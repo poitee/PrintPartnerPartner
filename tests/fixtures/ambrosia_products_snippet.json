@@ -1,0 +1,39 @@
+{
+  "products": [
+    {
+      "id": 8004738646228,
+      "title": "AMBROSIA PLA Filament of the Gods - 1KG Bambu AMS Friendly",
+      "variants": [
+        {
+          "id": 44020752253140,
+          "title": "1kg / Voron Red",
+          "featured_image": {
+            "src": "https://cdn.shopify.com/s/files/1/example/voron_red.png"
+          }
+        },
+        {
+          "id": 44020752253141,
+          "title": "Black",
+          "featured_image": {
+            "src": "https://cdn.shopify.com/s/files/1/example/black.png"
+          }
+        }
+      ],
+      "images": []
+    },
+    {
+      "id": 8004738646229,
+      "title": "AMBROSIA Galactic (Sparkle) PLA Filament of the Gods",
+      "variants": [
+        {
+          "id": 45409822343380,
+          "title": "Galactic Voron Red",
+          "featured_image": {
+            "src": "https://cdn.shopify.com/s/files/1/example/galactic_voron.png"
+          }
+        }
+      ],
+      "images": []
+    }
+  ]
+}
