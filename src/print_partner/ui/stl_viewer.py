@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -45,6 +46,7 @@ class StlViewer(QFrame):
         self._png_path: Path | None = None
         self._process: QProcess | None = None
         self._temp_dir = Path(tempfile.mkdtemp(prefix="print_partner_preview_"))
+        self._render_generation = 0
         self._load_timer = QTimer(self)
         self._load_timer.setSingleShot(True)
         self._load_timer.timeout.connect(self._start_render)
@@ -69,17 +71,6 @@ class StlViewer(QFrame):
         self._load_timer.start(120)
 
     def _stop_process(self) -> None:
-        from print_partner.debug_trace import debug_log
-
-        proc_state = self._process.state() if self._process else None
-        # region agent log
-        debug_log(
-            "stl_viewer._stop_process",
-            "enter",
-            {"has_process": self._process is not None, "state": int(proc_state) if proc_state is not None else None},
-            hypothesis_id="C",
-        )
-        # endregion
         if self._process and self._process.state() != QProcess.NotRunning:
             self._process.kill()
             self._process.waitForFinished(2000)
@@ -105,10 +96,15 @@ class StlViewer(QFrame):
 
         safe = path.name.replace("/", "_").replace(" ", "_")[:80]
         color_key = (mesh_hex or role).lstrip("#").replace("/", "_")[:24]
-        self._png_path = self._temp_dir / f"{safe}_{color_key}.png"
+        # v2: solid mesh preview (no PyVista wireframe edges)
+        self._png_path = self._temp_dir / f"{safe}_{color_key}_solidv2.png"
+        self._render_generation += 1
+        generation = self._render_generation
 
         self._process = QProcess(self)
-        self._process.finished.connect(self._on_process_finished)
+        self._process.finished.connect(
+            lambda code, status, gen=generation: self._on_process_finished(code, status, gen)
+        )
         cmd = [
             "-m",
             "print_partner.preview_cli",
@@ -120,15 +116,21 @@ class StlViewer(QFrame):
             cmd.append(mesh_hex)
         self._process.start(sys.executable, cmd)
 
-    def _on_process_finished(self, exit_code: int, status: QProcess.ExitStatus) -> None:
+    def _on_process_finished(
+        self, exit_code: int, status: QProcess.ExitStatus, generation: int
+    ) -> None:
         try:
-            self._handle_process_finished(exit_code, status)
+            self._handle_process_finished(exit_code, status, generation)
         except Exception as exc:
             name = self._pending_path.name if self._pending_path else "part"
             self._image.setPixmap(QPixmap())
             self._image.setText(f"Preview error for {name}:\n{exc}")
 
-    def _handle_process_finished(self, exit_code: int, status: QProcess.ExitStatus) -> None:
+    def _handle_process_finished(
+        self, exit_code: int, status: QProcess.ExitStatus, generation: int
+    ) -> None:
+        if generation != self._render_generation:
+            return
         path = self._pending_path
         png = self._png_path
         if exit_code != 0 or png is None or not png.is_file():
@@ -152,6 +154,8 @@ class StlViewer(QFrame):
     def shutdown(self) -> None:
         self._load_timer.stop()
         self._stop_process()
+        if self._temp_dir.is_dir():
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
 
     def clear(self) -> None:
         self._stop_process()

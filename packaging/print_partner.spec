@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for Print Partner."""
+"""PyInstaller spec for Print Partner (onedir bundle)."""
 
 import sys
 from pathlib import Path
@@ -7,12 +7,13 @@ from pathlib import Path
 block_cipher = None
 root = Path(SPECPATH).parent.parent
 src = root / "src"
+data_dir = src / "print_partner" / "data"
 
 a = Analysis(
     [str(src / "print_partner" / "__main__.py")],
     pathex=[str(src)],
     binaries=[],
-    datas=[],
+    datas=[(str(data_dir / "ambrosia_fallback.json"), "print_partner/data")],
     hiddenimports=[
         "print_partner",
         "print_partner.app",
@@ -22,6 +23,10 @@ a = Analysis(
         "print_partner.core.merge",
         "print_partner.core.git_sync",
         "print_partner.core.export_html",
+        "print_partner.core.export_stl_zip",
+        "print_partner.core.parts_tree",
+        "print_partner.core.path_tree",
+        "print_partner.core.repo_docs",
         "print_partner.db.models",
         "print_partner.db.session",
         "print_partner.ui.main_window",
@@ -30,7 +35,16 @@ a = Analysis(
         "print_partner.ui.diff_view",
         "print_partner.ui.stl_viewer",
         "print_partner.ui.docs_panel",
-        "pyvistaqt",
+        "print_partner.ui.repo_browse_tree",
+        "print_partner.ui.parts_tree_widget",
+        "print_partner.ui.profile_parts_panel",
+        "print_partner.ui.sync_worker",
+        "print_partner.ui.recompute_worker",
+        "print_partner.ui.catalog_sync_worker",
+        "print_partner.ui.export_worker",
+        "print_partner.ui.thumbnail_cache_worker",
+        "print_partner.ui.tabs.source_tab",
+        "print_partner.ui.app_style",
         "vtkmodules",
     ],
     hookspath=[],
@@ -48,17 +62,13 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="print-partner",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -67,9 +77,24 @@ exe = EXE(
     entitlements_file=None,
 )
 
-app = BUNDLE(
+coll = COLLECT(
     exe,
-    name="Print Partner.app",
-    icon=None,
-    bundle_identifier="com.printpartner.app",
-) if sys.platform == "darwin" else exe
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="Print Partner",
+)
+
+app = (
+    BUNDLE(
+        coll,
+        name="Print Partner.app",
+        icon=None,
+        bundle_identifier="com.printpartner.app",
+    )
+    if sys.platform == "darwin"
+    else coll
+)

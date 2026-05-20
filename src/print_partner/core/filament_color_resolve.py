@@ -6,6 +6,9 @@ import re
 
 from print_partner.core.mesh_color import normalize_mesh_hex
 
+# Voron red — default when no catalog color or custom hex is assigned.
+UNASSIGNED_FILAMENT_HEX = "#c41230"
+
 # Placeholder / failed swatch averages (cardboard + white background).
 _WEAK_EXACT = frozenset(
     {
@@ -102,3 +105,25 @@ def effective_filament_hex(
     if inferred:
         return normalize_mesh_hex(inferred)
     return sampled
+
+
+def resolve_part_filament_hex(part) -> str:
+    """
+    Resolved mesh/export hex for a Part: custom hex, then catalog effective, then unset red.
+    """
+    custom = normalize_mesh_hex(getattr(part, "filament_custom_hex", None))
+    if custom:
+        return custom
+    filament_id = getattr(part, "filament_color_id", None)
+    if filament_id:
+        from print_partner.core.ambrosia_catalog import get_color_by_id
+
+        color = get_color_by_id(filament_id)
+        if color:
+            resolved = effective_filament_hex(
+                color.hex, color.display_name, color.product_line
+            )
+            normalized = normalize_mesh_hex(resolved)
+            if normalized:
+                return normalized
+    return UNASSIGNED_FILAMENT_HEX

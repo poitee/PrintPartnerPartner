@@ -46,6 +46,25 @@ def get_printed_counts(session: Session, profile_id: int) -> dict[int, tuple[int
     return counts
 
 
+def print_units_by_part_id(session: Session, profile_id: int) -> dict[int, list[bool]]:
+    """Load all print-unit flags for a profile in two queries (avoids N+1)."""
+    parts = list(session.scalars(select(Part).where(Part.profile_id == profile_id)).all())
+    if not parts:
+        return {}
+    qty_by_part = {p.id: max(1, p.quantity_effective) for p in parts}
+    part_ids = list(qty_by_part.keys())
+    rows = session.scalars(
+        select(PrintProgress).where(PrintProgress.part_id.in_(part_ids))
+    ).all()
+    flags: dict[int, dict[int, bool]] = {}
+    for row in rows:
+        flags.setdefault(row.part_id, {})[row.unit_index] = row.completed
+    return {
+        pid: [flags.get(pid, {}).get(i, False) for i in range(qty_by_part[pid])]
+        for pid in part_ids
+    }
+
+
 def get_print_units(session: Session, part_id: int, qty: int) -> list[bool]:
     rows = {
         r.unit_index: r.completed

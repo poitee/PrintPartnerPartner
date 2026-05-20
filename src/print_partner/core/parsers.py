@@ -1,4 +1,4 @@
-"""STL filename/path parsers ported from stl-manifest-generator."""
+"""STL filename conventions used by Print Partner."""
 
 from __future__ import annotations
 

@@ -3,29 +3,44 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
 from print_partner.config import settings
 from print_partner.core.parsers import PartRole
+from print_partner.core.stl_camera import THUMB_CAMERA_PADDING, THUMB_PNG_SIZE, fit_mesh_in_view
 from print_partner.core.vtk_lock import vtk_lock
 
-# Mesh colors aligned with stl-manifest-generator gen-thumbs.sh
+# Tunables (also documented in README — Thumbnail generation).
+THUMB_MESH_POINT_LIMIT = 80_000
+THUMB_SHOW_EDGES = True
+THUMB_EDGE_COLOR = "#888888"
+THUMB_BACKGROUND = "white"
+# Bump when thumb rendering policy changes so old PNGs are regenerated.
+THUMB_CACHE_VERSION = "v2"
+# stl-thumb: https://github.com/unlimitedbacon/stl-thumb
+STL_THUMB_BACKGROUND_RGBA = "ffffffff"  # opaque white
+STL_THUMB_ANTIALIAS = "none"  # faster than fxaa; set to "fxaa" for smoother edges
+THUMB_BATCH_SIZE = 32  # thumbnails per child process (one VTK import)
+
+# Role default mesh colors (preview / picker); thumbnails also apply boost_dark_hex_for_thumbnail.
 ROLE_MESH_RGB: dict[str, str] = {
-    PartRole.ACCENT.value: "#770000",
-    PartRole.CLEAR.value: "#505050",
-    PartRole.OPAQUE.value: "#101010",
-    PartRole.PRIMARY.value: "#303030",
+    PartRole.ACCENT.value: "#880000",
+    PartRole.CLEAR.value: "#606060",
+    PartRole.OPAQUE.value: "#484848",
+    PartRole.PRIMARY.value: "#606060",
 }
 
 STL_THUMB_ARGS: dict[str, list[str]] = {
-    PartRole.ACCENT.value: ["-m", "770000", "111111", "ffffff"],
-    PartRole.CLEAR.value: ["-m", "505050", "222222", "888888"],
-    PartRole.OPAQUE.value: ["-m", "000000", "050505", "ffffff"],
-    PartRole.PRIMARY.value: ["-m", "222222", "050505", "777777"],
+    PartRole.ACCENT.value: ["-m", "550000", "990000", "ffffff"],
+    PartRole.CLEAR.value: ["-m", "606060", "404040", "aaaaaa"],
+    PartRole.OPAQUE.value: ["-m", "303030", "606060", "ffffff"],
+    PartRole.PRIMARY.value: ["-m", "404040", "707070", "cccccc"],
 }
 
 
@@ -38,7 +53,7 @@ def thumbnail_cache_digest(stl_path: Path, role: str, mesh_hex: str | None = Non
     except OSError:
         mtime = 0
     color_key = normalize_mesh_hex(mesh_hex) or ""
-    payload = f"{stl_path.resolve()}|{mtime}|{role}|{color_key}"
+    payload = f"{stl_path.resolve()}|{mtime}|{role}|{color_key}|{THUMB_CACHE_VERSION}"
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -91,18 +106,41 @@ def is_thumbnail_fresh(stl_path: Path, png_path: Path) -> bool:
         return False
 
 
-def _thumbnail_stl_thumb(stl_path: Path, out_path: Path, role: str, mesh_hex: str | None = None) -> bool:
-    if not shutil.which("stl-thumb"):
-        return False
+def stl_thumb_command(
+    stl_path: Path,
+    out_path: Path,
+    role: str,
+    mesh_hex: str | None = None,
+    *,
+    size: int | None = None,
+) -> list[str]:
+    """Build stl-thumb argv: size, background, material colors, antialiasing."""
     if mesh_hex:
         from print_partner.core.mesh_color import mesh_color_for_stl_thumb
 
-        extra = mesh_color_for_stl_thumb(mesh_hex)
+        material = mesh_color_for_stl_thumb(mesh_hex)
     else:
-        extra = STL_THUMB_ARGS.get(role, STL_THUMB_ARGS[PartRole.PRIMARY.value])
+        material = STL_THUMB_ARGS.get(role, STL_THUMB_ARGS[PartRole.PRIMARY.value])
+    return [
+        "stl-thumb",
+        "-s",
+        str(size if size is not None else THUMB_PNG_SIZE),
+        "-b",
+        STL_THUMB_BACKGROUND_RGBA,
+        "-a",
+        STL_THUMB_ANTIALIAS,
+        *material,
+        str(stl_path),
+        str(out_path),
+    ]
+
+
+def _thumbnail_stl_thumb(stl_path: Path, out_path: Path, role: str, mesh_hex: str | None = None) -> bool:
+    if not shutil.which("stl-thumb"):
+        return False
     try:
         result = subprocess.run(
-            ["stl-thumb", *extra, str(stl_path), str(out_path)],
+            stl_thumb_command(stl_path, out_path, role, mesh_hex),
             check=False,
             capture_output=True,
             timeout=60,
@@ -119,19 +157,24 @@ def _thumbnail_pyvista(stl_path: Path, out_path: Path, role: str, mesh_hex: str 
         return False
     try:
         with vtk_lock():
-            from print_partner.core.mesh_color import resolve_mesh_color
+            from print_partner.core.mesh_color import resolve_thumbnail_mesh_color
             from print_partner.core.stl_preview_render import _load_mesh, _simplify_mesh
 
-            color = resolve_mesh_color(role, mesh_hex)
-            mesh = _load_mesh(stl_path, point_limit=80_000)
+            color = resolve_thumbnail_mesh_color(role, mesh_hex)
+            mesh = _load_mesh(stl_path, point_limit=THUMB_MESH_POINT_LIMIT)
             if mesh is None:
                 mesh = pv.read(str(stl_path))
-            mesh = _simplify_mesh(mesh, limit=80_000)
-            plotter = pv.Plotter(off_screen=True, window_size=(256, 256))
-            plotter.set_background("white")
-            plotter.add_mesh(mesh, color=color, show_edges=True, edge_color="#666666")
-            plotter.view_isometric()
-            plotter.camera.zoom(1.15)
+            mesh = _simplify_mesh(mesh, limit=THUMB_MESH_POINT_LIMIT)
+            size = THUMB_PNG_SIZE
+            plotter = pv.Plotter(off_screen=True, window_size=(size, size))
+            plotter.set_background(THUMB_BACKGROUND)
+            plotter.add_mesh(
+                mesh,
+                color=color,
+                show_edges=THUMB_SHOW_EDGES,
+                edge_color=THUMB_EDGE_COLOR,
+            )
+            fit_mesh_in_view(plotter, padding=THUMB_CAMERA_PADDING)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             plotter.screenshot(str(out_path))
             plotter.close()
@@ -171,24 +214,63 @@ def generate_thumbnail_subprocess(
     mesh_hex: str | None,
 ) -> bool:
     """Run generate_thumbnail in a child process so VTK never loads in the Qt app."""
+    results = generate_thumbnails_batch_subprocess([(stl_path, out_path, role, mesh_hex)])
+    return results.get(out_path, False)
+
+
+def generate_thumbnails_batch_subprocess(
+    jobs: list[tuple[Path, Path, str, str | None]],
+) -> dict[Path, bool]:
+    """
+    Generate many thumbnails in one subprocess (loads PyVista once).
+    Returns map of output_path -> success.
+    """
     from print_partner.core.mesh_color import normalize_mesh_hex
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "print_partner.thumb_cli",
-        str(stl_path.resolve()),
-        str(out_path.resolve()),
-        role,
-    ]
-    normalized = normalize_mesh_hex(mesh_hex)
-    if normalized:
-        cmd.append(normalized)
+    if not jobs:
+        return {}
+    payload = []
+    out_paths: list[Path] = []
+    for stl_path, out_path, role, mesh_hex in jobs:
+        out_paths.append(out_path)
+        entry: dict = {
+            "stl": str(stl_path.resolve()),
+            "out": str(out_path.resolve()),
+            "role": role,
+        }
+        normalized = normalize_mesh_hex(mesh_hex)
+        if normalized:
+            entry["hex"] = normalized
+        payload.append(entry)
+
+    jobs_file: Path | None = None
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=180, check=False)
-        return result.returncode == 0 and out_path.is_file()
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            delete=False,
+            encoding="utf-8",
+        ) as handle:
+            json.dump(payload, handle)
+            jobs_file = Path(handle.name)
+        timeout = max(120, 45 * len(jobs))
+        result = subprocess.run(
+            [sys.executable, "-m", "print_partner.thumb_batch_cli", str(jobs_file)],
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
     except (OSError, subprocess.SubprocessError):
-        return False
+        return {out: False for out in out_paths}
+    finally:
+        if jobs_file is not None:
+            jobs_file.unlink(missing_ok=True)
+
+    success = {out: out.is_file() for out in out_paths}
+    if result.returncode != 0:
+        for out in out_paths:
+            success[out] = out.is_file()
+    return success
 
 
 # Backward-compatible alias

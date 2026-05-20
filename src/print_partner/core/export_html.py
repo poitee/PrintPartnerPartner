@@ -10,7 +10,6 @@ from jinja2 import Environment, select_autoescape
 
 from print_partner.core.merge import MergePart
 from print_partner.core.parts_grouping import folder_key_from_relative_path
-from print_partner.core.ambrosia_catalog import resolve_filament_hex
 from print_partner.core.thumbnails import ProgressCallback, ensure_thumbnail
 
 
@@ -44,16 +43,11 @@ def _build_export_row(
 ) -> dict:
     qty = max(1, p.quantity_effective)
     completed = completed_by_match_key.get(p.match_key, [])
-    units = []
-    for unit_index in range(qty):
-        checked = completed[unit_index] if unit_index < len(completed) else False
-        units.append(
-            {
-                "index": unit_index,
-                "checked": checked,
-                "storage_key": f"{p.match_key}-{unit_index}",
-            }
-        )
+    unit_flags = [
+        completed[unit_index] if unit_index < len(completed) else False
+        for unit_index in range(qty)
+    ]
+    all_printed = bool(unit_flags) and all(unit_flags)
     return {
         "relative_path": p.relative_path,
         "filename": p.filename,
@@ -63,8 +57,8 @@ def _build_export_row(
         "thumbnail": None,
         "filament_display": p.filament_display,
         "filament_hex": p.filament_hex,
-        "filament_swatch_url": p.filament_swatch_url,
-        "units": units,
+        "all_printed": all_printed,
+        "storage_key": p.match_key,
     }
 
 
@@ -76,17 +70,66 @@ EXPORT_TEMPLATE = _EXPORT_ENV.from_string("""<!DOCTYPE html>
   <title>{{ title }}</title>
   <style>
     body { font-family: system-ui, sans-serif; margin: 2rem; }
-    table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
-    th, td { border: 1px solid #ccc; padding: 0.5rem; text-align: left; vertical-align: middle; }
-    th { background: #f4f4f4; }
-    img.thumb { max-width: 96px; max-height: 96px; object-fit: contain; background: #fafafa; }
-    img.swatch { width: 20px; height: 20px; border-radius: 3px; border: 1px solid #ccc; vertical-align: middle; margin-right: 6px; }
-    .swatch-dot { display: inline-block; width: 20px; height: 20px; border-radius: 3px; border: 1px solid #ccc; vertical-align: middle; margin-right: 6px; }
+    table.parts-table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; table-layout: fixed; }
+    table.parts-table col.col-filename { width: 32%; }
+    table.parts-table col.col-qty { width: 6%; }
+    table.parts-table col.col-printed { width: 8%; }
+    table.parts-table col.col-verified { width: 8%; }
+    table.parts-table col.col-thumb { width: 22%; }
+    table.parts-table col.col-notes { width: 24%; }
+    table.parts-table th, table.parts-table td {
+      border: 1px solid #ccc;
+      padding: 0.5rem;
+      text-align: left;
+      vertical-align: middle;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    table.parts-table td.filename-cell {
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      word-break: break-word;
+    }
+    table.parts-table td.thumb-cell {
+      overflow: visible;
+      text-overflow: clip;
+      text-align: center;
+      vertical-align: middle;
+    }
+    table.parts-table th { background: #f4f4f4; }
+    .thumb-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 10rem;
+      padding: 0.35rem;
+      border: 1px solid #ccc;
+      background: #f5f5f5;
+      border-radius: 4px;
+    }
+    img.thumb {
+      display: block;
+      max-width: 100%;
+      width: auto;
+      height: auto;
+      max-height: 11rem;
+      object-fit: contain;
+      object-position: center;
+      background: #f5f5f5;
+    }
+    @media print {
+      .thumb-wrap { border-color: #999; background: #fff; }
+      img.thumb { background: #fff; }
+    }
+    .swatch-dot { display: inline-block; width: 20px; height: 20px; border-radius: 3px; border: 1px solid #ccc; vertical-align: middle; margin-right: 6px; flex-shrink: 0; }
     .no-thumb { color: #999; font-size: 0.85rem; }
     .filaments-used { margin: 1rem 0; padding: 0.75rem 1rem; background: #f8f8f8; border-radius: 6px; }
     .filaments-used ul { margin: 0.5rem 0 0; padding-left: 1.25rem; }
-    .qty-checks { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-    .qty-checks input[type=checkbox] { width: 1.1rem; height: 1.1rem; cursor: pointer; }
+    .qty-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .check-cell { text-align: center; }
+    .check-cell input[type=checkbox] { width: 1.1rem; height: 1.1rem; cursor: pointer; margin: 0; }
+    .check-cell input.customer-verify { cursor: default; }
     h2.repo-section { margin-top: 2rem; margin-bottom: 0.5rem; }
     h3.folder-section { margin: 1rem 0 0.5rem 1rem; color: #333; font-size: 1rem; font-weight: 600; }
     .subtitle { color: #555; margin-top: -0.5rem; }
@@ -102,7 +145,7 @@ EXPORT_TEMPLATE = _EXPORT_ENV.from_string("""<!DOCTYPE html>
     <strong>Filaments in this build</strong>
     <ul>
     {% for f in filaments_used %}
-      <li>{% if f.swatch_url %}<img class="swatch" src="{{ f.swatch_url }}" alt="">{% elif f.hex %}<span class="swatch-dot" style="background:{{ f.hex }}"></span>{% endif %}{{ f.label }}</li>
+      <li>{% if f.hex %}<span class="swatch-dot" style="background:{{ f.hex }}"></span>{% endif %}{{ f.label }}</li>
     {% endfor %}
     </ul>
   </div>
@@ -112,14 +155,21 @@ EXPORT_TEMPLATE = _EXPORT_ENV.from_string("""<!DOCTYPE html>
   <p class="repo-meta">{{ repo.part_count }} part(s) in this repository</p>
   {% for folder in repo.folders %}
   <h3 class="folder-section">{{ folder.label }}</h3>
-  <table>
+  <table class="parts-table">
+    <colgroup>
+      <col class="col-filename">
+      <col class="col-qty">
+      <col class="col-printed">
+      <col class="col-verified">
+      <col class="col-thumb">
+      <col class="col-notes">
+    </colgroup>
     <thead>
       <tr>
         <th>Filename</th>
-        <th>Role</th>
-        <th>Filament</th>
         <th>Qty</th>
-        <th>Print</th>
+        <th>Printed</th>
+        <th>Verified</th>
         <th>Thumb</th>
         <th>Notes</th>
       </tr>
@@ -127,22 +177,19 @@ EXPORT_TEMPLATE = _EXPORT_ENV.from_string("""<!DOCTYPE html>
     <tbody>
     {% for p in folder.parts %}
       <tr>
-        <td>{{ p.filename }}</td>
-        <td>{{ p.role }}</td>
-        <td>{% if p.filament_display %}{% if p.filament_swatch_url %}<img class="swatch" src="{{ p.filament_swatch_url }}" alt="">{% elif p.filament_hex %}<span class="swatch-dot" style="background:{{ p.filament_hex }}"></span>{% endif %}{{ p.filament_display }}{% else %}—{% endif %}</td>
-        <td>{{ p.quantity }}</td>
-        <td>
-          <span class="qty-checks">
-          {% for u in p.units %}
-            <input type="checkbox"
-              data-storage-key="{{ u.storage_key }}"
-              {% if u.checked %}checked{% endif %}
-              {% if p.filament_hex %}style="accent-color: {{ p.filament_hex }}"{% endif %}
-              title="Unit {{ u.index + 1 }}">
-          {% endfor %}
-          </span>
+        <td class="filename-cell">{{ p.filename }}</td>
+        <td><span class="qty-cell">{{ p.quantity }}</span></td>
+        <td class="check-cell">
+          <input type="checkbox"
+            data-storage-key="{{ p.storage_key }}"
+            {% if p.all_printed %}checked{% endif %}
+            {% if p.filament_hex %}style="accent-color: {{ p.filament_hex }}"{% endif %}
+            title="Mark all copies printed">
         </td>
-        <td>{% if p.thumbnail %}<img class="thumb" src="{{ p.thumbnail }}" alt="{{ p.filename }}">{% else %}<span class="no-thumb">—</span>{% endif %}</td>
+        <td class="check-cell">
+          <input type="checkbox" class="customer-verify" title="Customer verified (print only)">
+        </td>
+        <td class="thumb-cell">{% if p.thumbnail %}<div class="thumb-wrap"><img class="thumb" src="{{ p.thumbnail }}" alt="{{ p.filename }}"></div>{% else %}<span class="no-thumb">—</span>{% endif %}</td>
         <td>{{ p.notes }}</td>
       </tr>
     {% endfor %}
@@ -197,7 +244,7 @@ def export_profile_html(
             break
         if on_progress:
             on_progress(i + 1, total, p.filename)
-        mesh_hex = resolve_filament_hex(p.filament_color_id, p.role) or p.filament_hex
+        mesh_hex = p.filament_hex
         thumb = ensure_thumbnail(
             p.absolute_path,
             output_path.parent,

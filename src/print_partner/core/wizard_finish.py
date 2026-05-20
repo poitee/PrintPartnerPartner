@@ -8,6 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from print_partner.core.merge import merge_layers
+from print_partner.core.import_rules import import_rules_for_project
 from print_partner.core.scanner import scan_repo
 from print_partner.core.wizard_state import WizardLayer, WizardState
 from print_partner.db.models import BuildProfile, Part, ProfileLayer, Project
@@ -53,7 +54,8 @@ def finish_wizard_build(session: Session, state: WizardState) -> int:
         label = f"{layer.layer_type}:{proj.name}"
         layer.layer_label = label
         included_by_label[label] = set(layer.included_match_keys)
-        scanned = scan_repo(Path(proj.local_path), label)
+        rules = import_rules_for_project(proj.imported_paths)
+        scanned = scan_repo(Path(proj.local_path), label, import_rules=rules)
         layer_scans.append((label, scanned))
 
         session.add(

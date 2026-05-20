@@ -49,6 +49,26 @@ def _migrate_parts_filament_color(engine) -> None:
             conn.execute(text("ALTER TABLE parts ADD COLUMN filament_color_id TEXT"))
 
 
+def _migrate_parts_filament_custom_hex(engine) -> None:
+    insp = inspect(engine)
+    if "parts" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("parts")}
+    if "filament_custom_hex" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE parts ADD COLUMN filament_custom_hex TEXT"))
+
+
+def _migrate_projects_imported_paths(engine) -> None:
+    insp = inspect(engine)
+    if "projects" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("projects")}
+    if "imported_paths" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE projects ADD COLUMN imported_paths TEXT"))
+
+
 def _migrate_build_profiles_order_number(engine) -> None:
     insp = inspect(engine)
     if "build_profiles" not in insp.get_table_names():
@@ -59,12 +79,30 @@ def _migrate_build_profiles_order_number(engine) -> None:
             conn.execute(text("ALTER TABLE build_profiles ADD COLUMN order_number TEXT"))
 
 
+def _migrate_fix_empty_import_rules(engine) -> None:
+    """Treat legacy [] as import-all — empty rules were wiping profiles on Recompute."""
+    insp = inspect(engine)
+    if "projects" not in insp.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE projects SET imported_paths = NULL WHERE imported_paths = '[]'")
+        )
+
+
 def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(engine)
     _migrate_projects_source_type(engine)
     _migrate_parts_filament_color(engine)
+    _migrate_parts_filament_custom_hex(engine)
     _migrate_build_profiles_order_number(engine)
+    _migrate_projects_imported_paths(engine)
+    _migrate_fix_empty_import_rules(engine)
+
+
+class MergeWouldWipeProfileError(ValueError):
+    """Raised when a merge would delete all parts (e.g. import rules block every STL)."""
 
 
 def get_setting(session: Session, key: str, default: str | None = None) -> str | None:
@@ -141,25 +179,68 @@ def row_to_merge_part(row: Part) -> MergePart:
     )
 
 
-def save_merge_result(session: Session, profile_id: int, result: MergeResult) -> None:
-    from sqlalchemy import delete
+def _apply_merge_to_existing_part(row: Part, mp: MergePart) -> None:
+    """Update an existing part row in place so print_progress rows keep the same part_id."""
+    row.relative_path = mp.relative_path
+    row.filename = mp.filename
+    row.source_layer = mp.source_layer
+    row.status = mp.status
+    row.quantity_auto = mp.quantity_auto
+    row.geometry_same = mp.geometry_same
+    row.notes = mp.notes
+    row.included = mp.included
+    # Keep role / filament from the row unless merge explicitly carried overrides.
+    if mp.quantity_override is not None:
+        row.quantity_override = mp.quantity_override
+    row.quantity_effective = (
+        row.quantity_override if row.quantity_override is not None else row.quantity_auto
+    )
 
+
+def save_merge_result(session: Session, profile_id: int, result: MergeResult) -> None:
     from print_partner.core.print_progress import ensure_profile_progress
 
     existing_rows = list(session.scalars(select(Part).where(Part.profile_id == profile_id)).all())
-    existing = {p.match_key: row_to_merge_part(p) for p in existing_rows}
-    filament_by_key = {p.match_key: p.filament_color_id for p in existing_rows}
-    session.execute(delete(Part).where(Part.profile_id == profile_id))
+    if not result.parts and existing_rows:
+        raise MergeWouldWipeProfileError(
+            "Scan found no STL files (check Projects → Import files… for each repo). "
+            "Existing parts were not removed."
+        )
+    existing_by_key = {p.match_key: p for p in existing_rows}
+    existing_merge = {p.match_key: row_to_merge_part(p) for p in existing_rows}
+    filament_by_key = {
+        p.match_key: (p.filament_color_id, p.filament_custom_hex) for p in existing_rows
+    }
+    new_keys = {mp.match_key for mp in result.parts}
+
+    for key, row in existing_by_key.items():
+        if key not in new_keys:
+            session.delete(row)
+
     for mp in result.parts:
-        prior = existing.get(mp.match_key)
-        if prior:
-            if prior.quantity_override is not None:
-                mp.quantity_override = prior.quantity_override
-            mp.notes = prior.notes or mp.notes
-            mp.included = prior.included
-        row = merge_part_to_row(profile_id, mp)
-        row.filament_color_id = filament_by_key.get(mp.match_key)
-        session.add(row)
+        prior_merge = existing_merge.get(mp.match_key)
+        if prior_merge:
+            if prior_merge.quantity_override is not None:
+                mp.quantity_override = prior_merge.quantity_override
+            mp.notes = prior_merge.notes or mp.notes
+            mp.included = prior_merge.included
+
+        prior_row = existing_by_key.get(mp.match_key)
+        if prior_row:
+            _apply_merge_to_existing_part(prior_row, mp)
+            filament = filament_by_key.get(mp.match_key)
+            if filament:
+                prior_row.filament_color_id = filament[0]
+                prior_row.filament_custom_hex = filament[1]
+        else:
+            row = merge_part_to_row(profile_id, mp)
+            row.role = mp.role
+            filament = filament_by_key.get(mp.match_key)
+            if filament:
+                row.filament_color_id = filament[0]
+                row.filament_custom_hex = filament[1]
+            session.add(row)
+
     session.flush()
     ensure_profile_progress(session, profile_id)
 
@@ -188,17 +269,33 @@ def get_profile_parts(session: Session, profile_id: int) -> list[Part]:
     )
 
 
-def part_to_display_dict(part: Part, session: Session | None = None) -> dict:
+def part_to_display_dict(
+    part: Part,
+    session: Session | None = None,
+    *,
+    colors_by_id: dict | None = None,
+    print_units_by_id: dict[int, list[bool]] | None = None,
+) -> dict:
     """Snapshot Part fields while session is open (avoids DetachedInstanceError in UI)."""
-    from print_partner.core.ambrosia_catalog import get_color_by_id
+    from print_partner.core.ambrosia_catalog import AmbrosiaColor, get_color_by_id
+    from print_partner.core.filament_color_resolve import resolve_part_filament_hex
     from print_partner.core.print_progress import get_print_units
 
     filament_id = part.filament_color_id
-    color = get_color_by_id(filament_id)
+    color: AmbrosiaColor | None = None
+    if filament_id:
+        if colors_by_id is not None:
+            color = colors_by_id.get(filament_id)
+        else:
+            color = get_color_by_id(filament_id)
+    resolved_hex = resolve_part_filament_hex(part)
     qty = max(1, part.quantity_effective)
     print_units: list[bool] = []
     printed_count = 0
-    if session is not None:
+    if print_units_by_id is not None and part.id in print_units_by_id:
+        print_units = print_units_by_id[part.id]
+        printed_count = sum(print_units)
+    elif session is not None:
         print_units = get_print_units(session, part.id, qty)
         printed_count = sum(print_units)
     return {
@@ -214,8 +311,9 @@ def part_to_display_dict(part: Part, session: Session | None = None) -> dict:
         "relative_path": part.relative_path,
         "notes": part.notes or "",
         "filament_color_id": filament_id,
+        "filament_custom_hex": part.filament_custom_hex,
         "filament_display": color.combo_label if color else "",
-        "filament_hex": color.hex if color else None,
+        "filament_hex": resolved_hex,
         "printed_count": printed_count,
         "print_units": print_units,
     }
@@ -228,6 +326,7 @@ def bulk_set_filament_color(
     color_id: str | None,
     *,
     included_only: bool = True,
+    custom_hex: str | None = None,
 ) -> int:
     """Assign filament color to all parts with the given role. Returns rows updated."""
     parts = session.scalars(select(Part).where(Part.profile_id == profile_id)).all()
@@ -238,5 +337,6 @@ def bulk_set_filament_color(
         if included_only and not part.included:
             continue
         part.filament_color_id = color_id
+        part.filament_custom_hex = custom_hex
         count += 1
     return count

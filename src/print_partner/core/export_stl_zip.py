@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import re
-import time
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -15,27 +13,6 @@ from print_partner.core.parts_grouping import folder_key_from_relative_path
 
 ROLE_ORDER = ("primary", "accent", "clear", "opaque")
 ProgressCallback = Callable[[int, int, str], None]
-
-_DEBUG_LOG = Path(__file__).resolve().parents[3] / ".cursor" / "debug-ae4f75.log"
-
-
-def _stl_export_log(message: str, data: dict, hypothesis_id: str) -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "ae4f75",
-            "timestamp": int(time.time() * 1000),
-            "location": "export_stl_zip.py",
-            "message": message,
-            "data": data,
-            "hypothesisId": hypothesis_id,
-        }
-        with _DEBUG_LOG.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload) + "\n")
-    except OSError:
-        pass
-    # #endregion
-
 
 def _safe_zip_stem(folder_key: str) -> str:
     if folder_key == "(root)":
@@ -81,18 +58,6 @@ def export_profile_stl_zips(
     included = [p for p in parts if p.included]
     missing_path = [p for p in included if not p.absolute_path or not p.absolute_path.is_file()]
     exportable = [p for p in included if p.absolute_path and p.absolute_path.is_file()]
-
-    _stl_export_log(
-        "export start",
-        {
-            "profile": profile_name,
-            "output_root": str(output_root),
-            "included": len(included),
-            "exportable": len(exportable),
-            "missing_path": len(missing_path),
-        },
-        "H1",
-    )
 
     by_role_folder: dict[str, dict[str, list[tuple[MergePart, int]]]] = defaultdict(
         lambda: defaultdict(list)
@@ -140,9 +105,4 @@ def export_profile_stl_zips(
                 zip_path.unlink()
 
     result_counts = {k: v for k, v in zip_counts.items() if v}
-    _stl_export_log(
-        "export done",
-        {"zip_counts": result_counts, "warnings": len(warnings)},
-        "H1",
-    )
     return output_root, result_counts, warnings

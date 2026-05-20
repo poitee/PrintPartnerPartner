@@ -70,7 +70,18 @@ def test_export_html_repo_and_folder_sections(tmp_path: Path):
     assert 'class="folder-section">(root)</h3>' in html
     assert "accent-color: #ff0000" in html
     assert "print-partner-7-" in html
-    assert html.count('type="checkbox"') >= 4
+    assert html.count('type="checkbox"') == 6
+    assert html.count('title="Mark all copies printed"') == 3
+    assert html.count('class="customer-verify"') == 3
+    assert "getAttribute('data-storage-key')" in html
+    assert 'class="qty-cell"' in html
+    assert 'class="filename-cell"' in html
+    assert "max-height: 11rem" in html
+    assert 'class="parts-table"' in html
+    assert "<th>Role</th>" not in html
+    assert "<th>Filament</th>" not in html
+    assert "<th>Verified</th>" in html
+    assert "<th>Printed</th>" in html
     assert "role-section" not in html
 
 
@@ -105,3 +116,28 @@ def test_export_html_passes_filament_hex_to_thumbnails(tmp_path: Path, monkeypat
     ]
     export_profile_html("Color Test", parts, tmp_path / "out.html")
     assert captured == ["#00aaff"]
+
+
+def test_export_html_uses_dot_not_img_swatch(tmp_path: Path):
+    parts = [
+        MergePart(
+            match_key="parts/widget.stl",
+            relative_path="parts/widget.stl",
+            filename="widget.stl",
+            source_layer="addon:Boop",
+            status="added",
+            role="accent",
+            quantity_auto=1,
+            part_slug="widget",
+            included=True,
+            filament_hex="#ff0000",
+            filament_display="Red PLA",
+            filament_swatch_url="https://example.com/spool-photo.png",
+        ),
+    ]
+    out = tmp_path / "swatch.html"
+    export_profile_html("Swatch Test", parts, out)
+    html = out.read_text(encoding="utf-8")
+    assert 'class="swatch-dot"' in html
+    assert "spool-photo.png" not in html
+    assert '<img class="swatch"' not in html

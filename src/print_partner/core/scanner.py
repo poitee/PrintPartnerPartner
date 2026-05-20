@@ -43,7 +43,16 @@ def is_under_data_repos(path: Path) -> bool:
         return False
 
 
-def scan_repo(repo_root: Path, source_layer: str = "base") -> list[ScannedPart]:
+def scan_repo(
+    repo_root: Path,
+    source_layer: str = "base",
+    import_rules: list[str] | None = None,
+) -> list[ScannedPart]:
+    """
+    Walk repo for STLs. import_rules: None = all (legacy), [] = none, else filter.
+    """
+    from print_partner.core.import_rules import path_matches_rules
+
     if not repo_root.is_dir():
         return []
     root = repo_root.resolve()
@@ -58,6 +67,8 @@ def scan_repo(repo_root: Path, source_layer: str = "base") -> list[ScannedPart]:
         if not stl.is_file():
             continue
         rel = str(stl.relative_to(root)).replace("\\", "/")
+        if import_rules is not None and not path_matches_rules(rel, import_rules):
+            continue
         parsed: ParsedPart = parse_stl_path(rel)
         parts.append(
             ScannedPart(

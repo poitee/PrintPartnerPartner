@@ -55,5 +55,6 @@ def test_part_filament_color_migration_and_bulk_assign():
         assert primary.filament_color_id is None
         display = part_to_display_dict(accent)
         assert display["filament_color_id"] == "pla::voron-red"
+        assert display["filament_hex"] is not None
 
     Base.metadata.drop_all(engine)

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -24,7 +22,8 @@ from PySide6.QtWidgets import (
     QWizardPage,
 )
 
-from print_partner.core.project_import import import_local_folder, sync_git_project
+from print_partner.core.import_rules import import_rules_for_project, serialize_import_rules
+from print_partner.core.project_import import register_local_project_path, sync_git_project
 from print_partner.core.scanner import scan_repo
 from print_partner.core.wizard_finish import finish_wizard_build, load_wizard_state_from_profile
 from print_partner.core.wizard_reference import reference_layers_for_state
@@ -32,27 +31,6 @@ from print_partner.core.wizard_state import WizardState
 from print_partner.db.models import Project
 from print_partner.db.session import db_session, list_profiles, list_projects
 from print_partner.ui.parts_curation_widget import PartsCurationWidget
-
-_DEBUG_LOG = Path(__file__).resolve().parents[3] / ".cursor" / "debug-ae4f75.log"
-
-
-def _wiz_log(location: str, message: str, data: dict, hypothesis_id: str) -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "ae4f75",
-            "timestamp": int(time.time() * 1000),
-            "location": location,
-            "message": message,
-            "data": data,
-            "hypothesisId": hypothesis_id,
-        }
-        with _DEBUG_LOG.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload) + "\n")
-    except OSError:
-        pass
-    # #endregion
-
 
 class BuildWizard(QWizard):
     build_finished = Signal(int)
@@ -85,17 +63,6 @@ class BuildWizard(QWizard):
         # Re-apply after all pages exist (guards against style/options reset).
         self.setOption(QWizard.WizardOption.IndependentPages, True)
         self.finished.connect(self._on_finished)
-        # #region agent log
-        _wiz_log(
-            "build_wizard.py:__init__",
-            "wizard options after init",
-            {
-                "independentPages": self.testOption(QWizard.WizardOption.IndependentPages),
-                "pageIds": self.pageIds(),
-            },
-            "C",
-        )
-        # #endregion
 
     def pageIds(self) -> list[int]:
         return [
@@ -132,14 +99,6 @@ class BuildWizard(QWizard):
             # Wizard Next finishes addons (go to review). Avoid 5→3 forward revisit
             # which triggers Qt "Page already met" via C++ QWizard::next().
             nxt = self.PAGE_REVIEW
-        # #region agent log
-        _wiz_log(
-            "build_wizard.py:nextId",
-            "nextId resolved",
-            {"current": current, "next": nxt, "goto_addon_source": self._goto_addon_source},
-            "A" if current == self.PAGE_ADDON_PARTS and nxt == self.PAGE_ADDON_LOOP else "B",
-        )
-        # #endregion
         return nxt
 
     def next(self) -> None:
@@ -148,31 +107,11 @@ class BuildWizard(QWizard):
         if page is None or not page.validatePage():
             return
         next_id = self.nextId()
-        # #region agent log
-        _wiz_log(
-            "build_wizard.py:next",
-            "next() called",
-            {
-                "current": self.currentId(),
-                "next_id": next_id,
-                "independentPages": self.testOption(QWizard.WizardOption.IndependentPages),
-            },
-            "A",
-        )
-        # #endregion
         if next_id < 0:
             super().next()
             return
         self.setOption(QWizard.WizardOption.IndependentPages, True)
         self.setCurrentId(next_id)
-        # #region agent log
-        _wiz_log(
-            "build_wizard.py:next",
-            "setCurrentId done",
-            {"current": self.currentId()},
-            "A",
-        )
-        # #endregion
 
     def _on_finished(self, result: int) -> None:
         if result != QWizard.Accepted:
@@ -338,7 +277,7 @@ class ProjectSourceWidget(QWidget):
         name = self.local_name.text().strip() or Path(path).name
         if not path or not name:
             raise ValueError("Choose a folder and project name.")
-        result = import_local_folder(name, Path(path))
+        result = register_local_project_path(name, Path(path))
         with db_session() as session:
             from sqlalchemy import select
 
@@ -375,6 +314,12 @@ class ProjectSourceWidget(QWidget):
                     proj.local_path = str(sync.local_path)
                     proj.last_synced_at = sync.last_synced_at
                     proj.last_commit_sha = sync.commit_sha
+                rules = import_rules_for_project(proj.imported_paths)
+                if rules is not None and len(rules) == 0:
+                    raise ValueError(
+                        f"No STL files imported for project “{proj.name}”. "
+                        "On the Projects tab, sync the repo and use Import files to choose STLs."
+                    )
                 return proj.id
 
         name = self.new_name.text().strip()
@@ -406,6 +351,12 @@ class ProjectSourceWidget(QWidget):
                 )
                 session.add(proj)
             session.flush()
+            rules = import_rules_for_project(proj.imported_paths)
+            if rules is not None and len(rules) == 0:
+                raise ValueError(
+                    f"No STL files imported for project “{name}”. "
+                    "On the Projects tab, open the repo and use Import files to choose STLs."
+                )
             return proj.id
 
 
@@ -444,12 +395,24 @@ class BasePartsPage(QWizardPage):
     def initializePage(self) -> None:
         if self.state.base_project_id is None:
             return
+        repo: Path | None = None
+        rules = None
         with db_session() as session:
             proj = session.get(Project, self.state.base_project_id)
             if not proj or not proj.local_path:
                 return
             repo = Path(proj.local_path)
-            parts = scan_repo(repo, "base")
+            rules = import_rules_for_project(proj.imported_paths)
+            parts = scan_repo(repo, "base", import_rules=rules)
+        if not parts:
+            if rules is not None and len(rules) == 0:
+                QMessageBox.warning(
+                    self,
+                    "No imported files",
+                    "No STL files are imported for this project.\n\n"
+                    "Go to Projects → select the repo → Import files… to choose which STLs to include.",
+                )
+            return
         base_included = (
             set(self.state.base_included) if self.state.base_included else None
         )
@@ -457,7 +420,7 @@ class BasePartsPage(QWizardPage):
             parts,
             base_included,
             reference_layers=None,
-            repo_path=repo,
+            repo_path=repo or Path("."),
         )
 
     def validatePage(self) -> bool:
@@ -562,14 +525,6 @@ class AddonPartsPage(QWizardPage):
     def _commit_draft_addon(self) -> bool:
         pid = self.state.draft_addon_project_id
         if pid is None:
-            # #region agent log
-            _wiz_log(
-                "build_wizard.py:_commit_draft_addon",
-                "skip commit; draft project id is None",
-                {"included_keys": len(self.curation.included_match_keys())},
-                "A",
-            )
-            # #endregion
             return True
         included = self.curation.included_match_keys()
         self.state.draft_addon_included = included
@@ -580,14 +535,6 @@ class AddonPartsPage(QWizardPage):
             proj = session.get(Project, pid)
             label = f"addon:{proj.name}" if proj else "addon"
         self.state.commit_draft_addon(label)
-        # #region agent log
-        _wiz_log(
-            "build_wizard.py:_commit_draft_addon",
-            "committed addon layer",
-            {"project_id": pid, "label": label, "included_count": len(included)},
-            "B",
-        )
-        # #endregion
         return True
 
     def _wizard(self) -> BuildWizard | None:
@@ -602,14 +549,6 @@ class AddonPartsPage(QWizardPage):
             wiz.state.clear_draft_addon()
             wiz.setOption(QWizard.WizardOption.IndependentPages, True)
             wiz.setCurrentId(wiz.PAGE_ADDON_SOURCE)
-            # #region agent log
-            _wiz_log(
-                "build_wizard.py:_add_another_addon",
-                "navigate to addon source",
-                {"current": wiz.currentId()},
-                "A",
-            )
-            # #endregion
 
     def _back_to_addon_list(self) -> None:
         if not self._commit_draft_addon():
@@ -639,7 +578,17 @@ class AddonPartsPage(QWizardPage):
             if not proj or not proj.local_path:
                 self.curation.load_parts([], set())
                 return
-            parts = scan_repo(Path(proj.local_path), "addon")
+            rules = import_rules_for_project(proj.imported_paths)
+            parts = scan_repo(Path(proj.local_path), "addon", import_rules=rules)
+            if not parts and rules is not None and len(rules) == 0:
+                QMessageBox.warning(
+                    self,
+                    "No imported files",
+                    f"No STL files are imported for addon project “{proj.name}”.\n\n"
+                    "Use Projects → Import files… first.",
+                )
+                self.curation.load_parts([], set())
+                return
             refs = reference_layers_for_state(session, self.state)
             extra_readme: list[Path] = []
             base_proj = session.get(Project, self.state.base_project_id) if self.state.base_project_id else None
@@ -656,33 +605,12 @@ class AddonPartsPage(QWizardPage):
             repo_path=repo,
             extra_readme_paths=extra_readme,
         )
-        # #region agent log
-        _wiz_log(
-            "build_wizard.py:AddonPartsPage._reload_addon_parts",
-            "loaded addon repo parts",
-            {
-                "project_id": pid,
-                "part_count": len(parts),
-                "included_preset": len(addon_included) if addon_included else 0,
-                "addon_count": len(self.state.addons),
-            },
-            "C",
-        )
-        # #endregion
 
     def initializePage(self) -> None:
         self._reload_addon_parts()
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        # #region agent log
-        _wiz_log(
-            "build_wizard.py:AddonPartsPage.showEvent",
-            "page shown; reloading parts",
-            {"draft_project_id": self.state.draft_addon_project_id},
-            "C",
-        )
-        # #endregion
         self._reload_addon_parts()
 
     def validatePage(self) -> bool:

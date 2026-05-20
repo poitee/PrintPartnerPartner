@@ -1,0 +1,120 @@
+"""Background HTML and STL zip export."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+from PySide6.QtCore import QThread, Signal
+
+from print_partner.core.export_html import export_path_for_profile, export_profile_html
+from print_partner.core.export_stl_zip import export_profile_stl_zips
+from print_partner.core.merge import MergePart
+
+
+@dataclass(frozen=True)
+class HtmlExportResult:
+    path: Path
+    part_count: int
+    thumb_count: int
+    cancelled: bool
+
+
+@dataclass(frozen=True)
+class StlExportResult:
+    root: Path
+    zip_counts: dict[str, int]
+    warnings: list[str]
+    cancelled: bool
+
+
+class ExportWorker(QThread):
+    progress = Signal(int, int, str)  # current, total, filename
+    html_done = Signal(object)
+    stl_done = Signal(object)
+    error = Signal(str)
+
+    def __init__(
+        self,
+        *,
+        kind: Literal["html", "stl"],
+        profile_name: str,
+        order_number: str | None,
+        merge_parts: list[MergePart],
+        completed_by_key: dict[str, list[bool]],
+        exports_dir: Path,
+        profile_id: int | None = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._kind = kind
+        self._profile_name = profile_name
+        self._order_number = order_number
+        self._merge_parts = merge_parts
+        self._completed_by_key = completed_by_key
+        self._exports_dir = exports_dir
+        self._profile_id = profile_id
+        self._cancel = False
+
+    def cancel(self) -> None:
+        self._cancel = True
+
+    def run(self) -> None:
+        try:
+            if self._kind == "html":
+                self._run_html()
+            else:
+                self._run_stl()
+        except Exception as exc:
+            if not self._cancel:
+                self.error.emit(str(exc))
+
+    def _on_progress(self, current: int, total: int, filename: str) -> None:
+        if not self._cancel:
+            self.progress.emit(current, total, filename)
+
+    def _cancel_check(self) -> bool:
+        return self._cancel
+
+    def _run_html(self) -> None:
+        if self._cancel:
+            return
+        out = export_path_for_profile(self._profile_name, self._exports_dir)
+        out, part_count, thumb_count = export_profile_html(
+            self._profile_name,
+            self._merge_parts,
+            out,
+            on_progress=self._on_progress,
+            cancel_check=self._cancel_check,
+            order_number=self._order_number,
+            profile_id=self._profile_id,
+            completed_by_match_key=self._completed_by_key,
+        )
+        self.html_done.emit(
+            HtmlExportResult(
+                path=out,
+                part_count=part_count,
+                thumb_count=thumb_count,
+                cancelled=self._cancel,
+            )
+        )
+
+    def _run_stl(self) -> None:
+        if self._cancel:
+            return
+        root, zip_counts, warnings = export_profile_stl_zips(
+            self._profile_name,
+            self._merge_parts,
+            self._exports_dir,
+            on_progress=self._on_progress,
+            cancel_check=self._cancel_check,
+        )
+        self.stl_done.emit(
+            StlExportResult(
+                root=root,
+                zip_counts=zip_counts,
+                warnings=warnings,
+                cancelled=self._cancel,
+            )
+        )

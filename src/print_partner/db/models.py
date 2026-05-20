@@ -25,6 +25,8 @@ class Project(Base):
     last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_commit_sha: Mapped[Optional[str]] = mapped_column(String(64))
     docs_url: Mapped[Optional[str]] = mapped_column(String(1024))
+    # JSON list of import rules; NULL = legacy import all STLs
+    imported_paths: Mapped[Optional[str]] = mapped_column(Text)
 
     layers: Mapped[list["ProfileLayer"]] = relationship(back_populates="project")
 
@@ -69,6 +71,7 @@ class Part(Base):
     status: Mapped[str] = mapped_column(String(32), default="base")
     role: Mapped[str] = mapped_column(String(32), default="primary")
     filament_color_id: Mapped[Optional[str]] = mapped_column(String(256))
+    filament_custom_hex: Mapped[Optional[str]] = mapped_column(Text)
     quantity_auto: Mapped[int] = mapped_column(Integer, default=1)
     quantity_override: Mapped[Optional[int]] = mapped_column(Integer)
     quantity_effective: Mapped[int] = mapped_column(Integer, default=1)

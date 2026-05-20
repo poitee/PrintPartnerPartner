@@ -1,10 +1,9 @@
-"""Reusable parts curation with folder sections, filter, and suggestions."""
+"""Reusable parts curation with collapsible tree, filter, and suggestions."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -14,7 +13,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -27,15 +25,12 @@ from print_partner.core.parts_grouping import (
     apply_bulk_include,
     filter_parts,
     folder_scan_order,
-    group_by_folder,
     match_keys_for_parts,
-    order_folders,
-    sort_parts,
 )
 from print_partner.core.parts_suggestions import DEFAULT_FUZZY_THRESHOLD, Suggestion, build_suggestions
 from print_partner.core.readme_hints import ReadmeHint, hints_from_repo
 from print_partner.core.scanner import ScannedPart
-from print_partner.ui.folder_section_widget import FolderSectionWidget
+from print_partner.ui.parts_tree_widget import PartsTreeWidget
 
 
 class PartsCurationWidget(QWidget):
@@ -50,7 +45,6 @@ class PartsCurationWidget(QWidget):
         self._readme_hints: list[ReadmeHint] = []
         self._suggestions: list[Suggestion] = []
         self._suggestions_dismissed = False
-        self._section_widgets: dict[str, FolderSectionWidget] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -59,15 +53,23 @@ class PartsCurationWidget(QWidget):
         hint.setStyleSheet("color: #555;")
         root.addWidget(hint)
 
+        self.parts_tree = PartsTreeWidget(mode="wizard")
+
         toolbar = QHBoxLayout()
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Filter parts…")
         self.filter_edit.setClearButtonEnabled(True)
         self.filter_edit.textChanged.connect(self._on_filter_changed)
         toolbar.addWidget(self.filter_edit, 1)
+        expand_btn = QPushButton("Expand all")
+        expand_btn.clicked.connect(self.parts_tree.expand_all)
+        toolbar.addWidget(expand_btn)
+        collapse_btn = QPushButton("Collapse all")
+        collapse_btn.clicked.connect(self.parts_tree.collapse_all)
+        toolbar.addWidget(collapse_btn)
         self.sort_check = QCheckBox("Sort by name")
         self.sort_check.setChecked(True)
-        self.sort_check.toggled.connect(self._rebuild_ui)
+        self.sort_check.toggled.connect(self._on_sort_changed)
         toolbar.addWidget(self.sort_check)
         root.addLayout(toolbar)
 
@@ -104,13 +106,8 @@ class PartsCurationWidget(QWidget):
         sug_layout.addLayout(sug_btns)
         root.addWidget(self.suggestions_box)
 
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.sections_host = QWidget()
-        self.sections_layout = QVBoxLayout(self.sections_host)
-        self.sections_layout.addStretch()
-        self.scroll.setWidget(self.sections_host)
-        root.addWidget(self.scroll, 1)
+        self.parts_tree.inclusion_changed.connect(self._on_tree_inclusion_changed)
+        root.addWidget(self.parts_tree, 1)
 
         buttons = QHBoxLayout()
         self.btn_include = QPushButton("Include selected")
@@ -156,7 +153,8 @@ class PartsCurationWidget(QWidget):
             self._readme_hints.extend(hints_from_repo(path, parts))
 
         self._rebuild_suggestions()
-        self._rebuild_ui()
+        self._rebuild_tree()
+        self._update_summary()
 
     def included_match_keys(self) -> set[str]:
         return set(self._included)
@@ -194,7 +192,8 @@ class PartsCurationWidget(QWidget):
         else:
             self._included.discard(sug.target_match_key)
         self._rebuild_suggestions()
-        self._rebuild_ui()
+        self._rebuild_tree()
+        self._update_summary()
 
     def _apply_suggestions(self, action: str) -> None:
         visible_keys = self._visible_match_keys()
@@ -208,7 +207,8 @@ class PartsCurationWidget(QWidget):
             else:
                 self._included.discard(sug.target_match_key)
         self._rebuild_suggestions()
-        self._rebuild_ui()
+        self._rebuild_tree()
+        self._update_summary()
 
     def _dismiss_suggestions(self) -> None:
         self._suggestions_dismissed = True
@@ -222,7 +222,33 @@ class PartsCurationWidget(QWidget):
 
     def _on_filter_changed(self) -> None:
         self._update_bulk_button_labels()
-        self._rebuild_ui()
+        self.parts_tree.schedule_filter_rebuild(self.filter_edit.text())
+        self._update_summary()
+
+    def _on_sort_changed(self) -> None:
+        self.parts_tree.set_sort_by_name(self.sort_check.isChecked())
+        self._update_summary()
+
+    def _rebuild_tree(self) -> None:
+        self.parts_tree.set_pinned_folders(self._pinned_folders)
+        self.parts_tree.set_sort_by_name(self.sort_check.isChecked())
+        self.parts_tree.set_filter_text(self.filter_edit.text(), immediate=True)
+        self.parts_tree.load_wizard_parts(
+            self._parts,
+            self._included,
+            scan_order=self._scan_order,
+            folder_scan_order=self._folder_scan_order,
+        )
+
+    def _update_summary(self) -> None:
+        total = len(self._parts)
+        inc_count = sum(1 for p in self._parts if p.match_key in self._included)
+        showing = len(self._visible_parts())
+        text = f"{inc_count} of {total} parts included for printing"
+        if showing != total:
+            text += f" · showing {showing} of {total} parts"
+        self.summary.setText(text)
+        self._update_bulk_button_labels()
 
     def _update_bulk_button_labels(self) -> None:
         if self.filter_edit.text().strip():
@@ -232,69 +258,15 @@ class PartsCurationWidget(QWidget):
             self.btn_all.setText("Include all")
             self.btn_none.setText("Exclude all")
 
-    def _rebuild_ui(self) -> None:
-        while self.sections_layout.count() > 1:
-            item = self.sections_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._section_widgets.clear()
-
-        visible = self._visible_parts()
-        grouped = group_by_folder(visible)
-        folder_keys = order_folders(
-            list(grouped.keys()),
-            sort_by_name=self.sort_check.isChecked(),
-            pinned_folders=self._pinned_folders,
-            scan_order=self._folder_scan_order,
-        )
-
-        for folder in folder_keys:
-            folder_parts = grouped.get(folder, [])
-            sorted_parts = sort_parts(
-                folder_parts,
-                sort_by_name=self.sort_check.isChecked(),
-                scan_order=self._scan_order,
-            )
-            section = FolderSectionWidget(folder)
-            section.set_pinned(folder in self._pinned_folders)
-            section.load_parts(sorted_parts, self._included)
-            section.pin_toggled.connect(self._on_pin_toggled)
-            section.inclusion_changed.connect(self._on_section_inclusion_changed)
-            self._section_widgets[folder] = section
-            self.sections_layout.insertWidget(self.sections_layout.count() - 1, section)
-
-        total = len(self._parts)
-        inc_count = sum(1 for p in self._parts if p.match_key in self._included)
-        showing = len(visible)
-        text = f"{inc_count} of {total} parts included for printing"
-        if showing != total:
-            text += f" · showing {showing} of {total} parts"
-        self.summary.setText(text)
-        self._update_bulk_button_labels()
-
-    def _on_pin_toggled(self, folder: str, pinned: bool) -> None:
-        if pinned and folder not in self._pinned_folders:
-            self._pinned_folders.append(folder)
-        elif not pinned and folder in self._pinned_folders:
-            self._pinned_folders.remove(folder)
-        self._rebuild_ui()
-
-    def _on_section_inclusion_changed(self) -> None:
-        for folder, section in self._section_widgets.items():
-            for part in section._parts:
-                if part.match_key in section._included:
-                    self._included.add(part.match_key)
-                else:
-                    self._included.discard(part.match_key)
+    def _on_tree_inclusion_changed(self, included: set[str]) -> None:
+        self._included = set(included)
         self._rebuild_suggestions()
-        self._rebuild_ui()
+        self._update_summary()
 
     def _set_selected_visible(self, included: bool) -> None:
-        keys: list[str] = []
-        for section in self._section_widgets.values():
-            keys.extend(section.selected_match_keys())
+        keys = self.parts_tree.selected_match_keys()
         if not keys:
-            QMessageBox.information(self, "Selection", "Select one or more parts in the tables.")
+            QMessageBox.information(self, "Selection", "Select one or more parts in the tree.")
             return
         for key in keys:
             if included:
@@ -302,14 +274,17 @@ class PartsCurationWidget(QWidget):
             else:
                 self._included.discard(key)
         self._rebuild_suggestions()
-        self._rebuild_ui()
+        self._rebuild_tree()
+        self._update_summary()
 
     def _include_all(self) -> None:
         apply_bulk_include(self._included, self._visible_match_keys())
         self._rebuild_suggestions()
-        self._rebuild_ui()
+        self._rebuild_tree()
+        self._update_summary()
 
     def _exclude_all(self) -> None:
         apply_bulk_exclude(self._included, self._visible_match_keys())
         self._rebuild_suggestions()
-        self._rebuild_ui()
+        self._rebuild_tree()
+        self._update_summary()

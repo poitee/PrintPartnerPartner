@@ -284,14 +284,29 @@ def load_bundled_fallback() -> AmbrosiaCatalog | None:
         return None
 
 
+_catalog_memo: AmbrosiaCatalog | None = None
+
+
+def invalidate_catalog_cache() -> None:
+    """Clear in-memory catalog (call after Refresh Ambrosia colors)."""
+    global _catalog_memo
+    _catalog_memo = None
+
+
 def load_catalog() -> AmbrosiaCatalog:
+    global _catalog_memo
+    if _catalog_memo is not None and _catalog_memo.colors:
+        return _catalog_memo
     cached = load_catalog_from_path(catalog_cache_path())
     if cached and cached.colors:
+        _catalog_memo = cached
         return cached
     bundled = load_bundled_fallback()
     if bundled and bundled.colors:
+        _catalog_memo = bundled
         return bundled
-    return AmbrosiaCatalog(synced_at="", source="empty", colors=[])
+    _catalog_memo = AmbrosiaCatalog(synced_at="", source="empty", colors=[])
+    return _catalog_memo
 
 
 def get_color_by_id(color_id: str | None) -> AmbrosiaColor | None:
@@ -300,19 +315,30 @@ def get_color_by_id(color_id: str | None) -> AmbrosiaColor | None:
     return load_catalog().by_id().get(color_id)
 
 
-def resolve_filament_hex(filament_color_id: str | None, role: str) -> str | None:
-    """Return mesh hex for preview/thumbnails, or None to use role defaults."""
-    from print_partner.core.filament_color_resolve import effective_filament_hex
+def resolve_filament_hex(
+    filament_color_id: str | None,
+    role: str,
+    *,
+    filament_custom_hex: str | None = None,
+) -> str:
+    """Return mesh hex for preview/thumbnails; unset parts use Voron red."""
+    from print_partner.core.filament_color_resolve import (
+        UNASSIGNED_FILAMENT_HEX,
+        effective_filament_hex,
+    )
     from print_partner.core.mesh_color import normalize_mesh_hex
 
     del role  # reserved — filament color overrides role tint
+    custom = normalize_mesh_hex(filament_custom_hex)
+    if custom:
+        return custom
     if not filament_color_id:
-        return None
+        return UNASSIGNED_FILAMENT_HEX
     color = get_color_by_id(filament_color_id)
     if not color:
-        return None
+        return UNASSIGNED_FILAMENT_HEX
     resolved = effective_filament_hex(color.hex, color.display_name, color.product_line)
-    return normalize_mesh_hex(resolved)
+    return normalize_mesh_hex(resolved) or UNASSIGNED_FILAMENT_HEX
 
 
 def sync_ambrosia_catalog(
