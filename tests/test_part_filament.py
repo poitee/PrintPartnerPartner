@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from print_partner.db.models import Base, BuildProfile, Part
 from print_partner.db.session import (
     bulk_set_filament_color,
@@ -9,7 +11,6 @@ from print_partner.db.session import (
     init_db,
     part_to_display_dict,
 )
-from sqlalchemy.orm import Session
 
 
 def test_part_filament_color_migration_and_bulk_assign():

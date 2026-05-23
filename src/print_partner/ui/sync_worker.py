@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+
 from PySide6.QtCore import QThread, Signal
 
 from print_partner.core import git_sync
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -38,4 +42,5 @@ class SyncAllWorker(QThread):
                 result = git_sync.sync_repository(spec.name, spec.url, spec.branch)
                 self.project_done.emit(spec.project_id, result)
             except Exception as exc:
+                logger.exception("Sync failed for project %s", spec.name)
                 self.project_done.emit(spec.project_id, exc)

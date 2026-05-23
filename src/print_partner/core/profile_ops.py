@@ -7,8 +7,8 @@ from pathlib import Path
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from print_partner.core.merge import MergePart, merge_layers
 from print_partner.core.import_rules import import_rules_for_project
+from print_partner.core.merge import MergePart, merge_layers
 from print_partner.core.print_progress import (
     copy_progress_on_duplicate,
     ensure_profile_progress,
@@ -261,7 +261,7 @@ def set_base_project(session: Session, profile_id: int, project_id: int) -> None
 
 def add_addon_project(session: Session, profile_id: int, project_id: int) -> None:
     layers = get_profile_layers(session, profile_id)
-    order = max((l.layer_order for l in layers), default=-1) + 1
+    order = max((layer.layer_order for layer in layers), default=-1) + 1
     session.add(
         ProfileLayer(
             profile_id=profile_id,

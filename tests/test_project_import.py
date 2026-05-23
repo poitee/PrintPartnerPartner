@@ -1,6 +1,5 @@
 """Local folder import tests."""
 
-from pathlib import Path
 
 import pytest
 

@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
 
 from print_partner.core.import_rules import (
     list_stl_relative_paths,
-    normalize_relative_path,
     normalize_rule,
     path_matches_rules,
 )
@@ -104,6 +103,11 @@ class RepoImportDialog(QDialog):
             )
         )
 
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Path", "Type"])
+        self.tree.setColumnWidth(0, 480)
+        self.tree.itemChanged.connect(self._on_item_changed)
+
         toolbar = QHBoxLayout()
         self.filter_edit = QLineEdit()
         self.filter_edit.setPlaceholderText("Filter paths…")
@@ -120,11 +124,6 @@ class RepoImportDialog(QDialog):
         clear_btn.clicked.connect(self._clear_all)
         toolbar.addWidget(clear_btn)
         layout.addLayout(toolbar)
-
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Path", "Type"])
-        self.tree.setColumnWidth(0, 480)
-        self.tree.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self.tree, 1)
 
         self.status_label = QLabel()

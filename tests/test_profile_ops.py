@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from print_partner.core.profile_ops import (
     duplicate_profile,
     rename_profile,
@@ -9,7 +11,6 @@ from print_partner.core.profile_ops import (
 )
 from print_partner.db.models import Base, BuildProfile, Part, ProfileLayer, Project
 from print_partner.db.session import get_engine, init_db
-from sqlalchemy.orm import Session
 
 
 def test_profile_ops_rename_order_duplicate():

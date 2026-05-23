@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 
 def main(argv: list[str] | None = None) -> int:
+    from print_partner.logging_setup import configure_logging
+
+    configure_logging()
     args = argv if argv is not None else sys.argv[1:]
     if len(args) < 3:
-        print("usage: thumb_cli STL_PATH PNG_PATH ROLE [MESH_HEX]", file=sys.stderr)
+        logger.error("usage: thumb_cli STL_PATH PNG_PATH ROLE [MESH_HEX]")
         return 2
     from print_partner.core.thumbnails import generate_thumbnail
 

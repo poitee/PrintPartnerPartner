@@ -42,16 +42,14 @@ python -m print_partner
 
 ## Usage
 
-Workflow tabs: **Source → Build → Verify → Checkoff**. The app remembers your last tab and profile.
+Workflow: **Libraries → Kit → Checkoff** (one navigation strip). On **Kit**, choose **Compose** or **Review** on the right side of the same strip.
 
-1. **Source** — Add GitHub repos (name, URL, branch). **Sync selected** or **Sync all** to clone/pull into `~/.print-partner/repos/{name}` (progress dialog, cancellable).
-   - After sync (or when adding a local folder), use **Import files…** to choose which STL files and folders to include. Only selected paths are scanned into profiles (large repos stay fast). The **STLs imported** column shows how many files match your selection.
-   - Select a project to browse its folder tree and read README / markdown docs for the repo root or selected folder.
-2. Import bulk projects via **Import repos.txt** (`name,url,branch` per line), then **Sync all** and configure **Import files…** per repo.
-3. **Build** — Compose kits: layers, **Recompute**, part filters, filament overrides, STL preview, and docs for the selected part’s folder. Parts are shown in a **collapsible repo → folder → STL tree** — check a repo or folder to include or exclude its entire subtree. Use **New build…** for the guided wizard (recommended) or **New** / **Set base** / **Add addon** manually. **Duplicate build** clones the current profile into a new wizard run.
-4. **Verify** — Same collapsible **repo → folder → STL tree** as Build, but only **included** parts. Uncheck **Print** on a part (or use **Exclude selected**) to remove it from the kit before you print. The summary bar reports how many parts are chosen and flags unset filament or conflicts.
-5. **Checkoff** — Scrollable checklist matching the **HTML export**: repo/folder headings, readable filenames, **Qty**, **Printed** (saved to profile), **Verified** (empty box for customer sign-off on printouts), larger **Thumb** images, and **Notes**. Filament colors are listed once at the top of the export. Select a row for **3D preview** on the right. Run **Recompute** on Build to warm thumbnails. **Export HTML** / **Open HTML** for a printable checklist.
-6. After **Recompute** on Build, thumbnails for included parts are **cached in the background**. Select a part for **3D preview** (subprocess offscreen render; stable on macOS).
+1. **Libraries** — Add/sync GitHub repos or local folders. The table shows **Last sync**, **Commit**, and **Updates** (remote changes vs last sync). **Import files…** chooses which STL paths are scanned into kits (large repos stay fast). Browse the repo tree and read README/docs.
+2. Import bulk repos via **Import repos.txt** (`name,url,branch` per line), then **Sync all** and **Import files…** per repo.
+3. **Kit** — Start on **Your kits** (list all builds: open, rename, duplicate, delete). **Compose** — layers, **Recompute**, filament, parts tree, preview, docs, suggestions, AI. **Review** — included parts only before checkoff.
+4. **Kit — Review** — Included parts only; uncheck **Print** to exclude before printing. Use **Go to Checkoff →** when ready.
+5. **Checkoff** — Printable checklist (Qty, Printed, Verified, thumbs, Notes), print progress, **Export checklist** / HTML. Run **Recompute** in Compose to warm thumbnails.
+6. Thumbnails cache in the background after **Recompute**; 3D preview uses offscreen render (stable on macOS).
 
 ### repos.txt example
 
@@ -67,23 +65,46 @@ addons,https://github.com/you/extra-parts.git,main
 pytest
 ```
 
-CI runs pytest on Ubuntu and macOS (Python 3.11) and `ruff check` on pull requests.
+CI runs `ruff check src tests` and pytest on Ubuntu and macOS (Python 3.11 and 3.12), plus Windows (Python 3.11, Qt UI tests excluded). See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 ## Packaging
 
 ```bash
-chmod +x packaging/build_release.sh
+chmod +x packaging/build_release.sh packaging/package_artifacts.sh
 ./packaging/build_release.sh
 ```
+
+This runs pytest, PyInstaller, then writes versioned archives under `dist/artifacts/` (`.zip` on macOS/Windows, `.tar.gz` on Linux). On macOS, a `.dmg` is also created when `hdiutil` is available.
 
 Or manually:
 
 ```bash
 pip install pyinstaller
-pyinstaller packaging/print_partner.spec
+pyinstaller packaging/print_partner.spec --noconfirm
+./packaging/package_artifacts.sh
 ```
 
-The spec builds an **onedir** bundle (`dist/Print Partner/` on Linux/Windows, `dist/Print Partner.app` on macOS). Expect roughly 200–400 MB because of PySide6 and VTK/PyVista.
+The spec builds an **onedir** bundle (`dist/Print Partner/` on Linux/Windows, `dist/Print Partner.app` on macOS). Expect roughly 200–400 MB because of PySide6 and VTK/PyVista. **macOS DMGs target macOS 12+** (NumPy 1.26.x; avoid NumPy 2 wheels that require macOS 14). See [`packaging/README_RELEASE.md`](packaging/README_RELEASE.md) and [`packaging/THUMBNAILS_AND_BUNDLE.md`](packaging/THUMBNAILS_AND_BUNDLE.md).
+
+### GitHub Releases
+
+Push a version tag (e.g. `v0.1.0`) to trigger [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds on Ubuntu, macOS, and Windows and attaches platform archives to the release.
+
+### Smoke test before shipping
+
+Use the checklist in [`docs/RELEASE_SMOKE_TEST.md`](docs/RELEASE_SMOKE_TEST.md).
+
+## Sharing kits with print partners
+
+Export a portable kit file (`.print-partner-kit.zip`) from **Your kits** or **Kit → Manage → Export kit for sharing…**. The bundle includes:
+
+- Kit name and order number
+- Layer setup (which repos are base/addons), matched by **repo name or URL** on import
+- All parts with filament colors, quantities, inclusion, and notes
+
+**Import** via **Import kit…** on the kit list or **Manage → Import shared kit…**. If a referenced repository is not on the recipient’s machine yet, add and sync it on **Libraries**, then adjust layers or run **Recompute**.
+
+Print progress is not included in exports (recipients start a fresh checkoff). For shop-floor HTML/STL output, use **Export checklist** / **Export STLs** as before.
 
 ## Sharing with print partners
 
@@ -153,9 +174,9 @@ Tunable constants in `print_partner/core/thumbnails.py` and `stl_camera.py`:
 | `THUMB_PNG_SIZE` | 384 | Render resolution |
 | `THUMB_CAMERA_PADDING` | 0.88 | Zoom out so the full part fits (avoids clipped edges) |
 | `THUMB_MESH_POINT_LIMIT` | 80,000 | Decimate huge meshes before render |
-| `THUMB_SHOW_EDGES` | true | Edge lines on the mesh (improves dark-part readability) |
-| `THUMB_CACHE_VERSION` | v2 | Cache key suffix; bump to regenerate all thumbs after render changes |
-| `PREVIEW_SHOW_EDGES` | true | Same as thumbs — light edge outline on 3D preview |
+| `THUMB_SHOW_EDGES` | false | Solid mesh; boundary outline only (no triangle wireframe) |
+| `THUMB_CACHE_VERSION` | v3 | Cache key suffix; bump to regenerate all thumbs after render changes |
+| `PREVIEW_SHOW_EDGES` | false | Solid mesh in offscreen preview when using PyVista |
 | `PREVIEW_PNG_SIZE` | 640 | stl-thumb square size when used for preview |
 
 3D **preview** in the app uses a larger window (640×480) and `PREVIEW_CAMERA_PADDING` 0.90. When `stl-thumb` is on your `PATH`, preview uses it first (solid mesh, no edge lines); otherwise PyVista offscreen with edges disabled.
@@ -168,6 +189,16 @@ After changing filament colors, use **Recompute** or re-export so thumbnails reg
 - **stl-thumb** — When installed, used first for role-only colors; `-a none` is the default for faster renders (see `STL_THUMB_ANTIALIAS` in `thumbnails.py`).
 - **Profile UI** — Loading a profile batches filament catalog and print-progress lookups; typing in the parts filter waits 200ms before rebuilding the parts tree.
 - **Export HTML** — Reuses cached PNGs from `~/.print-partner/thumbs/` when fresh; only missing thumbs are generated during export.
+
+## AI assistant (optional)
+
+On **Kit**, open the **Assistant** tab (Preview / Docs / Assistant). The AI receives app workflow context, repositories, filament catalog ids, and the active kit. It is **disabled by default**.
+
+1. **Help → AI settings…** — enable the assistant, choose provider (OpenAI, Anthropic, or OpenAI-compatible), model, and API key.
+2. API key stored only in `~/.print-partner/ai_secrets.json` (gitignored).
+3. **Ask** sends context plus your question; **Review suggestions…** lets you pick which changes to apply (include/exclude, filament, role, qty, notes, navigation).
+
+**Offline:** the **Suggestions** panel above the parts tree uses README/fuzzy heuristics without an API key.
 
 ## Known limitations (MVP)
 

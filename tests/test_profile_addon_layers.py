@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from print_partner.core.profile_ops import add_addon_project
 from print_partner.db.models import Base, BuildProfile, ProfileLayer, Project
 from print_partner.db.session import get_engine, get_profile_layers, init_db
-from sqlalchemy.orm import Session
 
 
 def test_add_multiple_addon_layers():
@@ -42,7 +43,7 @@ def test_add_multiple_addon_layers():
     with Session(engine) as session:
         layers = get_profile_layers(session, pid)
         assert len(layers) == 3
-        addons = [l for l in layers if l.layer_type == "addon"]
+        addons = [layer for layer in layers if layer.layer_type == "addon"]
         assert len(addons) == 2
 
     Base.metadata.drop_all(engine)

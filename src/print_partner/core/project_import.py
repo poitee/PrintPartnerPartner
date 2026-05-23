@@ -11,7 +11,6 @@ from print_partner.core import git_sync
 from print_partner.core.git_sync import SyncResult
 from print_partner.core.import_rules import (
     expand_rules_to_files,
-    list_stl_relative_paths,
     normalize_relative_path,
 )
 

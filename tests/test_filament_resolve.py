@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from print_partner.core.ambrosia_catalog import resolve_filament_hex
 from print_partner.core.filament_color_resolve import (
     UNASSIGNED_FILAMENT_HEX,
@@ -9,7 +11,6 @@ from print_partner.core.filament_color_resolve import (
 )
 from print_partner.db.models import Base, BuildProfile, Part
 from print_partner.db.session import get_engine, init_db, part_to_display_dict
-from sqlalchemy.orm import Session
 
 
 def test_resolve_filament_hex_unset_returns_red():

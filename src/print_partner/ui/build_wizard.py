@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QComboBox,
-    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -22,7 +21,7 @@ from PySide6.QtWidgets import (
     QWizardPage,
 )
 
-from print_partner.core.import_rules import import_rules_for_project, serialize_import_rules
+from print_partner.core.import_rules import import_rules_for_project
 from print_partner.core.project_import import register_local_project_path, sync_git_project
 from print_partner.core.scanner import scan_repo
 from print_partner.core.wizard_finish import finish_wizard_build, load_wizard_state_from_profile
@@ -31,6 +30,8 @@ from print_partner.core.wizard_state import WizardState
 from print_partner.db.models import Project
 from print_partner.db.session import db_session, list_profiles, list_projects
 from print_partner.ui.parts_curation_widget import PartsCurationWidget
+from print_partner.ui.path_picker import DirectoryPathEdit, resolve_directory_input
+
 
 class BuildWizard(QWizard):
     build_finished = Signal(int)
@@ -223,15 +224,10 @@ class ProjectSourceWidget(QWidget):
         git_form.addRow("", self.btn_sync)
         layout.addWidget(self.stack_git)
 
-        local_row = QHBoxLayout()
-        self.local_path = QLineEdit()
-        self.local_path.setReadOnly(True)
-        self.btn_browse = QPushButton("Browse…")
-        local_row.addWidget(self.local_path, 1)
-        local_row.addWidget(self.btn_browse)
+        self.local_path_edit = DirectoryPathEdit()
         self.local_name = QLineEdit()
         local_form = QFormLayout()
-        local_form.addRow("Folder", local_row)
+        local_form.addRow("Folder", self.local_path_edit)
         local_form.addRow("Project name", self.local_name)
         self.stack_local = QWidget()
         self.stack_local.setLayout(local_form)
@@ -240,7 +236,6 @@ class ProjectSourceWidget(QWidget):
 
         self.git_radio.toggled.connect(self._on_type_changed)
         self.local_radio.toggled.connect(self._on_type_changed)
-        self.btn_browse.clicked.connect(self._browse_local)
         self.btn_sync.clicked.connect(self._sync_git)
         self._refresh_projects()
 
@@ -257,13 +252,6 @@ class ProjectSourceWidget(QWidget):
                 hint = "synced" if p.local_path else "not synced"
                 self.existing_combo.addItem(f"{p.name} ({hint})", p.id)
 
-    def _browse_local(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select STL folder")
-        if path:
-            self.local_path.setText(path)
-            if not self.local_name.text().strip():
-                self.local_name.setText(Path(path).name)
-
     def _sync_git(self) -> None:
         QMessageBox.information(self, "Sync", "Click Next to sync and continue.")
 
@@ -273,25 +261,25 @@ class ProjectSourceWidget(QWidget):
         return self._resolve_git()
 
     def _resolve_local(self) -> int:
-        path = self.local_path.text().strip()
-        name = self.local_name.text().strip() or Path(path).name
-        if not path or not name:
-            raise ValueError("Choose a folder and project name.")
-        result = register_local_project_path(name, Path(path))
+        path = resolve_directory_input(self.local_path_edit.path_text())
+        name = self.local_name.text().strip() or path.name
+        if not name:
+            raise ValueError("Enter a project name.")
+        result = register_local_project_path(name, path)
         with db_session() as session:
             from sqlalchemy import select
 
             proj = session.scalars(select(Project).where(Project.name == name)).first()
             if proj:
                 proj.source_type = "local"
-                proj.url = f"file://{path}"
+                proj.url = f"file://{path.as_posix()}"
                 proj.local_path = str(result.local_path)
                 proj.last_synced_at = result.last_synced_at
                 proj.branch = "main"
             else:
                 proj = Project(
                     name=name,
-                    url=f"file://{path}",
+                    url=f"file://{path.as_posix()}",
                     source_type="local",
                     branch="main",
                     local_path=str(result.local_path),

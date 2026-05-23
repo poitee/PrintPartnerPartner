@@ -11,7 +11,7 @@ from print_partner.core.thumbnails import THUMB_SHOW_EDGES
 
 def test_preview_show_edges_matches_thumbnails():
     assert preview.PREVIEW_SHOW_EDGES is THUMB_SHOW_EDGES
-    assert preview.PREVIEW_SHOW_EDGES is True
+    assert preview.PREVIEW_SHOW_EDGES is False
 
 
 def test_render_stl_preview_png_uses_stl_thumb_when_available(tmp_path: Path):
@@ -28,7 +28,7 @@ def test_render_stl_preview_png_uses_stl_thumb_when_available(tmp_path: Path):
     pv.assert_not_called()
 
 
-def test_preview_pyvista_enables_edges_when_thumbnails_do(tmp_path: Path):
+def test_preview_pyvista_solid_mesh_without_triangle_edges(tmp_path: Path):
     stl = tmp_path / "part.stl"
     stl.write_bytes(b"")
     out = tmp_path / "out.png"
@@ -50,5 +50,5 @@ def test_preview_pyvista_enables_edges_when_thumbnails_do(tmp_path: Path):
     assert result.ok
     plotter.add_mesh.assert_called_once()
     kwargs = plotter.add_mesh.call_args.kwargs
-    assert kwargs["show_edges"] is True
-    assert kwargs.get("smooth_shading") is False
+    assert kwargs["show_edges"] is False
+    assert kwargs.get("smooth_shading") is True

@@ -205,13 +205,27 @@ class PartsTreeWidget(QWidget):
 
     def _rebuild_tree(self) -> None:
         self._building = True
-        self.tree.clear()
-        self._part_items.clear()
-        self._match_key_items.clear()
-        model = self._build_model()
-        for repo_node in model:
-            self._add_node(None, repo_node)
+        self.tree.setUpdatesEnabled(False)
+        self.tree.blockSignals(True)
+        try:
+            self.tree.clear()
+            self._part_items.clear()
+            self._match_key_items.clear()
+            model = self._build_model()
+            for repo_node in model:
+                self._add_node(None, repo_node)
+            if self._mode == "profile" and len(self._part_items) > 80:
+                for i in range(self.tree.topLevelItemCount()):
+                    self.tree.topLevelItem(i).setExpanded(False)
+        finally:
+            self.tree.blockSignals(False)
+            self.tree.setUpdatesEnabled(True)
         self._building = False
+        if len(self._part_items) > 80:
+            for i in range(self.tree.topLevelItemCount()):
+                item = self.tree.topLevelItem(i)
+                if item is not None:
+                    item.setExpanded(False)
 
     def _add_node(self, parent_item: QTreeWidgetItem | None, node: PartsTreeNode) -> QTreeWidgetItem:
         if parent_item is None:

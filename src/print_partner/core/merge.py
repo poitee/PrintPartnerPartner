@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from rapidfuzz import fuzz
 import trimesh
+from rapidfuzz import fuzz
 
 from print_partner.core.scanner import ScannedPart, normalize_match_key
 

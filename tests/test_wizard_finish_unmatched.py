@@ -1,6 +1,5 @@
 """Finish marks parts excluded when not in layer inclusion set."""
 
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session

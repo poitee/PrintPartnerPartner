@@ -10,7 +10,6 @@ import pytest
 
 from print_partner.core.ambrosia_catalog import (
     catalog_from_dict,
-    catalog_to_dict,
     enrich_colors_with_hex,
     load_catalog_from_path,
     make_color_id,
@@ -20,7 +19,6 @@ from print_partner.core.ambrosia_catalog import (
     short_product_line,
     sync_ambrosia_catalog,
 )
-
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ambrosia_products_snippet.json"
 

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Generator
 
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import Engine, case, create_engine, func, inspect, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from print_partner.config import settings
@@ -15,7 +15,6 @@ from print_partner.db.models import (
     Base,
     BuildProfile,
     Part,
-    PrintProgress,
     ProfileLayer,
     Project,
 )
@@ -28,8 +27,13 @@ def get_engine():
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False)
 
+SCHEMA_VERSION_KEY = "schema_version"
+CURRENT_SCHEMA_VERSION = 6
 
-def _migrate_projects_source_type(engine) -> None:
+SCHEMA_MIGRATIONS: list[tuple[int, Callable[[Engine], None]]] = []
+
+
+def _migrate_projects_source_type(engine: Engine) -> None:
     insp = inspect(engine)
     if "projects" not in insp.get_table_names():
         return
@@ -39,7 +43,7 @@ def _migrate_projects_source_type(engine) -> None:
             conn.execute(text("ALTER TABLE projects ADD COLUMN source_type TEXT DEFAULT 'git'"))
 
 
-def _migrate_parts_filament_color(engine) -> None:
+def _migrate_parts_filament_color(engine: Engine) -> None:
     insp = inspect(engine)
     if "parts" not in insp.get_table_names():
         return
@@ -49,7 +53,7 @@ def _migrate_parts_filament_color(engine) -> None:
             conn.execute(text("ALTER TABLE parts ADD COLUMN filament_color_id TEXT"))
 
 
-def _migrate_parts_filament_custom_hex(engine) -> None:
+def _migrate_parts_filament_custom_hex(engine: Engine) -> None:
     insp = inspect(engine)
     if "parts" not in insp.get_table_names():
         return
@@ -59,7 +63,7 @@ def _migrate_parts_filament_custom_hex(engine) -> None:
             conn.execute(text("ALTER TABLE parts ADD COLUMN filament_custom_hex TEXT"))
 
 
-def _migrate_projects_imported_paths(engine) -> None:
+def _migrate_projects_imported_paths(engine: Engine) -> None:
     insp = inspect(engine)
     if "projects" not in insp.get_table_names():
         return
@@ -69,7 +73,7 @@ def _migrate_projects_imported_paths(engine) -> None:
             conn.execute(text("ALTER TABLE projects ADD COLUMN imported_paths TEXT"))
 
 
-def _migrate_build_profiles_order_number(engine) -> None:
+def _migrate_build_profiles_order_number(engine: Engine) -> None:
     insp = inspect(engine)
     if "build_profiles" not in insp.get_table_names():
         return
@@ -79,7 +83,7 @@ def _migrate_build_profiles_order_number(engine) -> None:
             conn.execute(text("ALTER TABLE build_profiles ADD COLUMN order_number TEXT"))
 
 
-def _migrate_fix_empty_import_rules(engine) -> None:
+def _migrate_fix_empty_import_rules(engine: Engine) -> None:
     """Treat legacy [] as import-all — empty rules were wiping profiles on Recompute."""
     insp = inspect(engine)
     if "projects" not in insp.get_table_names():
@@ -90,15 +94,64 @@ def _migrate_fix_empty_import_rules(engine) -> None:
         )
 
 
+SCHEMA_MIGRATIONS.extend(
+    [
+        (1, _migrate_projects_source_type),
+        (2, _migrate_parts_filament_color),
+        (3, _migrate_parts_filament_custom_hex),
+        (4, _migrate_build_profiles_order_number),
+        (5, _migrate_projects_imported_paths),
+        (6, _migrate_fix_empty_import_rules),
+    ]
+)
+
+
+def _read_schema_version(engine: Engine) -> int:
+    insp = inspect(engine)
+    if "app_settings" not in insp.get_table_names():
+        return 0
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"),
+            {"key": SCHEMA_VERSION_KEY},
+        ).fetchone()
+    if not row or not row[0]:
+        return 0
+    try:
+        return int(row[0])
+    except ValueError:
+        return 0
+
+
+def _write_schema_version(engine: Engine, version: int) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO app_settings (key, value) VALUES (:key, :val) "
+                "ON CONFLICT(key) DO UPDATE SET value = :val"
+            ),
+            {"key": SCHEMA_VERSION_KEY, "val": str(version)},
+        )
+
+
+def _apply_migrations(engine: Engine) -> None:
+    current = _read_schema_version(engine)
+    for version, migrate in sorted(SCHEMA_MIGRATIONS, key=lambda t: t[0]):
+        if version <= current:
+            continue
+        migrate(engine)
+        _write_schema_version(engine, version)
+
+
+def get_schema_version(engine: Engine | None = None) -> int:
+    eng = engine or get_engine()
+    return _read_schema_version(eng)
+
+
 def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(engine)
-    _migrate_projects_source_type(engine)
-    _migrate_parts_filament_color(engine)
-    _migrate_parts_filament_custom_hex(engine)
-    _migrate_build_profiles_order_number(engine)
-    _migrate_projects_imported_paths(engine)
-    _migrate_fix_empty_import_rules(engine)
+    _apply_migrations(engine)
 
 
 class MergeWouldWipeProfileError(ValueError):
@@ -251,6 +304,15 @@ def list_projects(session: Session) -> list[Project]:
 
 def list_profiles(session: Session) -> list[BuildProfile]:
     return list(session.scalars(select(BuildProfile).order_by(BuildProfile.name)).all())
+
+
+def profile_part_counts(session: Session) -> dict[int, tuple[int, int]]:
+    """Map profile_id -> (total_parts, included_parts)."""
+    included_sum = func.sum(case((Part.included.is_(True), 1), else_=0))
+    rows = session.execute(
+        select(Part.profile_id, func.count(Part.id), included_sum).group_by(Part.profile_id)
+    )
+    return {int(pid): (int(total), int(inc or 0)) for pid, total, inc in rows}
 
 
 def get_profile_layers(session: Session, profile_id: int) -> list[ProfileLayer]:

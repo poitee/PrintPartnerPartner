@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QProcess, QTimer
+from PySide6.QtCore import QProcess, Qt, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout
 

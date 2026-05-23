@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Optional
 
 from jinja2 import Environment, select_autoescape
 
+from print_partner.core.checklist_export_css import CHECKLIST_EXPORT_CSS
 from print_partner.core.merge import MergePart
 from print_partner.core.parts_grouping import folder_key_from_relative_path
 from print_partner.core.thumbnails import ProgressCallback, ensure_thumbnail
@@ -63,153 +65,121 @@ def _build_export_row(
 
 
 _EXPORT_ENV = Environment(autoescape=select_autoescape(["html", "xml"]))
-EXPORT_TEMPLATE = _EXPORT_ENV.from_string("""<!DOCTYPE html>
+EXPORT_TEMPLATE = _EXPORT_ENV.from_string(
+    """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title }}</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; }
-    table.parts-table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; table-layout: fixed; }
-    table.parts-table col.col-filename { width: 32%; }
+"""
+    + CHECKLIST_EXPORT_CSS
+    + """
+    table.parts-table col.col-filename { width: 36%; }
     table.parts-table col.col-qty { width: 6%; }
-    table.parts-table col.col-printed { width: 8%; }
-    table.parts-table col.col-verified { width: 8%; }
-    table.parts-table col.col-thumb { width: 22%; }
-    table.parts-table col.col-notes { width: 24%; }
-    table.parts-table th, table.parts-table td {
-      border: 1px solid #ccc;
-      padding: 0.5rem;
-      text-align: left;
-      vertical-align: middle;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    table.parts-table td.filename-cell {
-      overflow: visible;
-      text-overflow: clip;
-      white-space: normal;
-      word-break: break-word;
-    }
-    table.parts-table td.thumb-cell {
-      overflow: visible;
-      text-overflow: clip;
-      text-align: center;
-      vertical-align: middle;
-    }
-    table.parts-table th { background: #f4f4f4; }
-    .thumb-wrap {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 10rem;
-      padding: 0.35rem;
-      border: 1px solid #ccc;
-      background: #f5f5f5;
-      border-radius: 4px;
-    }
-    img.thumb {
-      display: block;
-      max-width: 100%;
-      width: auto;
-      height: auto;
-      max-height: 11rem;
-      object-fit: contain;
-      object-position: center;
-      background: #f5f5f5;
-    }
-    @media print {
-      .thumb-wrap { border-color: #999; background: #fff; }
-      img.thumb { background: #fff; }
-    }
-    .swatch-dot { display: inline-block; width: 20px; height: 20px; border-radius: 3px; border: 1px solid #ccc; vertical-align: middle; margin-right: 6px; flex-shrink: 0; }
-    .no-thumb { color: #999; font-size: 0.85rem; }
-    .filaments-used { margin: 1rem 0; padding: 0.75rem 1rem; background: #f8f8f8; border-radius: 6px; }
-    .filaments-used ul { margin: 0.5rem 0 0; padding-left: 1.25rem; }
-    .qty-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .check-cell { text-align: center; }
-    .check-cell input[type=checkbox] { width: 1.1rem; height: 1.1rem; cursor: pointer; margin: 0; }
-    .check-cell input.customer-verify { cursor: default; }
-    h2.repo-section { margin-top: 2rem; margin-bottom: 0.5rem; }
-    h3.folder-section { margin: 1rem 0 0.5rem 1rem; color: #333; font-size: 1rem; font-weight: 600; }
-    .subtitle { color: #555; margin-top: -0.5rem; }
-    .repo-meta { color: #666; font-size: 0.9rem; margin: 0 0 0.75rem 0; }
+    table.parts-table col.col-printed { width: 9%; }
+    table.parts-table col.col-verified { width: 9%; }
+    table.parts-table col.col-thumb { width: 20%; }
+    table.parts-table col.col-notes { width: 20%; }
   </style>
 </head>
 <body>
-  <h1>{{ title }}</h1>
-  {% if order_number %}<p class="subtitle"><strong>Order #:</strong> {{ order_number }}</p>{% endif %}
-  <p>{{ part_count }} parts</p>
-  {% if filaments_used %}
-  <div class="filaments-used">
-    <strong>Filaments in this build</strong>
-    <ul>
-    {% for f in filaments_used %}
-      <li>{% if f.hex %}<span class="swatch-dot" style="background:{{ f.hex }}"></span>{% endif %}{{ f.label }}</li>
+  <div class="checklist-doc">
+    <header class="doc-header">
+      <p class="doc-kicker">Print Partner · Build checklist</p>
+      <h1 class="doc-title">{{ profile_name }}</h1>
+      <p class="doc-meta">
+        {% if order_number %}<strong>Order #</strong> {{ order_number }} · {% endif %}
+        <strong>{{ part_count }}</strong> part(s) · Generated {{ generated_at }}
+      </p>
+    </header>
+    {% for repo in repo_sections %}
+    <section class="repo-section">
+      <h2 class="repo-heading">{{ repo.label }}</h2>
+      <p class="repo-meta">{{ repo.part_count }} part(s) in this repository</p>
+      {% for folder in repo.folders %}
+      <h3 class="folder-heading">{{ folder.label }}</h3>
+      <table class="parts-table">
+        <colgroup>
+          <col class="col-filename">
+          <col class="col-qty">
+          <col class="col-printed">
+          <col class="col-verified">
+          <col class="col-thumb">
+          <col class="col-notes">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Part</th>
+            <th>Qty</th>
+            <th class="check-col">Print</th>
+            <th class="check-col">Verify</th>
+            <th>Preview</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for p in folder.parts %}
+          <tr>
+            <td class="filename-cell">
+              <div class="part-row">
+                {% if p.filament_hex %}<span class="swatch-dot part-swatch" style="background:{{ p.filament_hex }}" title="{{ p.filament_display }}"></span>{% endif %}
+                <div class="part-text">
+                  <span class="part-name">{{ p.filename }}</span>
+                  {% if p.role %}<span class="part-role">{{ p.role }}</span>{% endif %}
+                </div>
+              </div>
+            </td>
+            <td class="qty-cell">{{ p.quantity }}</td>
+            <td class="check-cell">
+              <span class="check-box{% if p.all_printed %} checked{% endif %}"
+                {% if p.filament_hex %}data-color="{{ p.filament_hex }}" style="--check-color: {{ p.filament_hex }}"{% endif %}
+                aria-hidden="true"></span>
+              <input type="checkbox" class="checkbox-screen"
+                data-storage-key="{{ p.storage_key }}"
+                {% if p.all_printed %}checked{% endif %}
+                {% if p.filament_hex %}style="accent-color: {{ p.filament_hex }}"{% endif %}
+                title="Mark all copies printed">
+            </td>
+            <td class="check-cell">
+              <span class="check-box" aria-hidden="true"></span>
+              <input type="checkbox" class="checkbox-screen customer-verify"
+                title="Customer verified (print only)">
+            </td>
+            <td class="thumb-cell">{% if p.thumbnail %}<div class="thumb-wrap"><img class="thumb" src="{{ p.thumbnail }}" alt=""></div>{% else %}<span class="no-thumb">—</span>{% endif %}</td>
+            <td class="notes-cell">{{ p.notes }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endfor %}
+    </section>
     {% endfor %}
-    </ul>
+    <p class="screen-hint no-print">On screen: use checkboxes to track progress in this browser. When printing, use the empty boxes in the Print and Verify columns.</p>
   </div>
-  {% endif %}
-  {% for repo in repo_sections %}
-  <h2 class="repo-section">{{ repo.label }}</h2>
-  <p class="repo-meta">{{ repo.part_count }} part(s) in this repository</p>
-  {% for folder in repo.folders %}
-  <h3 class="folder-section">{{ folder.label }}</h3>
-  <table class="parts-table">
-    <colgroup>
-      <col class="col-filename">
-      <col class="col-qty">
-      <col class="col-printed">
-      <col class="col-verified">
-      <col class="col-thumb">
-      <col class="col-notes">
-    </colgroup>
-    <thead>
-      <tr>
-        <th>Filename</th>
-        <th>Qty</th>
-        <th>Printed</th>
-        <th>Verified</th>
-        <th>Thumb</th>
-        <th>Notes</th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for p in folder.parts %}
-      <tr>
-        <td class="filename-cell">{{ p.filename }}</td>
-        <td><span class="qty-cell">{{ p.quantity }}</span></td>
-        <td class="check-cell">
-          <input type="checkbox"
-            data-storage-key="{{ p.storage_key }}"
-            {% if p.all_printed %}checked{% endif %}
-            {% if p.filament_hex %}style="accent-color: {{ p.filament_hex }}"{% endif %}
-            title="Mark all copies printed">
-        </td>
-        <td class="check-cell">
-          <input type="checkbox" class="customer-verify" title="Customer verified (print only)">
-        </td>
-        <td class="thumb-cell">{% if p.thumbnail %}<div class="thumb-wrap"><img class="thumb" src="{{ p.thumbnail }}" alt="{{ p.filename }}"></div>{% else %}<span class="no-thumb">—</span>{% endif %}</td>
-        <td>{{ p.notes }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% endfor %}
-  {% endfor %}
   {% if profile_id %}
-  <script>
+  <script class="no-print">
   (function() {
     var prefix = "print-partner-{{ profile_id }}-";
     document.querySelectorAll('input[data-storage-key]').forEach(function(cb) {
       var key = prefix + cb.getAttribute('data-storage-key');
+      var box = cb.previousElementSibling;
+      function syncBox() {
+        if (box && box.classList.contains('check-box')) {
+          if (cb.checked) box.classList.add('checked');
+          else box.classList.remove('checked');
+        }
+      }
       try {
         var stored = localStorage.getItem(key);
         if (stored === "1") cb.checked = true;
         else if (stored === "0") cb.checked = false;
       } catch (e) {}
+      syncBox();
       cb.addEventListener('change', function() {
         try { localStorage.setItem(key, cb.checked ? "1" : "0"); } catch (e) {}
+        syncBox();
       });
     });
   })();
@@ -217,7 +187,8 @@ EXPORT_TEMPLATE = _EXPORT_ENV.from_string("""<!DOCTYPE html>
   {% endif %}
 </body>
 </html>
-""")
+"""
+)
 
 
 def export_profile_html(
@@ -226,7 +197,7 @@ def export_profile_html(
     output_path: Path,
     on_progress: ProgressCallback | None = None,
     *,
-    cancel_check: Optional[Callable[[], bool]] = None,
+    cancel_check: Callable[[], bool] | None = None,
     order_number: str | None = None,
     profile_id: int | None = None,
     completed_by_match_key: dict[str, list[bool]] | None = None,
@@ -235,7 +206,6 @@ def export_profile_html(
     included = [p for p in parts if p.included]
     by_repo_folder: dict[str, dict[str, list[dict]]] = defaultdict(lambda: defaultdict(list))
     thumb_count = 0
-    filament_labels: dict[str, dict] = {}
     total = len(included)
     completed_by_match_key = completed_by_match_key or {}
 
@@ -254,13 +224,6 @@ def export_profile_html(
         )
         if thumb:
             thumb_count += 1
-        if p.filament_display:
-            key = p.filament_color_id or p.filament_display
-            filament_labels[key] = {
-                "label": p.filament_display,
-                "hex": p.filament_hex,
-                "swatch_url": p.filament_swatch_url,
-            }
         repo_label = p.source_layer or "unknown"
         folder_label = folder_key_from_relative_path(p.relative_path)
         row = _build_export_row(p, completed_by_match_key=completed_by_match_key)
@@ -289,18 +252,19 @@ def export_profile_html(
         )
 
     part_count = sum(s["part_count"] for s in repo_sections)
-    filaments_used = sorted(filament_labels.values(), key=lambda x: x["label"].lower())
 
     title = f"Print Partner — {profile_name}"
     if order_number:
         title = f"{title} (Order {order_number})"
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     html = EXPORT_TEMPLATE.render(
         title=title,
+        profile_name=profile_name,
         order_number=order_number,
         part_count=part_count,
+        generated_at=generated_at,
         repo_sections=repo_sections,
-        filaments_used=filaments_used,
         profile_id=profile_id,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)

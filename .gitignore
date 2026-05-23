@@ -10,3 +10,4 @@ build/
 *.db
 .env
 .env.*
+ai_secrets.json

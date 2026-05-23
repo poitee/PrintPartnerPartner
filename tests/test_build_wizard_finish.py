@@ -33,6 +33,7 @@ def test_finish_applies_inclusion_sets(isolated_db):
     (addon_repo / "skip.stl").write_bytes(b"solid skip")
 
     from sqlalchemy.orm import Session
+
     from print_partner.db.session import get_engine
 
     engine = get_engine()

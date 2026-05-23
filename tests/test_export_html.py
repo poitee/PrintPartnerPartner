@@ -61,27 +61,36 @@ def test_export_html_repo_and_folder_sections(tmp_path: Path):
         },
     )
     html = out.read_text(encoding="utf-8")
-    assert "Order #:" in html
+    assert "Order #" in html
     assert "PO-100" in html
-    assert 'class="repo-section">base:Micron</h2>' in html
-    assert 'class="repo-section">addon:Boop</h2>' in html
+    assert 'class="repo-heading">base:Micron</h2>' in html
+    assert 'class="repo-heading">addon:Boop</h2>' in html
     assert html.index("base:Micron") < html.index("addon:Boop")
-    assert 'class="folder-section">parts</h3>' in html
-    assert 'class="folder-section">(root)</h3>' in html
+    assert 'class="folder-heading">parts</h3>' in html
+    assert 'class="folder-heading">(root)</h3>' in html
     assert "accent-color: #ff0000" in html
     assert "print-partner-7-" in html
-    assert html.count('type="checkbox"') == 6
+    assert html.count('data-storage-key=') == 3
     assert html.count('title="Mark all copies printed"') == 3
-    assert html.count('class="customer-verify"') == 3
+    assert html.count('class="checkbox-screen customer-verify"') == 3
     assert "getAttribute('data-storage-key')" in html
     assert 'class="qty-cell"' in html
     assert 'class="filename-cell"' in html
-    assert "max-height: 11rem" in html
+    assert "max-height: 1.45in" in html
+    assert "@media print" in html
     assert 'class="parts-table"' in html
-    assert "<th>Role</th>" not in html
     assert "<th>Filament</th>" not in html
-    assert "<th>Verified</th>" in html
-    assert "<th>Printed</th>" in html
+    assert "filaments-used" not in html
+    assert "Filaments in this build" not in html
+    assert '<th class="check-col">Print</th>' in html
+    assert '<th class="check-col">Verify</th>' in html
+    assert "part-swatch" in html
+    assert 'title="Red PLA"' in html
+    assert 'class="part-role">accent</span>' in html
+    assert 'class="check-box checked"' in html
+    assert "doc-progress" not in html
+    assert "parts fully printed" not in html
+    assert "Generated" in html
     assert "role-section" not in html
 
 
@@ -138,6 +147,7 @@ def test_export_html_uses_dot_not_img_swatch(tmp_path: Path):
     out = tmp_path / "swatch.html"
     export_profile_html("Swatch Test", parts, out)
     html = out.read_text(encoding="utf-8")
-    assert 'class="swatch-dot"' in html
+    assert "part-swatch" in html
+    assert 'title="Red PLA"' in html
     assert "spool-photo.png" not in html
     assert '<img class="swatch"' not in html

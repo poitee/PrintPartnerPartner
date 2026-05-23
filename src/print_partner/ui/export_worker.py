@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -11,6 +12,8 @@ from PySide6.QtCore import QThread, Signal
 from print_partner.core.export_html import export_path_for_profile, export_profile_html
 from print_partner.core.export_stl_zip import export_profile_stl_zips
 from print_partner.core.merge import MergePart
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -68,6 +71,7 @@ class ExportWorker(QThread):
                 self._run_stl()
         except Exception as exc:
             if not self._cancel:
+                logger.exception("Export failed (%s)", self._kind)
                 self.error.emit(str(exc))
 
     def _on_progress(self, current: int, total: int, filename: str) -> None:

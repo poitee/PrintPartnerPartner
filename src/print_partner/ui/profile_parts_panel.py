@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from PySide6.QtCore import Signal
@@ -19,8 +20,10 @@ from PySide6.QtWidgets import (
 
 from print_partner.core.parts_grouping import folder_scan_order
 from print_partner.core.profile_parts_adapter import display_dict_to_scanned, filter_profile_dicts
+from print_partner.core.scanner import ScannedPart
 from print_partner.ui.parts_tree_widget import PartsTreeWidget
 from print_partner.ui.print_checklist_widget import PrintChecklistWidget
+from print_partner.ui.profile_suggestions_panel import ProfileSuggestionsPanel
 
 PartsPanelMode = Literal["build", "verify_chosen", "checkoff"]
 
@@ -62,6 +65,9 @@ class ProfilePartsPanel(QWidget):
         self._tree_page = QWidget()
         tree_layout = QVBoxLayout(self._tree_page)
         tree_layout.setContentsMargins(0, 0, 0, 0)
+        self.suggestions_panel = ProfileSuggestionsPanel()
+        self.suggestions_panel.inclusion_suggested.connect(self._on_suggestion_inclusion)
+        tree_layout.addWidget(self.suggestions_panel)
         self.parts_tree = PartsTreeWidget(mode="profile")
         self._tree_toolbar_host = QWidget()
         tree_toolbar = QHBoxLayout(self._tree_toolbar_host)
@@ -128,6 +134,7 @@ class ProfilePartsPanel(QWidget):
             self.hint.setText(
                 "Curate parts for this profile. Expand repos and folders; check a folder to include its subtree."
             )
+            self.suggestions_panel.setVisible(True)
             self._tree_toolbar_host.setVisible(True)
             self._bulk_buttons_host.setVisible(True)
             self.btn_include.setVisible(True)
@@ -138,6 +145,7 @@ class ProfilePartsPanel(QWidget):
             self.hint.setText(
                 "Review parts included for printing. Uncheck Print to remove a part from the kit."
             )
+            self.suggestions_panel.setVisible(False)
             self._tree_toolbar_host.setVisible(True)
             self._bulk_buttons_host.setVisible(True)
             self.btn_include.setVisible(False)
@@ -146,6 +154,7 @@ class ProfilePartsPanel(QWidget):
             self.hide_printed_check.setChecked(False)
             self._hide_printed = False
         else:
+            self.suggestions_panel.setVisible(False)
             self.hide_printed_check.setChecked(False)
             self._hide_printed = False
             self._stack.setCurrentIndex(self._PAGE_CHECKLIST)
@@ -153,6 +162,7 @@ class ProfilePartsPanel(QWidget):
                 "Check off parts as you print. Progress is saved to this profile. "
                 "Export HTML for a printable checklist."
             )
+            self.suggestions_panel.setVisible(False)
             self._tree_toolbar_host.setVisible(False)
             self._bulk_buttons_host.setVisible(False)
             self.summary.setVisible(False)
@@ -161,7 +171,7 @@ class ProfilePartsPanel(QWidget):
             self._rebuild_tree()
             self._update_summary()
         elif mode == "checkoff" and self._all_rows:
-            self.print_checklist.load_rows(self._all_rows)
+            self.print_checklist.load_rows(self._all_rows)  # header set via load_parts
 
     def set_callbacks(
         self,
@@ -175,7 +185,24 @@ class ProfilePartsPanel(QWidget):
         self._quantity_changed_cb = on_quantity_changed
         self._all_printed_toggled_cb = on_all_printed_toggled
 
-    def load_parts(self, all_rows: list[dict], display_rows: list[dict]) -> None:
+    def _on_suggestion_inclusion(self, include_ids: set, exclude_ids: set) -> None:
+        self._included_part_ids.update(include_ids)
+        self._included_part_ids.difference_update(exclude_ids)
+        if self._inclusion_changed_cb:
+            self._inclusion_changed_cb(self._included_part_ids)
+        self._rebuild_tree()
+        self._update_summary()
+
+    def load_parts(
+        self,
+        all_rows: list[dict],
+        display_rows: list[dict],
+        *,
+        readme_repo_paths: list[Path] | None = None,
+        reference_layers: list[tuple[str, list[ScannedPart], set[str]]] | None = None,
+        profile_name: str = "",
+        order_number: str | None = None,
+    ) -> None:
         """Load snapshots only — never pass detached ORM Part instances."""
         self._all_rows = list(all_rows)
         self._display_rows = list(display_rows)
@@ -183,10 +210,18 @@ class ProfilePartsPanel(QWidget):
         scanned = [display_dict_to_scanned(r) for r in all_rows]
         self._scan_order = {s.match_key: i for i, s in enumerate(scanned)}
         self._folder_scan_order = folder_scan_order(scanned)
+        if self._panel_mode == "build":
+            self.suggestions_panel.reset_dismissed()
+            self.suggestions_panel.load_profile_parts(
+                all_rows,
+                readme_repo_paths=readme_repo_paths,
+                reference_layers=reference_layers,
+            )
         if self._panel_mode in ("build", "verify_chosen"):
             self._rebuild_tree()
             self._update_summary()
         else:
+            self.print_checklist.set_header(profile_name, order_number)
             self.print_checklist.load_rows(self._all_rows)
 
     def visible_part_ids(self) -> set[int]:

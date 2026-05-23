@@ -1,11 +1,12 @@
 """Recompute must not wipe print progress for parts that still exist."""
 
-from print_partner.core.merge import MergePart, MergeResult
-from print_partner.core.print_progress import get_print_units, set_unit_completed
-from print_partner.db.models import Base, BuildProfile, Part, PrintProgress
-from print_partner.db.session import get_engine, init_db, save_merge_result
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from print_partner.core.merge import MergePart, MergeResult
+from print_partner.core.print_progress import get_print_units, set_unit_completed
+from print_partner.db.models import Base, BuildProfile, Part
+from print_partner.db.session import get_engine, init_db, save_merge_result
 
 
 def test_save_merge_result_preserves_print_progress():

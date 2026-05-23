@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import unicodedata
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 import httpx
 
@@ -166,6 +168,9 @@ def _fetch_swatch_hex(
         resp.raise_for_status()
         return sample_hex_from_image(resp.content)
     except Exception:
+        logging.getLogger(__name__).debug(
+            "Could not sample hex from image URL %s; using prior", url, exc_info=True
+        )
         return prior_hex or DEFAULT_HEX
 
 
@@ -176,7 +181,7 @@ def enrich_colors_with_hex(
 ) -> list[AmbrosiaColor]:
     prior = prior_by_id or {}
     total = len(colors)
-    enriched: list[Optional[AmbrosiaColor]] = [None] * total
+    enriched: list[AmbrosiaColor | None] = [None] * total
 
     def work(idx: int, color: AmbrosiaColor) -> tuple[int, AmbrosiaColor]:
         from print_partner.core.filament_color_resolve import (

@@ -27,7 +27,11 @@ from print_partner.core.parts_grouping import (
     folder_scan_order,
     match_keys_for_parts,
 )
-from print_partner.core.parts_suggestions import DEFAULT_FUZZY_THRESHOLD, Suggestion, build_suggestions
+from print_partner.core.parts_suggestions import (
+    DEFAULT_FUZZY_THRESHOLD,
+    Suggestion,
+    build_suggestions,
+)
 from print_partner.core.readme_hints import ReadmeHint, hints_from_repo
 from print_partner.core.scanner import ScannedPart
 from print_partner.ui.parts_tree_widget import PartsTreeWidget

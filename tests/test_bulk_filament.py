@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from print_partner.core.filament_color_resolve import UNASSIGNED_FILAMENT_HEX, resolve_part_filament_hex
+from sqlalchemy.orm import Session
+
+from print_partner.core.filament_color_resolve import resolve_part_filament_hex
 from print_partner.db.models import Base, BuildProfile, Part
 from print_partner.db.session import bulk_set_filament_color, get_engine, init_db
-from sqlalchemy.orm import Session
 
 
 def test_bulk_set_filament_color_sets_custom_hex():

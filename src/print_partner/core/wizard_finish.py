@@ -7,8 +7,8 @@ from pathlib import Path
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from print_partner.core.merge import merge_layers
 from print_partner.core.import_rules import import_rules_for_project
+from print_partner.core.merge import merge_layers
 from print_partner.core.scanner import scan_repo
 from print_partner.core.wizard_state import WizardLayer, WizardState
 from print_partner.db.models import BuildProfile, Part, ProfileLayer, Project

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from sqlalchemy.orm import Session
+
 from print_partner.core.print_progress import (
     ensure_progress_rows,
     get_print_units,
@@ -11,7 +13,6 @@ from print_partner.core.print_progress import (
 )
 from print_partner.db.models import Base, BuildProfile, Part
 from print_partner.db.session import get_engine, init_db
-from sqlalchemy.orm import Session
 
 
 def test_print_progress_units():

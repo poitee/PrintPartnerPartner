@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QThread, Signal
 
 from print_partner.core.profile_ops import recompute_profile
 from print_partner.db.session import db_session
+
+logger = logging.getLogger(__name__)
 
 
 class RecomputeWorker(QThread):
@@ -35,4 +39,5 @@ class RecomputeWorker(QThread):
             self.finished_ok.emit(result)
         except Exception as exc:
             if not self._cancel:
+                logger.exception("Recompute failed for profile %s", self._profile_id)
                 self.error.emit(str(exc))

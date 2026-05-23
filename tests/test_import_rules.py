@@ -1,6 +1,6 @@
 from print_partner.core.import_rules import (
-    path_matches_rules,
     parse_import_rules_json,
+    path_matches_rules,
     serialize_import_rules,
 )
 

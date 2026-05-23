@@ -1,7 +1,8 @@
+from sqlalchemy.orm import Session
+
 from print_partner.core.print_progress import print_units_by_part_id
 from print_partner.db.models import Base, BuildProfile, Part, PrintProgress
 from print_partner.db.session import get_engine, init_db
-from sqlalchemy.orm import Session
 
 
 def test_print_units_by_part_id_single_query_pattern():

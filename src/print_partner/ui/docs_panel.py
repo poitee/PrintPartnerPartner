@@ -5,7 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QListWidget, QListWidgetItem, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
 from print_partner.core.repo_docs import (
     DocRef,

@@ -5,12 +5,13 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
+from sqlalchemy.orm import Session
+
 from print_partner.core.export_stl_zip import export_profile_stl_zips
 from print_partner.core.merge import MergePart
 from print_partner.core.part_paths import resolve_part_stl_path
 from print_partner.db.models import Base, BuildProfile, Part, ProfileLayer, Project
 from print_partner.db.session import get_engine, init_db
-from sqlalchemy.orm import Session
 
 
 def test_export_stl_zip_qty_duplicates(tmp_path: Path, monkeypatch):

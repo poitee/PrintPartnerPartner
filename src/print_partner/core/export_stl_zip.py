@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 import zipfile
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 from print_partner.core.merge import MergePart
 from print_partner.core.parts_grouping import folder_key_from_relative_path
@@ -43,9 +43,9 @@ def export_profile_stl_zips(
     profile_name: str,
     parts: list[MergePart],
     exports_dir: Path,
-    on_progress: Optional[ProgressCallback] = None,
+    on_progress: ProgressCallback | None = None,
     *,
-    cancel_check: Optional[Callable[[], bool]] = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[Path, dict[str, int], list[str]]:
     """
     Export included parts with resolved absolute_path to role/folder zips.

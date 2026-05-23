@@ -7,8 +7,6 @@ from print_partner.core.parts_grouping import (
     filter_parts,
     folder_key,
     folder_key_from_relative_path,
-    folder_scan_order,
-    group_by_folder,
     order_folders,
     sort_parts,
 )

@@ -11,8 +11,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ["3.11"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+            pytest-args: "-q"
+          - os: ubuntu-latest
+            python-version: "3.12"
+            pytest-args: "-q"
+          - os: macos-latest
+            python-version: "3.11"
+            pytest-args: "-q"
+          - os: windows-latest
+            python-version: "3.11"
+            pytest-args: "-q -k 'not repo_import_dialog'"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,15 +33,7 @@ jobs:
         run: |
           python -m pip install -U pip
           pip install -e ".[dev]"
-          pip install ruff
       - name: Ruff
-        run: |
-          ruff check \
-            src/print_partner/ui/recompute_worker.py \
-            src/print_partner/ui/catalog_sync_worker.py \
-            src/print_partner/ui/export_worker.py \
-            src/print_partner/ui/project_library.py \
-            src/print_partner/ui/profile_composer.py \
-            src/print_partner/ui/parts_tree_widget.py
+        run: ruff check src tests
       - name: Pytest
-        run: pytest -q
+        run: pytest ${{ matrix.pytest-args }}

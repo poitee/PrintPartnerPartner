@@ -4,25 +4,29 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 from print_partner.config import settings
 from print_partner.core.parsers import PartRole
 from print_partner.core.stl_camera import THUMB_CAMERA_PADDING, THUMB_PNG_SIZE, fit_mesh_in_view
 from print_partner.core.vtk_lock import vtk_lock
 
+logger = logging.getLogger(__name__)
+
 # Tunables (also documented in README — Thumbnail generation).
 THUMB_MESH_POINT_LIMIT = 80_000
-THUMB_SHOW_EDGES = True
+THUMB_SHOW_EDGES = False
+THUMB_OUTLINE_COLOR = "#333333"
 THUMB_EDGE_COLOR = "#888888"
 THUMB_BACKGROUND = "white"
 # Bump when thumb rendering policy changes so old PNGs are regenerated.
-THUMB_CACHE_VERSION = "v2"
+THUMB_CACHE_VERSION = "v3"
 # stl-thumb: https://github.com/unlimitedbacon/stl-thumb
 STL_THUMB_BACKGROUND_RGBA = "ffffffff"  # opaque white
 STL_THUMB_ANTIALIAS = "none"  # faster than fxaa; set to "fxaa" for smoother edges
@@ -173,13 +177,29 @@ def _thumbnail_pyvista(stl_path: Path, out_path: Path, role: str, mesh_hex: str 
                 color=color,
                 show_edges=THUMB_SHOW_EDGES,
                 edge_color=THUMB_EDGE_COLOR,
+                smooth_shading=not THUMB_SHOW_EDGES,
             )
+            if not THUMB_SHOW_EDGES:
+                edges = mesh.extract_feature_edges(
+                    boundary_edges=True,
+                    feature_edges=False,
+                    non_manifold_edges=False,
+                    manifold_edges=False,
+                )
+                if edges.n_points > 0:
+                    plotter.add_mesh(
+                        edges,
+                        color=THUMB_OUTLINE_COLOR,
+                        line_width=1.5,
+                        render_lines_as_tubes=False,
+                    )
             fit_mesh_in_view(plotter, padding=THUMB_CAMERA_PADDING)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             plotter.screenshot(str(out_path))
             plotter.close()
         return out_path.is_file()
     except Exception:
+        logger.exception("PyVista thumbnail render failed for %s", out_path)
         return False
 
 
@@ -343,7 +363,7 @@ ProgressCallback = Callable[[int, int, str], None]
 def generate_export_thumbnails(
     items: list[tuple[Path | None, str, str | None]],
     export_dir: Path,
-    on_progress: Optional[ProgressCallback] = None,
+    on_progress: ProgressCallback | None = None,
 ) -> list[str | None]:
     """Generate thumbnails for export rows; items are (stl_path, role, mesh_hex)."""
     total = len(items)

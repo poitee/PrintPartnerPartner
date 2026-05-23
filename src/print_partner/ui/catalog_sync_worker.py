@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QThread, Signal
 
 from print_partner.core.ambrosia_catalog import sync_ambrosia_catalog
+
+logger = logging.getLogger(__name__)
 
 
 class CatalogSyncWorker(QThread):
@@ -32,4 +36,5 @@ class CatalogSyncWorker(QThread):
             self.finished_ok.emit(catalog)
         except Exception as exc:
             if not self._cancel:
+                logger.exception("Ambrosia catalog sync failed")
                 self.error.emit(str(exc))
