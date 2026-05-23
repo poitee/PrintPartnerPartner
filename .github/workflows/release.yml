@@ -29,6 +29,20 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install Qt libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libglib2.0-0 \
+            libxkbcommon0 \
+            libdbus-1-3 \
+            libxcb-xfixes0 \
+            libxcb-cursor0 \
+            libfontconfig1
+
       - name: Install dependencies
         shell: bash
         env:
@@ -40,6 +54,8 @@ jobs:
           python -c "import numpy; print('numpy', numpy.__version__)"
 
       - name: Pytest
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: pytest -q
 
       - name: PyInstaller
