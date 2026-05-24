@@ -6,10 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-24
+
 ### Added
 
-- **3MF export** — Multi-printer **Print** tab: fleet bed sizes, loaded filament per machine, auto-assign parts by color, bin-pack per plate; export per-plate `.3mf`, zip, or single-file modes; STL-style object names for slicers.
+- **3MF export** — Multi-printer **Print** tab: fleet bed sizes, loaded filament per machine, manual assign from an unclassified pool to printers, auto-assign by filament, bin-pack per plate; export per-plate `.3mf`, zip, or single-file modes.
+- **Printer fleet** — Presets, bed sizes, loaded spool slots; persisted per kit print plan.
 - **Release automation** — Reusable GitHub Actions build workflow, version/CHANGELOG gates, **Release (create tag)** dispatch, CHANGELOG-based release notes.
+- **Workflow guide** — Numbered workflow strip with gating, breadcrumbs, status bar, and onboarding copy.
+- **Industrial UI polish** — Palette-aware light/dark styling, banners, consolidated toolbars, richer parts/repo trees.
+
+### Changed
+
+- **Kit Compose** — Removed suggestions panel from compose flow; parts summary in toolbar.
+- **Print tab** — Two-panel assign UI (unclassified ↔ printers) instead of nested plate tree editor.
+
+### Fixed
+
+- Theme text contrast in dark mode (palette-based QSS instead of hardcoded grays).
+- CI: Ruff import/unused fixes; repo import dialog test reads UTF-8 on Linux.
 
 ## [0.2.0] - 2026-05-23
 
@@ -45,5 +60,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Initial release: GitHub STL libraries, layered kits, merge engine, PySide6 UI, HTML export, SQLite persistence, Source–Build–Verify–Checkoff workflow.
 
+[0.3.0]: https://github.com/poitee/PrintPartnerPartner/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/poitee/PrintPartnerPartner/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/poitee/PrintPartnerPartner/releases/tag/v0.1.0

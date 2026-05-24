@@ -19,11 +19,11 @@ def _load_changelog_module():
     return mod
 
 
-def test_extract_changelog_body_020():
+def test_extract_changelog_body_current():
     mod = _load_changelog_module()
-    body = mod.extract_changelog_body("0.2.0")
+    body = mod.extract_changelog_body("0.3.0")
     assert body is not None
-    assert "Kit sharing" in body
+    assert "3MF export" in body
 
 
 def test_extract_changelog_body_missing():
@@ -34,7 +34,7 @@ def test_extract_changelog_body_missing():
 def test_verify_release_version_ok():
     script = ROOT / "packaging" / "verify_release_version.py"
     proc = subprocess.run(
-        [sys.executable, str(script), "0.2.0"],
+        [sys.executable, str(script), "0.3.0"],
         cwd=ROOT,
         capture_output=True,
         text=True,
