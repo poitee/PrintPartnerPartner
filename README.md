@@ -42,13 +42,13 @@ python -m print_partner
 
 ## Usage
 
-Workflow: **Libraries → Kit → Checkoff** (one navigation strip). On **Kit**, choose **Compose** or **Review** on the right side of the same strip.
+Workflow: **Libraries → Kit → Print → Checkoff** (top navigation strip, **Ctrl+1–4**). On **Kit**, choose **Compose** or **Review** under step 2 when a kit is open. Press **F1** for the full guide.
 
-1. **Libraries** — Add/sync GitHub repos or local folders. The table shows **Last sync**, **Commit**, and **Updates** (remote changes vs last sync). **Import files…** chooses which STL paths are scanned into kits (large repos stay fast). Browse the repo tree and read README/docs.
+1. **Libraries** (Ctrl+1) — Add/sync GitHub repos or local folders. **Import files…** chooses which STL paths are scanned into kits. Browse the repo tree and read README/docs.
 2. Import bulk repos via **Import repos.txt** (`name,url,branch` per line), then **Sync all** and **Import files…** per repo.
-3. **Kit** — Start on **Your kits** (list all builds: open, rename, duplicate, delete). **Compose** — layers, **Recompute**, filament, parts tree, preview, docs, suggestions, AI. **Review** — included parts only before checkoff.
-4. **Kit — Review** — Included parts only; uncheck **Print** to exclude before printing. Use **Go to Checkoff →** when ready.
-5. **Checkoff** — Printable checklist (Qty, Printed, Verified, thumbs, Notes), print progress, **Export checklist** / HTML. Run **Recompute** in Compose to warm thumbnails.
+3. **Kit** (Ctrl+2) — **Your kits**: open, rename, duplicate, delete. **Compose** — layers, **Recompute**, filament, parts tree, preview, docs, AI. **Review** — included parts only before checkoff.
+4. **Print** (Ctrl+3) — Enable printers, load filament spools, preview assignment, **Export 3MF…** (primary slicer export).
+5. **Checkoff** (Ctrl+4) — Printable checklist (Qty, Printed, Verified, thumbs, Notes), **Export checklist** HTML. Use **Print** for 3MF plates.
 6. Thumbnails cache in the background after **Recompute**; 3D preview uses offscreen render (stable on macOS).
 
 ### repos.txt example
@@ -88,10 +88,11 @@ The spec builds an **onedir** bundle (`dist/Print Partner/` on Linux/Windows, `d
 
 ### GitHub Releases
 
-1. **Actions → Build all platforms → Run workflow** — confirms Linux, macOS, and Windows PyInstaller builds on `main` (also runs on every push to `main`).
-2. Push a version tag (e.g. `v0.2.1`) to trigger [`.github/workflows/release.yml`](.github/workflows/release.yml), which runs the same builds and attaches archives to a GitHub Release.
+1. Bump version in `pyproject.toml`, `__version__`, and `CHANGELOG.md`.
+2. **Actions → Build all platforms** — confirms Linux, macOS, and Windows builds on `main` (also runs on every push to `main`).
+3. Publish via **tag** (`git push origin v0.2.3`) or **Actions → Release (create tag)** with version `0.2.3`.
 
-See [`packaging/README_RELEASE.md`](packaging/README_RELEASE.md) for details.
+See [`packaging/README_RELEASE.md`](packaging/README_RELEASE.md) for details. 3MF slicer checks: [`docs/3MF_EXPORT_VALIDATION.md`](docs/3MF_EXPORT_VALIDATION.md).
 
 ### Smoke test before shipping
 

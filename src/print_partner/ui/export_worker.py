@@ -9,6 +9,7 @@ from typing import Literal
 
 from PySide6.QtCore import QThread, Signal
 
+from print_partner.core.export_3mf import Export3mfOptions, export_profile_3mf
 from print_partner.core.export_html import export_path_for_profile, export_profile_html
 from print_partner.core.export_stl_zip import export_profile_stl_zips
 from print_partner.core.merge import MergePart
@@ -32,22 +33,35 @@ class StlExportResult:
     cancelled: bool
 
 
+@dataclass(frozen=True)
+class ThreeMfExportResult:
+    path: Path
+    paths: list[Path]
+    object_count: int
+    plate_count: int
+    warnings: list[str]
+    printer_summaries: list[str]
+    cancelled: bool
+
+
 class ExportWorker(QThread):
     progress = Signal(int, int, str)  # current, total, filename
     html_done = Signal(object)
     stl_done = Signal(object)
+    three_mf_done = Signal(object)
     error = Signal(str)
 
     def __init__(
         self,
         *,
-        kind: Literal["html", "stl"],
+        kind: Literal["html", "stl", "3mf"],
         profile_name: str,
         order_number: str | None,
         merge_parts: list[MergePart],
         completed_by_key: dict[str, list[bool]],
         exports_dir: Path,
         profile_id: int | None = None,
+        three_mf_options: Export3mfOptions | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -58,6 +72,7 @@ class ExportWorker(QThread):
         self._completed_by_key = completed_by_key
         self._exports_dir = exports_dir
         self._profile_id = profile_id
+        self._three_mf_options = three_mf_options
         self._cancel = False
 
     def cancel(self) -> None:
@@ -67,8 +82,10 @@ class ExportWorker(QThread):
         try:
             if self._kind == "html":
                 self._run_html()
-            else:
+            elif self._kind == "stl":
                 self._run_stl()
+            else:
+                self._run_3mf()
         except Exception as exc:
             if not self._cancel:
                 logger.exception("Export failed (%s)", self._kind)
@@ -119,6 +136,32 @@ class ExportWorker(QThread):
                 root=root,
                 zip_counts=zip_counts,
                 warnings=warnings,
+                cancelled=self._cancel,
+            )
+        )
+
+    def _run_3mf(self) -> None:
+        if self._cancel:
+            return
+        if not self._three_mf_options:
+            self.error.emit("3MF export requires printer configuration (Print tab).")
+            return
+        result = export_profile_3mf(
+            self._profile_name,
+            self._merge_parts,
+            self._exports_dir,
+            on_progress=self._on_progress,
+            cancel_check=self._cancel_check,
+            options=self._three_mf_options,
+        )
+        self.three_mf_done.emit(
+            ThreeMfExportResult(
+                path=result.primary_path,
+                paths=result.paths,
+                object_count=result.object_count,
+                plate_count=result.plate_count,
+                warnings=result.warnings,
+                printer_summaries=result.printer_summaries,
                 cancelled=self._cancel,
             )
         )

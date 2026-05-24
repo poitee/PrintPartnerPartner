@@ -1,0 +1,118 @@
+# Reusable PyInstaller build for Linux, macOS, and Windows.
+name: Build reusable
+
+on:
+  workflow_call:
+    inputs:
+      run_tests:
+        description: Run ruff and pytest before PyInstaller
+        type: boolean
+        default: true
+      upload_artifacts:
+        description: Upload platform archives as workflow artifacts
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: linux
+          - os: macos-14
+            artifact_name: macos
+          - os: windows-latest
+            artifact_name: windows
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Qt libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 \
+            libgl1 \
+            libglib2.0-0 \
+            libxkbcommon0 \
+            libdbus-1-3 \
+            libxcb-xfixes0 \
+            libxcb-cursor0 \
+            libfontconfig1
+
+      - name: Install dependencies
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
+        run: |
+          python -m pip install -U pip
+          pip install -e ".[dev]"
+          pip install "numpy>=1.26.4,<2"
+          python -c "import numpy; print('numpy', numpy.__version__)"
+
+      - name: Ruff
+        if: inputs.run_tests
+        run: ruff check src tests
+
+      - name: Pytest
+        if: inputs.run_tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest -q
+
+      - name: PyInstaller
+        shell: bash
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
+        run: pyinstaller packaging/print_partner.spec --noconfirm
+
+      - name: Verify bundle layout
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            test -d "dist/Print Partner.app/Contents/MacOS"
+          else
+            test -d "dist/Print Partner"
+          fi
+
+      - name: Verify macOS NumPy in bundle
+        if: runner.os == 'macOS'
+        run: python packaging/verify_macos_numpy.py
+
+      - name: Package artifacts (Unix)
+        if: runner.os != 'Windows'
+        run: chmod +x packaging/package_artifacts.sh && ./packaging/package_artifacts.sh
+
+      - name: Package artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dist = "dist/Print Partner"
+          if (-not (Test-Path $dist)) { throw "Missing $dist" }
+          $ver = python -c "from print_partner import __version__; print(__version__)"
+          $zip = "dist/artifacts/print-partner-$ver-windows.zip"
+          New-Item -ItemType Directory -Force -Path dist/artifacts | Out-Null
+          Compress-Archive -Path $dist -DestinationPath $zip -Force
+
+      - name: List artifacts
+        shell: bash
+        run: find dist/artifacts dist -maxdepth 2 -type f \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.dmg' \) 2>/dev/null | sort || true
+
+      - name: Upload bundle
+        if: inputs.upload_artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            dist/artifacts/
+            dist/Print-Partner-*.dmg
+          if-no-files-found: error

@@ -1,6 +1,12 @@
 # Release smoke test
 
-Quick manual checklist after `packaging/build_release.sh` (and optional `make_dmg.sh` on macOS).
+Quick manual checklist after `packaging/build_release.sh` (and optional `make_dmg.sh` on macOS), or after downloading **Build all platforms** / **Release** artifacts from GitHub Actions.
+
+## CI artifacts
+
+1. Open the green workflow run → **Artifacts** → download `linux`, `macos`, and/or `windows`.
+2. Extract and run the app binary inside (same checks as below).
+3. For releases, confirm the GitHub Release lists all three platform archives and the CHANGELOG body.
 
 ## Launch
 
@@ -31,7 +37,7 @@ Quick manual checklist after `packaging/build_release.sh` (and optional `make_dm
 
 ## Checkoff
 
-- [ ] Checklist, print progress, **Export checklist**, **Open HTML**
+- [ ] Checklist, print progress, **Export checklist**, **Export 3MF…**, **Open HTML**
 
 ## Quit
 

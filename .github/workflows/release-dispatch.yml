@@ -1,0 +1,99 @@
+# One-click release: validate version on main, optionally check recent builds, create tag v*.
+# Tag push triggers release.yml (build + publish).
+name: Release (create tag)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.2.3)"
+        required: true
+        type: string
+      dry_run:
+        description: "Validate only; do not create tag"
+        required: false
+        type: boolean
+        default: false
+      require_green_build:
+        description: "Fail if latest Build all platforms on this commit is not success"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  dispatch:
+    name: Validate and tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Verify package version and CHANGELOG
+        run: python packaging/verify_release_version.py "${{ inputs.version }}"
+
+      - name: Check tag does not exist
+        shell: bash
+        run: |
+          tag="v${{ inputs.version }}"
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists" >&2
+            exit 1
+          fi
+
+      - name: Require green build-artifacts on this commit
+        if: inputs.require_green_build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha="${{ github.sha }}"
+          repo="${{ github.repository }}"
+          status=$(gh api "repos/${repo}/actions/workflows/build-artifacts.yml/runs?head_sha=${sha}&event=push&status=completed&per_page=5" \
+            --jq '.workflow_runs[] | select(.conclusion=="success") | .id' | head -1)
+          if [[ -z "$status" ]]; then
+            echo "No successful 'Build all platforms' run on commit ${sha}" >&2
+            echo "Push to main and wait for green build, or disable require_green_build." >&2
+            exit 1
+          fi
+          echo "Found successful build-artifacts run id ${status}"
+
+      - name: Warn if build-artifacts not green (optional)
+        if: ${{ !inputs.require_green_build }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha="${{ github.sha }}"
+          repo="${{ github.repository }}"
+          ok=$(gh api "repos/${repo}/actions/workflows/build-artifacts.yml/runs?head_sha=${sha}&per_page=3" \
+            --jq '[.workflow_runs[] | select(.conclusion=="success")] | length')
+          if [[ "$ok" -eq 0 ]]; then
+            echo "::warning::No successful Build all platforms run on ${sha}. Consider waiting for green CI before tagging."
+          fi
+
+      - name: Dry run summary
+        if: inputs.dry_run
+        run: |
+          echo "## Dry run — release v${{ inputs.version }} would be created" >> "$GITHUB_STEP_SUMMARY"
+          echo "Package version and CHANGELOG checks passed." >> "$GITHUB_STEP_SUMMARY"
+          echo "Re-run without dry_run to push tag \`v${{ inputs.version }}\` and trigger Release workflow." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create and push annotated tag
+        if: ${{ !inputs.dry_run }}
+        run: |
+          tag="v${{ inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "Release ${{ inputs.version }}"
+          git push origin "$tag"
+
+      - name: Tag pushed
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "Pushed tag v${{ inputs.version }}. Watch the **Release** workflow for build and publish." >> "$GITHUB_STEP_SUMMARY"

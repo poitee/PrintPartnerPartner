@@ -22,6 +22,8 @@ _hiddenimports = [
     "print_partner.core.git_sync",
     "print_partner.core.export_html",
     "print_partner.core.export_stl_zip",
+    "print_partner.core.export_3mf",
+    "lib3mf",
     "print_partner.core.parts_tree",
     "print_partner.core.path_tree",
     "print_partner.core.repo_docs",
@@ -86,7 +88,7 @@ _hiddenimports = [
 _binaries: list = []
 _datas: list = [(str(data_dir / "ambrosia_fallback.json"), "print_partner/data")]
 
-for _pkg in ("numpy", "pyvista"):
+for _pkg in ("numpy", "pyvista", "lib3mf"):
     _d, _b, _h = collect_all(_pkg)
     _datas += _d
     _binaries += _b

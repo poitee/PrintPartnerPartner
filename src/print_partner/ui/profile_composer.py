@@ -67,7 +67,13 @@ from print_partner.ui.catalog_sync_worker import CatalogSyncWorker
 from print_partner.ui.composer import AiIntegrationMixin, KitActionsMixin, PartsViewMixin
 from print_partner.ui.docs_panel import DocsPanel
 from print_partner.ui.empty_state import EmptyStateWidget
-from print_partner.ui.export_worker import ExportWorker, HtmlExportResult, StlExportResult
+from print_partner.core.export_3mf import Export3mfOptions
+from print_partner.ui.export_worker import (
+    ExportWorker,
+    HtmlExportResult,
+    StlExportResult,
+    ThreeMfExportResult,
+)
 from print_partner.ui.filament_picker_widget import FilamentPickerWidget
 from print_partner.ui.profile_layers_panel import ProfileLayersPanel
 from print_partner.ui.profile_parts_panel import ProfilePartsPanel
@@ -81,7 +87,7 @@ TopViewMode = Literal["kit", "checkoff"]
 
 class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidget):
     profile_changed = Signal()
-    navigate_requested = Signal(str)  # libraries | kit | checkoff | compose | review
+    navigate_requested = Signal(str)  # libraries | kit | print | checkoff | compose | review
     back_to_kit_library = Signal()
 
     def __init__(self, parent=None):
@@ -114,13 +120,28 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         root = QVBoxLayout(self)
 
         self._kit_header = QWidget()
+        self._kit_header.setObjectName("kitHeader")
         kit_header_layout = QVBoxLayout(self._kit_header)
-        kit_header_layout.setContentsMargins(0, 0, 0, 0)
+        kit_header_layout.setContentsMargins(8, 6, 8, 6)
 
         kit_row = QHBoxLayout()
-        self.btn_all_kits = QPushButton("← All kits")
-        self.btn_all_kits.clicked.connect(self.back_to_kit_library.emit)
-        kit_row.addWidget(self.btn_all_kits)
+        self._btn_crumb_library = QPushButton("All kits")
+        self._btn_crumb_library.setObjectName("linkButton")
+        self._btn_crumb_library.setFlat(True)
+        self._btn_crumb_library.clicked.connect(self.back_to_kit_library.emit)
+        kit_row.addWidget(self._btn_crumb_library)
+        self._crumb_sep1 = QLabel("›")
+        self._crumb_sep1.setProperty("muted", True)
+        kit_row.addWidget(self._crumb_sep1)
+        self._crumb_kit = QLabel("—")
+        kit_row.addWidget(self._crumb_kit)
+        self._crumb_sep2 = QLabel("›")
+        self._crumb_sep2.setProperty("muted", True)
+        kit_row.addWidget(self._crumb_sep2)
+        self._crumb_mode = QLabel("Compose")
+        self._crumb_mode.setProperty("emptyTitle", True)
+        kit_row.addWidget(self._crumb_mode)
+        kit_row.addStretch(1)
         self.profile_combo = QComboBox()
         self.profile_combo.currentIndexChanged.connect(self._on_profile_selected)
         kit_row.addWidget(QLabel("Kit:"))
@@ -159,19 +180,30 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         self._btn_build_advanced = QPushButton("Advanced ▾")
         self._btn_build_advanced.setMenu(build_advanced)
 
+        build_menu = QMenu(self)
+        build_menu.addAction("New build…", self._new_build_wizard)
+        build_menu.addAction("Duplicate build", self._duplicate_build_wizard)
+        build_menu.addSeparator()
+        build_menu.addAction("New profile", self._new_profile)
+        build_menu.addAction("Refresh Ambrosia colors", self._refresh_ambrosia_colors)
+        self._btn_build_menu = QPushButton("Build ▾")
+        self._btn_build_menu.setMenu(build_menu)
+
         build_bar = QWidget()
         build_layout = QHBoxLayout(build_bar)
         build_layout.setContentsMargins(0, 0, 0, 0)
+        self._header_status = QLabel("")
+        self._header_status.setProperty("muted", True)
+        self._header_status.setWordWrap(True)
+        build_layout.addWidget(self._header_status, 1)
         self.btn_recompute = QPushButton("Recompute")
         self.btn_recompute.clicked.connect(self._recompute)
-        build_layout.addWidget(self.btn_new_build)
-        build_layout.addWidget(self.btn_recompute)
-        build_layout.addWidget(self.btn_duplicate_build)
-        build_layout.addWidget(self._btn_build_advanced)
-        self.btn_next_review = QPushButton("Next: Review kit →")
+        self.btn_next_review = QPushButton("Next: Review →")
+        self.btn_next_review.setObjectName("primaryButton")
         self.btn_next_review.clicked.connect(lambda: self.navigate_requested.emit("review"))
+        build_layout.addWidget(self._btn_build_menu)
+        build_layout.addWidget(self.btn_recompute)
         build_layout.addWidget(self.btn_next_review)
-        build_layout.addStretch(1)
 
         verify_bar = QWidget()
         verify_layout = QHBoxLayout(verify_bar)
@@ -182,9 +214,11 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         self._verify_action_hint.setProperty("muted", True)
         self._verify_action_hint.setWordWrap(True)
         verify_layout.addWidget(self._verify_action_hint, 1)
-        self.btn_back_compose = QPushButton("← Back to Compose")
-        self.btn_back_compose.clicked.connect(lambda: self.navigate_requested.emit("compose"))
-        verify_layout.addWidget(self.btn_back_compose)
+        verify_menu = QMenu(self)
+        verify_menu.addAction("← Back to Compose", lambda: self.navigate_requested.emit("compose"))
+        self._btn_verify_menu = QPushButton("More ▾")
+        self._btn_verify_menu.setMenu(verify_menu)
+        verify_layout.addWidget(self._btn_verify_menu)
         self.btn_go_checkoff = QPushButton("Go to Checkoff →")
         self.btn_go_checkoff.setObjectName("primaryButton")
         self.btn_go_checkoff.clicked.connect(lambda: self.navigate_requested.emit("checkoff"))
@@ -195,12 +229,16 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         self._btn_export_html.clicked.connect(self._export_html)
         self._btn_export_stls = QPushButton("Export STLs…")
         self._btn_export_stls.clicked.connect(self._export_stls)
+        self._btn_export_3mf = QPushButton("Export 3MF…")
+        self._btn_export_3mf.clicked.connect(self._export_3mf)
         self._btn_export_all = QPushButton("Export all")
         self._btn_export_all.clicked.connect(self._export_all)
         self._btn_open_html = QPushButton("Open HTML")
         self._btn_open_html.clicked.connect(self._open_html)
         checkoff_more = QMenu(self)
         checkoff_more.addAction("Export STLs…", self._export_stls)
+        checkoff_more.addAction("Export 3MF… (Print tab)", self._export_3mf)
+        checkoff_more.addAction("Go to Print tab…", lambda: self.navigate_requested.emit("print"))
         checkoff_more.addAction("Export all", self._export_all)
         checkoff_more.addAction("Open HTML", self._open_html)
         self._btn_checkoff_more = QPushButton("More ▾")
@@ -209,12 +247,11 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         checkoff_bar = QWidget()
         checkoff_layout = QHBoxLayout(checkoff_bar)
         checkoff_layout.setContentsMargins(0, 0, 0, 0)
-        self._checkoff_hint = QLabel("Export checklist when ready for the shop floor.")
-        self._checkoff_hint.setProperty("muted", True)
-        checkoff_layout.addWidget(self._checkoff_hint)
+        self._checkoff_progress = QLabel("")
+        self._checkoff_progress.setProperty("muted", True)
+        checkoff_layout.addWidget(self._checkoff_progress, 1)
         checkoff_layout.addWidget(self._btn_export_html)
         checkoff_layout.addWidget(self._btn_checkoff_more)
-        checkoff_layout.addStretch(1)
 
         self._action_stack = QStackedWidget()
         self._action_stack.addWidget(build_bar)
@@ -239,11 +276,11 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
 
         self.catalog_status = QLabel(catalog_status_text(self._catalog))
         self.catalog_status.setProperty("muted", True)
-        body.addWidget(self.catalog_status)
+        self.catalog_status.hide()
 
         self.thumb_status = QLabel("Thumbnails: run Recompute to cache in background")
         self.thumb_status.setProperty("muted", True)
-        body.addWidget(self.thumb_status)
+        self.thumb_status.hide()
 
         self._kit_empty_parts_banner = QLabel(
             "No parts in this kit — import STLs on Libraries, then use Recompute "
@@ -254,19 +291,12 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         self._kit_empty_parts_banner.hide()
         body.addWidget(self._kit_empty_parts_banner)
 
-        self._recompute_banner = QLabel("")
-        self._recompute_banner.setWordWrap(True)
-        self._recompute_banner.hide()
-        banner_row = QHBoxLayout()
-        banner_row.setContentsMargins(0, 0, 0, 0)
-        banner_row.addWidget(self._recompute_banner, 1)
-        self._btn_recompute_banner = QPushButton("Recompute now")
-        self._btn_recompute_banner.clicked.connect(self._recompute)
-        self._btn_recompute_banner.hide()
-        banner_row.addWidget(self._btn_recompute_banner)
-        banner_host = QWidget()
-        banner_host.setLayout(banner_row)
-        body.addWidget(banner_host)
+        from print_partner.ui.banner_widget import BannerWidget
+
+        self._recompute_banner_host = BannerWidget()
+        self._recompute_banner_host.action_clicked.connect(self._recompute)
+        self._recompute_banner_host.hide()
+        body.addWidget(self._recompute_banner_host)
 
         self._verify_summary = QLabel("")
         self._verify_summary.setProperty("muted", True)
@@ -435,13 +465,40 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
             self.refresh_view_from_cache()
 
     def show_recompute_banner(self, message: str) -> None:
-        self._recompute_banner.setText(message)
-        self._recompute_banner.show()
-        self._btn_recompute_banner.show()
+        self._recompute_banner_host.show_message(message, action_text="Recompute now")
 
     def dismiss_recompute_banner(self) -> None:
-        self._recompute_banner.hide()
-        self._btn_recompute_banner.hide()
+        self._recompute_banner_host.hide_banner()
+
+    def _update_breadcrumb(self) -> None:
+        name = self.profile_combo.currentText() or "—"
+        self._crumb_kit.setText(name)
+        if self._top_mode == "checkoff":
+            mode = "Checkoff"
+        elif self._kit_sub_mode == "review":
+            mode = "Review"
+        else:
+            mode = "Compose"
+        self._crumb_mode.setText(mode)
+
+    def _update_header_status(self) -> None:
+        parts = [catalog_status_text(self._catalog)]
+        if self._thumb_worker and self._thumb_worker.isRunning():
+            parts.append("Thumbnails: caching…")
+        elif self._cached_part_dicts:
+            parts.append("Thumbnails: cached or in progress")
+        else:
+            parts.append("Thumbnails: run Recompute to cache")
+        self._header_status.setText(" · ".join(parts))
+
+    def _update_checkoff_progress(self, part_dicts: list[dict] | None = None) -> None:
+        rows = part_dicts if part_dicts is not None else self._cached_part_dicts
+        included = [d for d in rows if d.get("included")]
+        n_inc = len(included)
+        printed = sum(1 for d in included if d.get("printed_count", 0) >= max(1, d.get("quantity_effective", 1)))
+        self._checkoff_progress.setText(
+            f"{n_inc} included · {printed} printed · track verified on checklist"
+        )
 
     def set_kit_sub_mode(self, sub: KitSubMode, *, reload_parts: bool = False) -> None:
         self._kit_sub_mode = sub
@@ -540,13 +597,13 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
                 set_setting_value("last_profile_id", str(self._current_profile_id))
             if profile_changed:
                 self._restore_filter_state()
-                self.parts_panel.suggestions_panel.reset_dismissed()
             if reload_parts:
                 self._schedule_load_parts()
         else:
             self._current_profile_id = None
             self._clear_parts_table()
         self._update_kit_visibility()
+        self._update_breadcrumb()
 
     def _on_profile_selected(self, index: int = -1) -> None:
         idx = index if index >= 0 else self.profile_combo.currentIndex()
@@ -562,9 +619,9 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
             set_setting_value("last_profile_id", str(self._current_profile_id))
         if profile_changed:
             self._restore_filter_state()
-            self.parts_panel.suggestions_panel.reset_dismissed()
             self._ref_layers_cache_key = None
         self._update_kit_visibility()
+        self._update_breadcrumb()
         self._schedule_load_parts()
 
     def _clear_parts_table(self) -> None:
@@ -944,6 +1001,73 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
 
         self._export_worker.progress.connect(on_progress)
         self._export_worker.stl_done.connect(on_done)
+        self._export_worker.error.connect(on_error)
+        self._export_worker.start()
+
+    def _export_3mf(self) -> None:
+        if self._current_profile_id is None:
+            return
+        self.navigate_requested.emit("print")
+
+    def run_3mf_export(self, options: Export3mfOptions) -> None:
+        if self._current_profile_id is None:
+            return
+        if self._export_worker and self._export_worker.isRunning():
+            return
+        name, order_number, merge_parts, completed_by_key = self._merge_parts_for_export()
+        included = [p for p in merge_parts if p.included]
+        total = sum(max(1, p.quantity_effective) for p in included)
+        progress = QProgressDialog("Exporting 3MF…", "Cancel", 0, max(1, total), self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        self._export_worker = ExportWorker(
+            kind="3mf",
+            profile_name=name,
+            order_number=order_number,
+            merge_parts=merge_parts,
+            completed_by_key=completed_by_key,
+            exports_dir=settings.exports_dir,
+            profile_id=self._current_profile_id,
+            three_mf_options=options,
+            parent=self,
+        )
+
+        def on_progress(done: int, tot: int, filename: str) -> None:
+            progress.setMaximum(max(1, tot))
+            progress.setLabelText(f"Exporting ({done}/{tot}):\n{filename}")
+            progress.setValue(done)
+            if progress.wasCanceled() and self._export_worker:
+                self._export_worker.cancel()
+
+        def on_done(result: ThreeMfExportResult) -> None:
+            progress.close()
+            self._export_worker = None
+            if result.cancelled:
+                QMessageBox.information(self, "Export", "Export cancelled.")
+                return
+            summary = "\n".join(result.printer_summaries) if result.printer_summaries else ""
+            msg = (
+                f"Saved to:\n{result.path}\n\n"
+                f"{result.object_count} object(s) on {result.plate_count} plate(s).\n"
+            )
+            if summary:
+                msg += f"\n{summary}\n"
+            msg += "Assign filaments in your slicer after import."
+            if result.warnings:
+                msg += f"\n\n{len(result.warnings)} warning(s), e.g.:\n" + "\n".join(
+                    result.warnings[:5]
+                )
+            if result.object_count == 0 and included:
+                msg += "\n\nNo STL files found on disk. Sync projects on the Libraries tab first."
+            QMessageBox.information(self, "Export 3MF", msg)
+
+        def on_error(message: str) -> None:
+            progress.close()
+            self._export_worker = None
+            QMessageBox.critical(self, "Export failed", message)
+
+        self._export_worker.progress.connect(on_progress)
+        self._export_worker.three_mf_done.connect(on_done)
         self._export_worker.error.connect(on_error)
         self._export_worker.start()
 

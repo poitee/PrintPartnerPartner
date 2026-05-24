@@ -21,6 +21,7 @@ dependencies = [
     "Pillow>=10.0",
     "pydantic-settings>=2.0",
     "SQLAlchemy>=2.0",
+    "lib3mf>=2.3",
 ]
 
 [project.optional-dependencies]

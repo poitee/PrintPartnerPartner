@@ -4,6 +4,13 @@ All notable changes to Print Partner are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **3MF export** — Multi-printer **Print** tab: fleet bed sizes, loaded filament per machine, auto-assign parts by color, bin-pack per plate; export per-plate `.3mf`, zip, or single-file modes; STL-style object names for slicers.
+- **Release automation** — Reusable GitHub Actions build workflow, version/CHANGELOG gates, **Release (create tag)** dispatch, CHANGELOG-based release notes.
+
 ## [0.2.0] - 2026-05-23
 
 ### Added

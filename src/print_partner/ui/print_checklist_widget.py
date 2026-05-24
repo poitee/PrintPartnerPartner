@@ -310,7 +310,19 @@ class PrintChecklistWidget(QWidget):
         cb.setChecked(part.all_printed)
         hex_color = part.filament_hex
         if hex_color:
-            cb.setStyleSheet(f"QCheckBox::indicator:checked {{ background-color: {hex_color}; }}")
+            pal = self.palette()
+            border = pal.color(QPalette.ColorRole.Mid).name()
+            base = pal.color(QPalette.ColorRole.Base).name()
+            cb.setStyleSheet(
+                "QCheckBox::indicator {"
+                f" border: 1px solid {border};"
+                f" background-color: {base};"
+                "}"
+                "QCheckBox::indicator:checked {"
+                f" background-color: {hex_color};"
+                f" border: 1px solid {border};"
+                "}"
+            )
         pid = part.id
 
         def on_toggle(checked: bool) -> None:

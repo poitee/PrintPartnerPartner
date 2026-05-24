@@ -32,7 +32,9 @@ from print_partner.core.profile_ops import delete_profile, duplicate_profile, re
 from print_partner.db.session import (
     db_session,
     get_profile_layers,
+    get_setting_value,
     list_profiles,
+    list_projects,
     profile_part_counts,
 )
 from print_partner.ui.build_wizard import run_build_wizard
@@ -44,6 +46,7 @@ class KitLibraryWidget(QWidget):
 
     open_kit = Signal(int)
     list_changed = Signal()
+    navigate_libraries = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -61,9 +64,21 @@ class KitLibraryWidget(QWidget):
         header.addWidget(self.btn_new)
         layout.addLayout(header)
 
+        self._continue_row = QWidget()
+        continue_layout = QHBoxLayout(self._continue_row)
+        continue_layout.setContentsMargins(0, 0, 0, 0)
+        self._continue_label = QLabel("")
+        self._continue_label.setProperty("muted", True)
+        continue_layout.addWidget(self._continue_label, 1)
+        self._btn_continue = QPushButton("Open last kit")
+        self._btn_continue.setObjectName("primaryButton")
+        self._btn_continue.clicked.connect(self._open_last_kit)
+        continue_layout.addWidget(self._btn_continue)
+        self._continue_row.hide()
+        layout.addWidget(self._continue_row)
+
         hint = QLabel(
-            "Open a kit to compose layers, assign filament, and review parts. "
-            "Use Checkoff when you are ready to print."
+            "Open a kit to compose layers and filament, review parts, then use Print and Checkoff."
         )
         hint.setProperty("muted", True)
         hint.setWordWrap(True)
@@ -76,7 +91,22 @@ class KitLibraryWidget(QWidget):
             cta_text="New build…",
         )
         self._empty.cta_clicked.connect(self._new_build)
-        self._stack.addWidget(self._empty)
+        empty_actions = QHBoxLayout()
+        empty_actions.addStretch(1)
+        self._btn_go_libraries = QPushButton("Go to Libraries")
+        self._btn_go_libraries.setObjectName("linkButton")
+        self._btn_go_libraries.setFlat(True)
+        self._btn_go_libraries.clicked.connect(self.navigate_libraries.emit)
+        empty_wrap = QWidget()
+        empty_layout = QVBoxLayout(empty_wrap)
+        empty_layout.setContentsMargins(0, 0, 0, 0)
+        empty_layout.addWidget(self._empty)
+        empty_actions_row = QHBoxLayout()
+        empty_actions_row.addStretch(1)
+        empty_actions_row.addWidget(self._btn_go_libraries)
+        empty_actions_row.addStretch(1)
+        empty_layout.addLayout(empty_actions_row)
+        self._stack.addWidget(empty_wrap)
 
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
@@ -115,8 +145,23 @@ class KitLibraryWidget(QWidget):
 
         self.refresh()
 
+    def _last_profile_id(self) -> int | None:
+        raw = get_setting_value("last_profile_id")
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
+    def _open_last_kit(self) -> None:
+        pid = self._last_profile_id()
+        if pid is not None:
+            self.open_kit.emit(pid)
+
     def refresh(self) -> None:
         rows: list[dict] = []
+        last_id = self._last_profile_id()
         with db_session() as session:
             profiles = list_profiles(session)
             counts = profile_part_counts(session)
@@ -136,14 +181,37 @@ class KitLibraryWidget(QWidget):
 
         has_rows = bool(rows)
         self._stack.setCurrentIndex(1 if has_rows else 0)
+        if has_rows and last_id is not None:
+            last_row = next((r for r in rows if r["id"] == last_id), None)
+            if last_row:
+                self._continue_label.setText(f"Continue: {last_row['name']}")
+                self._continue_row.show()
+            else:
+                self._continue_row.hide()
+        else:
+            self._continue_row.hide()
+
+        has_repos = False
+        with db_session() as session:
+            has_repos = len(list_projects(session)) > 0
+        self._btn_go_libraries.setVisible(not has_repos)
+
         self.table.setRowCount(len(rows))
         for i, row in enumerate(rows):
-            self.table.setItem(i, 0, QTableWidgetItem(row["name"]))
+            name = row["name"]
+            if row["id"] == last_id:
+                name = f"{name}  (last opened)"
+            self.table.setItem(i, 0, QTableWidgetItem(name))
             self.table.setItem(i, 1, QTableWidgetItem(row["order_number"]))
             self.table.setItem(i, 2, QTableWidgetItem(str(row["total"])))
             self.table.setItem(i, 3, QTableWidgetItem(str(row["included"])))
             self.table.setItem(i, 4, QTableWidgetItem(str(row["layers"])))
-            self.table.item(i, 0).setData(Qt.UserRole, row["id"])
+            item = self.table.item(i, 0)
+            item.setData(Qt.UserRole, row["id"])
+            if row["id"] == last_id:
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
         self.table.resizeColumnsToContents()
 
     def _selected_id(self) -> int | None:

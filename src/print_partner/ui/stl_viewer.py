@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollA
 class StlViewer(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("StlViewer")
         self.setMinimumHeight(280)
         self.setFrameShape(QFrame.StyledPanel)
 
@@ -23,7 +24,7 @@ class StlViewer(QFrame):
 
         header = QHBoxLayout()
         self._title = QLabel("3D preview")
-        self._title.setStyleSheet("font-weight: bold;")
+        self._title.setProperty("emptyTitle", True)
         header.addWidget(self._title, 1)
         self._btn_reset = QPushButton("Refresh view")
         self._btn_reset.clicked.connect(self._refresh_view)

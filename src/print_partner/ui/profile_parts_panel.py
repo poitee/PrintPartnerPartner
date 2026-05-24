@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -23,8 +23,6 @@ from print_partner.core.profile_parts_adapter import display_dict_to_scanned, fi
 from print_partner.core.scanner import ScannedPart
 from print_partner.ui.parts_tree_widget import PartsTreeWidget
 from print_partner.ui.print_checklist_widget import PrintChecklistWidget
-from print_partner.ui.profile_suggestions_panel import ProfileSuggestionsPanel
-
 PartsPanelMode = Literal["build", "verify_chosen", "checkoff"]
 
 
@@ -65,9 +63,6 @@ class ProfilePartsPanel(QWidget):
         self._tree_page = QWidget()
         tree_layout = QVBoxLayout(self._tree_page)
         tree_layout.setContentsMargins(0, 0, 0, 0)
-        self.suggestions_panel = ProfileSuggestionsPanel()
-        self.suggestions_panel.inclusion_suggested.connect(self._on_suggestion_inclusion)
-        tree_layout.addWidget(self.suggestions_panel)
         self.parts_tree = PartsTreeWidget(mode="profile")
         self._tree_toolbar_host = QWidget()
         tree_toolbar = QHBoxLayout(self._tree_toolbar_host)
@@ -90,6 +85,10 @@ class ProfilePartsPanel(QWidget):
         self.hide_printed_check = QCheckBox("Hide fully printed")
         self.hide_printed_check.toggled.connect(self._on_hide_printed)
         tree_toolbar.addWidget(self.hide_printed_check)
+        self.summary = QLabel("")
+        self.summary.setObjectName("partsSummary")
+        self.summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        tree_toolbar.addWidget(self.summary, 1)
         tree_layout.addWidget(self._tree_toolbar_host)
         self.parts_tree.inclusion_changed.connect(self._on_tree_inclusion_changed)
         self.parts_tree.part_selected.connect(self.part_selected.emit)
@@ -123,10 +122,6 @@ class ProfilePartsPanel(QWidget):
         buttons.addWidget(self.btn_none)
         root.addWidget(self._bulk_buttons_host)
 
-        self.summary = QLabel("")
-        self.summary.setProperty("muted", True)
-        root.addWidget(self.summary)
-
     def set_panel_mode(self, mode: PartsPanelMode) -> None:
         self._panel_mode = mode
         if mode == "build":
@@ -134,7 +129,6 @@ class ProfilePartsPanel(QWidget):
             self.hint.setText(
                 "Curate parts for this profile. Expand repos and folders; check a folder to include its subtree."
             )
-            self.suggestions_panel.setVisible(True)
             self._tree_toolbar_host.setVisible(True)
             self._bulk_buttons_host.setVisible(True)
             self.btn_include.setVisible(True)
@@ -145,7 +139,6 @@ class ProfilePartsPanel(QWidget):
             self.hint.setText(
                 "Review parts included for printing. Uncheck Print to remove a part from the kit."
             )
-            self.suggestions_panel.setVisible(False)
             self._tree_toolbar_host.setVisible(True)
             self._bulk_buttons_host.setVisible(True)
             self.btn_include.setVisible(False)
@@ -154,7 +147,6 @@ class ProfilePartsPanel(QWidget):
             self.hide_printed_check.setChecked(False)
             self._hide_printed = False
         else:
-            self.suggestions_panel.setVisible(False)
             self.hide_printed_check.setChecked(False)
             self._hide_printed = False
             self._stack.setCurrentIndex(self._PAGE_CHECKLIST)
@@ -162,7 +154,6 @@ class ProfilePartsPanel(QWidget):
                 "Check off parts as you print. Progress is saved to this profile. "
                 "Export HTML for a printable checklist."
             )
-            self.suggestions_panel.setVisible(False)
             self._tree_toolbar_host.setVisible(False)
             self._bulk_buttons_host.setVisible(False)
             self.summary.setVisible(False)
@@ -185,14 +176,6 @@ class ProfilePartsPanel(QWidget):
         self._quantity_changed_cb = on_quantity_changed
         self._all_printed_toggled_cb = on_all_printed_toggled
 
-    def _on_suggestion_inclusion(self, include_ids: set, exclude_ids: set) -> None:
-        self._included_part_ids.update(include_ids)
-        self._included_part_ids.difference_update(exclude_ids)
-        if self._inclusion_changed_cb:
-            self._inclusion_changed_cb(self._included_part_ids)
-        self._rebuild_tree()
-        self._update_summary()
-
     def load_parts(
         self,
         all_rows: list[dict],
@@ -210,13 +193,6 @@ class ProfilePartsPanel(QWidget):
         scanned = [display_dict_to_scanned(r) for r in all_rows]
         self._scan_order = {s.match_key: i for i, s in enumerate(scanned)}
         self._folder_scan_order = folder_scan_order(scanned)
-        if self._panel_mode == "build":
-            self.suggestions_panel.reset_dismissed()
-            self.suggestions_panel.load_profile_parts(
-                all_rows,
-                readme_repo_paths=readme_repo_paths,
-                reference_layers=reference_layers,
-            )
         if self._panel_mode in ("build", "verify_chosen"):
             self._rebuild_tree()
             self._update_summary()

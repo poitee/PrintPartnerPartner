@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -27,13 +28,21 @@ class SourceTab(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
 
-        hint = QLabel(
-            "1. Add or sync a repository → 2. Import which STL files to use → "
-            "3. Open Kit to compose your print project."
+        action_card = QFrame()
+        action_card.setObjectName("actionCard")
+        card_layout = QHBoxLayout(action_card)
+        card_layout.setContentsMargins(12, 10, 12, 10)
+        card_text = QLabel(
+            "<b>1 Libraries</b> — Sync a repo, then <b>Import files…</b> for STLs. "
+            "Continue on Kit → Print → Checkoff."
         )
-        hint.setProperty("muted", True)
-        hint.setWordWrap(True)
-        root.addWidget(hint)
+        card_text.setWordWrap(True)
+        card_layout.addWidget(card_text, 1)
+        self.btn_import_files = QPushButton("Import files…")
+        self.btn_import_files.setObjectName("primaryButton")
+        self.btn_import_files.clicked.connect(self._import_files_for_selection)
+        card_layout.addWidget(self.btn_import_files)
+        root.addWidget(action_card)
 
         outer = QSplitter(Qt.Horizontal)
         root.addWidget(outer, 1)
@@ -61,10 +70,6 @@ class SourceTab(QWidget):
         self.btn_add_local = QPushButton("Add local folder…")
         self.btn_add_local.clicked.connect(self.project_library._add_local_folder)
         row.addWidget(self.btn_add_local)
-        self.btn_import_files = QPushButton("Import files…")
-        self.btn_import_files.setObjectName("primaryButton")
-        self.btn_import_files.clicked.connect(self._import_files_for_selection)
-        row.addWidget(self.btn_import_files)
         fh.addLayout(row)
         self.browse_tree = RepoBrowseTree()
         fh.addWidget(self.browse_tree)

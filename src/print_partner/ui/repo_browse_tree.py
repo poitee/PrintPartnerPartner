@@ -15,6 +15,7 @@ class RepoBrowseTree(QTreeWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("RepoBrowseTree")
         self.setHeaderHidden(True)
         self.setAlternatingRowColors(True)
         self.setEditTriggers(QTreeWidget.NoEditTriggers)

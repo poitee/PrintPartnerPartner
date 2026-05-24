@@ -42,7 +42,8 @@ class FirstRunDialog(QDialog):
             QLabel(
                 "<p>Print Partner helps you compose layered STL kits, verify parts, "
                 "and export printable checklists.</p>"
-                "<p>Workflow: <b>Libraries</b> → <b>Kit</b> (Compose / Review) → <b>Checkoff</b>.</p>"
+                "<p>Workflow: <b>Libraries</b> → <b>Kit</b> (Compose / Review) → "
+                "<b>Print</b> → <b>Checkoff</b>.</p>"
             )
         )
 

@@ -83,8 +83,12 @@ class PartsViewMixin:
             self._action_stack.setCurrentIndex(0)
 
         self.layers_panel.setVisible(is_compose)
-        self.catalog_status.setVisible(is_compose)
-        self.thumb_status.setVisible(is_compose or is_checkoff)
+        self.catalog_status.setVisible(False)
+        self.thumb_status.setVisible(False)
+        self._update_header_status()
+        self._update_breadcrumb()
+        if is_checkoff:
+            self._update_checkoff_progress()
         self._filters_group.setVisible(is_compose)
         self._splitter.setVisible(True)
         self._splitter_right.setVisible(is_compose or is_checkoff)
@@ -244,6 +248,7 @@ class PartsViewMixin:
                 else:
                     part.status = "excluded"
         self._load_parts()
+        self.profile_changed.emit()
 
     def _on_all_printed_toggled(self, part_id: int, all_printed: bool) -> None:
         with db_session() as session:
@@ -297,6 +302,8 @@ class PartsViewMixin:
             filtered_dicts = [d for d in part_dicts if d["id"] in visible]
             self.parts_panel.refresh_progress_rows(part_dicts, filtered_dicts)
             self._update_verify_summary(part_dicts)
+            if self._top_mode == "checkoff":
+                self._update_checkoff_progress(part_dicts)
             return
 
         visible = self._visible_part_ids

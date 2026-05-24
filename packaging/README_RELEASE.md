@@ -45,24 +45,40 @@ After `build_release.sh`, versioned files are under `dist/artifacts/`:
 
 ## GitHub Releases
 
+Shared build logic lives in [`.github/workflows/build-reusable.yml`](../.github/workflows/build-reusable.yml) (used by **Build all platforms** and **Release**).
+
 ### Verify all platforms (recommended before tagging)
 
-1. Open **Actions** → **Build all platforms** → **Run workflow** (branch `main`).
-2. Wait for **linux**, **macos**, and **windows** jobs to finish green.
+1. Bump `pyproject.toml`, `src/print_partner/__init__.py`, and `CHANGELOG.md` (`## [X.Y.Z]`) on `main`.
+2. Open **Actions** → **Build all platforms** → confirm **linux**, **macos**, and **windows** are green (also runs on every push to `main`).
 3. Download artifacts from the run to smoke-test locally.
 
-This workflow also runs on every push to `main` so broken builds are caught early.
-
-### Publish a release
-
-Push a tag matching `v*` (e.g. `v0.2.1`):
+Validate locally:
 
 ```bash
-git tag -a v0.2.1 -m "Release 0.2.1"
-git push origin v0.2.1
+python packaging/verify_release_version.py 0.2.3
 ```
 
-Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) builds on **Ubuntu**, **macOS 14**, and **Windows**, then attaches:
+### Publish a release (two options)
+
+**Option A — CLI tag**
+
+```bash
+git tag -a v0.2.3 -m "Release 0.2.3"
+git push origin v0.2.3
+```
+
+**Option B — Actions button**
+
+1. **Actions** → **Release (create tag)** → **Run workflow**
+2. Enter version `0.2.3`; use **dry run** to validate only
+3. On success, the workflow pushes `v0.2.3`, which triggers **Release** (build + publish)
+
+Both paths run [`.github/workflows/release.yml`](../.github/workflows/release.yml), which checks version/CHANGELOG, builds on **Ubuntu**, **macOS 14**, and **Windows**, and publishes with the matching **CHANGELOG** section as release notes.
+
+**CI artifacts are unsigned.** macOS notarization remains a local maintainer step (below).
+
+Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) attaches:
 
 | Platform | Artifact |
 |----------|----------|

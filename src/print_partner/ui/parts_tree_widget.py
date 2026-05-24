@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -61,7 +62,9 @@ class PartsTreeWidget(QWidget):
         self._match_key_items: dict[str, QTreeWidgetItem] = {}
 
         self.tree = QTreeWidget()
+        self.tree.setObjectName("PartsTree")
         self.tree.setHeaderLabels(["Name", "Role", "Qty", "Print"])
+        self.tree.setIndentation(18)
         # Custom widgets per leaf row need per-row height hints; uniform heights
         # and alternating stripes fight embedded widgets on macOS dark theme.
         self.tree.setAlternatingRowColors(False)
@@ -214,18 +217,28 @@ class PartsTreeWidget(QWidget):
             model = self._build_model()
             for repo_node in model:
                 self._add_node(None, repo_node)
-            if self._mode == "profile" and len(self._part_items) > 80:
-                for i in range(self.tree.topLevelItemCount()):
-                    self.tree.topLevelItem(i).setExpanded(False)
+            self._apply_expand_state()
         finally:
             self.tree.blockSignals(False)
             self.tree.setUpdatesEnabled(True)
         self._building = False
-        if len(self._part_items) > 80:
-            for i in range(self.tree.topLevelItemCount()):
-                item = self.tree.topLevelItem(i)
-                if item is not None:
-                    item.setExpanded(False)
+
+    def _apply_expand_state(self) -> None:
+        """Expand repos by default; expand all when filtering so matches stay visible."""
+        query = self._filter_text.strip()
+        if query:
+            self.tree.expandAll()
+            return
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if item is None:
+                continue
+            item.setExpanded(True)
+            if item.childCount() <= 8:
+                for j in range(item.childCount()):
+                    child = item.child(j)
+                    if child is not None:
+                        child.setExpanded(True)
 
     def _add_node(self, parent_item: QTreeWidgetItem | None, node: PartsTreeNode) -> QTreeWidgetItem:
         if parent_item is None:
@@ -242,6 +255,18 @@ class PartsTreeWidget(QWidget):
                 Qt.Checked if state == "checked" else Qt.PartiallyChecked if state == "partial" else Qt.Unchecked,
             )
             item.setData(_COL_NAME, Qt.UserRole, (node.kind, node.key, node.repo, node.folder_path))
+            font = QFont(item.font(0))
+            font.setBold(True)
+            item.setFont(_COL_NAME, font)
+            inc = node.counts.included
+            total = node.counts.total
+            item.setText(_COL_ROLE, f"{inc}/{total} incl.")
+            item.setText(_COL_QTY, str(total))
+            item.setText(_COL_PRINT, "✓" if inc == total and total > 0 else "")
+            item.setToolTip(
+                _COL_NAME,
+                f"{node.label}\nIncluded: {inc} of {total}",
+            )
             for child in node.children:
                 self._add_node(item, child)
         else:
