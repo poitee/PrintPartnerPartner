@@ -88,7 +88,10 @@ The spec builds an **onedir** bundle (`dist/Print Partner/` on Linux/Windows, `d
 
 ### GitHub Releases
 
-Push a version tag (e.g. `v0.1.0`) to trigger [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds on Ubuntu, macOS, and Windows and attaches platform archives to the release.
+1. **Actions → Build all platforms → Run workflow** — confirms Linux, macOS, and Windows PyInstaller builds on `main` (also runs on every push to `main`).
+2. Push a version tag (e.g. `v0.2.1`) to trigger [`.github/workflows/release.yml`](.github/workflows/release.yml), which runs the same builds and attaches archives to a GitHub Release.
+
+See [`packaging/README_RELEASE.md`](packaging/README_RELEASE.md) for details.
 
 ### Smoke test before shipping
 

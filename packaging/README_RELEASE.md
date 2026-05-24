@@ -45,7 +45,32 @@ After `build_release.sh`, versioned files are under `dist/artifacts/`:
 
 ## GitHub Releases
 
-Push a tag matching `v*` (e.g. `v0.1.0`). Workflow `.github/workflows/release.yml` builds on Ubuntu, macOS, and Windows and uploads archives to the GitHub Release.
+### Verify all platforms (recommended before tagging)
+
+1. Open **Actions** → **Build all platforms** → **Run workflow** (branch `main`).
+2. Wait for **linux**, **macos**, and **windows** jobs to finish green.
+3. Download artifacts from the run to smoke-test locally.
+
+This workflow also runs on every push to `main` so broken builds are caught early.
+
+### Publish a release
+
+Push a tag matching `v*` (e.g. `v0.2.1`):
+
+```bash
+git tag -a v0.2.1 -m "Release 0.2.1"
+git push origin v0.2.1
+```
+
+Workflow [`.github/workflows/release.yml`](../.github/workflows/release.yml) builds on **Ubuntu**, **macOS 14**, and **Windows**, then attaches:
+
+| Platform | Artifact |
+|----------|----------|
+| Linux | `print-partner-<ver>-linux-<arch>.tar.gz` |
+| macOS | `print-partner-<ver>-macos-<arch>.zip` (+ optional `.dmg`) |
+| Windows | `print-partner-<ver>-windows.zip` |
+
+Each build job has a **120 minute** timeout. The publish step fails if any of the three platform archives is missing.
 
 ## macOS notarization
 

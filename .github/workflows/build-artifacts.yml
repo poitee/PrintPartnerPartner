@@ -1,17 +1,14 @@
-# Tag push (v*) builds Linux + macOS + Windows and publishes a GitHub Release.
-name: Release
+# Build PyInstaller bundles on Linux, macOS, and Windows (no GitHub Release publish).
+# Use before tagging: Actions → Build all platforms → Run workflow.
+name: Build all platforms
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
-
-permissions:
-  contents: write
+  push:
+    branches: [main, master]
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: build-artifacts-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -114,42 +111,3 @@ jobs:
             dist/artifacts/
             dist/Print-Partner-*.dmg
           if-no-files-found: error
-
-  release:
-    name: Publish GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-files
-          merge-multiple: true
-
-      - name: List release files
-        run: find release-files -type f | sort
-
-      - name: Require Linux, macOS, and Windows artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s globstar nullglob
-          linux=$(find release-files -name '*-linux-*.tar.gz' | head -1)
-          macos=$(find release-files -name '*-macos-*.zip' | head -1)
-          windows=$(find release-files -name '*-windows*.zip' | head -1)
-          echo "linux=$linux"
-          echo "macos=$macos"
-          echo "windows=$windows"
-          test -n "$linux" || { echo "Missing Linux .tar.gz"; exit 1; }
-          test -n "$macos" || { echo "Missing macOS .zip"; exit 1; }
-          test -n "$windows" || { echo "Missing Windows .zip"; exit 1; }
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release-files/**/*
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
