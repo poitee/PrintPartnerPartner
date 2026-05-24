@@ -35,6 +35,11 @@ After a successful build on macOS:
 
 Produces `dist/Print-Partner-<version>.dmg` for drag-and-drop install.
 
+
+## Legal files in release bundles
+
+`LICENSE`, `THIRD_PARTY_NOTICES.md`, and `COMMERCIAL.md` are copied into the onedir bundle root (next to the executable) by `print_partner.spec`. Help → **Third-party notices** / **License** in the app opens these files.
+
 ## Platform archives
 
 After `build_release.sh`, versioned files are under `dist/artifacts/`:

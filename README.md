@@ -59,6 +59,19 @@ my-kit,https://github.com/you/my-stl-kit.git,main
 addons,https://github.com/you/extra-parts.git,main
 ```
 
+## License
+
+Print Partner is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Noncommercial use is permitted under that license; **commercial use requires written permission** — see [COMMERCIAL.md](COMMERCIAL.md).
+
+Third-party libraries and optional tools are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Acknowledgments
+
+- [stl-thumb](https://github.com/unlimitedbacon/stl-thumb) (optional, MIT) for fast STL thumbnails when installed on your `PATH`
+- [PySide6](https://pyside.org) / Qt (LGPL) for the desktop UI
+- [lib3mf](https://github.com/3MFConsortium/lib3mf) for 3MF export
+- [PyVista](https://github.com/pyvista/pyvista) / VTK for mesh preview and thumbnails
+
 ## Tests
 
 ```bash

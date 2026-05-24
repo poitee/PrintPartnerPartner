@@ -88,6 +88,13 @@ _hiddenimports = [
 _binaries: list = []
 _datas: list = [(str(data_dir / "ambrosia_fallback.json"), "print_partner/data")]
 
+_legal_files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "COMMERCIAL.md"]
+for _name in _legal_files:
+    _p = root / _name
+    if _p.is_file():
+        _datas.append((str(_p), "."))
+
+
 for _pkg in ("numpy", "pyvista", "lib3mf"):
     _d, _b, _h = collect_all(_pkg)
     _datas += _d

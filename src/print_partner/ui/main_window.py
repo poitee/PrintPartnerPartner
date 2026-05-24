@@ -33,6 +33,7 @@ from print_partner.ui.ai_settings_dialog import AiSettingsDialog
 from print_partner.ui.banner_widget import BannerWidget
 from print_partner.ui.first_run_dialog import maybe_show_first_run
 from print_partner.ui.kit_library import KitLibraryWidget
+from print_partner.ui.legal_notices_dialog import LegalNoticesDialog
 from print_partner.ui.print_plan_tab import PrintPlanTab
 from print_partner.ui.profile_composer import ProfileComposer
 from print_partner.ui.tabs.source_tab import SourceTab
@@ -249,8 +250,20 @@ class MainWindow(QMainWindow):
             "About Print Partner",
             f"<h3>Print Partner</h3>"
             f"<p>Version {__version__}</p>"
-            f"<p>Local-first kit builder for layered STL print manifests.</p>",
+            f"<p>Local-first kit builder for layered STL print manifests.</p>"
+            "<p>Licensed under the "
+            '<a href="https://github.com/poitee/PrintPartnerPartner/blob/main/LICENSE">'
+            "PolyForm Noncommercial License 1.0.0</a>. "
+            "Commercial use requires permission — see COMMERCIAL.md in the app bundle "
+            "or on GitHub.</p>"
+            "<p>Third-party notices: Help → Third-party notices…</p>",
         )
+
+    def _show_third_party_notices(self) -> None:
+        LegalNoticesDialog("THIRD_PARTY_NOTICES.md", "Third-party notices", parent=self).exec()
+
+    def _show_license(self) -> None:
+        LegalNoticesDialog("LICENSE", "License", parent=self).exec()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
