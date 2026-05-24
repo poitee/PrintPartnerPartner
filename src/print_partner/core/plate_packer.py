@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from copy import deepcopy
+from dataclasses import dataclass
 
 import trimesh
 

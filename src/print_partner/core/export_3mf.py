@@ -16,7 +16,7 @@ import trimesh
 from print_partner.core.filament_assigner import PartCopy, assign_parts_to_printers
 from print_partner.core.merge import MergePart
 from print_partner.core.mesh_color import resolve_mesh_color
-from print_partner.core.plate_packer import PlateLayout, PlacedItem, pack_copies_on_printer
+from print_partner.core.plate_packer import PlacedItem, PlateLayout, pack_copies_on_printer
 from print_partner.core.printer_fleet import PrinterMachine
 
 ProgressCallback = Callable[[int, int, str], None]

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from print_partner.core.export_3mf import Export3mfOptions, ExportLayoutMode
+from print_partner.core.export_3mf import ExportLayoutMode
 
 
 class Export3mfDialog(QDialog):

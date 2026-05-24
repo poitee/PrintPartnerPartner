@@ -23,6 +23,7 @@ from print_partner.core.profile_parts_adapter import display_dict_to_scanned, fi
 from print_partner.core.scanner import ScannedPart
 from print_partner.ui.parts_tree_widget import PartsTreeWidget
 from print_partner.ui.print_checklist_widget import PrintChecklistWidget
+
 PartsPanelMode = Literal["build", "verify_chosen", "checkoff"]
 
 

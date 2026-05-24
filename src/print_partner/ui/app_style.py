@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtGui import QFont, QPalette
+from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication, QStyleFactory
 
 # Accent tokens (work on light and dark surfaces)

@@ -34,6 +34,7 @@ from print_partner.core.ambrosia_catalog import (
     catalog_status_text,
     load_catalog,
 )
+from print_partner.core.export_3mf import Export3mfOptions
 from print_partner.core.export_html import export_path_for_profile, open_html_file
 from print_partner.core.export_kit_bundle import (
     KIT_EXTENSION,
@@ -67,7 +68,6 @@ from print_partner.ui.catalog_sync_worker import CatalogSyncWorker
 from print_partner.ui.composer import AiIntegrationMixin, KitActionsMixin, PartsViewMixin
 from print_partner.ui.docs_panel import DocsPanel
 from print_partner.ui.empty_state import EmptyStateWidget
-from print_partner.core.export_3mf import Export3mfOptions
 from print_partner.ui.export_worker import (
     ExportWorker,
     HtmlExportResult,

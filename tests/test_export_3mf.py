@@ -16,7 +16,7 @@ from print_partner.core.export_3mf import (
 from print_partner.core.merge import MergePart
 from print_partner.core.part_paths import resolve_part_stl_path
 from print_partner.core.printer_fleet import LoadedFilament, PrinterMachine
-from print_partner.db.models import Base, BuildProfile, Part, ProfileLayer, Project
+from print_partner.db.models import BuildProfile, Part, ProfileLayer, Project
 from print_partner.db.session import get_engine, init_db
 
 

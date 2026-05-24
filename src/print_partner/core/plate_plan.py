@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from print_partner.core.filament_assigner import PartCopy, assign_parts_to_printers
-from print_partner.core.plate_packer import PlateLayout, pack_copies_on_printer, pack_single_plate
+from print_partner.core.plate_packer import PlateLayout, pack_copies_on_printer
 from print_partner.core.printer_fleet import PrinterMachine
 
 

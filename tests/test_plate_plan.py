@@ -6,6 +6,7 @@ from pathlib import Path
 
 from print_partner.core.filament_assigner import PartCopy
 from print_partner.core.merge import MergePart
+from print_partner.core.plate_packer import pack_copies_on_printer, pack_single_plate
 from print_partner.core.plate_plan import (
     CopyRef,
     KitPlateLayout,
@@ -16,7 +17,6 @@ from print_partner.core.plate_plan import (
     move_within_plate,
     remove_plate,
 )
-from print_partner.core.plate_packer import pack_copies_on_printer, pack_single_plate
 from print_partner.core.printer_fleet import PrinterMachine
 
 

@@ -7,13 +7,11 @@ from pathlib import Path
 from print_partner.core.filament_assigner import PartCopy
 from print_partner.core.merge import MergePart
 from print_partner.core.plate_plan import (
-    CopyRef,
     assign_refs_to_printer,
     layout_with_pool,
     printer_assigned_refs,
     return_refs_to_pool,
 )
-from print_partner.core.printer_fleet import PrinterMachine
 
 
 def _part(path: Path) -> MergePart:
