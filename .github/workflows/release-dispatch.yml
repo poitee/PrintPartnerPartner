@@ -22,6 +22,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   dispatch:
@@ -56,7 +57,7 @@ jobs:
           sha="${{ github.sha }}"
           repo="${{ github.repository }}"
           status=$(gh api "repos/${repo}/actions/workflows/build-artifacts.yml/runs?head_sha=${sha}&event=push&status=completed&per_page=5" \
-            --jq '.workflow_runs[] | select(.conclusion=="success") | .id' | head -1)
+            --jq '.workflow_runs[] | select(.conclusion=="success") | .id' 2>/dev/null | head -1)
           if [[ -z "$status" ]]; then
             echo "No successful 'Build all platforms' run on commit ${sha}" >&2
             echo "Push to main and wait for green build, or disable require_green_build." >&2
@@ -72,8 +73,8 @@ jobs:
           sha="${{ github.sha }}"
           repo="${{ github.repository }}"
           ok=$(gh api "repos/${repo}/actions/workflows/build-artifacts.yml/runs?head_sha=${sha}&per_page=3" \
-            --jq '[.workflow_runs[] | select(.conclusion=="success")] | length')
-          if [[ "$ok" -eq 0 ]]; then
+            --jq '[.workflow_runs[] | select(.conclusion=="success")] | length' 2>/dev/null || echo 0)
+          if [[ "${ok:-0}" -eq 0 ]]; then
             echo "::warning::No successful Build all platforms run on ${sha}. Consider waiting for green CI before tagging."
           fi
 
