@@ -1,231 +1,149 @@
 # Print Partner
 
-Local-first Python desktop app for composing layered 3D print manifests from GitHub STL repositories.
+**Print Partner** is a desktop app for anyone who prints from layered STL kits — base repo plus add-ons, accent/clear parts, quantities in filenames, and a pile of folders to keep straight. It lives on your machine, syncs GitHub (or local) repos, and walks you from “what’s in this build?” to “what’s on the plate?” to “what did we already run?”
 
-## Features
+No cloud account. Your data stays in `~/.print-partner`.
 
-- Sync GitHub STL repos (GitPython) into `~/.print-partner/repos`
-- Auto-classify parts by role (`[a]` accent, `[c]` clear, `[o]` opaque) and quantity (`_xN` suffix)
-- Layered build profiles: base + addon repos with merge engine
-- PySide6 UI: project library, profile composer, diff filters, STL preview (PyVista)
-- HTML export (Jinja2), optional `stl-thumb` thumbnails
-- SQLite persistence in `~/.print-partner`
+---
 
-## Requirements
+## Why it exists
 
-- Python 3.11+ (3.9+ may work with `Optional` types in models; 3.11 recommended)
-- macOS / Linux / Windows
+If you’ve ever:
 
-## Install
+- merged a **base kit** with **addon repos** and lost track of what changed,
+- assigned **filament colors** across dozens of parts,
+- wanted a **shop-floor checklist** that actually remembers what you printed,
+- or exported **3MF plates** grouped by printer, filament, and folder —
+
+…this is the workflow the app is built around.
+
+---
+
+## Quick start
+
+**Requirements:** Python 3.11+ · macOS, Linux, or Windows · `git` on your PATH for repo sync
 
 ```bash
+git clone https://github.com/poitee/PrintPartnerPartner.git
 cd PrintPartnerPartner
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-```
-
-Optional STL thumbnails (faster than built-in PyVista when installed):
-
-```bash
-cargo install stl-thumb
-# or see https://github.com/unlimitedbacon/stl-thumb
-```
-
-## Run
-
-```bash
 print-partner
-# or
-python -m print_partner
 ```
 
-## Usage
+**Pre-built installers:** [Releases](https://github.com/poitee/PrintPartnerPartner/releases) (macOS, Windows, Linux).
 
-Workflow: **Libraries → Kit → Print → Checkoff** (top navigation strip, **Ctrl+1–4**). On **Kit**, choose **Compose** or **Review** under step 2 when a kit is open. Press **F1** for the full guide.
+Optional faster thumbnails: `cargo install stl-thumb` ([upstream](https://github.com/unlimitedbacon/stl-thumb)). The app falls back to built-in PyVista rendering if it’s not installed.
 
-1. **Libraries** (Ctrl+1) — Add/sync GitHub repos or local folders. **Import files…** chooses which STL paths are scanned into kits. **More ▾ → Export/Import repo list** shares your repo table (JSON). Bulk add via **Import repos.txt** (`name,url,branch` per line).
-2. **Kit** (Ctrl+2) — Open a kit from **Your kits**. **Compose** — layers, **Recompute**, filament (catalog + **Custom filaments…**), parts tree, preview, docs, optional AI. **Review** — included parts only before checkoff.
-3. **Print** (Ctrl+3) — Enable printers, set loaded spools, assign parts or whole **repo/folder** rows to printers, **Export 3MF…** (plates named by filament · repo · folder).
-4. **Checkoff** (Ctrl+4) — Printable checklist (Qty, Printed, Verified, thumbs, Notes), **Export checklist** HTML.
-5. Thumbnails cache in the background after **Recompute**; 3D preview uses offscreen render (stable on macOS).
+---
 
-### repos.txt example
+## The workflow (Libraries → Kit → Print → Checkoff)
+
+Use the top strip or **Ctrl+1–4**. Press **F1** anytime for the in-app guide.
+
+| Step | What you’re doing |
+|------|-------------------|
+| **Libraries** | Add GitHub repos or local folders, sync STLs, import only the paths you care about. Export/import your repo list as JSON for another machine. |
+| **Kit → Compose** | Stack layers (base + addons), **Recompute** the merge, curate the parts tree, assign filaments (catalog + custom colors), preview STLs, read repo docs. |
+| **Kit → Review** | Sanity-check **included** parts before you commit to printing. |
+| **Print** | Turn on printers, set what’s loaded on each spool, assign parts or whole **repo/folder** rows, export **3MF** (plates named `filament · repo · folder`). |
+| **Checkoff** | Mark units printed (saved per kit), filter what’s left, **Print missing →** or **Export missing 3MF…**, or **Export checklist** HTML for the bench. |
+
+**Custom filaments** — name your own colors; they travel with kit bundles and your filament library export.
+
+**Sharing a kit** — `.print-partner-kit.zip` from **Your kits** (layers, parts, filaments, notes — not print progress). Recipient adds the same repos on Libraries, imports the kit, runs **Recompute**.
+
+**Bulk repos** — `Import repos.txt` with `name,url,branch` per line:
 
 ```text
-# name,url,branch
 my-kit,https://github.com/you/my-stl-kit.git,main
 addons,https://github.com/you/extra-parts.git,main
 ```
 
-## Support
+---
 
-If Print Partner saves you time, you can optionally support development on [Ko-fi](https://ko-fi.com/poitee). Thank you.
+## Part naming (how the scanner thinks)
 
-Donations are voluntary appreciation only; **commercial use still requires written permission** under [COMMERCIAL.md](COMMERCIAL.md).
+| In path / filename | Meaning |
+|--------------------|---------|
+| `[a]` | accent |
+| `[c]` | clear |
+| `[o]` | opaque |
+| *(none)* | primary |
+| `_x4` or ` x4` before `.stl` | quantity 4 |
+
+---
+
+## Where things live on disk
+
+| Path | Purpose |
+|------|---------|
+| `~/.print-partner/print_partner.db` | Kits, parts, print progress |
+| `~/.print-partner/repos/` | Cloned repositories |
+| `~/.print-partner/thumbs/` | Thumbnail cache (after **Recompute**) |
+| `~/.print-partner/exports/` | HTML checklists and related files |
+
+Back up that folder before moving machines.
+
+---
+
+## Thumbnails & preview
+
+After **Recompute**, thumbs warm in the background (384×384 PNG). **stl-thumb** is used when available; filament-colored parts use PyVista so swatches match your picker. **Export checklist** reuses the cache. Tune behavior in `print_partner/core/thumbnails.py` if you’re hacking on renders.
+
+---
+
+## Optional AI assistant
+
+**Kit → Assistant** tab. Off by default. **Help → AI settings…** for provider, model, and API key (stored only in `~/.print-partner/ai_secrets.json`). Suggestions can adjust inclusion, filament, role, qty, and notes — you review before applying. Without a key, lightweight offline hints still run.
+
+---
+
+## Support the project
+
+If Print Partner saves you time on the bench, [buy me a coffee on Ko-fi](https://ko-fi.com/poitee) — totally optional.
+
+Tips are appreciation only; **commercial use still needs written permission** under [COMMERCIAL.md](COMMERCIAL.md).
+
+---
 
 ## License
 
-Print Partner is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Noncommercial use is permitted under that license; **commercial use requires written permission** — see [COMMERCIAL.md](COMMERCIAL.md).
+[PolyForm Noncommercial License 1.0.0](LICENSE) — noncommercial use is fine; commercial use requires permission ([COMMERCIAL.md](COMMERCIAL.md)). Third-party bits: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Third-party libraries and optional tools are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+**Thanks to:** [stl-thumb](https://github.com/unlimitedbacon/stl-thumb), [PySide6](https://pyside.org), [lib3mf](https://github.com/3MFConsortium/lib3mf), [PyVista](https://github.com/pyvista/pyvista) / VTK.
 
-## Acknowledgments
+---
 
-- [stl-thumb](https://github.com/unlimitedbacon/stl-thumb) (optional, MIT) for fast STL thumbnails when installed on your `PATH`
-- [PySide6](https://pyside.org) / Qt (LGPL) for the desktop UI
-- [lib3mf](https://github.com/3MFConsortium/lib3mf) for 3MF export
-- [PyVista](https://github.com/pyvista/pyvista) / VTK for mesh preview and thumbnails
-
-## Tests
+## Developing & releasing
 
 ```bash
 pytest
+ruff check src tests
 ```
 
-CI runs `ruff check src tests` and pytest on Ubuntu and macOS (Python 3.11 and 3.12), plus Windows (Python 3.11, Qt UI tests excluded). See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+CI runs on Ubuntu, macOS, and Windows — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-## Packaging
+**Local release build:**
 
 ```bash
 chmod +x packaging/build_release.sh packaging/package_artifacts.sh
 ./packaging/build_release.sh
 ```
 
-This runs pytest, PyInstaller, then writes versioned archives under `dist/artifacts/` (`.zip` on macOS/Windows, `.tar.gz` on Linux). On macOS, a `.dmg` is also created when `hdiutil` is available.
+Details: [`packaging/README_RELEASE.md`](packaging/README_RELEASE.md) · smoke test: [`docs/RELEASE_SMOKE_TEST.md`](docs/RELEASE_SMOKE_TEST.md) · 3MF checks: [`docs/3MF_EXPORT_VALIDATION.md`](docs/3MF_EXPORT_VALIDATION.md) · architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-Or manually:
+**Ship a version:** bump `pyproject.toml`, `__version__`, and `CHANGELOG.md`, green **Build all platforms** on `main`, then **Actions → Release (create tag)** with e.g. `0.3.1` (or push `v0.3.1` and run **Release** if needed).
 
-```bash
-pip install pyinstaller
-pyinstaller packaging/print_partner.spec --noconfirm
-./packaging/package_artifacts.sh
-```
+---
 
-The spec builds an **onedir** bundle (`dist/Print Partner/` on Linux/Windows, `dist/Print Partner.app` on macOS). Expect roughly 200–400 MB because of PySide6 and VTK/PyVista. **macOS DMGs target macOS 12+** (NumPy 1.26.x; avoid NumPy 2 wheels that require macOS 14). See [`packaging/README_RELEASE.md`](packaging/README_RELEASE.md) and [`packaging/THUMBNAILS_AND_BUNDLE.md`](packaging/THUMBNAILS_AND_BUNDLE.md).
+## Honest MVP limits
 
-### GitHub Releases
+- Layer scanning is manual-friendly, not magic for arbitrary folder trees
+- Geometry diff is coarse (vertex counts, not full CAD compare)
+- 3D preview is an offscreen snapshot (stable on macOS, not a live VTK window)
+- Shallow git clones — huge histories may need a deeper fetch by hand
+- Single user, single machine — no cloud sync
 
-1. Bump version in `pyproject.toml`, `__version__`, and `CHANGELOG.md`.
-2. **Actions → Build all platforms** — confirms Linux, macOS, and Windows builds on `main` (also runs on every push to `main`).
-3. Publish via **tag** (`git push origin v0.3.1`) or **Actions → Release (create tag)** with version `0.3.1`.
-
-See [`packaging/README_RELEASE.md`](packaging/README_RELEASE.md) for details. 3MF slicer checks: [`docs/3MF_EXPORT_VALIDATION.md`](docs/3MF_EXPORT_VALIDATION.md).
-
-### Smoke test before shipping
-
-Use the checklist in [`docs/RELEASE_SMOKE_TEST.md`](docs/RELEASE_SMOKE_TEST.md).
-
-## Sharing kits with print partners
-
-Export a portable kit file (`.print-partner-kit.zip`) from **Your kits** or **Kit → Manage → Export kit for sharing…**. The bundle includes:
-
-- Kit name and order number
-- Layer setup (which repos are base/addons), matched by **repo name or URL** on import
-- All parts with filament colors, quantities, inclusion, and notes
-
-**Import** via **Import kit…** on the kit list or **Manage → Import shared kit…**. If a referenced repository is not on the recipient’s machine yet, add and sync it on **Libraries**, then adjust layers or run **Recompute**.
-
-Print progress is not included in exports (recipients start a fresh checkoff). **Custom filament** definitions used in the kit are embedded in the bundle. For shop-floor HTML/STL output, use **Export checklist** / **Export STLs** as before.
-
-## Sharing with print partners
-
-- **Git on PATH** — Sync uses the system `git` binary (GitPython does not bundle git). Partners need git installed and available in their shell.
-- **Data directory** — Back up `~/.print-partner/` before moving machines: `print_partner.db`, `repos/`, and optionally `thumbs/` and `exports/`.
-- **Frozen build** — Ship the onedir folder or `.app` from `packaging/build_release.sh` after tests pass; partners run the executable without installing Python.
-- **Optional `stl-thumb`** — Recommend `cargo install stl-thumb` on shop-floor machines for faster role-only thumbnails (see Thumbnail generation below).
-
-## Data directory
-
-| Path | Purpose |
-|------|---------|
-| `~/.print-partner/print_partner.db` | SQLite database |
-| `~/.print-partner/repos/` | Cloned repositories |
-| `~/.print-partner/exports/` | HTML exports |
-| `~/.print-partner/exports/thumbs/` | Per-export PNG copies for portable HTML |
-| `~/.print-partner/thumbs/` | Global thumbnail cache (warmed after Recompute) |
-
-## Part naming conventions
-
-| Marker | Role |
-|--------|------|
-| `[a]` in path/filename | accent |
-| `[c]` | clear |
-| `[o]` | opaque |
-| (none) | primary |
-| `_x4` or ` x4` before `.stl` | quantity 4 |
-
-## Thumbnail generation
-
-Thumbnails are **384×384 PNG** files cached under `~/.print-partner/thumbs/`. After **Recompute**, the app warms the cache in the background; **Export HTML** copies those PNGs into the export folder.
-
-### Backends (automatic)
-
-| Order | Backend | When used |
-|-------|---------|-----------|
-| 1 | **stl-thumb** | On your `PATH`; preferred for speed when no custom filament color |
-| 2 | **PyVista** (built-in) | Always available if `pyvista` is installed; used for filament-colored parts and as fallback |
-
-With a **filament color** assigned, PyVista is tried first so the mesh matches the picker; then `stl-thumb` with `-m` material colors.
-
-### stl-thumb options (used by Print Partner)
-
-Print Partner invokes `stl-thumb` roughly as:
-
-```text
-stl-thumb -s 384 -b ffffffff -a fxaa -m <ambient> <diffuse> <specular> model.stl out.png
-```
-
-| Flag | Meaning |
-|------|---------|
-| `-s` / `--size` | Square image size in pixels (default in app: **384**) |
-| `-b` / `--background` | Background RGBA hex (`ffffffff` = white) |
-| `-a` / `--antialiasing` | `fxaa` (default) or `none` |
-| `-m` / `--material` | Phong colors: ambient, diffuse, specular (hex, no `#`) — diffuse is the visible body color |
-| `-f` / `--format` | Output format if extension omitted (PNG, JPEG, …) |
-| `--recalc-normals` | Fix broken STL normals (not passed by default) |
-
-Role-only thumbs (no filament) use lighter default colors per part role (`primary`, `accent`, `clear`, `opaque`). Very dark filament colors are automatically lifted for thumbnails only (`boost_dark_hex_for_thumbnail` in `mesh_color.py`); the filament picker still shows the true color.
-
-### PyVista options (in code)
-
-Tunable constants in `print_partner/core/thumbnails.py` and `stl_camera.py`:
-
-| Setting | Default | Purpose |
-|---------|---------|---------|
-| `THUMB_PNG_SIZE` | 384 | Render resolution |
-| `THUMB_CAMERA_PADDING` | 0.88 | Zoom out so the full part fits (avoids clipped edges) |
-| `THUMB_MESH_POINT_LIMIT` | 80,000 | Decimate huge meshes before render |
-| `THUMB_SHOW_EDGES` | false | Solid mesh; boundary outline only (no triangle wireframe) |
-| `THUMB_CACHE_VERSION` | v3 | Cache key suffix; bump to regenerate all thumbs after render changes |
-| `PREVIEW_SHOW_EDGES` | false | Solid mesh in offscreen preview when using PyVista |
-| `PREVIEW_PNG_SIZE` | 640 | stl-thumb square size when used for preview |
-
-3D **preview** in the app uses a larger window (640×480) and `PREVIEW_CAMERA_PADDING` 0.90. When `stl-thumb` is on your `PATH`, preview uses it first (solid mesh, no edge lines); otherwise PyVista offscreen with edges disabled.
-
-After changing filament colors, use **Recompute** or re-export so thumbnails regenerate (old cache entries are invalidated).
-
-### Performance notes
-
-- **Batch thumbnails** — Background caching runs up to 32 STLs per subprocess so PyVista/VTK loads once per batch instead of per file (large speedup on big builds).
-- **stl-thumb** — When installed, used first for role-only colors; `-a none` is the default for faster renders (see `STL_THUMB_ANTIALIAS` in `thumbnails.py`).
-- **Profile UI** — Loading a profile batches filament catalog and print-progress lookups; typing in the parts filter waits 200ms before rebuilding the parts tree.
-- **Export HTML** — Reuses cached PNGs from `~/.print-partner/thumbs/` when fresh; only missing thumbs are generated during export.
-
-## AI assistant (optional)
-
-On **Kit**, open the **Assistant** tab (Preview / Docs / Assistant). The AI receives app workflow context, repositories, filament catalog ids, and the active kit. It is **disabled by default**.
-
-1. **Help → AI settings…** — enable the assistant, choose provider (OpenAI, Anthropic, or OpenAI-compatible), model, and API key.
-2. API key stored only in `~/.print-partner/ai_secrets.json` (gitignored).
-3. **Ask** sends context plus your question; **Review suggestions…** lets you pick which changes to apply (include/exclude, filament, role, qty, notes, navigation).
-
-**Offline:** README/fuzzy heuristics are available via the AI panel when no API key is configured.
-
-## Known limitations (MVP)
-
-- Manual layers are stored but not fully scanned from arbitrary folders
-- Geometry compare is vertex-count / coarse equality only
-- **3D preview** renders offscreen to an image in the panel (no embedded VTK window; avoids macOS crashes)
-- Git sync uses shallow clone; large repos may need manual depth adjustment
-- No cloud sync or multi-user support
+If something’s confusing on the bench, open an issue or tweak the workflow — the app is meant to stay out of your way while you print.
