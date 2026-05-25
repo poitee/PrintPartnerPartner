@@ -22,7 +22,7 @@ on:
 
 permissions:
   contents: write
-  actions: read
+  actions: write
 
 jobs:
   dispatch:
@@ -88,7 +88,15 @@ jobs:
           git tag -a "$tag" -m "Release ${{ inputs.version }}"
           git push origin "$tag"
 
+      - name: Trigger Release workflow
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Tag pushes from GITHUB_TOKEN do not start other workflows; dispatch explicitly.
+          gh workflow run Release -f "version=${{ inputs.version }}" -f prerelease=false
+
       - name: Tag pushed
         if: ${{ !inputs.dry_run }}
         run: |
-          echo "Pushed tag v${{ inputs.version }}. Watch the **Release** workflow for build and publish." >> "$GITHUB_STEP_SUMMARY"
+          echo "Pushed tag v${{ inputs.version }} and started **Release** workflow." >> "$GITHUB_STEP_SUMMARY"
