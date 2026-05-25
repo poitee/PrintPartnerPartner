@@ -23,8 +23,9 @@ _GUIDE_HTML = """
 </ul>
 <p><b>3 Print</b> (Ctrl+3) — Enable printers, load filament spools, preview assignment,
 export 3MF plates (primary export for slicer plates).</p>
-<p><b>4 Checkoff</b> (Ctrl+4) — Printable checklist, print progress, export HTML checklist.
-Use the Print tab for 3MF; use Checkoff for shop-floor tracking.</p>
+<p><b>4 Checkoff</b> (Ctrl+4) — Mark printed units on the in-app checklist (progress saves per kit).
+<b>Print missing →</b> sends unfinished parts to the Print tab; <b>Export missing 3MF…</b> exports
+only unprinted units. <b>Export checklist</b> saves printable HTML for the shop floor.</p>
 <p><b>Shortcuts:</b> Ctrl+1–4 workflow steps · F1 this guide · Ctrl+R Recompute (Kit tab)</p>
 """
 

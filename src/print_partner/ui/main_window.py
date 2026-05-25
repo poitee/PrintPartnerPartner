@@ -29,6 +29,7 @@ from print_partner.db.session import (
     list_projects,
     set_setting_value,
 )
+from print_partner.support_links import KOFI_URL, open_kofi
 from print_partner.ui.ai_settings_dialog import AiSettingsDialog
 from print_partner.ui.banner_widget import BannerWidget
 from print_partner.ui.first_run_dialog import maybe_show_first_run
@@ -224,6 +225,10 @@ class MainWindow(QMainWindow):
         open_exports.triggered.connect(self._open_exports_folder)
         help_menu.addAction(open_exports)
         help_menu.addSeparator()
+        support_kofi = QAction("Support on Ko-fi…", self)
+        support_kofi.triggered.connect(open_kofi)
+        help_menu.addAction(support_kofi)
+        help_menu.addSeparator()
         about_action = QAction("About Print Partner…", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
@@ -256,6 +261,8 @@ class MainWindow(QMainWindow):
             "PolyForm Noncommercial License 1.0.0</a>. "
             "Commercial use requires permission — see COMMERCIAL.md in the app bundle "
             "or on GitHub.</p>"
+            f'<p>Optional tip jar on <a href="{KOFI_URL}">Ko-fi</a>. '
+            "Donations are appreciated but do not grant commercial use rights.</p>"
             "<p>Third-party notices: Help → Third-party notices…</p>",
         )
 

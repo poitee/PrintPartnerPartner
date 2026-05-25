@@ -317,6 +317,11 @@ def load_catalog() -> AmbrosiaCatalog:
 def get_color_by_id(color_id: str | None) -> AmbrosiaColor | None:
     if not color_id:
         return None
+    from print_partner.core.custom_filaments import get_custom_color_by_id
+
+    custom = get_custom_color_by_id(color_id)
+    if custom:
+        return custom
     return load_catalog().by_id().get(color_id)
 
 

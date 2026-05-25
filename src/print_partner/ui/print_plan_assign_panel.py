@@ -64,12 +64,12 @@ def _configure_tree(
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(1, 44)
-        tree.setColumnWidth(0, 360)
+        tree.setColumnWidth(0, 420)
     else:
         tree.setColumnCount(1)
         tree.setHeaderLabels([primary_header])
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        tree.setColumnWidth(0, 360)
+        tree.setColumnWidth(0, 420)
     header.setSectionsMovable(False)
 
 
@@ -105,8 +105,9 @@ class PrintPlanAssignPanel(QWidget):
         root.setSpacing(6)
 
         hint = QLabel(
-            "Select parts on the left, choose a printer, and click <b>Assign →</b>. "
-            "Plates are packed automatically when you export."
+            "<b>Assign parts to printers</b> — Select a folder or parts on the left, pick a printer, "
+            "then <b>Assign →</b> or <b>Assign folder →</b>. On export, each "
+            "<i>filament · repo · folder</i> group becomes one or more named plates."
         )
         hint.setProperty("muted", True)
         hint.setWordWrap(True)
@@ -117,6 +118,12 @@ class PrintPlanAssignPanel(QWidget):
         self._btn_auto.setToolTip("Match parts to printers by loaded filament and pack plates.")
         self._btn_auto.clicked.connect(self.auto_assign_by_filament)
         toolbar.addWidget(self._btn_auto)
+        self._btn_assign_folder = QPushButton("Assign folder →")
+        self._btn_assign_folder.setToolTip(
+            "Assign every unclassified part in the selected repo/folder row to the chosen printer."
+        )
+        self._btn_assign_folder.clicked.connect(self._assign_selected_folder)
+        toolbar.addWidget(self._btn_assign_folder)
         toolbar.addStretch(1)
         self._status = QLabel("")
         self._status.setObjectName("printPlanStatus")
@@ -128,7 +135,7 @@ class PrintPlanAssignPanel(QWidget):
 
         left = QFrame()
         left.setObjectName("printPlanPoolPane")
-        left.setMinimumWidth(300)
+        left.setMinimumWidth(360)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(8, 8, 8, 8)
         left_title = QLabel("Unclassified")
@@ -165,7 +172,7 @@ class PrintPlanAssignPanel(QWidget):
 
         right = QFrame()
         right.setObjectName("printPlanPrintersPane")
-        right.setMinimumWidth(300)
+        right.setMinimumWidth(360)
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(8, 8, 8, 8)
         right_title = QLabel("Printers")
@@ -368,14 +375,30 @@ class PrintPlanAssignPanel(QWidget):
         parent.addChild(item)
         return item
 
+    def _refs_under_pool_item(self, item: QTreeWidgetItem) -> list[CopyRef]:
+        kind = item.data(0, _ROLE_KIND)
+        if kind == "part":
+            ref = item.data(0, _ROLE_REF)
+            return [ref] if isinstance(ref, CopyRef) else []
+        if kind == "folder":
+            stored = item.data(0, _ROLE_REF)
+            if isinstance(stored, list):
+                return [r for r in stored if isinstance(r, CopyRef)]
+            refs: list[CopyRef] = []
+            for i in range(item.childCount()):
+                refs.extend(self._refs_under_pool_item(item.child(i)))
+            return refs
+        return []
+
     def _selected_pool_refs(self) -> list[CopyRef]:
         refs: list[CopyRef] = []
+        seen: set[tuple[str, int]] = set()
         for item in self._pool_tree.selectedItems():
-            if item.data(0, _ROLE_KIND) != "part":
-                continue
-            ref = item.data(0, _ROLE_REF)
-            if isinstance(ref, CopyRef):
-                refs.append(ref)
+            for ref in self._refs_under_pool_item(item):
+                key = (ref.match_key, ref.unit)
+                if key not in seen:
+                    seen.add(key)
+                    refs.append(ref)
         return refs
 
     def _selected_printer_refs(self) -> list[CopyRef]:
@@ -388,10 +411,27 @@ class PrintPlanAssignPanel(QWidget):
                 refs.append(ref)
         return refs
 
-    def _assign_selected_to_printer(self) -> None:
+    def _assign_selected_folder(self) -> None:
+        folders = [
+            item
+            for item in self._pool_tree.selectedItems()
+            if item.data(0, _ROLE_KIND) == "folder"
+        ]
+        if not folders:
+            QMessageBox.information(
+                self,
+                "Assign folder",
+                "Select a repo/folder row on the left (e.g. “voron-kit / frame/”).",
+            )
+            return
         refs = self._selected_pool_refs()
         if not refs:
-            QMessageBox.information(self, "Assign", "Select one or more unclassified parts.")
+            QMessageBox.information(self, "Assign folder", "No parts in the selected folder.")
+            return
+        self._assign_refs_to_target(refs)
+
+    def _assign_refs_to_target(self, refs: list[CopyRef]) -> None:
+        if not refs:
             return
         printer_id = self._assign_combo.currentData()
         if not printer_id:
@@ -401,6 +441,17 @@ class PrintPlanAssignPanel(QWidget):
         moved = assign_refs_to_printer(layout, refs, str(printer_id))
         if moved:
             self._emit_changed()
+
+    def _assign_selected_to_printer(self) -> None:
+        refs = self._selected_pool_refs()
+        if not refs:
+            QMessageBox.information(
+                self,
+                "Assign",
+                "Select one or more parts, or a repo/folder row on the left.",
+            )
+            return
+        self._assign_refs_to_target(refs)
 
     def _unassign_selected(self) -> None:
         refs = self._selected_printer_refs()
@@ -446,7 +497,12 @@ class PrintPlanAssignPanel(QWidget):
                 [f"{repo} / {folder_label}  ({len(group_refs)})"]
             )
             group_item.setData(0, _ROLE_KIND, "folder")
-            group_item.setFlags(group_item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            group_item.setData(0, _ROLE_REF, list(group_refs))
+            group_item.setToolTip(
+                0,
+                f"Select this row and use Assign folder → to send all {len(group_refs)} "
+                f"part(s) to the chosen printer.",
+            )
             self._pool_tree.addTopLevelItem(group_item)
             for ref in sorted(
                 group_refs,

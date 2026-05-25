@@ -72,6 +72,8 @@ class PartsTreeWidget(QWidget):
         self.tree.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tree.setRootIsDecorated(True)
+        self.tree.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_context_menu)
         self.tree.itemChanged.connect(self._on_item_changed)

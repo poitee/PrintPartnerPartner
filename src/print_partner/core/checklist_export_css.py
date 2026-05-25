@@ -26,14 +26,14 @@ body {
 .checklist-doc {
   max-width: 8.5in;
   margin: 0 auto;
-  padding: 0.35in 0.45in 0.5in;
+  padding: 0.2in 0.3in 0.35in;
   background: var(--paper);
 }
 
 .doc-header {
   border-bottom: 2pt solid var(--ink);
-  padding-bottom: 0.35rem;
-  margin-bottom: 0.65rem;
+  padding-bottom: 0.2rem;
+  margin-bottom: 0.35rem;
 }
 
 .doc-kicker {
@@ -72,7 +72,7 @@ body {
 }
 
 .repo-section {
-  margin-top: 1.1rem;
+  margin-top: 0.55rem;
   page-break-before: auto;
 }
 
@@ -281,7 +281,7 @@ td.notes-cell {
 @media print {
   @page {
     size: letter portrait;
-    margin: 0.45in;
+    margin: 0.35in;
   }
 
   body {

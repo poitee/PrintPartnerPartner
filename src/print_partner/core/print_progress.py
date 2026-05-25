@@ -102,6 +102,18 @@ def mark_part_printed(session: Session, part_id: int, *, all: bool = True) -> No
         set_unit_completed(session, part_id, unit_index, completed=all)
 
 
+def set_printed_unit_count(session: Session, part_id: int, completed_count: int) -> None:
+    """Mark the first N units printed (0..qty); persists to print_progress."""
+    part = session.get(Part, part_id)
+    if not part:
+        return
+    ensure_progress_rows(session, part)
+    qty = max(1, part.quantity_effective)
+    count = max(0, min(completed_count, qty))
+    for unit_index in range(qty):
+        set_unit_completed(session, part_id, unit_index, completed=unit_index < count)
+
+
 def copy_progress_on_duplicate(
     session: Session,
     old_parts: list[Part],

@@ -8,22 +8,25 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QScrollArea,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from print_partner.core.checkoff_missing import filter_checkoff_display_rows
 from print_partner.core.print_checklist import (
     ChecklistPartRow,
-    filter_print_checklist_rows,
     group_checklist_rows,
+    progress_summary,
 )
+from print_partner.ui.table_layout import configure_table_columns
 
 # Sized for letter paper when exported; compact in-app preview column.
 _THUMB_MAX_WIDTH = 112
@@ -34,7 +37,9 @@ _CHECK_COL_WIDTH = 72
 
 class PrintChecklistWidget(QWidget):
     printed_toggled = Signal(int, bool)
+    printed_count_changed = Signal(int, int)  # part_id, completed unit count
     part_selected = Signal(int)
+    filter_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,6 +48,7 @@ class PrintChecklistWidget(QWidget):
         self._kit_name = ""
         self._order_number: str | None = None
         self._refreshing = False
+        self._filter_mode = "all"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -50,23 +56,53 @@ class PrintChecklistWidget(QWidget):
         self._header_card = QFrame()
         self._header_card.setObjectName("checklistHeader")
         header_layout = QVBoxLayout(self._header_card)
-        header_layout.setContentsMargins(14, 12, 14, 12)
-        header_layout.setSpacing(4)
+        header_layout.setContentsMargins(8, 6, 8, 6)
+        header_layout.setSpacing(2)
         self._header_kicker = QLabel("Print Partner · Build checklist")
         self._header_kicker.setObjectName("checklistKicker")
         self._header_title = QLabel("")
         self._header_title.setObjectName("checklistTitle")
         title_font = QFont(self._header_title.font())
-        title_font.setPointSize(title_font.pointSize() + 4)
+        title_font.setPointSize(title_font.pointSize() + 2)
         title_font.setBold(True)
         self._header_title.setFont(title_font)
         self._header_meta = QLabel("")
         self._header_meta.setProperty("muted", True)
         self._header_meta.setWordWrap(True)
+        self._header_help = QLabel(
+            "Use the <b>Print</b> column to record finished units (saved automatically). "
+            "Filter the list without losing progress. For exports, use the bar above: "
+            "<b>Print missing →</b> (Print tab + 3MF), <b>Export missing 3MF…</b>, or "
+            "<b>Export checklist</b> for HTML."
+        )
+        self._header_help.setProperty("muted", True)
+        self._header_help.setWordWrap(True)
+        self._header_help.setTextFormat(Qt.TextFormat.RichText)
         header_layout.addWidget(self._header_kicker)
         header_layout.addWidget(self._header_title)
         header_layout.addWidget(self._header_meta)
+        header_layout.addWidget(self._header_help)
         root.addWidget(self._header_card)
+
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(4, 0, 4, 0)
+        filter_hint = QLabel("Show")
+        filter_hint.setProperty("muted", True)
+        filter_row.addWidget(filter_hint)
+        self._filter_combo = QComboBox()
+        self._filter_combo.addItem("All included parts", "all")
+        self._filter_combo.addItem("Not finished", "missing")
+        self._filter_combo.addItem("Finished", "done")
+        self._filter_combo.setToolTip("Filter the checklist view (progress is always saved).")
+        self._filter_combo.currentIndexChanged.connect(self._on_filter_changed)
+        filter_row.addWidget(self._filter_combo)
+        save_hint = QLabel(
+            "View filter only — printed counts always save to this kit."
+        )
+        save_hint.setProperty("muted", True)
+        save_hint.setWordWrap(True)
+        filter_row.addWidget(save_hint, 1)
+        root.addLayout(filter_row)
 
         self.setAutoFillBackground(True)
         self.scroll = QScrollArea()
@@ -76,8 +112,8 @@ class PrintChecklistWidget(QWidget):
         self._document = QWidget()
         self._document.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._document_layout = QVBoxLayout(self._document)
-        self._document_layout.setContentsMargins(8, 0, 8, 16)
-        self._document_layout.setSpacing(6)
+        self._document_layout.setContentsMargins(4, 0, 4, 8)
+        self._document_layout.setSpacing(4)
         self.scroll.setWidget(self._document)
         root.addWidget(self.scroll, 1)
 
@@ -98,8 +134,16 @@ class PrintChecklistWidget(QWidget):
         if hasattr(win, "_set_workflow_index"):
             win._set_workflow_index(1)
 
+    def filter_mode(self) -> str:
+        return self._filter_mode
+
+    def _on_filter_changed(self) -> None:
+        self._filter_mode = str(self._filter_combo.currentData() or "all")
+        self._rebuild()
+        self.filter_changed.emit()
+
     def _filtered_rows(self) -> list[dict]:
-        return filter_print_checklist_rows(self._rows)
+        return filter_checkoff_display_rows(self._rows, self._filter_mode)
 
     def _clear_document(self) -> None:
         while self._document_layout.count():
@@ -113,7 +157,9 @@ class PrintChecklistWidget(QWidget):
         meta_parts: list[str] = []
         if self._order_number:
             meta_parts.append(f"Order # {self._order_number}")
-        meta_parts.append(f"{filtered_count} part(s) for printing")
+        meta_parts.append(progress_summary(self._rows))
+        if self._filter_mode != "all":
+            meta_parts.append(f"showing {filtered_count} in view")
         self._header_meta.setText(" · ".join(meta_parts))
 
     def _swatch_style(self, hex_color: str) -> str:
@@ -142,8 +188,9 @@ class PrintChecklistWidget(QWidget):
         repo_sections = group_checklist_rows(filtered)
         for repo in repo_sections:
             self._document_layout.addWidget(self._repo_heading(repo.label))
-            meta = QLabel(f"{repo.part_count} part(s) in this repository")
+            meta = QLabel(f"{repo.part_count} part(s)")
             meta.setProperty("muted", True)
+            meta.setContentsMargins(0, 0, 0, 2)
             self._document_layout.addWidget(meta)
             for folder in repo.folders:
                 folder_label = folder.label if folder.label != "(root)" else "(root)"
@@ -160,7 +207,7 @@ class PrintChecklistWidget(QWidget):
         font.setPointSize(font.pointSize() + 2)
         font.setBold(True)
         label.setFont(font)
-        label.setContentsMargins(0, 14, 0, 2)
+        label.setContentsMargins(0, 8, 0, 0)
         return label
 
     @staticmethod
@@ -170,7 +217,7 @@ class PrintChecklistWidget(QWidget):
         font = QFont(label.font())
         font.setBold(True)
         label.setFont(font)
-        label.setContentsMargins(0, 6, 0, 2)
+        label.setContentsMargins(0, 4, 0, 0)
         return label
 
     def _filename_cell(self, part: ChecklistPartRow) -> QWidget:
@@ -218,17 +265,12 @@ class PrintChecklistWidget(QWidget):
         table.setWordWrap(True)
         table.setAlternatingRowColors(True)
 
-        header = table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        table.setColumnWidth(1, 44)
-        table.setColumnWidth(2, _CHECK_COL_WIDTH)
-        table.setColumnWidth(3, _CHECK_COL_WIDTH)
-        table.setColumnWidth(4, 128)
+        configure_table_columns(
+            table,
+            stretch_columns=(0, 5),
+            fixed_widths={1: 48, 2: 100, 3: _CHECK_COL_WIDTH, 4: 128},
+            min_stretch_width=160,
+        )
         print_header = table.horizontalHeaderItem(2)
         if print_header:
             print_header.setToolTip("Mark all copies printed")
@@ -305,33 +347,54 @@ class PrintChecklistWidget(QWidget):
         layout = QHBoxLayout(container)
         layout.setContentsMargins(6, 0, 6, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cb = QCheckBox()
-        cb.setToolTip("Mark all copies printed")
-        cb.setChecked(part.all_printed)
-        hex_color = part.filament_hex
-        if hex_color:
-            pal = self.palette()
-            border = pal.color(QPalette.ColorRole.Mid).name()
-            base = pal.color(QPalette.ColorRole.Base).name()
-            cb.setStyleSheet(
-                "QCheckBox::indicator {"
-                f" border: 1px solid {border};"
-                f" background-color: {base};"
-                "}"
-                "QCheckBox::indicator:checked {"
-                f" background-color: {hex_color};"
-                f" border: 1px solid {border};"
-                "}"
-            )
         pid = part.id
+        qty = max(1, part.quantity)
 
-        def on_toggle(checked: bool) -> None:
-            if self._refreshing:
-                return
-            self.printed_toggled.emit(pid, checked)
+        if qty > 1:
+            spin = QSpinBox()
+            spin.setRange(0, qty)
+            spin.setValue(min(part.printed_count, qty))
+            spin.setToolTip(f"Units printed (0–{qty}); saved automatically")
+            spin.setMinimumWidth(52)
 
-        cb.toggled.connect(on_toggle)
-        layout.addWidget(cb)
+            def on_spin(value: int) -> None:
+                if self._refreshing:
+                    return
+                self.printed_count_changed.emit(pid, value)
+
+            spin.valueChanged.connect(on_spin)
+            layout.addWidget(spin)
+            of_label = QLabel(f"/ {qty}")
+            of_label.setProperty("muted", True)
+            layout.addWidget(of_label)
+        else:
+            cb = QCheckBox()
+            cb.setToolTip("Mark printed (saved automatically)")
+            cb.setChecked(part.printed_count >= 1)
+            hex_color = part.filament_hex
+            if hex_color:
+                pal = self.palette()
+                border = pal.color(QPalette.ColorRole.Mid).name()
+                base = pal.color(QPalette.ColorRole.Base).name()
+                cb.setStyleSheet(
+                    "QCheckBox::indicator {"
+                    f" border: 1px solid {border};"
+                    f" background-color: {base};"
+                    "}"
+                    "QCheckBox::indicator:checked {"
+                    f" background-color: {hex_color};"
+                    f" border: 1px solid {border};"
+                    "}"
+                )
+
+            def on_toggle(checked: bool) -> None:
+                if self._refreshing:
+                    return
+                self.printed_toggled.emit(pid, checked)
+                self.printed_count_changed.emit(pid, 1 if checked else 0)
+
+            cb.toggled.connect(on_toggle)
+            layout.addWidget(cb)
         return container
 
     @staticmethod

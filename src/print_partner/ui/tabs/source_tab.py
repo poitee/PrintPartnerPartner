@@ -30,18 +30,37 @@ class SourceTab(QWidget):
 
         action_card = QFrame()
         action_card.setObjectName("actionCard")
-        card_layout = QHBoxLayout(action_card)
+        card_layout = QVBoxLayout(action_card)
         card_layout.setContentsMargins(12, 10, 12, 10)
-        card_text = QLabel(
-            "<b>1 Libraries</b> — Sync a repo, then <b>Import files…</b> for STLs. "
-            "Continue on Kit → Print → Checkoff."
+        card_layout.setSpacing(6)
+        card_title = QLabel("<b>Libraries</b> — add sources, sync, then import STLs")
+        card_title.setWordWrap(True)
+        card_layout.addWidget(card_title)
+        steps = QLabel(
+            "<ol style='margin:4px 0 8px 18px;padding:0'>"
+            "<li><b>Add repository</b> — GitHub URL (clone + sync) or <b>Add local folder…</b> "
+            "for files already on disk.</li>"
+            "<li><b>Sync</b> selected or all Git repos so STLs are available offline.</li>"
+            "<li><b>Import files…</b> — choose which folders/files from a repo become kit parts "
+            "(required before Kit → Recompute).</li>"
+            "<li><b>Export / import repo list</b> — share your repo table with another machine "
+            "(More ▾ on the repository list).</li>"
+            "</ol>"
         )
-        card_text.setWordWrap(True)
-        card_layout.addWidget(card_text, 1)
+        steps.setWordWrap(True)
+        steps.setProperty("muted", True)
+        card_layout.addWidget(steps)
+        card_btn_row = QHBoxLayout()
+        card_btn_row.addStretch(1)
         self.btn_import_files = QPushButton("Import files…")
         self.btn_import_files.setObjectName("primaryButton")
+        self.btn_import_files.setToolTip(
+            "Open the STL import dialog for the selected repository "
+            "(pick folders or patterns to include in kits)."
+        )
         self.btn_import_files.clicked.connect(self._import_files_for_selection)
-        card_layout.addWidget(self.btn_import_files)
+        card_btn_row.addWidget(self.btn_import_files)
+        card_layout.addLayout(card_btn_row)
         root.addWidget(action_card)
 
         outer = QSplitter(Qt.Horizontal)
@@ -55,6 +74,13 @@ class SourceTab(QWidget):
         title = QLabel("Repositories")
         title.setProperty("emptyTitle", True)
         rh.addWidget(title)
+        repos_hint = QLabel(
+            "Git repos clone into ~/.print-partner/repos. Local folders stay in place. "
+            "Select a row to browse files below."
+        )
+        repos_hint.setProperty("muted", True)
+        repos_hint.setWordWrap(True)
+        rh.addWidget(repos_hint)
         self.project_library = ProjectLibrary()
         rh.addWidget(self.project_library)
         left.addWidget(repos_header)
@@ -68,19 +94,36 @@ class SourceTab(QWidget):
         row.addWidget(files_title)
         row.addStretch(1)
         self.btn_add_local = QPushButton("Add local folder…")
+        self.btn_add_local.setToolTip(
+            "Register a folder on disk as a project (same as Add local folder in the list)."
+        )
         self.btn_add_local.clicked.connect(self.project_library._add_local_folder)
         row.addWidget(self.btn_add_local)
         fh.addLayout(row)
+        files_hint = QLabel(
+            "Browse synced files; README/docs open on the right. Import rules live in "
+            "Import files… for the selected repo."
+        )
+        files_hint.setProperty("muted", True)
+        files_hint.setWordWrap(True)
+        fh.addWidget(files_hint)
         self.browse_tree = RepoBrowseTree()
         fh.addWidget(self.browse_tree)
         left.addWidget(files_header)
 
-        left.setSizes([320, 280])
+        left.setSizes([340, 280])
         outer.addWidget(left)
 
+        docs_header = QLabel("Documentation")
+        docs_header.setProperty("emptyTitle", True)
+        docs_wrap = QWidget()
+        docs_layout = QVBoxLayout(docs_wrap)
+        docs_layout.setContentsMargins(0, 0, 0, 0)
+        docs_layout.addWidget(docs_header)
         self.docs_panel = DocsPanel()
-        outer.addWidget(self.docs_panel)
-        outer.setSizes([480, 520])
+        docs_layout.addWidget(self.docs_panel, 1)
+        outer.addWidget(docs_wrap)
+        outer.setSizes([500, 500])
 
         self.project_library.table.selectionModel().selectionChanged.connect(
             self._on_project_selection_changed

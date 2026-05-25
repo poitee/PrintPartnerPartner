@@ -48,13 +48,15 @@ class ProfilePartsPanel(QWidget):
         self._inclusion_changed_cb = None
         self._quantity_changed_cb = None
         self._all_printed_toggled_cb = None
+        self._printed_count_changed_cb = None
         self._print_toggle_cb = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
 
         self.hint = QLabel(
-            "Curate parts for this profile. Expand repos and folders; check a folder to include its subtree."
+            "Curate parts for this kit. Expand repos → folders; check rows to include STLs in the build. "
+            "Use filters above the tree; select a part to set role, filament, and quantity in the editor below."
         )
         self.hint.setProperty("muted", True)
         self.hint.setWordWrap(True)
@@ -101,6 +103,7 @@ class ProfilePartsPanel(QWidget):
 
         self.print_checklist = PrintChecklistWidget()
         self.print_checklist.printed_toggled.connect(self._on_all_printed_toggled)
+        self.print_checklist.printed_count_changed.connect(self._on_printed_count_changed)
         self.print_checklist.part_selected.connect(self.part_selected.emit)
         self._stack.addWidget(self.print_checklist)
 
@@ -128,7 +131,8 @@ class ProfilePartsPanel(QWidget):
         if mode == "build":
             self._stack.setCurrentIndex(self._PAGE_TREE)
             self.hint.setText(
-                "Curate parts for this profile. Expand repos and folders; check a folder to include its subtree."
+                "Compose the kit: include/exclude parts, assign filament colors, set quantities. "
+                "Filters narrow the tree; the editor below applies to the selected part."
             )
             self._tree_toolbar_host.setVisible(True)
             self._bulk_buttons_host.setVisible(True)
@@ -152,8 +156,9 @@ class ProfilePartsPanel(QWidget):
             self._hide_printed = False
             self._stack.setCurrentIndex(self._PAGE_CHECKLIST)
             self.hint.setText(
-                "Check off parts as you print. Progress is saved to this profile. "
-                "Export HTML for a printable checklist."
+                "Checklist below: mark Print as you finish units (saved per kit). "
+                "Toolbar above — Print missing → for the Print tab, Export missing 3MF… for slicer "
+                "plates, Export checklist for a printable HTML sheet."
             )
             self._tree_toolbar_host.setVisible(False)
             self._bulk_buttons_host.setVisible(False)
@@ -171,11 +176,13 @@ class ProfilePartsPanel(QWidget):
         on_print_toggle=None,
         on_quantity_changed=None,
         on_all_printed_toggled=None,
+        on_printed_count_changed=None,
     ) -> None:
         self._inclusion_changed_cb = on_inclusion_changed
         self._print_toggle_cb = on_print_toggle
         self._quantity_changed_cb = on_quantity_changed
         self._all_printed_toggled_cb = on_all_printed_toggled
+        self._printed_count_changed_cb = on_printed_count_changed
 
     def load_parts(
         self,
@@ -304,6 +311,10 @@ class ProfilePartsPanel(QWidget):
     def _on_all_printed_toggled(self, part_id: int, all_printed: bool) -> None:
         if self._all_printed_toggled_cb:
             self._all_printed_toggled_cb(part_id, all_printed)
+
+    def _on_printed_count_changed(self, part_id: int, count: int) -> None:
+        if self._printed_count_changed_cb:
+            self._printed_count_changed_cb(part_id, count)
 
     def _set_selected_visible(self, included: bool) -> None:
         ids = self.parts_tree.selected_part_ids()

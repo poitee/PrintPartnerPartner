@@ -9,7 +9,9 @@ from typing import Literal
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFileDialog,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
@@ -34,6 +36,12 @@ from print_partner.core.ambrosia_catalog import (
     catalog_status_text,
     load_catalog,
 )
+from print_partner.core.checkoff_missing import (
+    count_unprinted_units,
+    prepare_print_plan_for_missing,
+    unprinted_copies,
+)
+from print_partner.core.custom_filaments import merged_filament_by_id
 from print_partner.core.export_3mf import Export3mfOptions
 from print_partner.core.export_html import export_path_for_profile, open_html_file
 from print_partner.core.export_kit_bundle import (
@@ -49,10 +57,11 @@ from print_partner.core.part_paths import (
     resolve_part_stl_path,
     thumbnail_jobs_for_profile,
 )
-from print_partner.core.print_checklist import enrich_thumbnail_paths
-from print_partner.core.print_progress import (
-    print_units_by_part_id,
-)
+from print_partner.core.plate_plan import resolve_layout_to_plates
+from print_partner.core.print_checklist import enrich_thumbnail_paths, progress_summary
+from print_partner.core.print_plan import load_kit_print_plan
+from print_partner.core.print_progress import print_units_by_part_id
+from print_partner.core.printer_fleet import load_fleet
 from print_partner.db.models import BuildProfile, Project
 from print_partner.db.session import (
     db_session,
@@ -66,6 +75,7 @@ from print_partner.db.session import (
 from print_partner.ui.ai_assistant_panel import AiAssistantPanel
 from print_partner.ui.catalog_sync_worker import CatalogSyncWorker
 from print_partner.ui.composer import AiIntegrationMixin, KitActionsMixin, PartsViewMixin
+from print_partner.ui.custom_filaments_dialog import CustomFilamentsDialog
 from print_partner.ui.docs_panel import DocsPanel
 from print_partner.ui.empty_state import EmptyStateWidget
 from print_partner.ui.export_worker import (
@@ -159,6 +169,7 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         manage_menu.addAction("Duplicate in database…", self._manage_duplicate_db)
         manage_menu.addAction("Edit in wizard…", self._manage_edit_wizard)
         manage_menu.addSeparator()
+        manage_menu.addAction("Custom filaments…", self._show_custom_filaments)
         manage_menu.addAction("Export kit for sharing…", self._export_kit_bundle)
         manage_menu.addAction("Import shared kit…", self._import_kit_bundle)
         self.btn_manage.setMenu(manage_menu)
@@ -177,6 +188,7 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         build_advanced = QMenu(self)
         build_advanced.addAction("New profile", self._new_profile)
         build_advanced.addAction("Refresh Ambrosia colors", self._refresh_ambrosia_colors)
+        build_advanced.addAction("Custom filaments…", self._show_custom_filaments)
         self._btn_build_advanced = QPushButton("Advanced ▾")
         self._btn_build_advanced.setMenu(build_advanced)
 
@@ -186,6 +198,7 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         build_menu.addSeparator()
         build_menu.addAction("New profile", self._new_profile)
         build_menu.addAction("Refresh Ambrosia colors", self._refresh_ambrosia_colors)
+        build_menu.addAction("Custom filaments…", self._show_custom_filaments)
         self._btn_build_menu = QPushButton("Build ▾")
         self._btn_build_menu.setMenu(build_menu)
 
@@ -226,6 +239,9 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
 
         self._btn_export_html = QPushButton("Export checklist")
         self._btn_export_html.setObjectName("primaryButton")
+        self._btn_export_html.setToolTip(
+            "Save a printable HTML checklist (thumbnails + print boxes) to open in a browser."
+        )
         self._btn_export_html.clicked.connect(self._export_html)
         self._btn_export_stls = QPushButton("Export STLs…")
         self._btn_export_stls.clicked.connect(self._export_stls)
@@ -249,7 +265,19 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         checkoff_layout.setContentsMargins(0, 0, 0, 0)
         self._checkoff_progress = QLabel("")
         self._checkoff_progress.setProperty("muted", True)
+        self._btn_print_missing = QPushButton("Print missing →")
+        self._btn_print_missing.setToolTip(
+            "Send unprinted parts to the Print tab unclassified pool (saved)."
+        )
+        self._btn_print_missing.clicked.connect(self._send_missing_to_print_tab)
+        self._btn_export_missing_3mf = QPushButton("Export missing 3MF…")
+        self._btn_export_missing_3mf.setToolTip(
+            "Export 3MF for units not yet marked printed (uses Print tab printers)."
+        )
+        self._btn_export_missing_3mf.clicked.connect(self._export_missing_3mf)
         checkoff_layout.addWidget(self._checkoff_progress, 1)
+        checkoff_layout.addWidget(self._btn_print_missing)
+        checkoff_layout.addWidget(self._btn_export_missing_3mf)
         checkoff_layout.addWidget(self._btn_export_html)
         checkoff_layout.addWidget(self._btn_checkoff_more)
 
@@ -303,6 +331,33 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         self._verify_summary.setWordWrap(True)
         body.addWidget(self._verify_summary)
 
+        self._checkoff_guide = QFrame()
+        self._checkoff_guide.setObjectName("actionCard")
+        checkoff_guide_layout = QVBoxLayout(self._checkoff_guide)
+        checkoff_guide_layout.setContentsMargins(10, 8, 10, 8)
+        checkoff_guide_title = QLabel(
+            "<b>Checkoff</b> — track what you have printed for this kit. "
+            "Every checkbox and printed count saves to the kit automatically."
+        )
+        checkoff_guide_title.setWordWrap(True)
+        checkoff_guide_layout.addWidget(checkoff_guide_title)
+        checkoff_guide_steps = QLabel(
+            "<b>While printing:</b> mark the <b>Print</b> column (or 0/N for multi-qty parts) "
+            "as units finish.<br>"
+            "<b>Still need parts?</b> <b>Print missing →</b> loads only unprinted units onto "
+            "the Print tab — enable printers there, assign folders, then export 3MF.<br>"
+            "<b>Export missing 3MF…</b> builds plates for unmarked units only (uses Print tab "
+            "printers).<br>"
+            "<b>Export checklist</b> opens a printable HTML sheet for the shop floor; "
+            "<b>More ▾</b> for STLs or a full-kit export."
+        )
+        checkoff_guide_steps.setProperty("muted", True)
+        checkoff_guide_steps.setWordWrap(True)
+        checkoff_guide_steps.setTextFormat(Qt.TextFormat.RichText)
+        checkoff_guide_layout.addWidget(checkoff_guide_steps)
+        self._checkoff_guide.hide()
+        body.addWidget(self._checkoff_guide)
+
         self.layers_panel = ProfileLayersPanel()
         self.layers_panel.set_base_requested.connect(self._set_base)
         self.layers_panel.add_addon_requested.connect(self._add_addon)
@@ -311,34 +366,51 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
         self.layers_panel.recompute_requested.connect(self._recompute)
         body.addWidget(self.layers_panel)
 
-        self._filters_group = QGroupBox("Advanced filters")
-        self._filters_group.setCheckable(True)
-        self._filters_group.setChecked(False)
+        self._filters_group = QGroupBox("Filter parts in tree")
         filters_inner = QWidget()
         filters = QHBoxLayout(filters_inner)
         filters.setContentsMargins(0, 0, 0, 0)
-        filters.addWidget(QLabel("Status:"))
+        filters.setSpacing(10)
         self.status_combo = QComboBox()
-        self.status_combo.addItems(["", "base", "added", "replaced", "conflict", "excluded"])
-        self.status_combo.currentTextChanged.connect(self._apply_filters)
+        self.status_combo.addItem("Any status", "")
+        for st in ("base", "added", "replaced", "conflict", "excluded"):
+            self.status_combo.addItem(st.capitalize(), st)
+        self.status_combo.setToolTip("Limit the parts tree by merge status (from layer diffs).")
+        self.status_combo.currentIndexChanged.connect(self._apply_filters)
+        filters.addWidget(QLabel("Status"))
         filters.addWidget(self.status_combo)
-        filters.addWidget(QLabel("Role:"))
         self.role_combo = QComboBox()
-        self.role_combo.addItems(["", "primary", "accent", "clear", "opaque"])
-        self.role_combo.currentTextChanged.connect(self._apply_filters)
+        self.role_combo.addItem("Any role", "")
+        for role in ("primary", "accent", "clear", "opaque"):
+            self.role_combo.addItem(role, role)
+        self.role_combo.setToolTip("Show only parts with this print role ([a], [c], etc.).")
+        self.role_combo.currentIndexChanged.connect(self._apply_filters)
+        filters.addWidget(QLabel("Role"))
         filters.addWidget(self.role_combo)
         self.included_only = QComboBox()
-        self.included_only.addItems(["All", "Included only", "Excluded only"])
+        self.included_only.addItem("All parts", 0)
+        self.included_only.addItem("Included only", 1)
+        self.included_only.addItem("Excluded only", 2)
+        self.included_only.setToolTip("Filter by whether parts are included in the kit export.")
         self.included_only.currentIndexChanged.connect(self._apply_filters)
+        filters.addWidget(QLabel("Show"))
         filters.addWidget(self.included_only)
-        filters.addWidget(QLabel("Filament:"))
         self.filament_filter = QComboBox()
+        self.filament_filter.setMinimumWidth(160)
+        self.filament_filter.setToolTip("Filter by assigned filament color.")
         self.filament_filter.currentIndexChanged.connect(self._apply_filters)
-        filters.addWidget(self.filament_filter)
+        filters.addWidget(QLabel("Filament"))
+        filters.addWidget(self.filament_filter, 1)
+        filters.addStretch(0)
         group_layout = QVBoxLayout(self._filters_group)
+        filter_hint = QLabel(
+            "Use the search box on the parts tree for names/paths. "
+            "Select a part to edit role, filament, and qty below the tree."
+        )
+        filter_hint.setProperty("muted", True)
+        filter_hint.setWordWrap(True)
+        group_layout.addWidget(filter_hint)
         group_layout.addWidget(filters_inner)
-        filters_inner.setVisible(False)
-        self._filters_group.toggled.connect(filters_inner.setVisible)
         body.addWidget(self._filters_group)
 
         self._splitter = QSplitter(Qt.Horizontal)
@@ -350,6 +422,7 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
             on_inclusion_changed=self._on_parts_inclusion_changed,
             on_quantity_changed=self._on_part_quantity_changed,
             on_all_printed_toggled=self._on_all_printed_toggled,
+            on_printed_count_changed=self._on_printed_count_changed,
         )
         self.parts_panel.part_selected.connect(self._on_part_selected_by_id)
         self.parts_panel.tree_path_selected.connect(self._on_tree_path_selected)
@@ -493,12 +566,88 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
 
     def _update_checkoff_progress(self, part_dicts: list[dict] | None = None) -> None:
         rows = part_dicts if part_dicts is not None else self._cached_part_dicts
-        included = [d for d in rows if d.get("included")]
-        n_inc = len(included)
-        printed = sum(1 for d in included if d.get("printed_count", 0) >= max(1, d.get("quantity_effective", 1)))
-        self._checkoff_progress.setText(
-            f"{n_inc} included · {printed} printed · track verified on checklist"
+        self._checkoff_progress.setText(progress_summary(rows) if rows else "No parts loaded")
+        missing = count_unprinted_units(rows) if rows else 0
+        has_rows = bool(rows)
+        self._btn_print_missing.setEnabled(has_rows and missing > 0)
+        self._btn_export_missing_3mf.setEnabled(has_rows and missing > 0)
+
+    def _send_missing_to_print_tab(self) -> None:
+        if self._current_profile_id is None:
+            return
+        _, _, merge_parts, completed_by_key = self._merge_parts_for_export()
+        n, _layout = prepare_print_plan_for_missing(
+            self._current_profile_id, merge_parts, completed_by_key
         )
+        if n == 0:
+            QMessageBox.information(
+                self,
+                "Print missing",
+                "All included parts with STLs are marked printed.",
+            )
+            return
+        from print_partner.ui.toast import show_toast
+
+        self.navigate_requested.emit("print")
+        show_toast(
+            self,
+            f"{n} unprinted unit(s) loaded on Print — assign printers, then export 3MF.",
+        )
+
+    def _export_missing_3mf(self) -> None:
+        if self._current_profile_id is None:
+            return
+        _, _, merge_parts, completed_by_key = self._merge_parts_for_export()
+        copies = unprinted_copies(merge_parts, completed_by_key)
+        if not copies:
+            QMessageBox.information(
+                self,
+                "Export missing 3MF",
+                "All included parts with STLs are marked printed.",
+            )
+            return
+        plan = load_kit_print_plan(self._current_profile_id)
+        fleet = load_fleet()
+        enabled = [p for p in fleet if p.id in (plan.enabled_printer_ids or [])]
+        if not enabled:
+            QMessageBox.information(
+                self,
+                "Export missing 3MF",
+                "Enable at least one printer on the Print tab first.",
+            )
+            self.navigate_requested.emit("print")
+            return
+        plate_layouts = None
+        if plan.plate_layout:
+            plate_layouts, warnings = resolve_layout_to_plates(
+                plan.plate_layout, enabled, copies
+            )
+            if warnings:
+                QMessageBox.warning(
+                    self,
+                    "Print plan",
+                    "Some parts are not assigned to printers.\n\n"
+                    + "\n".join(warnings[:6]),
+                )
+        from print_partner.ui.export_3mf_dialog import Export3mfDialog
+
+        dlg = Export3mfDialog(
+            f"{len(copies)} unprinted unit(s) · {len(enabled)} printer(s)",
+            "Exports only units not marked printed in checkoff.",
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        mode, spacing = dlg.options_kwargs()
+        options = Export3mfOptions(
+            layout_mode=mode,
+            spacing_mm=spacing,
+            enabled_printers=enabled,
+            plate_layouts=plate_layouts,
+            missing_only=True,
+            completed_by_match_key=completed_by_key,
+        )
+        self.run_3mf_export(options)
 
     def set_kit_sub_mode(self, sub: KitSubMode, *, reload_parts: bool = False) -> None:
         self._kit_sub_mode = sub
@@ -693,7 +842,7 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
 
             profile = session.get(BuildProfile, self._current_profile_id)
             parts = get_profile_parts(session, self._current_profile_id)
-            colors_by_id = self._catalog.by_id()
+            colors_by_id = merged_filament_by_id()
             units_by_id = print_units_by_part_id(session, self._current_profile_id)
             part_dicts = [
                 part_to_display_dict(
@@ -761,7 +910,7 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
             counts[row["status"]] = counts.get(row["status"], 0) + 1
             if self._status_filter and row["status"] != self._status_filter:
                 continue
-            role_f = self.role_combo.currentText()
+            role_f = self.role_combo.currentData() or ""
             if role_f and row["role"] != role_f:
                 continue
             if filament_f == "__unset__" and row.get("filament_color_id"):
@@ -852,7 +1001,7 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
             name = profile.name if profile else self.profile_combo.currentText()
             order_number = profile.order_number if profile else None
             rows = get_profile_parts(session, self._current_profile_id)
-            colors_by_id = load_catalog().by_id()
+            colors_by_id = merged_filament_by_id()
             units_by_id = print_units_by_part_id(session, self._current_profile_id)
             merge_parts: list[MergePart] = []
             completed_by_key: dict[str, list[bool]] = {}
@@ -1093,6 +1242,22 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
             f"Could not open:\n{path}\n\nExport first or choose another file.",
         )
 
+    def _show_custom_filaments(self) -> None:
+        dialog = CustomFilamentsDialog(self)
+        dialog.library_changed.connect(self._on_custom_filaments_changed)
+        dialog.exec()
+
+    def _on_custom_filaments_changed(self) -> None:
+        self.filament_picker.refresh_custom_filaments()
+        if self._current_profile_id is not None:
+            with db_session() as session:
+                parts = get_profile_parts(session, self._current_profile_id)
+                colors_by_id = merged_filament_by_id()
+                part_dicts = [
+                    part_to_display_dict(p, colors_by_id=colors_by_id) for p in parts
+                ]
+            self._rebuild_filament_filter(part_dicts)
+
     def _export_kit_bundle(self) -> None:
         if self._current_profile_id is None:
             QMessageBox.information(self, "Export kit", "Select a kit first.")
@@ -1116,7 +1281,10 @@ class ProfileComposer(PartsViewMixin, KitActionsMixin, AiIntegrationMixin, QWidg
             return
         from print_partner.ui.toast import show_toast
 
-        show_toast(self, f"Kit saved to {dest.name} — share this file with your print partner.")
+        show_toast(
+            self,
+            f"Kit saved to {dest.name} — includes custom filaments used in the kit.",
+        )
 
     def _import_kit_bundle(self) -> None:
         start = str(settings.exports_dir) if settings.exports_dir.is_dir() else ""

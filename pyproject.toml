@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "print-partner"
-version = "0.3.0"
+version = "0.3.1"
 description = "Local-first desktop app for layered 3D print part manifests from GitHub STL repos"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -45,7 +45,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-print_partner = ["data/*.json"]
+print_partner = ["data/*.json", "data/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

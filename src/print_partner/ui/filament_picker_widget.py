@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from print_partner.core.ambrosia_catalog import AmbrosiaCatalog, AmbrosiaColor, load_catalog
+from print_partner.core.custom_filaments import custom_filaments_as_catalog
 from print_partner.core.filament_color_resolve import (
     UNASSIGNED_FILAMENT_HEX,
     effective_filament_hex,
@@ -72,6 +73,11 @@ class FilamentPickerWidget(QWidget):
         select_id = self.selected_color_id()
         self._populate_catalog(select_id=select_id)
 
+    def refresh_custom_filaments(self) -> None:
+        """Reload custom entries in the combo (after library edit or import)."""
+        select_id = self.selected_color_id()
+        self._populate_catalog(select_id=select_id)
+
     def selected_color_id(self) -> str | None:
         data = self.catalog_combo.currentData()
         if data:
@@ -86,7 +92,7 @@ class FilamentPickerWidget(QWidget):
             return self._custom_hex
         color_id = self.selected_color_id()
         if color_id:
-            color = self._catalog.by_id().get(color_id)
+            color = self._merged_by_id().get(color_id)
             if color:
                 resolved = effective_filament_hex(
                     color.hex, color.display_name, color.product_line
@@ -124,6 +130,16 @@ class FilamentPickerWidget(QWidget):
             row = self.catalog_combo.count() - 1
             if mesh_hex:
                 self.catalog_combo.setItemIcon(row, _icon_for_hex(mesh_hex))
+        custom_colors = custom_filaments_as_catalog()
+        if custom_colors:
+            self.catalog_combo.insertSeparator(self.catalog_combo.count())
+            for color in custom_colors:
+                mesh_hex = self._color_mesh_hex(color)
+                label = color.combo_label
+                self.catalog_combo.addItem(label, color.id)
+                row = self.catalog_combo.count() - 1
+                if mesh_hex:
+                    self.catalog_combo.setItemIcon(row, _icon_for_hex(mesh_hex))
         completer = QCompleter(
             [self.catalog_combo.itemText(i) for i in range(self.catalog_combo.count())]
         )
@@ -137,8 +153,16 @@ class FilamentPickerWidget(QWidget):
         self.catalog_combo.blockSignals(False)
         self._sync_display()
 
+    def _merged_by_id(self) -> dict[str, AmbrosiaColor]:
+        out = self._catalog.by_id()
+        for color in custom_filaments_as_catalog():
+            out[color.id] = color
+        return out
+
     @staticmethod
     def _color_mesh_hex(color: AmbrosiaColor) -> str | None:
+        if str(color.id).startswith("custom:"):
+            return normalize_mesh_hex(color.hex)
         return effective_filament_hex(color.hex, color.display_name, color.product_line)
 
     def _sync_display(self) -> None:

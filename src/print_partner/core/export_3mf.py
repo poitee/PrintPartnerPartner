@@ -34,6 +34,9 @@ class Export3mfOptions:
     enabled_printers: list[PrinterMachine] = field(default_factory=list)
     # When set, export uses these plate positions instead of auto-packing.
     plate_layouts: list[tuple[PrinterMachine, PlateLayout]] | None = None
+    # When missing_only, export only units not marked printed (checkoff progress).
+    missing_only: bool = False
+    completed_by_match_key: dict[str, list[bool]] | None = None
 
 
 @dataclass
@@ -191,10 +194,18 @@ def export_profile_3mf(
     ]
 
     copies: list[PartCopy] = []
+    completed = opts.completed_by_match_key or {}
     for part in exportable:
         qty = max(1, part.quantity_effective)
+        units = completed.get(part.match_key)
         for unit in range(1, qty + 1):
+            if opts.missing_only:
+                idx = unit - 1
+                if units and idx < len(units) and units[idx]:
+                    continue
             copies.append(PartCopy(part=part, unit=unit))
+    if opts.missing_only and not copies:
+        warnings.append("All included units are already marked printed in checkoff.")
 
     empty = Export3mfResult(
         primary_path=output_dir / f"{safe_profile}.3mf",
@@ -278,12 +289,12 @@ def export_profile_3mf(
         model = wrapper.CreateModel()
         material_by_key: dict[str, tuple[object, int]] = {}
         used_names: set[str] = set()
-        x_cursor = 0.0
+        x_offset_mm = 0.0
         for printer, plate in all_plates:
             object_count += _write_items_to_model(
-                model, wrapper, plate.items, used_names, material_by_key, x_cursor
+                model, wrapper, plate.items, used_names, material_by_key, x_offset_mm
             )
-            x_cursor += printer.bed_width_mm + _PLATE_GAP_MM
+            x_offset_mm += printer.bed_width_mm + _PLATE_GAP_MM
         out_path = output_dir / f"{safe_profile}.3mf"
         if object_count > 0:
             model.QueryWriter("3mf").WriteToFile(str(out_path))
@@ -291,7 +302,11 @@ def export_profile_3mf(
     else:
         for printer, plate in all_plates:
             slug_printer = _slug(printer.name)
-            fname = f"{safe_profile}_{slug_printer}_plate_{plate.index:02d}.3mf"
+            if plate.group_label:
+                slug_group = _slug(plate.group_label)[:80]
+                fname = f"{safe_profile}_{slug_printer}_{slug_group}_p{plate.index:02d}.3mf"
+            else:
+                fname = f"{safe_profile}_{slug_printer}_plate_{plate.index:02d}.3mf"
             out_path = output_dir / fname
             n = _write_plate_file(out_path, plate.items)
             object_count += n

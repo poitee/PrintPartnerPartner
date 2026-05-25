@@ -6,7 +6,10 @@ dist/
 build/
 *.egg-info/
 .DS_Store
+# Local IDE / editor metadata (never ship in releases)
 .cursor/
+.vscode/
+.idea/
 *.db
 .env
 .env.*

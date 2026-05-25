@@ -13,6 +13,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from print_partner.core.custom_filaments import (
+    collect_custom_ids_from_parts,
+    library_to_export_dict,
+    merge_filaments_from_dict,
+)
 from print_partner.core.print_progress import ensure_profile_progress
 from print_partner.db.models import BuildProfile, Part, ProfileLayer, Project
 from print_partner.db.session import get_profile_layers, get_profile_parts, list_projects
@@ -81,7 +86,10 @@ def profile_to_bundle_dict(
             qty = max(1, part.quantity_effective)
             progress_by_match[part.match_key] = get_print_units(session, part.id, qty)
 
-    for part in get_profile_parts(session, profile_id):
+    parts_list = get_profile_parts(session, profile_id)
+    custom_refs = collect_custom_ids_from_parts(parts_list)
+
+    for part in parts_list:
         row: dict[str, Any] = {
             "match_key": part.match_key,
             "relative_path": part.relative_path,
@@ -103,7 +111,7 @@ def profile_to_bundle_dict(
             row["print_units"] = progress_by_match[part.match_key]
         parts_out.append(row)
 
-    return {
+    bundle: dict[str, Any] = {
         "format": KIT_FORMAT,
         "version": KIT_VERSION,
         "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -114,6 +122,9 @@ def profile_to_bundle_dict(
         "layers": layers_out,
         "parts": parts_out,
     }
+    if custom_refs:
+        bundle["custom_filaments"] = library_to_export_dict(custom_refs)["filaments"]
+    return bundle
 
 
 def export_kit_bundle(
@@ -202,6 +213,8 @@ def import_kit_bundle(
     unless include_print_progress=False.
     """
     data = _load_bundle_dict(path)
+    if data.get("custom_filaments"):
+        merge_filaments_from_dict({"filaments": data["custom_filaments"]})
     profile_data = data.get("profile") or {}
     desired_name = (new_name or profile_data.get("name") or "Imported kit").strip()
     name = _unique_profile_name(session, desired_name)

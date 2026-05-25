@@ -7,7 +7,15 @@ from pathlib import Path
 
 from print_partner.core.repo_readme import README_NAMES
 
-SKIP_DIR_NAMES = frozenset({".git", "node_modules", "__pycache__", ".venv", ".cursor"})
+SKIP_DIR_NAMES = frozenset({
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    ".cursor",
+    ".vscode",
+    ".idea",
+})
 MAX_SIBLING_DOCS = 12
 
 

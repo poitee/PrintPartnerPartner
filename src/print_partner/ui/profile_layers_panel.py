@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from print_partner.ui.table_layout import configure_table_columns
+
 
 class ProfileLayersPanel(QWidget):
     layers_changed = Signal()
@@ -40,6 +42,11 @@ class ProfileLayersPanel(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setMaximumHeight(140)
+        configure_table_columns(
+            self.table,
+            stretch_columns=(2,),
+            fixed_widths={0: 36, 1: 72},
+        )
         root.addWidget(self.table)
 
         buttons = QHBoxLayout()

@@ -14,11 +14,16 @@ from print_partner.core.ambrosia_catalog import (
     invalidate_catalog_cache,
     load_catalog,
 )
+from print_partner.core.custom_filaments import merged_filament_by_id
 from print_partner.core.filament_color_resolve import resolve_part_filament_hex
 from print_partner.core.part_paths import build_profile_stl_index, resolve_part_stl_path
 from print_partner.core.parts_tree import repo_name_from_source_layer
 from print_partner.core.print_checklist import enrich_thumbnail_paths
-from print_partner.core.print_progress import mark_part_printed, print_units_by_part_id
+from print_partner.core.print_progress import (
+    mark_part_printed,
+    print_units_by_part_id,
+    set_printed_unit_count,
+)
 from print_partner.core.thumbnails import invalidate_global_thumbnails
 from print_partner.db.models import Part, Project
 from print_partner.db.session import (
@@ -42,7 +47,7 @@ class PartsViewMixin:
         for row in part_dicts:
             if self._status_filter and row["status"] != self._status_filter:
                 continue
-            role_f = self.role_combo.currentText()
+            role_f = self.role_combo.currentData() or ""
             if role_f and row["role"] != role_f:
                 continue
             if filament_f == "__unset__" and row.get("filament_color_id"):
@@ -94,6 +99,7 @@ class PartsViewMixin:
         self._splitter_right.setVisible(is_compose or is_checkoff)
         self._editor_host.setVisible(is_compose)
         self._verify_summary.setVisible(is_review)
+        self._checkoff_guide.setVisible(is_checkoff)
         self._inspector_tabs.setVisible(is_compose or is_checkoff)
         if is_compose:
             self.ai_panel.refresh_enabled_state()
@@ -196,7 +202,7 @@ class PartsViewMixin:
     def _load_part_dicts_for_summary(self) -> list[dict]:
         with db_session() as session:
             parts = get_profile_parts(session, self._current_profile_id)
-            colors_by_id = self._catalog.by_id()
+            colors_by_id = merged_filament_by_id()
             units_by_id = print_units_by_part_id(session, self._current_profile_id)
             return [
                 part_to_display_dict(
@@ -255,6 +261,11 @@ class PartsViewMixin:
             mark_part_printed(session, part_id, all=all_printed)
         self._reload_print_progress_ui()
 
+    def _on_printed_count_changed(self, part_id: int, count: int) -> None:
+        with db_session() as session:
+            set_printed_unit_count(session, part_id, count)
+        self._reload_print_progress_ui()
+
     def _on_part_quantity_changed(self, part_id: int, value: int) -> None:
         with db_session() as session:
             part = session.get(Part, part_id)
@@ -280,7 +291,7 @@ class PartsViewMixin:
             from print_partner.core.print_progress import print_units_by_part_id
 
             parts = get_profile_parts(session, self._current_profile_id)
-            colors_by_id = self._catalog.by_id()
+            colors_by_id = merged_filament_by_id()
             units_by_id = print_units_by_part_id(session, self._current_profile_id)
             part_dicts = [
                 part_to_display_dict(
@@ -295,7 +306,9 @@ class PartsViewMixin:
             enrich_thumbnail_paths(part_dicts, parts, stl_index)
 
         if self._is_checkoff:
+            self._cached_part_dicts = part_dicts
             self.parts_panel.refresh_checkoff_rows(part_dicts)
+            self._update_checkoff_progress(part_dicts)
             return
         if self._is_kit_review:
             visible = self._visible_part_ids
@@ -470,7 +483,7 @@ class PartsViewMixin:
             return
         use_visible = bool(self._visible_part_ids) and (
             self._status_filter
-            or self.role_combo.currentText()
+            or self.role_combo.currentData()
             or self.filament_filter.currentData() not in ("", None)
             or self.included_only.currentIndex() != 0
         )
@@ -520,8 +533,8 @@ class PartsViewMixin:
             return
         filament = self.filament_filter.currentData()
         state = {
-            "status": self.status_combo.currentText(),
-            "role": self.role_combo.currentText(),
+            "status": self.status_combo.currentData() or "",
+            "role": self.role_combo.currentData() or "",
             "filament": filament if filament is not None else "",
             "included_idx": self.included_only.currentIndex(),
         }
@@ -544,12 +557,12 @@ class PartsViewMixin:
         self.included_only.blockSignals(True)
         status = state.get("status", "")
         if status:
-            idx = self.status_combo.findText(status)
+            idx = self.status_combo.findData(status)
             if idx >= 0:
                 self.status_combo.setCurrentIndex(idx)
         role = state.get("role", "")
         if role:
-            idx = self.role_combo.findText(role)
+            idx = self.role_combo.findData(role)
             if idx >= 0:
                 self.role_combo.setCurrentIndex(idx)
         filament = state.get("filament", "")
@@ -563,10 +576,10 @@ class PartsViewMixin:
         self.role_combo.blockSignals(False)
         self.filament_filter.blockSignals(False)
         self.included_only.blockSignals(False)
-        self._status_filter = self.status_combo.currentText()
+        self._status_filter = self.status_combo.currentData() or ""
 
     def _apply_filters(self) -> None:
-        self._status_filter = self.status_combo.currentText()
+        self._status_filter = self.status_combo.currentData() or ""
         self._save_filter_state()
         if self._cached_part_dicts and self._is_kit_compose:
             self._apply_compose_parts_ui(self._cached_part_dicts)

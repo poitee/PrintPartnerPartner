@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QGroupBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QMenu,
     QMessageBox,
@@ -39,6 +38,7 @@ from print_partner.ui.export_3mf_dialog import Export3mfDialog
 from print_partner.ui.filament_picker_widget import FilamentPickerWidget
 from print_partner.ui.print_plan_assign_panel import PrintPlanAssignPanel
 from print_partner.ui.printer_fleet_dialog import PrinterFleetDialog
+from print_partner.ui.table_layout import configure_table_columns
 
 
 class PrintPlanTab(QWidget):
@@ -74,6 +74,25 @@ class PrintPlanTab(QWidget):
         main_layout = QVBoxLayout(self._main)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
+        print_guide = QFrame()
+        print_guide.setObjectName("actionCard")
+        pg_layout = QVBoxLayout(print_guide)
+        pg_layout.setContentsMargins(10, 8, 10, 8)
+        pg_title = QLabel(
+            "<b>Print</b> — enable printers, load matching filament on each spool, "
+            "then assign parts by folder or individually."
+        )
+        pg_title.setWordWrap(True)
+        pg_layout.addWidget(pg_title)
+        pg_steps = QLabel(
+            "Select a <b>repo/folder</b> row on the left → <b>Assign folder →</b> to a printer. "
+            "Export 3MF names plates as <i>filament · repo · folder</i>."
+        )
+        pg_steps.setProperty("muted", True)
+        pg_steps.setWordWrap(True)
+        pg_layout.addWidget(pg_steps)
+        main_layout.addWidget(print_guide)
+
         self._kit_chip = QFrame()
         self._kit_chip.setObjectName("kitNameChip")
         chip_layout = QHBoxLayout(self._kit_chip)
@@ -93,7 +112,11 @@ class PrintPlanTab(QWidget):
         fleet_layout = QVBoxLayout(fleet_box)
         self._printer_table = QTableWidget(0, 3)
         self._printer_table.setHorizontalHeaderLabels(["Use", "Printer", "Bed"])
-        self._printer_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        configure_table_columns(
+            self._printer_table,
+            stretch_columns=(1,),
+            fixed_widths={0: 44, 2: 88},
+        )
         self._printer_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._printer_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self._printer_table.itemSelectionChanged.connect(self._on_printer_selected)
@@ -116,7 +139,10 @@ class PrintPlanTab(QWidget):
 
         self._filament_box = QGroupBox("Loaded spools")
         self._filament_layout = QVBoxLayout(self._filament_box)
-        self._filament_hint = QLabel("Select a printer to match filament types.")
+        self._filament_hint = QLabel(
+            "Select a printer, then set each spool to the filament loaded on that machine. "
+            "Auto-assign uses these colors to pick a printer."
+        )
         self._filament_hint.setProperty("muted", True)
         self._filament_hint.setWordWrap(True)
         self._filament_layout.addWidget(self._filament_hint)

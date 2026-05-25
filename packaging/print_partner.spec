@@ -86,7 +86,10 @@ _hiddenimports = [
 ]
 
 _binaries: list = []
-_datas: list = [(str(data_dir / "ambrosia_fallback.json"), "print_partner/data")]
+_datas: list = [
+    (str(data_dir / "ambrosia_fallback.json"), "print_partner/data"),
+    (str(data_dir / "kofi_cup.svg"), "print_partner/data"),
+]
 
 _legal_files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "COMMERCIAL.md"]
 for _name in _legal_files:

@@ -44,12 +44,11 @@ python -m print_partner
 
 Workflow: **Libraries → Kit → Print → Checkoff** (top navigation strip, **Ctrl+1–4**). On **Kit**, choose **Compose** or **Review** under step 2 when a kit is open. Press **F1** for the full guide.
 
-1. **Libraries** (Ctrl+1) — Add/sync GitHub repos or local folders. **Import files…** chooses which STL paths are scanned into kits. Browse the repo tree and read README/docs.
-2. Import bulk repos via **Import repos.txt** (`name,url,branch` per line), then **Sync all** and **Import files…** per repo.
-3. **Kit** (Ctrl+2) — **Your kits**: open, rename, duplicate, delete. **Compose** — layers, **Recompute**, filament, parts tree, preview, docs, AI. **Review** — included parts only before checkoff.
-4. **Print** (Ctrl+3) — Enable printers, load filament spools, preview assignment, **Export 3MF…** (primary slicer export).
-5. **Checkoff** (Ctrl+4) — Printable checklist (Qty, Printed, Verified, thumbs, Notes), **Export checklist** HTML. Use **Print** for 3MF plates.
-6. Thumbnails cache in the background after **Recompute**; 3D preview uses offscreen render (stable on macOS).
+1. **Libraries** (Ctrl+1) — Add/sync GitHub repos or local folders. **Import files…** chooses which STL paths are scanned into kits. **More ▾ → Export/Import repo list** shares your repo table (JSON). Bulk add via **Import repos.txt** (`name,url,branch` per line).
+2. **Kit** (Ctrl+2) — Open a kit from **Your kits**. **Compose** — layers, **Recompute**, filament (catalog + **Custom filaments…**), parts tree, preview, docs, optional AI. **Review** — included parts only before checkoff.
+3. **Print** (Ctrl+3) — Enable printers, set loaded spools, assign parts or whole **repo/folder** rows to printers, **Export 3MF…** (plates named by filament · repo · folder).
+4. **Checkoff** (Ctrl+4) — Printable checklist (Qty, Printed, Verified, thumbs, Notes), **Export checklist** HTML.
+5. Thumbnails cache in the background after **Recompute**; 3D preview uses offscreen render (stable on macOS).
 
 ### repos.txt example
 
@@ -58,6 +57,12 @@ Workflow: **Libraries → Kit → Print → Checkoff** (top navigation strip, **
 my-kit,https://github.com/you/my-stl-kit.git,main
 addons,https://github.com/you/extra-parts.git,main
 ```
+
+## Support
+
+If Print Partner saves you time, you can optionally support development on [Ko-fi](https://ko-fi.com/poitee). Thank you.
+
+Donations are voluntary appreciation only; **commercial use still requires written permission** under [COMMERCIAL.md](COMMERCIAL.md).
 
 ## License
 
@@ -103,7 +108,7 @@ The spec builds an **onedir** bundle (`dist/Print Partner/` on Linux/Windows, `d
 
 1. Bump version in `pyproject.toml`, `__version__`, and `CHANGELOG.md`.
 2. **Actions → Build all platforms** — confirms Linux, macOS, and Windows builds on `main` (also runs on every push to `main`).
-3. Publish via **tag** (`git push origin v0.2.3`) or **Actions → Release (create tag)** with version `0.2.3`.
+3. Publish via **tag** (`git push origin v0.3.1`) or **Actions → Release (create tag)** with version `0.3.1`.
 
 See [`packaging/README_RELEASE.md`](packaging/README_RELEASE.md) for details. 3MF slicer checks: [`docs/3MF_EXPORT_VALIDATION.md`](docs/3MF_EXPORT_VALIDATION.md).
 
@@ -121,7 +126,7 @@ Export a portable kit file (`.print-partner-kit.zip`) from **Your kits** or **Ki
 
 **Import** via **Import kit…** on the kit list or **Manage → Import shared kit…**. If a referenced repository is not on the recipient’s machine yet, add and sync it on **Libraries**, then adjust layers or run **Recompute**.
 
-Print progress is not included in exports (recipients start a fresh checkoff). For shop-floor HTML/STL output, use **Export checklist** / **Export STLs** as before.
+Print progress is not included in exports (recipients start a fresh checkoff). **Custom filament** definitions used in the kit are embedded in the bundle. For shop-floor HTML/STL output, use **Export checklist** / **Export STLs** as before.
 
 ## Sharing with print partners
 
@@ -215,7 +220,7 @@ On **Kit**, open the **Assistant** tab (Preview / Docs / Assistant). The AI rece
 2. API key stored only in `~/.print-partner/ai_secrets.json` (gitignored).
 3. **Ask** sends context plus your question; **Review suggestions…** lets you pick which changes to apply (include/exclude, filament, role, qty, notes, navigation).
 
-**Offline:** the **Suggestions** panel above the parts tree uses README/fuzzy heuristics without an API key.
+**Offline:** README/fuzzy heuristics are available via the AI panel when no API key is configured.
 
 ## Known limitations (MVP)
 

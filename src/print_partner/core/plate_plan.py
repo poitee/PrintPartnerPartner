@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from print_partner.core.filament_assigner import PartCopy, assign_parts_to_printers
-from print_partner.core.plate_packer import PlateLayout, pack_copies_on_printer
+from print_partner.core.plate_packer import (
+    PlateLayout,
+    pack_copies_grouped_by_location,
+)
 from print_partner.core.printer_fleet import PrinterMachine
 
 
@@ -124,7 +127,7 @@ def auto_plate_layout(
         pcopies = by_printer.get(printer.id, [])
         if not pcopies:
             continue
-        plates, pack_warnings = pack_copies_on_printer(
+        plates, pack_warnings = pack_copies_grouped_by_location(
             printer, pcopies, spacing_mm=spacing_mm
         )
         warnings.extend(pack_warnings)
@@ -240,7 +243,7 @@ def resolve_layout_to_plates(
             pcopies = by_printer.get(printer.id, [])
             if not pcopies:
                 continue
-            plates, pack_warnings = pack_copies_on_printer(
+            plates, pack_warnings = pack_copies_grouped_by_location(
                 printer, pcopies, spacing_mm=layout.spacing_mm
             )
             warnings.extend(pack_warnings)
@@ -254,7 +257,7 @@ def resolve_layout_to_plates(
         pcopies = _resolve_refs(assigned_refs, lookup)
         if not pcopies:
             continue
-        plates, pack_warnings = pack_copies_on_printer(
+        plates, pack_warnings = pack_copies_grouped_by_location(
             printer, pcopies, spacing_mm=layout.spacing_mm
         )
         warnings.extend(pack_warnings)

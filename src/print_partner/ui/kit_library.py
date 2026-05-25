@@ -39,6 +39,7 @@ from print_partner.db.session import (
 )
 from print_partner.ui.build_wizard import run_build_wizard
 from print_partner.ui.empty_state import EmptyStateWidget
+from print_partner.ui.table_layout import configure_table_columns
 
 
 class KitLibraryWidget(QWidget):
@@ -116,6 +117,11 @@ class KitLibraryWidget(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.doubleClicked.connect(self._open_selected)
+        configure_table_columns(
+            self.table,
+            stretch_columns=(0,),
+            fixed_widths={1: 88, 2: 64, 3: 72, 4: 56},
+        )
         self._stack.addWidget(self.table)
 
         layout.addWidget(self._stack, 1)

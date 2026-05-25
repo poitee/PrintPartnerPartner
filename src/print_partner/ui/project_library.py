@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -48,6 +49,7 @@ from print_partner.ui.path_picker import (
 from print_partner.ui.remote_check_worker import RemoteCheckSpec, RemoteCheckWorker
 from print_partner.ui.repo_import_dialog import RepoImportDialog
 from print_partner.ui.sync_worker import SyncAllWorker, SyncProjectSpec
+from print_partner.ui.table_layout import configure_table_columns
 
 
 class ProjectDialog(QDialog):
@@ -175,6 +177,11 @@ class ProjectLibrary(QWidget):
         )
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        configure_table_columns(
+            self.table,
+            stretch_columns=(1, 3),
+            fixed_widths={0: 140, 2: 72, 4: 100, 5: 120, 6: 88, 7: 80},
+        )
         content_layout.addWidget(self.table)
         self._stack.addWidget(self._content)
         layout.addWidget(self._stack, 1)
@@ -187,22 +194,32 @@ class ProjectLibrary(QWidget):
 
         row = QHBoxLayout()
         self.btn_add = QPushButton("Add repository")
+        self.btn_add.setToolTip("Register a GitHub (or other Git) URL — sync downloads STLs locally.")
         self.btn_add.clicked.connect(self._add)
         row.addWidget(self.btn_add)
         self.btn_add_local = QPushButton("Add local folder…")
         self.btn_add_local.setObjectName("primaryButton")
+        self.btn_add_local.setToolTip(
+            "Use STLs already on disk without cloning (then Import files… for rules)."
+        )
         self.btn_add_local.clicked.connect(self._add_local_folder)
         row.addWidget(self.btn_add_local)
         self.btn_sync_sel = QPushButton("Sync selected")
+        self.btn_sync_sel.setToolTip("Pull latest commit for the selected Git repository.")
         self.btn_sync_sel.clicked.connect(self._sync_selected)
         row.addWidget(self.btn_sync_sel)
         self.btn_sync_all = QPushButton("Sync all")
+        self.btn_sync_all.setToolTip("Sync every Git repository in the list.")
         self.btn_sync_all.clicked.connect(self._sync_all)
         row.addWidget(self.btn_sync_all)
         more = QMenu(self)
         more.addAction("Edit…", self._edit)
         more.addAction("Delete…", self._delete)
+        more.addSeparator()
+        more.addAction("Export repo list…", self._export_repo_list)
+        more.addAction("Import repo list…", self._import_repo_list)
         more.addAction("Import repos.txt…", self._import_repos)
+        more.addSeparator()
         more.addAction("Import files…", self._import_files)
         self.btn_more = QPushButton("More ▾")
         self.btn_more.setMenu(more)
@@ -485,6 +502,57 @@ class ProjectLibrary(QWidget):
             proj = session.get(Project, pid)
             if proj:
                 session.delete(proj)
+        self.refresh()
+        self.projects_changed.emit()
+
+    def _export_repo_list(self) -> None:
+        from print_partner.config import settings
+        from print_partner.core.repo_list_io import export_repo_list_file
+
+        default = str(settings.exports_dir / "repo-list.json")
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export repository list",
+            default,
+            "JSON (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            with db_session() as session:
+                export_repo_list_file(session, Path(path))
+        except OSError as exc:
+            QMessageBox.critical(self, "Export", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "Exported",
+            "Repository list saved. Share this JSON with another Print Partner install "
+            "(Import repo list…). Sync and import rules are still per machine.",
+        )
+
+    def _import_repo_list(self) -> None:
+        from print_partner.core.repo_list_io import import_repo_list_file
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import repository list",
+            "",
+            "JSON (*.json);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            with db_session() as session:
+                count = import_repo_list_file(session, Path(path))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            QMessageBox.critical(self, "Import", str(exc))
+            return
+        QMessageBox.information(
+            self,
+            "Import",
+            f"Merged {count} repository(ies).\n\nSync Git repos, then Import files… for each.",
+        )
         self.refresh()
         self.projects_changed.emit()
 

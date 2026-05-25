@@ -47,11 +47,11 @@ def build_kit_context(
     lines.append("")
     lines.append("## Filament catalog ids (use in set_filament / assign_filament_to_role)")
     try:
-        from print_partner.core.ambrosia_catalog import load_catalog
+        from print_partner.core.custom_filaments import merged_filament_by_id
 
-        catalog = load_catalog()
-        for cid, color in sorted(catalog.by_id().items(), key=lambda x: x[0])[:40]:
-            lines.append(f"- {cid}: {color.display_name}")
+        merged = merged_filament_by_id()
+        for cid, color in sorted(merged.items(), key=lambda x: x[0])[:60]:
+            lines.append(f"- {cid}: {color.combo_label}")
     except Exception:
         lines.append("- (catalog unavailable)")
     if profile and profile.order_number:

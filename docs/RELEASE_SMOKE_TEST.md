@@ -11,33 +11,49 @@ Quick manual checklist after `packaging/build_release.sh` (and optional `make_dm
 ## Launch
 
 - [ ] App opens without console errors
-- [ ] Single workflow bar: **Libraries → Kit → Checkoff** (no duplicate tab bar)
-- [ ] On **Kit**, **Compose | Review** appears on the right of the same strip
-- [ ] **Help → Workflow guide**, **Open data folder**, **Open exports folder**
+- [ ] Workflow bar: **Libraries → Kit → Print → Checkoff**; **Buy me a Coffee** / Ko-fi opens browser (optional)
+- [ ] On **Kit**, **Compose | Review** sub-row when a kit is open
+- [ ] **Help → Workflow guide**, **Support on Ko-fi…**, **Third-party notices…**, **License…**, **Open data folder**, **Open exports folder**
 
 ## Libraries
 
-- [ ] Empty state → **Add repository**
-- [ ] Sync a test repo; table shows **Last sync**, **Commit**, **Updates** (Checking… then Up to date / Updates available)
+- [ ] Guide card explains add → sync → import flow
+- [ ] Empty state → **Add repository** / **Add local folder…**
+- [ ] Sync a test repo; table columns readable (name, URL, branch, …)
+- [ ] **More ▾ → Export repo list…** then **Import repo list…** round-trip
 - [ ] **Import files…** opens dialog (no crash); OK saves rules
 - [ ] Browse tree and docs panel update when selecting a repo
 
 ## Kit — Compose
 
 - [ ] Empty state → **New build…** wizard; profile loads
-- [ ] **Recompute** fills parts tree (or empty banner + Recompute prompt after import)
+- [ ] **Recompute** fills parts tree (or empty banner + Recompute prompt)
+- [ ] **Filter parts in tree** and search box narrow the tree
+- [ ] **Custom filaments…** — add a color; appears in filament picker
 - [ ] **Next: Review kit →** switches sub-mode
-- [ ] Inspector tabs: Preview, Docs, Assistant
-- [ ] Suggestions panel (offline); AI **Review suggestions…** if API configured
+- [ ] Inspector tabs: Preview, Docs, Assistant (AI optional)
 
 ## Kit — Review
 
 - [ ] Only included parts; uncheck **Print** excludes
 - [ ] **← Back to Compose** and **Go to Checkoff →**
 
+## Print
+
+- [ ] Empty state when no kit open; opens kit library CTA
+- [ ] Enable printer(s); set loaded spool colors
+- [ ] Select **repo/folder** row → **Assign folder →**; parts move to printer column
+- [ ] **Export 3MF…** produces files; names include filament/repo/folder when grouped
+
 ## Checkoff
 
-- [ ] Checklist, print progress, **Export checklist**, **Export 3MF…**, **Open HTML**
+- [ ] Checklist uses space efficiently; thumbs ~same size as before
+- [ ] Print progress saves; **Export checklist** HTML
+- [ ] **Help → License** and **Third-party notices** open bundled files
+
+## Legal bundle (frozen build)
+
+- [ ] `LICENSE`, `THIRD_PARTY_NOTICES.md`, `COMMERCIAL.md` beside executable in onedir / `.app` bundle
 
 ## Quit
 

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import trimesh
 
 from print_partner.core.filament_assigner import PartCopy
+from print_partner.core.parts_grouping import folder_key_from_relative_path
+from print_partner.core.parts_tree import repo_name_from_source_layer
 from print_partner.core.printer_fleet import PrinterMachine
 
 
@@ -27,6 +29,7 @@ class PlateLayout:
     printer_id: str
     index: int
     items: list[PlacedItem]
+    group_label: str = ""  # e.g. "PLA Red · voron-kit · frame/"
 
 
 def load_mesh_for_copy(copy: PartCopy) -> tuple[trimesh.Trimesh | None, str | None]:
@@ -144,6 +147,44 @@ def pack_copies_on_printer(
 
     flush_plate()
     return plates, warnings
+
+
+def pack_copies_grouped_by_location(
+    printer: PrinterMachine,
+    copies: list[PartCopy],
+    *,
+    spacing_mm: float | None = None,
+) -> tuple[list[PlateLayout], list[str]]:
+    """Pack each filament + repo + folder group as its own plate sequence with labels."""
+    if not copies:
+        return [], []
+    groups: dict[tuple[str, str, str], list[PartCopy]] = {}
+    from print_partner.core.print_plan_grouping import part_filament_label
+
+    for copy in copies:
+        key = (
+            part_filament_label(copy.part),
+            repo_name_from_source_layer(copy.part.source_layer),
+            folder_key_from_relative_path(copy.part.relative_path),
+        )
+        groups.setdefault(key, []).append(copy)
+    all_plates: list[PlateLayout] = []
+    all_warnings: list[str] = []
+    plate_index = 1
+    for key in sorted(groups.keys(), key=lambda k: (k[0].lower(), k[1].lower(), k[2].lower())):
+        filament, repo, folder = key
+        folder_disp = folder if folder != "(root)" else "root"
+        label = f"{filament} · {repo} · {folder_disp}"
+        plates, warnings = pack_copies_on_printer(
+            printer, groups[key], spacing_mm=spacing_mm
+        )
+        for plate in plates:
+            plate.index = plate_index
+            plate.group_label = label
+            plate_index += 1
+            all_plates.append(plate)
+        all_warnings.extend(warnings)
+    return all_plates, all_warnings
 
 
 def pack_single_plate(

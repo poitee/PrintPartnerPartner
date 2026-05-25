@@ -270,6 +270,24 @@ WorkflowStrip QPushButton[subRole="substep"][active="true"] {{
     border-color: {_ACCENT};
     color: {_ACCENT};
 }}
+WorkflowStrip QPushButton#kofiSupportButton {{
+    padding: 7px 16px 7px 12px;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid #ff5e5b;
+    border-radius: 6px;
+    background-color: #fff0ef;
+    color: #c93d3a;
+    min-height: 20px;
+}}
+WorkflowStrip QPushButton#kofiSupportButton:hover:enabled {{
+    background-color: #ffe4e2;
+    border-color: #e84e4b;
+    color: #a83230;
+}}
+WorkflowStrip QPushButton#kofiSupportButton:pressed {{
+    background-color: #ffd6d4;
+}}
 BannerWidget {{
     background-color: palette(alternate-base);
     border: 1px solid {_BANNER_EDGE};
@@ -310,7 +328,8 @@ PrintChecklistWidget QFrame#checklistHeader {{
     color: palette(text);
     border: 1px solid palette(mid);
     border-radius: 4px;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
+    padding: 2px 0;
 }}
 PrintChecklistWidget QLabel#checklistKicker {{
     color: palette(mid);
@@ -328,7 +347,7 @@ PrintChecklistWidget QLabel#checklistRepoHeading {{
 }}
 PrintChecklistWidget QLabel#checklistFolderHeading {{
     color: palette(text);
-    padding: 4px 8px;
+    padding: 2px 6px;
     background-color: palette(alternate-base);
     border: 1px solid palette(mid);
     border-radius: 2px;

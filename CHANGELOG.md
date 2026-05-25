@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-24
+
+### Added
+
+- **Custom filaments** — Named colors in a local library; export/import library JSON; bundled in shared kit exports.
+- **Repo list sharing** — Export/import repository list JSON (Libraries → More).
+- **Print: assign folder** — Select a repo/folder row and assign all parts to a printer; 3MF plates group and name by filament · repo · folder.
+- **Ko-fi support** — Optional tip link in workflow bar and Help menu; Support section in README.
+- **Checkoff print tracking** — Per-unit printed counts save to the kit; filter all/missing/done; **Print missing →** loads unfinished units on the Print tab; **Export missing 3MF…** for slicer plates; in-tab guide for exports.
+
+### Changed
+
+- **Libraries / Kit / Print / Checkoff UI** — Clearer step guides, tooltips, wider readable columns, simplified part filters, tighter checkoff layout, and checkoff export help copy.
+- **License & notices** — PolyForm Noncommercial, third-party notices, in-app Help entries, bundled in release builds.
+
+### Fixed
+
+- Circular import in plate packer when grouping plates by location.
+
 ## [0.3.0] - 2026-05-24
 
 ### Added

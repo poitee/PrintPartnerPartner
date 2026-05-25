@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+
+from print_partner.support_links import KOFI_BUTTON_LABEL, kofi_icon, open_kofi
 
 _STEP_LABELS = ("Libraries", "Kit", "Print", "Checkoff")
 _STEP_TOOLTIPS = (
@@ -64,6 +66,14 @@ class WorkflowStrip(QWidget):
             main_row.addWidget(btn)
 
         main_row.addStretch(1)
+        kofi_btn = QPushButton(KOFI_BUTTON_LABEL)
+        kofi_btn.setObjectName("kofiSupportButton")
+        kofi_btn.setIcon(kofi_icon())
+        kofi_btn.setIconSize(QSize(24, 24))
+        kofi_btn.setToolTip("Support development on Ko-fi")
+        kofi_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        kofi_btn.clicked.connect(open_kofi)
+        main_row.addWidget(kofi_btn)
         root.addLayout(main_row)
 
         self._kit_sub_container = QWidget()
