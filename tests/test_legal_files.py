@@ -21,4 +21,5 @@ def test_legal_files_avoid_vendor_brands():
 
 def test_pyproject_license_metadata():
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert "PolyForm Noncommercial" in text
+    assert "PolyForm-Noncommercial" in text
+    assert "license-files" in text
