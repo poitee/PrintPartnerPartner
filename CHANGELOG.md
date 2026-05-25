@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **License docs** — [PolyForm Noncommercial 1.0.0](LICENSE) with [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md) explanations and [COMMERCIAL.md](COMMERCIAL.md); Help menu entries for overview and full license text.
+
 ## [0.3.1] - 2026-05-24
 
 ### Added
@@ -19,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **Libraries / Kit / Print / Checkoff UI** — Clearer step guides, tooltips, wider readable columns, simplified part filters, tighter checkoff layout, and checkoff export help copy.
-- **License & notices** — PolyForm Noncommercial, third-party notices, in-app Help entries, bundled in release builds.
+- **License & notices** — Non-commercial license, third-party notices, in-app Help entries, bundled in release builds.
 
 ### Fixed
 

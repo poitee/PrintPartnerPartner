@@ -91,7 +91,7 @@ _datas: list = [
     (str(data_dir / "kofi_cup.svg"), "print_partner/data"),
 ]
 
-_legal_files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "COMMERCIAL.md"]
+_legal_files = ["LICENSE", "LICENSE-SUMMARY.md", "THIRD_PARTY_NOTICES.md", "COMMERCIAL.md"]
 for _name in _legal_files:
     _p = root / _name
     if _p.is_file():

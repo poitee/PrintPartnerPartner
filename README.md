@@ -104,13 +104,19 @@ After **Recompute**, thumbs warm in the background (384×384 PNG). **stl-thumb**
 
 If Print Partner saves you time on the bench, [buy me a coffee on Ko-fi](https://ko-fi.com/poitee) — totally optional.
 
-Tips are appreciation only; **commercial use still needs written permission** under [COMMERCIAL.md](COMMERCIAL.md).
+Tips are appreciation only; they **do not** grant commercial use rights.
 
 ---
 
 ## License
 
-[PolyForm Noncommercial License 1.0.0](LICENSE) — noncommercial use is fine; commercial use requires permission ([COMMERCIAL.md](COMMERCIAL.md)). Third-party bits: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Print Partner uses the **[PolyForm Noncommercial License 1.0.0](LICENSE)**.
+
+- **[LICENSE-SUMMARY.md](LICENSE-SUMMARY.md)** — what that means in plain language (use, forks, print shops, limits)
+- **[COMMERCIAL.md](COMMERCIAL.md)** — when you need written permission to use or sell the **software**
+- **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)** — PySide6, VTK, and other bundled libraries
+
+In the desktop app: **Help → License overview…** or **Help → PolyForm license (full text)…**
 
 **Thanks to:** [stl-thumb](https://github.com/unlimitedbacon/stl-thumb), [PySide6](https://pyside.org), [lib3mf](https://github.com/3MFConsortium/lib3mf), [PyVista](https://github.com/pyvista/pyvista) / VTK.
 

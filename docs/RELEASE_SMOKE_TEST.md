@@ -13,7 +13,7 @@ Quick manual checklist after `packaging/build_release.sh` (and optional `make_dm
 - [ ] App opens without console errors
 - [ ] Workflow bar: **Libraries → Kit → Print → Checkoff**; **Buy me a Coffee** / Ko-fi opens browser (optional)
 - [ ] On **Kit**, **Compose | Review** sub-row when a kit is open
-- [ ] **Help → Workflow guide**, **Support on Ko-fi…**, **Third-party notices…**, **License…**, **Open data folder**, **Open exports folder**
+- [ ] **Help → Workflow guide**, **License overview…**, **PolyForm license (full text)…**, **Commercial licensing…**, **Third-party notices…**, **Support on Ko-fi…**, **Open data folder**, **Open exports folder**
 
 ## Libraries
 
@@ -49,11 +49,11 @@ Quick manual checklist after `packaging/build_release.sh` (and optional `make_dm
 
 - [ ] Checklist uses space efficiently; thumbs ~same size as before
 - [ ] Print progress saves; **Export checklist** HTML
-- [ ] **Help → License** and **Third-party notices** open bundled files
+- [ ] **Help → License overview…**, **PolyForm license…**, and **Commercial licensing…** open bundled markdown; **Third-party notices** opens notices file
 
 ## Legal bundle (frozen build)
 
-- [ ] `LICENSE`, `THIRD_PARTY_NOTICES.md`, `COMMERCIAL.md` beside executable in onedir / `.app` bundle
+- [ ] `LICENSE`, `LICENSE-SUMMARY.md`, `THIRD_PARTY_NOTICES.md`, `COMMERCIAL.md` beside executable in onedir / `.app` bundle
 
 ## Quit
 

@@ -56,4 +56,4 @@ Built-in printer presets use common printer model names for bed-size hints only.
 
 ## Print Partner license
 
-Application source code by Chad Lynch is licensed under the **PolyForm Noncommercial License 1.0.0**. See [LICENSE](LICENSE) and [COMMERCIAL.md](COMMERCIAL.md).
+Application source code by Chad Lynch is licensed under the **PolyForm Noncommercial License 1.0.0**. See [LICENSE](LICENSE) (legal text), [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md) (explanation), and [COMMERCIAL.md](COMMERCIAL.md) (commercial use).

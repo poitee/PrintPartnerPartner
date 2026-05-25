@@ -229,6 +229,19 @@ class MainWindow(QMainWindow):
         support_kofi.triggered.connect(open_kofi)
         help_menu.addAction(support_kofi)
         help_menu.addSeparator()
+        license_overview = QAction("License overview…", self)
+        license_overview.triggered.connect(self._show_license_overview)
+        help_menu.addAction(license_overview)
+        license_full = QAction("PolyForm license (full text)…", self)
+        license_full.triggered.connect(self._show_license)
+        help_menu.addAction(license_full)
+        commercial = QAction("Commercial licensing…", self)
+        commercial.triggered.connect(self._show_commercial_licensing)
+        help_menu.addAction(commercial)
+        third_party = QAction("Third-party notices…", self)
+        third_party.triggered.connect(self._show_third_party_notices)
+        help_menu.addAction(third_party)
+        help_menu.addSeparator()
         about_action = QAction("About Print Partner…", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
@@ -258,19 +271,24 @@ class MainWindow(QMainWindow):
             f"<p>Local-first kit builder for layered STL print manifests.</p>"
             "<p>Licensed under the "
             '<a href="https://github.com/poitee/PrintPartnerPartner/blob/main/LICENSE">'
-            "PolyForm Noncommercial License 1.0.0</a>. "
-            "Commercial use requires permission — see COMMERCIAL.md in the app bundle "
-            "or on GitHub.</p>"
-            f'<p>Optional tip jar on <a href="{KOFI_URL}">Ko-fi</a>. '
-            "Donations are appreciated but do not grant commercial use rights.</p>"
-            "<p>Third-party notices: Help → Third-party notices…</p>",
+            "PolyForm Noncommercial License 1.0.0</a>.</p>"
+            "<p>Help → <b>License overview…</b> for a plain-language summary. "
+            "Commercial use of the software requires permission (Help → Commercial licensing…).</p>"
+            f'<p>Optional tip jar on <a href="{KOFI_URL}">Ko-fi</a> — '
+            "does not grant commercial rights.</p>",
         )
+
+    def _show_license_overview(self) -> None:
+        LegalNoticesDialog("LICENSE-SUMMARY.md", "License overview", parent=self).exec()
 
     def _show_third_party_notices(self) -> None:
         LegalNoticesDialog("THIRD_PARTY_NOTICES.md", "Third-party notices", parent=self).exec()
 
     def _show_license(self) -> None:
-        LegalNoticesDialog("LICENSE", "License", parent=self).exec()
+        LegalNoticesDialog("LICENSE", "PolyForm Noncommercial License", parent=self).exec()
+
+    def _show_commercial_licensing(self) -> None:
+        LegalNoticesDialog("COMMERCIAL.md", "Commercial licensing", parent=self).exec()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
