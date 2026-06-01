@@ -159,6 +159,7 @@ Print Partner is inspired by [Annex Engineering](https://github.com/Annex-Engine
 
 ## Links
 
+- [Project site (GitHub Pages)](https://poitee.github.io/PrintPartnerPartner/) — landing page with workflow screenshots
 - [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, and desktop-data migration
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design
 - [`CHANGELOG.md`](CHANGELOG.md) — release history

@@ -2,7 +2,7 @@ name: Web CI
 
 on:
   push:
-    branches: [web-platform, main, master]
+    branches: [main, master]
     paths:
       - "web/**"
       - ".github/workflows/web-ci.yml"

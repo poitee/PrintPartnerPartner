@@ -35,6 +35,7 @@ import { validateProductionConfig } from "./config.js";
 import { setRequestTenantId } from "./middleware/tenant-context.js";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
+import { isBrowserDocumentNavigation, isSpaClientPath } from "./lib/spa-nav.js";
 import type { SaasDbStore } from "./adapters/saas/index.js";
 import type { AppRepository } from "./db/repository.js";
 
@@ -81,6 +82,17 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
   app.addHook("preHandler", async (request) => {
     setRequestTenantId(request.tenantId ?? "default");
   });
+
+  if (config.staticDir && existsSync(config.staticDir)) {
+    app.addHook("preHandler", async (request, reply) => {
+      if (
+        isSpaClientPath(request.url) &&
+        isBrowserDocumentNavigation(request)
+      ) {
+        return reply.sendFile("index.html", config.staticDir!);
+      }
+    });
+  }
 
   await registerHealthRoutes(app, config, ports);
 
