@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import type { ServerConfig } from "../config.js";
+import { checkAppUpdate, resetAppUpdateCheckCache } from "../services/app-update-check.js";
 import {
   DEFAULT_NAMING_PROFILE,
   mergeNamingProfiles,
@@ -15,10 +17,35 @@ import {
   deleteCustomFilament,
   listCustomFilaments,
 } from "../services/custom-filaments.js";
+import { getIntegrationConfig } from "../integrations/store.js";
+import {
+  listSpoolmanFilaments,
+  spoolmanFilamentToCatalogColor,
+} from "../integrations/spoolman-client.js";
 
-type RouteDeps = { repo: AppRepository; dataDir: string };
+type RouteDeps = { repo: AppRepository; dataDir: string; config?: ServerConfig };
 
 export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
+  app.get("/settings/update-check", async (request) => {
+    if (!deps.config) {
+      return {
+        enabled: false,
+        update_available: false,
+        current_version: "unknown",
+        latest_version: null,
+        release_url: null,
+        release_notes_url: null,
+        deploy_mode: "self-host" as const,
+        checked_at: null,
+      };
+    }
+    const query = request.query as { refresh?: string };
+    if (query.refresh === "1") {
+      resetAppUpdateCheckCache();
+    }
+    return checkAppUpdate(deps.config);
+  });
+
   app.get("/settings/source-categories", async () => ({
     categories: deps.repo.getSourceCategories(),
   }));
@@ -100,8 +127,27 @@ export async function registerSourceNamingRoutes(app: FastifyInstance, deps: Rou
 }
 
 export async function registerStubRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
-  app.get("/filaments/catalog", async () => {
-    const catalog = await loadFilamentCatalog();
+  app.get("/settings/spoolman-default", async () => ({
+    integration_id: deps.repo.getSetting("default_spoolman_integration_id") || null,
+  }));
+
+  app.put("/settings/spoolman-default", async (request, reply) => {
+    const body = request.body as { integration_id?: string | null };
+    const raw = body.integration_id?.trim() ?? "";
+    if (!raw) {
+      deps.repo.setSetting("default_spoolman_integration_id", "");
+      return { integration_id: null };
+    }
+    const item = getIntegrationConfig(deps.repo, raw);
+    if (!item || item.type !== "spoolman") {
+      return reply.status(400).send({ detail: "integration_id must be a Spoolman connector" });
+    }
+    deps.repo.setSetting("default_spoolman_integration_id", raw);
+    return { integration_id: raw };
+  });
+
+  app.get("/filaments/catalog", async (request) => {
+    const catalog = loadFilamentCatalog();
     const custom = listCustomFilaments(deps.dataDir).map((f) => ({
       id: f.id,
       display_name: f.display_name,
@@ -110,7 +156,55 @@ export async function registerStubRoutes(app: FastifyInstance, deps: RouteDeps):
       combo_label: f.combo_label,
       swatch_url: "",
     }));
-    return { ...catalog, custom_colors: custom };
+
+    const query = request.query as { spoolman_integration_id?: string };
+    const defaultId = deps.repo.getSetting("default_spoolman_integration_id") || null;
+    const integrationId = query.spoolman_integration_id?.trim() || defaultId || "";
+    let spoolman_colors: ReturnType<typeof spoolmanFilamentToCatalogColor>[] = [];
+    let spoolman_status: "ok" | "empty" | "error" | "disabled" | "not_found" | undefined;
+    let spoolman_error: string | null = null;
+
+    if (integrationId) {
+      const integration = getIntegrationConfig(deps.repo, integrationId);
+      if (!integration) {
+        spoolman_status = "not_found";
+        spoolman_error = "Spoolman integration not found";
+      } else if (integration.type !== "spoolman") {
+        spoolman_status = "error";
+        spoolman_error = "Selected integration is not a Spoolman connector";
+      } else if (integration.config.enabled === false) {
+        spoolman_status = "disabled";
+        spoolman_error = "Spoolman integration is disabled in Settings";
+      } else {
+        try {
+          const filaments = await listSpoolmanFilaments(integration.config);
+          spoolman_colors = filaments.map((f) =>
+            spoolmanFilamentToCatalogColor(integration.id, f),
+          );
+          if (filaments.length === 0) {
+            spoolman_status = "empty";
+            spoolman_error =
+              "Spoolman returned no filament types — add filaments in Spoolman (spools alone are not listed here)";
+          } else {
+            spoolman_status = "ok";
+          }
+        } catch (e) {
+          spoolman_status = "error";
+          spoolman_error = e instanceof Error ? e.message : String(e);
+          request.log.warn({ err: e, integrationId }, "Spoolman catalog fetch failed");
+          spoolman_colors = [];
+        }
+      }
+    }
+
+    return {
+      ...catalog,
+      custom_colors: custom,
+      spoolman_colors,
+      default_spoolman_integration_id: defaultId,
+      ...(spoolman_status ? { spoolman_status } : {}),
+      ...(spoolman_error ? { spoolman_error } : {}),
+    };
   });
 
   app.get("/filaments/custom", async () => ({ filaments: listCustomFilaments(deps.dataDir) }));

@@ -1,6 +1,8 @@
 /** Layered merge engine for build profiles (ported from Python merge.py). */
 
+import { parsePartSlug } from "./parsers.js";
 import { normalizeMatchKey, type ScannedPart } from "./scanner.js";
+import type { NamingProfile } from "./stl-naming.js";
 
 export type MergePart = {
   matchKey: string;
@@ -25,6 +27,40 @@ export type MergeResult = {
 
 export function quantityEffective(part: MergePart): number {
   return part.quantityOverride ?? part.quantityAuto;
+}
+
+export type SlugConflictPart = {
+  matchKey: string;
+  relativePath: string;
+  filename: string;
+  included: boolean;
+  partSlug?: string;
+};
+
+/** Included parts that share a slug but not the same match key (active merge conflicts). */
+export function findActiveSlugConflictKeys(
+  parts: SlugConflictPart[],
+  profile?: NamingProfile | null,
+): Set<string> {
+  const slugIndex = new Map<string, string>();
+  const conflictKeys = new Set<string>();
+
+  for (const part of parts) {
+    if (!part.included) continue;
+    const slug =
+      part.partSlug?.trim() ||
+      parsePartSlug(part.relativePath || part.filename, profile);
+    const key = part.matchKey;
+    const otherKey = slugIndex.get(slug);
+    if (otherKey && otherKey !== key) {
+      conflictKeys.add(key);
+      conflictKeys.add(otherKey);
+    } else if (!otherKey) {
+      slugIndex.set(slug, key);
+    }
+  }
+
+  return conflictKeys;
 }
 
 function scannedToMerge(part: ScannedPart, status: string, source: string): MergePart {

@@ -43,6 +43,10 @@ export class SqliteDatabase {
     for (const stmt of schemaMigrations) {
       this.sqlite.exec(stmt);
     }
+    const partCols = this.sqlite.pragma("table_info(parts)") as { name: string }[];
+    if (!partCols.some((c) => c.name === "spoolman_spool_id")) {
+      this.sqlite.exec("ALTER TABLE parts ADD COLUMN spoolman_spool_id TEXT");
+    }
     const row = this.sqlite
       .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
       .get("default", schemaVersionKey) as { value?: string } | undefined;

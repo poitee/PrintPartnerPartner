@@ -14,7 +14,7 @@ import {
   patchPartProgress,
   type PlanReview,
 } from "../api/engine";
-import { mergePartIntoReview, mergeProgressIntoReview } from "../lib/reviewParts";
+import { mergeProgressIntoReview } from "../lib/reviewParts";
 import { formatCheckoffSummary } from "../lib/checkoffProgress";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useProfileSelection } from "./ProfileContext";
@@ -32,6 +32,7 @@ type PlanWorkspaceValue = {
   bumpPlanRevision: () => void;
   setQuantity: (partId: number, qty: number) => Promise<void>;
   setIncluded: (partId: number, included: boolean) => Promise<void>;
+  setSpoolmanSpool: (partId: number, spoolman_spool_id: string | null) => Promise<void>;
   toggleUnit: (partId: number, unitIndex: number, completed: boolean) => Promise<void>;
   busyPartId: number | null;
 };
@@ -150,20 +151,27 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
       if (!review) return;
       setBusyPartId(partId);
       try {
-        const updated = await patchPart(partId, { included });
-        let next = mergePartIntoReview(review, updated);
-        if (!included && !includeExcludedRef.current) {
-          next = {
-            ...next,
-            part_groups: next.part_groups
-              .map((g) => ({ ...g, parts: g.parts.filter((p) => p.id !== partId) }))
-              .filter((g) => g.parts.length > 0),
-          };
-        }
-        setReview(next);
+        await patchPart(partId, { included });
+        await reload(review.profile_id);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         if (profileIdRef.current != null) await reload(profileIdRef.current);
+      } finally {
+        setBusyPartId(null);
+      }
+    },
+    [review, reload],
+  );
+
+  const setSpoolmanSpool = useCallback(
+    async (partId: number, spoolman_spool_id: string | null) => {
+      if (!review) return;
+      setBusyPartId(partId);
+      try {
+        await patchPart(partId, { spoolman_spool_id });
+        await reload(review.profile_id);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
       } finally {
         setBusyPartId(null);
       }
@@ -223,6 +231,7 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
       bumpPlanRevision: invalidate,
       setQuantity,
       setIncluded,
+      setSpoolmanSpool,
       toggleUnit,
       busyPartId,
     }),
@@ -236,6 +245,7 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
       invalidate,
       setQuantity,
       setIncluded,
+      setSpoolmanSpool,
       toggleUnit,
       busyPartId,
     ],

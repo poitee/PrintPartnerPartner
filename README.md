@@ -47,6 +47,8 @@
 | **Review** | Confirm a validation summary grouped by role and filament, browse the full included-parts list with 3D STL previews, and **Export STLs** by role and folder. |
 | **Checkoff** | Track per-unit print progress (saved per plan), filter missing/done, print the checklist, and **Export missing STLs** for the next batch. |
 
+Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Spoolman instance in Settings to pick filaments from your inventory on Build and see read-only spool remaining weights in Review / Checkoff.
+
 ---
 
 ## Screenshots
@@ -104,6 +106,11 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload / request body limit (512 MiB) |
 | `PP_VERSION` | `0.1.0-web` | Version reported by `GET /health` |
+| `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
+| `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
+| `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped: compare against this version instead of GitHub |
+
+The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker: `docker compose pull && docker compose up --build`.
 
 See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables and desktop-data migration.
 

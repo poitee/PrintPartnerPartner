@@ -1108,6 +1108,12 @@ select:not([class*="rounded-md"]) {
   vertical-align: middle;
 }
 
+.sheet-table .sheet-cell-spool {
+  width: auto;
+  min-width: 9rem;
+  max-width: 14rem;
+}
+
 .sheet-table .sheet-cell-qty {
   width: auto;
   min-width: 7rem;

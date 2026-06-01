@@ -1,14 +1,21 @@
-import type { ReviewPart } from "../../api/engine";
+import type { ReviewPart, RoleFilamentRow, SpoolmanSpoolRow } from "../../api/engine";
 import PartThumb from "../parts/PartThumb";
+import PartSpoolPicker from "../PartSpoolPicker";
+import SpoolRemainingBadge from "../SpoolRemainingBadge";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 
 type Props = {
   part: ReviewPart;
   busy: boolean;
+  spoolmanConfigured?: boolean;
+  roleFilaments?: RoleFilamentRow[];
+  spools?: SpoolmanSpoolRow[];
+  spoolsLoading?: boolean;
   onQtyChange: (part: ReviewPart, qty: number) => void;
   onRemove: () => void;
   onRestore: () => void;
+  onSpoolChange?: (partId: number, spoolman_spool_id: string | null) => void;
 };
 
 function MobileQtyStepper({
@@ -51,9 +58,14 @@ function MobileQtyStepper({
 export default function ReviewSheetMobileCard({
   part,
   busy,
+  spoolmanConfigured,
+  roleFilaments = [],
+  spools = [],
+  spoolsLoading,
   onQtyChange,
   onRemove,
   onRestore,
+  onSpoolChange,
 }: Props) {
   return (
     <article className={cn("checkoff-mobile-card", !part.included && "opacity-80")}>
@@ -65,6 +77,18 @@ export default function ReviewSheetMobileCard({
           </h4>
           <p className="checkoff-mobile-sub">
             {part.filament_display && <span>{part.filament_display}</span>}
+            <SpoolRemainingBadge part={part} />
+            {spoolmanConfigured && onSpoolChange && (
+              <PartSpoolPicker
+                part={part}
+                roleFilaments={roleFilaments}
+                spools={spools}
+                spoolsLoading={spoolsLoading}
+                disabled={busy || !part.included}
+                onChange={onSpoolChange}
+                className="mt-1 w-full"
+              />
+            )}
             {part.role && <span className="checkoff-mobile-role">{part.role}</span>}
             {!part.included && <span className="checkoff-mobile-role">excluded</span>}
           </p>

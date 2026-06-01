@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import type { PlanReview, ReviewPart } from "../../api/engine";
+import type { PlanReview, ReviewPart, RoleFilamentRow, SpoolmanSpoolRow } from "../../api/engine";
+import { fetchRoleFilaments, fetchSpoolmanSpools } from "../../api/engine";
 import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
+import { useSpoolmanEnabled } from "../../hooks/useSpoolmanEnabled";
 import { groupCheckoffParts } from "../../lib/checkoffGroups";
 import { formatCheckoffSummary } from "../../lib/checkoffProgress";
 import {
@@ -20,6 +22,8 @@ import {
 import { useProfileSelection } from "../../context/ProfileContext";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import PartThumb from "../parts/PartThumb";
+import PartSpoolPicker from "../PartSpoolPicker";
+import SpoolRemainingBadge from "../SpoolRemainingBadge";
 import ReviewSheetMobileCard from "./ReviewSheetMobileCard";
 import { Button } from "../ui/button";
 import {
@@ -94,16 +98,26 @@ function ReviewSheetRow({
   part,
   busy,
   compact,
+  spoolmanConfigured,
+  roleFilaments,
+  spools,
+  spoolsLoading,
   onQtyChange,
   onRemove,
   onRestore,
+  onSpoolChange,
 }: {
   part: ReviewPart;
   busy: boolean;
   compact: boolean;
+  spoolmanConfigured: boolean;
+  roleFilaments: RoleFilamentRow[];
+  spools: SpoolmanSpoolRow[];
+  spoolsLoading?: boolean;
   onQtyChange: (part: ReviewPart, qty: number) => void;
   onRemove: (part: ReviewPart) => void;
   onRestore: (part: ReviewPart) => void;
+  onSpoolChange: (partId: number, spoolman_spool_id: string | null) => void;
 }) {
   return (
     <tr className={cn("sheet-row", !part.included && "opacity-70")}>
@@ -119,12 +133,26 @@ function ReviewSheetRow({
                 <span className="sheet-swatch" style={{ background: part.filament_hex }} />
               )}
               {part.filament_display && <span>{part.filament_display}</span>}
+              <SpoolRemainingBadge part={part} />
               {part.role && <span className="sheet-role">{part.role}</span>}
               {!part.included && <span className="sheet-role">excluded</span>}
             </span>
           </div>
         </div>
       </td>
+      {spoolmanConfigured && (
+        <td className="sheet-cell-spool">
+          <PartSpoolPicker
+            part={part}
+            roleFilaments={roleFilaments}
+            spools={spools}
+            spoolsLoading={spoolsLoading}
+            disabled={busy || !part.included}
+            hideLabel
+            onChange={onSpoolChange}
+          />
+        </td>
+      )}
       <td className="sheet-cell-qty">
         <QuantityStepper
           part={part}
@@ -164,7 +192,12 @@ function ReviewSheetRow({
 
 export default function ReviewPartsSheet({ review, planName, disabled }: Props) {
   const { profiles } = useProfileSelection();
-  const { setQuantity, setIncluded, reload, busyPartId } = usePlanWorkspace();
+  const { setQuantity, setIncluded, setSpoolmanSpool, reload, busyPartId, loadedRevision } =
+    usePlanWorkspace();
+  const { configured: spoolmanConfigured, integrationId } = useSpoolmanEnabled();
+  const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
+  const [spools, setSpools] = useState<SpoolmanSpoolRow[]>([]);
+  const [spoolsLoading, setSpoolsLoading] = useState(false);
   const persisted = useMemo(() => loadPersistedReviewPartsUi(), []);
   const [ui, setUi] = useState<PersistedReviewPartsUi>(persisted);
   const [removeTarget, setRemoveTarget] = useState<ReviewPart | null>(null);
@@ -173,6 +206,39 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
   useEffect(() => {
     savePersistedReviewPartsUi(ui);
   }, [ui]);
+
+  useEffect(() => {
+    if (!spoolmanConfigured || !integrationId) {
+      setRoleFilaments([]);
+      setSpools([]);
+      setSpoolsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSpoolsLoading(true);
+    void (async () => {
+      try {
+        const [roles, spoolRows] = await Promise.all([
+          fetchRoleFilaments(review.profile_id),
+          fetchSpoolmanSpools(integrationId),
+        ]);
+        if (!cancelled) {
+          setRoleFilaments(roles);
+          setSpools(spoolRows);
+        }
+      } catch {
+        if (!cancelled) {
+          setRoleFilaments([]);
+          setSpools([]);
+        }
+      } finally {
+        if (!cancelled) setSpoolsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [spoolmanConfigured, integrationId, review.profile_id, loadedRevision]);
 
   const allParts = useMemo(() => flattenReviewParts(review.part_groups), [review.part_groups]);
 
@@ -219,12 +285,21 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
     void setIncluded(part.id, true).then(() => toast.success(`Restored ${part.filename}`));
   };
 
+  const onSpoolChange = (partId: number, spoolman_spool_id: string | null) => {
+    void setSpoolmanSpool(partId, spoolman_spool_id);
+  };
+
   const displayName = planName || profiles.find((p) => p.id === review.profile_id)?.name || "Review";
 
   return (
     <section className="space-y-3">
       <div className="no-print checkoff-sticky flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
         <h3 className="text-sm font-semibold">Parts</h3>
+        {spoolmanConfigured && (
+          <p className="text-xs text-muted-foreground">
+            Spool column: optional override per part
+          </p>
+        )}
 
         <input
           type="search"
@@ -383,9 +458,14 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                           key={part.id}
                           part={part}
                           busy={busyPartId === part.id || Boolean(disabled)}
+                          spoolmanConfigured={spoolmanConfigured}
+                          roleFilaments={roleFilaments}
+                          spools={spools}
+                          spoolsLoading={spoolsLoading}
                           onQtyChange={onQtyChange}
                           onRemove={() => onRemove(part)}
                           onRestore={() => onRestore(part)}
+                          onSpoolChange={onSpoolChange}
                         />
                       ))}
                     </div>
@@ -400,6 +480,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                       <thead>
                         <tr>
                           <th className="sheet-cell-part">Part</th>
+                          {spoolmanConfigured && <th className="sheet-cell-spool">Spool</th>}
                           <th className="sheet-cell-qty">Qty</th>
                           <th className="sheet-cell-actions">Actions</th>
                           <th className="sheet-cell-notes">Notes</th>
@@ -412,9 +493,14 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                             part={part}
                             busy={busyPartId === part.id || Boolean(disabled)}
                             compact={isMobileLayout || ui.compactMode}
+                            spoolmanConfigured={spoolmanConfigured}
+                            roleFilaments={roleFilaments}
+                            spools={spools}
+                            spoolsLoading={spoolsLoading}
                             onQtyChange={onQtyChange}
                             onRemove={onRemove}
                             onRestore={onRestore}
+                            onSpoolChange={onSpoolChange}
                           />
                         ))}
                       </tbody>

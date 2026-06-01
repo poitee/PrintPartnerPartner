@@ -53,11 +53,11 @@ export async function registerCoreRoutes(
   };
 
   await registerSourceRoutes(app, routeDeps);
-  await registerPlanRoutes(app, { repo: deps.repo });
+  await registerPlanRoutes(app, { repo: deps.repo, dataDir: deps.dataDir });
   await registerPartRoutes(app, { repo: deps.repo, thumbsDir: deps.thumbsDir });
   await registerExportRoutes(app, { dataDir: deps.dataDir });
   await registerImportRoutes(app, { repo: deps.repo });
-  await registerSettingsRoutes(app, { repo: deps.repo, dataDir: deps.dataDir });
+  await registerSettingsRoutes(app, { repo: deps.repo, dataDir: deps.dataDir, config: deps.config });
   await registerSourceNamingRoutes(app, { repo: deps.repo, dataDir: deps.dataDir });
   await registerStubRoutes(app, { repo: deps.repo, dataDir: deps.dataDir });
   await registerLegalRoutes(app);
@@ -75,7 +75,7 @@ export async function registerCoreRoutes(
       repo: deps.repo,
       getAdapter: getIntegrationAdapter,
     });
-    await registerIntegrationRoutes(app, { integrations });
+    await registerIntegrationRoutes(app, { integrations, repo: deps.repo });
     await registerWebhookRoutes(app, { repo: deps.repo });
   }
 

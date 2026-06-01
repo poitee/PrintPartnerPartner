@@ -135,7 +135,11 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
         wildcard: false,
       });
       app.setNotFoundHandler((request, reply) => {
-        if (request.method === "GET" && !request.url.includes(".")) {
+        if (
+          request.method === "GET" &&
+          !request.url.includes(".") &&
+          isBrowserDocumentNavigation(request)
+        ) {
           return reply.sendFile("index.html", config.staticDir!);
         }
         return reply.status(404).send({ detail: "Not found" });

@@ -8,6 +8,7 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import EmptyState from "../components/layout/EmptyState";
 import CheckoffMobilePartCard from "../components/checkoff/CheckoffMobilePartCard";
 import PartThumb from "../components/parts/PartThumb";
+import SpoolRemainingBadge from "../components/SpoolRemainingBadge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { startExportChecklistHtml, startExportStlPack, type ReviewPart } from "../api/engine";
@@ -54,6 +55,7 @@ function CheckoffSheetRow({
                 <span className="sheet-swatch" style={{ background: part.filament_hex }} />
               )}
               {part.filament_display && <span>{part.filament_display}</span>}
+              <SpoolRemainingBadge part={part} />
               {part.role && <span className="sheet-role">{part.role}</span>}
             </span>
           </div>

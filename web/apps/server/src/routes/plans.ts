@@ -4,8 +4,9 @@ import { buildPlanReview } from "../services/plan-review.js";
 import { applyManifestToProfile } from "../services/manifest-apply.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
 import { buildPlanManifestBuilder } from "../services/plan-manifest-builder.js";
+import { preloadSpoolmanForColorIds, enrichRoleFilamentRows } from "../services/filament-resolve.js";
 
-type RouteDeps = { repo: AppRepository };
+type RouteDeps = { repo: AppRepository; dataDir: string };
 
 export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.get("/plans", async () => ({ profiles: deps.repo.listProfiles() }));
@@ -138,7 +139,16 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
     const include_excluded =
       query.include_excluded === "1" ||
       query.include_excluded === "true";
-    return buildPlanReview(deps.repo, id, { includeExcluded: include_excluded });
+    const resolveDeps = { repo: deps.repo, dataDir: deps.dataDir };
+    const { parts: reviewParts } = deps.repo.listParts(id, 10000, 0);
+    const ctx = await preloadSpoolmanForColorIds(
+      resolveDeps,
+      reviewParts.map((p) => p.filament_color_id),
+    );
+    return buildPlanReview(deps.repo, id, {
+      includeExcluded: include_excluded,
+      filamentContext: ctx,
+    });
   });
 
   app.post("/plans/:id/apply-manifest", async (request, reply) => {
@@ -165,7 +175,9 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.get("/plans/:id/role-filaments", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
-    return { roles: deps.repo.getRoleFilaments(id) };
+    const roles = deps.repo.getRoleFilaments(id);
+    await enrichRoleFilamentRows(roles, { repo: deps.repo, dataDir: deps.dataDir });
+    return { roles };
   });
 
   app.put("/plans/:id/role-filament", async (request, reply) => {
@@ -175,23 +187,36 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       role?: string;
       filament_color_id?: string | null;
       filament_custom_hex?: string | null;
+      spoolman_spool_id?: string | null;
     };
     const role = String(body.role ?? "").trim();
     if (!role) return reply.status(400).send({ detail: "role is required" });
+    const spoolRef =
+      body.spoolman_spool_id !== undefined ? body.spoolman_spool_id : undefined;
     const updated = deps.repo.bulkSetRoleFilament(
       id,
       role,
       body.filament_color_id ?? null,
       body.filament_custom_hex ?? null,
+      spoolRef,
     );
-    return { updated, roles: deps.repo.getRoleFilaments(id) };
+    const roles = deps.repo.getRoleFilaments(id);
+    await enrichRoleFilamentRows(roles, { repo: deps.repo, dataDir: deps.dataDir });
+    return { updated, roles };
   });
 
   app.get("/plans/:id/checkoff", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
-    return deps.repo.getCheckoff(id);
+    const resolveDeps = { repo: deps.repo, dataDir: deps.dataDir };
+    const { parts: checkoffParts } = deps.repo.listParts(id, 10000, 0);
+    const ctx = await preloadSpoolmanForColorIds(
+      resolveDeps,
+      checkoffParts.map((p) => p.filament_color_id),
+    );
+    return deps.repo.getCheckoff(id, ctx);
   });
+
   app.get("/plans/:id/kit-manifest", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });

@@ -1,7 +1,12 @@
 import { accessSync } from "node:fs";
 import { join } from "node:path";
-import { folderKeyFromRelativePath, ROOT_FOLDER } from "@print-partner/domain";
-import { getColorById } from "./filament-catalog.js";
+import {
+  findActiveSlugConflictKeys,
+  folderKeyFromRelativePath,
+  resolveNamingProfile,
+  ROOT_FOLDER,
+} from "@print-partner/domain";
+import type { FilamentResolveContext } from "./filament-resolve.js";
 import type { AppRepository } from "../db/repository.js";
 import type { PartDbRow } from "../db/repository.js";
 
@@ -14,18 +19,22 @@ export type PlanReviewIssue = {
 
 export type PlanReviewOptions = {
   includeExcluded?: boolean;
+  filamentContext?: FilamentResolveContext;
 };
 
-function filamentLabel(part: {
-  filament_color_id: string | null;
-  filament_display?: string;
-  filament_custom_hex?: string | null;
-}): string {
+function filamentLabel(
+  part: {
+    filament_color_id: string | null;
+    filament_display?: string;
+    filament_custom_hex?: string | null;
+  },
+  ctx?: FilamentResolveContext,
+): string {
   if (part.filament_display?.trim()) return part.filament_display.trim();
   const fid = (part.filament_color_id ?? "").trim();
   if (fid) {
-    const color = getColorById(fid);
-    if (color) return color.combo_label;
+    const resolved = ctx?.resolve(fid);
+    if (resolved?.combo_label) return resolved.combo_label;
     return fid;
   }
   return "Unassigned";
@@ -68,13 +77,14 @@ export function buildPlanReview(
   options: PlanReviewOptions = {},
 ) {
   const includeExcluded = options.includeExcluded ?? false;
+  const ctx = options.filamentContext;
   const profile = repo.getProfile(profileId);
   if (!profile) throw new Error("Profile not found");
 
   const layers = repo.getProfileLayers(profileId);
   const { parts } = repo.listParts(profileId, 10000, 0);
   const included = parts.filter((p) => p.included);
-  const enrichedParts = repo.getEnrichedPartsForReview(profileId, includeExcluded);
+  const enrichedParts = repo.getEnrichedPartsForReview(profileId, includeExcluded, ctx);
 
   const projectByLayer = new Map<number, ReturnType<AppRepository["getProjectRow"]>>();
   const layerPayload = layers.map((layer) => {
@@ -106,8 +116,8 @@ export function buildPlanReview(
   let printUnits = 0;
   for (const part of enrichedParts.filter((p) => p.included)) {
     byRole[part.role || "primary"] = (byRole[part.role || "primary"] ?? 0) + 1;
-    byFilament[filamentLabel(part)] =
-      (byFilament[filamentLabel(part)] ?? 0) + Math.max(1, part.quantity_effective);
+    byFilament[filamentLabel(part, ctx)] =
+      (byFilament[filamentLabel(part, ctx)] ?? 0) + Math.max(1, part.quantity_effective);
     printUnits += Math.max(1, part.quantity_effective);
   }
 
@@ -170,15 +180,24 @@ export function buildPlanReview(
     }
   }
 
+  const namingProfile = resolveNamingProfile(repo.getGlobalNaming(), null);
+  const activeConflictKeys = findActiveSlugConflictKeys(
+    parts.map((p) => ({
+      matchKey: p.match_key,
+      relativePath: p.relative_path,
+      filename: p.filename,
+      included: p.included,
+    })),
+    namingProfile,
+  );
   for (const part of parts) {
-    if (part.status === "conflict") {
-      issues.push({
-        severity: "warning",
-        code: "merge_conflict",
-        message: `Merge conflict for ${part.filename} — verify selection.`,
-        link_hint: "build",
-      });
-    }
+    if (!activeConflictKeys.has(part.match_key)) continue;
+    issues.push({
+      severity: "warning",
+      code: "merge_conflict",
+      message: `Merge conflict for ${part.filename} — exclude duplicates or pick one in Build.`,
+      link_hint: "build",
+    });
   }
 
   const grouped = new Map<string, typeof enrichedParts>();

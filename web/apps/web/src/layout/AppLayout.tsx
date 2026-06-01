@@ -1,4 +1,4 @@
-import { type ComponentType, type MouseEvent } from "react";
+import { type ComponentType, type MouseEvent, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   BookOpen,
@@ -24,9 +24,14 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import PlanPicker from "../components/PlanPicker";
+import UpdateAvailableBanner, {
+  dismissUpdateBanner,
+  isUpdateBannerDismissed,
+} from "../components/UpdateAvailableBanner";
 import { openDataFolder } from "../api/engine";
 import { openKofi } from "../lib/supportLinks";
 import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
+import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import {
   buildRoute,
   checkoffRoute,
@@ -104,6 +109,21 @@ export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { health, error } = useEngineHealth();
+  const { updateCheck } = useAppUpdateCheck(Boolean(health));
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  useEffect(() => {
+    if (updateCheck?.latest_version) {
+      setBannerDismissed(isUpdateBannerDismissed(updateCheck.latest_version));
+    }
+  }, [updateCheck?.latest_version]);
+
+  const onDismissUpdateBanner = () => {
+    if (!updateCheck?.latest_version) return;
+    dismissUpdateBanner(updateCheck.latest_version);
+    setBannerDismissed(true);
+  };
+
   useProfileUrlSync();
   const { selectedProfileId, profiles } = useProfileSelection();
   const { flushAll: flushImportRules } = useImportRulesSaveRegistry();
@@ -288,6 +308,14 @@ export default function AppLayout() {
         <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 pb-20 sm:p-5 sm:pb-16 lg:pb-14 print:overflow-visible print:p-0">
           <Outlet />
         </main>
+
+        {updateCheck && (
+          <UpdateAvailableBanner
+            updateCheck={updateCheck}
+            dismissed={bannerDismissed}
+            onDismiss={onDismissUpdateBanner}
+          />
+        )}
       </div>
 
       <JobTray />

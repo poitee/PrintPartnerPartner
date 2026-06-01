@@ -1,4 +1,5 @@
 import type {
+  AppUpdateCheckResponse,
   HealthResponse,
   JobEvent,
   JobSnapshot,
@@ -13,7 +14,7 @@ import {
   saveTextFileWeb,
 } from "@/lib/webFilePickers";
 
-export type { HealthResponse, JobEvent, JobSnapshot, PartRow, ProfileSummary, SourceSummary };
+export type { AppUpdateCheckResponse, HealthResponse, JobEvent, JobSnapshot, PartRow, ProfileSummary, SourceSummary };
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 const API_PREFIX = (import.meta.env.VITE_API_PREFIX ?? "").replace(/\/$/, "");
@@ -63,6 +64,29 @@ export type FilamentCatalog = {
   status: string;
   colors: CatalogColor[];
   custom_colors: CatalogColor[];
+  spoolman_colors?: CatalogColor[];
+  /** Set when a Spoolman integration is selected for the Build picker. */
+  default_spoolman_integration_id?: string | null;
+  spoolman_status?: "ok" | "empty" | "error" | "disabled" | "not_found";
+  spoolman_error?: string | null;
+};
+
+export type IntegrationSummary = {
+  id: string;
+  type: string;
+  name: string;
+  config: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type IntegrationTestResult = {
+  ok: boolean;
+  message?: string;
+};
+
+export type SpoolmanDefaultSettings = {
+  integration_id: string | null;
 };
 
 export type ProfileLayer = {
@@ -287,9 +311,17 @@ export type RoleFilamentRow = {
   role: string;
   part_count: number;
   filament_color_id: string | null;
+  spoolman_spool_id?: string | null;
   filament_custom_hex: string | null;
   filament_display: string;
   filament_hex: string | null;
+};
+
+export type SpoolmanSpoolRow = {
+  id: number;
+  filament_id: number;
+  remaining_weight: number | null;
+  location?: string | null;
 };
 
 export type PrintPlan = {
@@ -362,6 +394,16 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 204) {
     return undefined as T;
   }
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const snippet = (await res.text()).trimStart().slice(0, 40);
+    if (snippet.startsWith("<!") || snippet.toLowerCase().startsWith("<html")) {
+      throw new Error(
+        `Engine ${path} returned HTML instead of JSON — check API route and dev proxy`,
+      );
+    }
+    throw new Error(`Engine ${path} expected JSON but got ${contentType || "unknown type"}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -375,6 +417,11 @@ async function engineFetchText(path: string): Promise<string> {
 
 export async function fetchHealth(): Promise<HealthResponse> {
   return engineFetch<HealthResponse>("/health");
+}
+
+export async function fetchAppUpdateCheck(refresh = false): Promise<AppUpdateCheckResponse> {
+  const suffix = refresh ? "?refresh=1" : "";
+  return engineFetch<AppUpdateCheckResponse>(`/settings/update-check${suffix}`);
 }
 
 export async function fetchProfiles(): Promise<ProfileSummary[]> {
@@ -860,6 +907,7 @@ export async function patchPart(
     included?: boolean;
     filament_color_id?: string;
     quantity_override?: number;
+    spoolman_spool_id?: string | null;
   },
 ): Promise<PartRow> {
   return engineFetch<PartRow>(`/parts/${partId}`, {
@@ -930,6 +978,60 @@ export async function fetchLegalDocument(
 export async function fetchCustomFilaments(): Promise<CustomFilament[]> {
   const body = await engineFetch<{ filaments: CustomFilament[] }>("/filaments/custom");
   return body.filaments;
+}
+
+async function v1Fetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  return engineFetch<T>(`/api/v1${normalized}`, init);
+}
+
+export async function fetchIntegrations(): Promise<IntegrationSummary[]> {
+  const body = await v1Fetch<{ integrations: IntegrationSummary[] }>("/integrations");
+  return body.integrations;
+}
+
+export async function createIntegration(body: {
+  type: string;
+  name: string;
+  config: Record<string, unknown>;
+}): Promise<IntegrationSummary> {
+  return v1Fetch<IntegrationSummary>("/integrations", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateIntegration(
+  id: string,
+  body: { name?: string; config?: Record<string, unknown> },
+): Promise<IntegrationSummary> {
+  return v1Fetch<IntegrationSummary>(`/integrations/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteIntegration(id: string): Promise<void> {
+  await v1Fetch(`/integrations/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function testIntegration(id: string): Promise<IntegrationTestResult> {
+  return v1Fetch<IntegrationTestResult>(`/integrations/${encodeURIComponent(id)}/test`, {
+    method: "POST",
+  });
+}
+
+export async function fetchSpoolmanDefaultSettings(): Promise<SpoolmanDefaultSettings> {
+  return engineFetch<SpoolmanDefaultSettings>("/settings/spoolman-default");
+}
+
+export async function saveSpoolmanDefaultIntegration(
+  integrationId: string | null,
+): Promise<SpoolmanDefaultSettings> {
+  return engineFetch<SpoolmanDefaultSettings>("/settings/spoolman-default", {
+    method: "PUT",
+    body: JSON.stringify({ integration_id: integrationId }),
+  });
 }
 
 export async function fetchFilamentCatalog(): Promise<FilamentCatalog> {
@@ -1499,6 +1601,8 @@ export type ReviewPart = PartRow & {
   missing: boolean;
   filament_display: string;
   filament_hex?: string | null;
+  spool_summary?: Array<{ remaining_g: number; spool_id: number }>;
+  spool_badge?: string | null;
 };
 
 export type PlanReviewPartGroup = {
@@ -1656,12 +1760,20 @@ export async function saveRoleFilament(
     role: string;
     filament_color_id?: string | null;
     filament_custom_hex?: string | null;
+    spoolman_spool_id?: string | null;
   },
 ): Promise<{ updated: number; roles: RoleFilamentRow[] }> {
   return engineFetch(`/plans/${profileId}/role-filament`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
+}
+
+export async function fetchSpoolmanSpools(integrationId: string): Promise<SpoolmanSpoolRow[]> {
+  const body = await v1Fetch<{ spools: SpoolmanSpoolRow[] }>(
+    `/integrations/${encodeURIComponent(integrationId)}/spoolman/spools`,
+  );
+  return body.spools;
 }
 
 export async function prepareMissingPrintPlan(profileId: number): Promise<{

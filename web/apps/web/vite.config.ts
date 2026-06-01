@@ -7,6 +7,7 @@ const API_TARGET = process.env.VITE_DEV_API_TARGET ?? "http://127.0.0.1:18765";
 
 /** Backend route prefixes proxied to the Fastify server during `npm run dev`. */
 const API_PREFIXES = [
+  "api/v1",
   "health",
   "plans",
   "sources",
@@ -16,6 +17,7 @@ const API_PREFIXES = [
   "printer-presets",
   "settings",
   "filaments",
+  "integrations",
   "legal",
   "help",
   "kit-catalog",

@@ -41,6 +41,7 @@ export class PostgresDatabase {
     for (const stmt of sql.split(";").map((s) => s.trim()).filter(Boolean)) {
       await this.pool.query(stmt);
     }
+    await this.pool.query("ALTER TABLE parts ADD COLUMN IF NOT EXISTS spoolman_spool_id TEXT");
     await this.pool.query(
       `INSERT INTO app_settings (tenant_id, key, value) VALUES ($1, $2, $3)
        ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value`,
