@@ -1,6 +1,97 @@
-/** Shared API types between web client and server (seeded from desktop engine.ts). */
+/** Shared API types between web client and server. */
 
 export type DeployMode = "self-host" | "saas";
+
+export type ApiError = {
+  detail: string;
+  title?: string;
+  status?: number;
+  type?: string;
+};
+
+export const JOB_KINDS = [
+  "sync",
+  "recompute",
+  "import-scan",
+  "check-source-updates",
+  "export-stl-pack",
+  "export-checklist-html",
+  "export-kit-bundle",
+  "import-kit-bundle",
+  "export-3mf",
+  "pack-preview",
+] as const;
+
+export type JobKind = (typeof JOB_KINDS)[number];
+
+export type JobStartResponse = {
+  job_id: string;
+};
+
+export type ExportArtifact = {
+  path?: string;
+  download_url: string | null;
+  kind?: string;
+  job_id?: string;
+  created_at?: string;
+  manifest_path?: string | null;
+};
+
+export type FleetPreset = {
+  id: string;
+  name: string;
+  bed_width_mm: number;
+  bed_depth_mm: number;
+  bed_height_mm?: number;
+  margin_mm?: number;
+  enabled?: boolean;
+};
+
+export type IntegrationType =
+  | "moonraker"
+  | "prusalink"
+  | "bambu"
+  | "spoolman"
+  | "slicer_folder";
+
+export type IntegrationConfig = Record<string, unknown>;
+
+export type IntegrationSummary = {
+  id: string;
+  type: IntegrationType;
+  name: string;
+  config: IntegrationConfig;
+  created_at: string;
+  updated_at: string;
+};
+
+export type IntegrationTestResult = {
+  ok: boolean;
+  message?: string;
+};
+
+export type DeviceSummary = {
+  id: string;
+  name: string;
+  type?: string;
+  status?: string;
+};
+
+export type WebhookEvent = "job.done" | "job.error";
+
+export type WebhookRegistration = {
+  id: string;
+  url: string;
+  events: WebhookEvent[];
+  secret?: string | null;
+  created_at: string;
+};
+
+export type ApiV1Index = {
+  version: string;
+  openapi: string;
+  health: string;
+};
 
 export type HealthResponse = {
   ok: boolean;
@@ -8,6 +99,13 @@ export type HealthResponse = {
   deploy_mode: DeployMode;
   data_dir: string;
   port?: number;
+  api_version?: string;
+  capabilities?: string[];
+  db?: {
+    connected: boolean;
+    driver: string;
+    postgres: boolean | null;
+  };
 };
 
 export type ProfileSummary = {
@@ -58,6 +156,14 @@ export type PartRow = {
   quantity_effective: number;
 };
 
+/** Plan review / checkoff sheet row (print progress + filament display). */
+export type ReviewPart = PartRow & {
+  print_units: boolean[];
+  printed_count: number;
+  missing: boolean;
+  filament_display: string;
+};
+
 export type JobStatus = "pending" | "running" | "done" | "error" | "cancelled";
 
 export type JobEvent = {
@@ -71,4 +177,5 @@ export type JobEvent = {
 export type JobSnapshot = JobEvent & {
   job_id: string;
   kind: string;
+  finished_at?: string | null;
 };

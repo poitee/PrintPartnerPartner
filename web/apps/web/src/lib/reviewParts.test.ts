@@ -7,7 +7,12 @@ import {
   sourceLabelFromLayer,
 } from "./reviewParts";
 
-const samplePart = (overrides: Partial<PartRow> & { id: number }): PartRow => ({
+const samplePart = (overrides: Partial<PartRow> & { id: number }): PartRow & {
+  print_units: boolean[];
+  printed_count: number;
+  missing: boolean;
+  filament_display: string;
+} => ({
   match_key: "k",
   relative_path: "a.stl",
   filename: "a.stl",
@@ -21,6 +26,10 @@ const samplePart = (overrides: Partial<PartRow> & { id: number }): PartRow => ({
   quantity_auto: 1,
   quantity_override: null,
   quantity_effective: 1,
+  print_units: [false],
+  printed_count: 0,
+  missing: true,
+  filament_display: "",
   ...overrides,
 });
 

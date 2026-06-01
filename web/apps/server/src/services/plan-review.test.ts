@@ -36,6 +36,39 @@ describe("buildPlanReview", () => {
     expect(reviewParts[0]?.id).toBe(includedPart.id);
     expect(review.totals.included_parts).toBe(1);
 
+    const withExcluded = buildPlanReview(repo, plan.id, { includeExcluded: true });
+    const allReviewParts = withExcluded.part_groups.flatMap((g) => g.parts);
+    expect(allReviewParts).toHaveLength(2);
+
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("includes print_units and progress fields on each part", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-review-units-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+
+    const source = repo.createSource({ name: "Repo", url: "https://github.com/a/b" });
+    const repoPath = join(dir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "parts"), { recursive: true });
+    writeFileSync(join(repoPath, "parts", "widget.stl"), "solid");
+    repo.updateSource(source.id, { local_path: repoPath });
+    repo.updateImportRules(source.id, ["parts/"]);
+
+    const plan = repo.createProfile("UnitsPlan", source.id);
+    repo.recomputeProfile(plan.id);
+    const part = repo.listParts(plan.id).parts[0]!;
+    repo.patchPart(part.id, { quantity_override: 2 });
+
+    const review = buildPlanReview(repo, plan.id);
+    const reviewPart = review.part_groups.flatMap((g) => g.parts)[0]!;
+    expect(reviewPart.print_units).toEqual([false, false]);
+    expect(reviewPart.printed_count).toBe(0);
+    expect(reviewPart.missing).toBe(true);
+    expect(reviewPart.quantity_effective).toBe(2);
+
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });

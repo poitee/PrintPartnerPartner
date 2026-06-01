@@ -1021,6 +1021,32 @@ export class AppRepository {
     return out;
   }
 
+  /** Parts with print progress for the unified Review API (optional excluded rows). */
+  getEnrichedPartsForReview(profileId: number, includeExcluded: boolean) {
+    const partRows = this.listPartRows(profileId);
+    for (const part of partRows) {
+      this.ensureProgressForPart(part);
+    }
+    const unitsById = this.printUnitsByPartId(profileId);
+    const rows = partRows.filter((p) => includeExcluded || p.included);
+    return rows.map((p) => {
+      const units = unitsById.get(p.id) ?? [];
+      const printedCount = units.filter(Boolean).length;
+      const qty = Math.max(1, p.quantityEffective);
+      const color = p.filamentColorId ? getColorById(p.filamentColorId) : null;
+      const hex = resolvePartFilamentHex(p);
+      const base = partRow(p);
+      return {
+        ...base,
+        printed_count: printedCount,
+        print_units: units,
+        missing: printedCount < qty,
+        filament_display: color?.combo_label ?? base.filament_display ?? "",
+        filament_hex: hex ?? base.filament_hex ?? null,
+      };
+    });
+  }
+
   getCheckoff(profileId: number) {
     const partRows = this.listPartRows(profileId);
     for (const part of partRows) {

@@ -1,21 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { Printer } from "lucide-react";
+import { toast } from "sonner";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
+import ReviewPartsSheet from "../components/review/ReviewPartsSheet";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
 import {
-  Card,
-  CardContent,
-} from "../components/ui/card";
-import ReviewPartsEditor from "../components/review/ReviewPartsEditor";
-import { fetchPlanReview, startExportStlPack, type PlanReview } from "../api/engine";
-import { buildRoute, checkoffRoute, sourcesRoute } from "../lib/routes";
+  startExportChecklistHtml,
+  startExportStlPack,
+} from "../api/engine";
+import { buildRoute, sourcesRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
-import { toast } from "sonner";
 import { useProfileSelection } from "../context/ProfileContext";
+import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 
@@ -27,40 +29,31 @@ function hintRoute(hint: string | null | undefined, profileId: number | null) {
 
 export default function ReviewPage() {
   const { health, error: engineError } = useEngineHealth();
-  const { selectedProfileId } = useProfileSelection();
+  const { selectedProfileId, profiles } = useProfileSelection();
+  const {
+    review,
+    loading,
+    error: workspaceError,
+    reload,
+    revision,
+    loadedRevision,
+  } = usePlanWorkspace();
   const exportStlJob = useJobRunner("stl-export");
-  const [review, setReview] = useState<PlanReview | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const exportJob = useJobRunner("export");
   const [shareOpen, setShareOpen] = useState(false);
 
-  const load = useCallback(async (profileId: number) => {
-    setLoadError(null);
-    setLoading(true);
-    try {
-      setReview(await fetchPlanReview(profileId));
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      setLoadError(
-        message.includes("404")
-          ? "Plan review API is unavailable — restart the Print Partner engine, then try again."
-          : message,
-      );
-      setReview(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    if (!health || selectedProfileId == null) {
-      setReview(null);
-      setLoadError(null);
-      setLoading(false);
-      return;
+    if (!health?.ok || selectedProfileId == null) return;
+    if (review?.profile_id !== selectedProfileId || loadedRevision < revision) {
+      void reload(selectedProfileId);
     }
-    void load(selectedProfileId);
-  }, [health, selectedProfileId, load]);
+  }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
+
+  const loadError = workspaceError;
+  const planName =
+    review?.plan_name ??
+    profiles.find((p) => p.id === selectedProfileId)?.name ??
+    "Review";
 
   const blockers = useMemo(
     () => review?.issues.filter((i) => i.severity === "blocker") ?? [],
@@ -70,8 +63,14 @@ export default function ReviewPage() {
     () => review?.issues.filter((i) => i.severity === "warning") ?? [],
     [review],
   );
-
   const hasBlockers = review?.has_blockers ?? blockers.length > 0;
+
+  const missingCount = useMemo(() => {
+    if (!review) return 0;
+    return review.part_groups
+      .flatMap((g) => g.parts)
+      .filter((p) => p.included && p.missing).length;
+  }, [review]);
 
   const onExportStls = () => {
     if (selectedProfileId == null) return;
@@ -87,6 +86,38 @@ export default function ReviewPage() {
     );
   };
 
+  const onExportChecklist = () => {
+    if (selectedProfileId == null) return;
+    void exportJob.runJob(
+      () => startExportChecklistHtml(selectedProfileId),
+      (snap) => {
+        if (snap.status === "error") {
+          toast.error(snap.message || "Checklist export failed");
+          return;
+        }
+        completeExportDownload("Checklist HTML", snap.result);
+      },
+    );
+  };
+
+  const onExportMissing = () => {
+    if (selectedProfileId == null) return;
+    void exportJob.runJob(
+      () => startExportStlPack(selectedProfileId, { missing_only: true }),
+      (snap) => {
+        if (snap.status === "error") {
+          toast.error(snap.message || "Missing-STL export failed");
+          return;
+        }
+        completeExportDownload("Missing-parts STL", snap.result, {
+          pathField: "root_path",
+          isDirectory: true,
+        });
+        if (selectedProfileId != null) void reload(selectedProfileId);
+      },
+    );
+  };
+
   return (
     <div className="space-y-4">
       <RouteBreadcrumbs
@@ -97,13 +128,45 @@ export default function ReviewPage() {
       />
       <PageHeader
         title="Review"
-        description="Confirm parts, quantities, and sources before exporting STLs."
+        description="Confirm parts, edit quantities, track printing, and export."
         actions={
           <PageHeaderActions>
             <Button
+              variant="ghost"
+              className="min-h-10 w-full sm:w-auto"
+              onClick={() => window.print()}
+              disabled={!review}
+            >
+              <Printer className="mr-1 h-4 w-4" />
+              Print
+            </Button>
+            <Button
+              variant="secondary"
+              className="min-h-10 w-full sm:w-auto"
+              onClick={onExportChecklist}
+              disabled={selectedProfileId == null || exportJob.busy || !review}
+            >
+              Export checklist
+            </Button>
+            <Button
+              variant="secondary"
+              className="min-h-10 w-full sm:w-auto"
+              onClick={onExportMissing}
+              disabled={
+                selectedProfileId == null ||
+                exportJob.busy ||
+                !review ||
+                missingCount === 0
+              }
+            >
+              Export missing STLs
+            </Button>
+            <Button
               className="min-h-10 w-full sm:w-auto"
               onClick={onExportStls}
-              disabled={selectedProfileId == null || hasBlockers || exportStlJob.busy || !health}
+              disabled={
+                selectedProfileId == null || hasBlockers || exportStlJob.busy || !health
+              }
             >
               {exportStlJob.busy ? "Exporting…" : "Export STLs"}
             </Button>
@@ -135,7 +198,7 @@ export default function ReviewPage() {
         <Card>
           <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-muted-foreground">
-              Select a plan in the header to review sync status and blockers before export.
+              Select a plan in the header to review sync status and parts before export.
             </p>
             <Button variant="secondary" size="sm" asChild>
               <Link to={buildRoute(null)}>Go to Build</Link>
@@ -225,19 +288,13 @@ export default function ReviewPage() {
             </section>
           )}
 
-          <ReviewPartsEditor
+          <ReviewPartsSheet
             review={review}
+            planName={planName}
             disabled={!health || loading}
-            onReviewUpdated={setReview}
-            onReload={async () => {
-              if (selectedProfileId != null) await load(selectedProfileId);
-            }}
           />
 
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <Button className="min-h-10 w-full sm:w-auto" asChild disabled={hasBlockers}>
-              <Link to={checkoffRoute(selectedProfileId)}>Continue to Checkoff</Link>
-            </Button>
             <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
               <Link to={buildRoute(selectedProfileId)}>Back to Build</Link>
             </Button>

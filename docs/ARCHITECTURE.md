@@ -57,6 +57,24 @@ File blobs (synced repos, exports, thumbnails) are stored on disk in self-host, 
 
 STL previews and the on-scroll Checkoff thumbnails are rendered **client-side with Three.js** in the React SPA — there is no server-side mesh renderer. The browser downloads STL geometry from the API and rasterizes previews locally.
 
+## HTTP API & integrations
+
+- **Versioned surface:** `GET /api/v1` with OpenAPI at `/api/v1/openapi.json` (legacy flat routes remain for the SPA).
+- **Automation auth (self-host):** optional `PRINT_PARTNER_API_KEY` for `/api/v1/*`.
+- **Integrations:** pluggable adapters under `/api/v1/integrations` (Moonraker test connection first; other vendors stubbed).
+- **Fleet presets:** `/printers` bed metadata for 3MF packing — separate from live printer hosts.
+
+See [API.md](./API.md) for slicer polling, exports, and webhooks.
+
+```mermaid
+flowchart LR
+  Clients[External clients] --> V1["/api/v1"]
+  SPA[React SPA] --> Flat["/plans /jobs …"]
+  V1 --> Core[Core routes]
+  Flat --> Core
+  V1 --> Integrations[integrations adapters]
+```
+
 ## Background jobs & progress
 
 Long-running work — repo sync, plan recompute, STL pack export, HTML checklist export, and kit-bundle import/export — runs through a background **job runner** (`web/apps/server/src/routes/jobs.ts`). Self-host and SaaS both use the in-process runner by default; SaaS can be backed by a BullMQ/Redis queue (`REDIS_URL`) for horizontal scaling. Clients start a job over REST and subscribe to live progress via the WebSocket at `/ws/jobs/:id`.

@@ -26,6 +26,8 @@ type PlanManagerProps = {
   hideSelector?: boolean;
   /** Collapse CRUD behind a summary row (Build page). */
   collapsible?: boolean;
+  /** When collapsible, start expanded (Build page). */
+  defaultOpen?: boolean;
 };
 
 /** Full plan CRUD — use on Build; workflow pages use header PlanPicker for switching. */
@@ -35,7 +37,12 @@ type SwitchPrompt = {
   actionLabel: "created" | "duplicated";
 };
 
-export default function PlanManager({ disabled, hideSelector, collapsible }: PlanManagerProps) {
+export default function PlanManager({
+  disabled,
+  hideSelector,
+  collapsible,
+  defaultOpen,
+}: PlanManagerProps) {
   const navigate = useNavigate();
   const {
     profiles,
@@ -282,10 +289,10 @@ export default function PlanManager({ disabled, hideSelector, collapsible }: Pla
   return (
     <div className="plan-manager">
       {collapsible ? (
-        <details className="group rounded-lg border border-border bg-card">
+        <details className="group rounded-lg border border-border bg-card" open={defaultOpen || undefined}>
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
             <div className="min-w-0">
-              <p className="text-sm font-semibold">Plan settings</p>
+              <p className="text-sm font-semibold">Manage builds</p>
               <p className="truncate text-xs text-muted-foreground">
                 {selected
                   ? `${selected.name} · ${selected.part_count} part${selected.part_count === 1 ? "" : "s"}`

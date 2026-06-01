@@ -25,6 +25,8 @@ export type ServerConfig = {
   s3Bucket: string | null;
   s3Region: string | null;
   uploadMaxBytes: number;
+  /** Self-host: optional key for /api/v1 automation clients */
+  integrationApiKey: string | null;
 };
 
 const DEFAULT_DATA_DIR = process.env.PRINT_PARTNER_DATA_DIR ?? "./data";
@@ -111,5 +113,6 @@ export function loadConfig(): ServerConfig {
     s3Bucket: process.env.S3_BUCKET ?? null,
     s3Region: process.env.S3_REGION ?? process.env.AWS_REGION ?? null,
     uploadMaxBytes: Number(process.env.UPLOAD_MAX_BYTES ?? 512 * 1024 * 1024),
+    integrationApiKey: process.env.PRINT_PARTNER_API_KEY?.trim() || null,
   };
 }

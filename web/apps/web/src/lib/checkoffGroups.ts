@@ -1,4 +1,4 @@
-import type { CheckoffPart } from "../api/engine";
+import type { ReviewPart } from "../api/engine";
 import { sourceLabelFromLayer } from "./reviewParts";
 
 const ROOT_FOLDER = "(root)";
@@ -14,7 +14,7 @@ export function folderKeyFromRelativePath(relativePath: string): string {
 
 export type CheckoffFolderGroup = {
   folder: string;
-  parts: CheckoffPart[];
+  parts: ReviewPart[];
 };
 
 export type CheckoffRepoGroup = {
@@ -32,8 +32,8 @@ function repoSortKey(layer: string): [number, string] {
  * Group checkoff parts by repo → folder, sorted to match the printable checklist
  * HTML (base source first, then add-ons; folders and files alphabetical).
  */
-export function groupCheckoffParts(parts: CheckoffPart[]): CheckoffRepoGroup[] {
-  const byRepo = new Map<string, Map<string, CheckoffPart[]>>();
+export function groupCheckoffParts(parts: ReviewPart[]): CheckoffRepoGroup[] {
+  const byRepo = new Map<string, Map<string, ReviewPart[]>>();
   for (const p of parts) {
     const repo = p.source_layer || "unknown";
     const folder = folderKeyFromRelativePath(p.relative_path);

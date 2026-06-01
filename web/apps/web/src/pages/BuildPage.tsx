@@ -3,8 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
+import PlanManager from "../components/PlanManager";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
-import KitManifestOptions from "../components/KitManifestOptions";
 import RoleFilamentPicker from "../components/RoleFilamentPicker";
 import SourceCategorySheet from "../components/sources/SourceCategorySheet";
 import SourceFilePickerCard from "../components/SourceFilePickerCard";
@@ -34,9 +34,10 @@ import {
   type ProfileLayer,
   type SourceSummary,
 } from "../api/engine";
-import { buildRoute, buildsRoute, reviewRoute, sourcesRoute } from "../lib/routes";
+import { buildRoute, reviewRoute, sourcesRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
 import { useProfileSelection } from "../context/ProfileContext";
+import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
@@ -56,6 +57,7 @@ function BuildPageContent() {
   const navigate = useNavigate();
   const { health } = useEngineHealth();
   const { selectedProfileId, reloadProfiles } = useProfileSelection();
+  const { invalidate: bumpPlanRevision } = usePlanWorkspace();
   const { busy, runJob } = useJobRunner("recompute");
   const exportStlJob = useJobRunner("stl-export");
 
@@ -180,6 +182,7 @@ function BuildPageContent() {
           return;
         }
         toast.success("Build updated");
+        bumpPlanRevision();
         setFilamentRefreshKey((k) => k + 1);
         void loadProfileData(selectedProfileId);
         void reloadProfiles();
@@ -291,13 +294,7 @@ function BuildPageContent() {
         }
       />
 
-      <p className="text-sm text-muted-foreground">
-        <Button variant="ghost" className="h-auto px-0 text-sm text-primary" asChild>
-          <Link to={buildsRoute(selectedProfileId)}>Manage builds</Link>
-        </Button>
-        {" "}
-        — create, rename, duplicate, or delete plans.
-      </p>
+      <PlanManager hideSelector disabled={!health} collapsible defaultOpen />
 
       {kitImportSetup &&
         ((kitImportSetup.unmatched_sources?.length ?? 0) > 0 ||
@@ -391,16 +388,6 @@ function BuildPageContent() {
                 row.layerType === "addon"
                   ? () => void onRemoveLayer(row.layer)
                   : undefined
-              }
-              expandedExtra={
-                row.layerType === "base" && selectedProfileId != null ? (
-                  <KitManifestOptions
-                    profileId={selectedProfileId}
-                    baseSourceName={row.sourceName}
-                    disabled={!health || busy}
-                    compact
-                  />
-                ) : undefined
               }
             />
           ))}

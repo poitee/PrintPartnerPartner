@@ -1,4 +1,4 @@
-import type { PartRow, PlanReview, PlanReviewPartGroup } from "../api/engine";
+import type { PartRow, PlanReview, PlanReviewPartGroup, ReviewPart } from "../api/engine";
 
 /** Human-readable source name from `base:repo-name` / `addon:repo-name` layer labels. */
 export function sourceLabelFromLayer(sourceLayer: string | null | undefined): string {
@@ -7,8 +7,16 @@ export function sourceLabelFromLayer(sourceLayer: string | null | undefined): st
   return colon >= 0 ? sourceLayer.slice(colon + 1) : sourceLayer;
 }
 
-export function flattenReviewParts(groups: PlanReviewPartGroup[]): PartRow[] {
+export function flattenReviewParts(groups: PlanReviewPartGroup[]): ReviewPart[] {
   return groups.flatMap((g) => g.parts);
+}
+
+/** Merge a partial patch into a review part row (keeps print progress fields). */
+export function mergeReviewPartPatch(
+  part: ReviewPart,
+  patch: Partial<ReviewPart> & Partial<PartRow>,
+): ReviewPart {
+  return { ...part, ...patch };
 }
 
 export function partitionIncludedParts(parts: PartRow[]): {
@@ -44,10 +52,12 @@ export function filterPartsByQuery(parts: PartRow[], query: string): PartRow[] {
 }
 
 /** Apply a PATCH response into review payload (totals omit filament breakdown). */
-export function mergePartIntoReview(review: PlanReview, updated: PartRow): PlanReview {
+export function mergePartIntoReview(review: PlanReview, updated: ReviewPart | PartRow): PlanReview {
   const part_groups = review.part_groups.map((g) => ({
     ...g,
-    parts: g.parts.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)),
+    parts: g.parts.map((p) =>
+      p.id === updated.id ? mergeReviewPartPatch(p, updated) : p,
+    ),
   }));
   const all = flattenReviewParts(part_groups);
   const included = all.filter((p) => p.included);
@@ -68,4 +78,18 @@ export function mergePartIntoReview(review: PlanReview, updated: PartRow): PlanR
       by_role,
     },
   };
+}
+
+export function mergeProgressIntoReview(
+  review: PlanReview,
+  partId: number,
+  progress: { printed_count: number; print_units: boolean[]; missing: boolean },
+): PlanReview {
+  const part_groups = review.part_groups.map((g) => ({
+    ...g,
+    parts: g.parts.map((p) =>
+      p.id === partId ? mergeReviewPartPatch(p, progress) : p,
+    ),
+  }));
+  return { ...review, part_groups };
 }

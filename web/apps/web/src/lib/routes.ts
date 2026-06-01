@@ -10,8 +10,9 @@ export function buildRoute(profileId?: number | null): string {
   return withProfile("/build", profileId ?? null);
 }
 
+/** @deprecated Builds merged into Build — use buildRoute */
 export function buildsRoute(profileId?: number | null): string {
-  return withProfile("/builds", profileId ?? null);
+  return buildRoute(profileId ?? null);
 }
 
 /** @deprecated use buildRoute */
@@ -30,10 +31,6 @@ export function sourcesRoute(): string {
 /** @deprecated Plate step removed — use reviewRoute */
 export function plateRoute(profileId?: number | null): string {
   return reviewRoute(profileId);
-}
-
-export function checkoffRoute(profileId?: number | null): string {
-  return withProfile("/checkoff", profileId ?? null);
 }
 
 export function settingsRoute(): string {
@@ -57,12 +54,13 @@ export function isBuildPath(pathname: string): boolean {
   return pathname === "/build" || pathname === "/plan";
 }
 
-export function isBuildsPath(pathname: string): boolean {
-  return pathname === "/builds";
+export function isReviewPath(pathname: string): boolean {
+  return pathname === "/review" || pathname === "/checkoff";
 }
 
-export function isReviewPath(pathname: string): boolean {
-  return pathname === "/review";
+/** @deprecated Checkoff merged into Review — redirects to /review */
+export function checkoffRoute(profileId?: number | null): string {
+  return reviewRoute(profileId);
 }
 
 export function isPlanWorkflowPath(pathname: string): boolean {

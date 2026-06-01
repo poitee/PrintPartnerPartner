@@ -37,6 +37,8 @@ export async function registerHealthRoutes(
       deploy_mode: config.deployMode,
       data_dir: config.dataDir,
       port: config.port,
+      api_version: "v1",
+      capabilities: ["kit_planning", "jobs_ws", "fleet_presets", "integrations_api"],
       db: {
         connected: dbOk,
         driver: saasDb.bundle?.driver ?? "sqlite",
