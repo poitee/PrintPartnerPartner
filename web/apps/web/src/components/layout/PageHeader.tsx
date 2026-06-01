@@ -12,7 +12,7 @@ export default function PageHeader({ title, description, actions, className }: P
   return (
     <header
       className={cn(
-        "flex flex-wrap items-start justify-between gap-3 pb-4",
+        "flex flex-col gap-3 pb-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between",
         className,
       )}
     >
@@ -22,7 +22,11 @@ export default function PageHeader({ title, description, actions, className }: P
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         )}
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          {actions}
+        </div>
+      ) : null}
     </header>
   );
 }

@@ -7,6 +7,7 @@ import {
   FolderGit2,
   FolderOpen,
   Hammer,
+  MoreHorizontal,
   Settings,
 } from "lucide-react";
 import CommandPalette from "../components/CommandPalette";
@@ -15,8 +16,16 @@ import SupportCta from "../components/SupportCta";
 import { Toaster } from "../components/ui/sonner";
 import { Separator } from "../components/ui/separator";
 import { Button } from "../components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
 import PlanPicker from "../components/PlanPicker";
 import { openDataFolder } from "../api/engine";
+import { openKofi } from "../lib/supportLinks";
 import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
 import {
   buildRoute,
@@ -145,8 +154,8 @@ export default function AppLayout() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-card print:hidden">
+    <div className="flex min-h-screen min-w-0 bg-background">
+      <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-card lg:flex print:hidden">
         <div className="border-b border-border px-4 py-4">
           <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
           <p className="text-xs text-muted-foreground">
@@ -192,30 +201,90 @@ export default function AppLayout() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-4 border-b border-border bg-card px-5 py-2.5 print:hidden">
-          <div className="flex items-center gap-3 text-sm">
+        <header className="flex flex-col gap-2 border-b border-border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 print:hidden">
+          <div className="flex min-w-0 items-center gap-2 text-sm">
             <span
               className={cn(
-                "inline-flex h-2 w-2 rounded-full",
+                "inline-flex h-2 w-2 shrink-0 rounded-full",
                 health ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" : error ? "bg-red-400" : "bg-amber-400",
               )}
             />
-            <span className="text-muted-foreground">
+            <span className="truncate text-muted-foreground">
               {health ? "Engine online" : error ? "Engine offline" : "Connecting…"}
             </span>
-            {showPlanInHeader && (
-              <span className="hidden text-foreground sm:inline">
-                · Plan: <span className="font-medium">{activePlanName}</span>
+            {showPlanInHeader && activePlanName && (
+              <span className="hidden truncate text-foreground md:inline">
+                · <span className="font-medium">{activePlanName}</span>
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <SupportCta variant="secondary" size="sm" className="hidden sm:inline-flex" />
-            <PlanPicker className="min-w-[200px] max-w-xs" />
+          <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:justify-end">
+            <SupportCta variant="secondary" size="sm" className="hidden shrink-0 sm:inline-flex" />
+            <PlanPicker className="min-w-0 flex-1 sm:min-w-[200px] sm:max-w-xs" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 lg:hidden"
+                  aria-label="More"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem
+                  className="sm:hidden"
+                  onClick={() => void openKofi()}
+                >
+                  Support on Ko-fi
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="sm:hidden" />
+                {secondaryNav.map((item) => (
+                  <DropdownMenuItem key={item.to} asChild>
+                    <NavLink to={item.to} className="flex w-full cursor-pointer items-center gap-2">
+                      <item.icon className="h-4 w-4" />
+                      {item.label}
+                    </NavLink>
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => void openDataFolder()}>
+                  <FolderOpen className="mr-2 h-4 w-4" />
+                  Open data folder
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto p-5 pb-14 print:overflow-visible print:p-0">
+        <nav
+          className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-2 lg:hidden print:hidden [-webkit-overflow-scrolling:touch]"
+          aria-label="Workflow"
+        >
+          {pipelineNav.map((item) => (
+            <NavLink
+              key={item.label}
+              to={item.to}
+              onClick={(e) => onPipelineNavigate(item.to, e)}
+              className={({ isActive }) => {
+                const active = item.isActive?.(location.pathname) ?? isActive;
+                return cn(
+                  "flex shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-colors",
+                  active
+                    ? "bg-primary/15 text-primary"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                );
+              }}
+            >
+              <item.icon className="h-4 w-4 shrink-0" />
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 pb-20 sm:p-5 sm:pb-16 lg:pb-14 print:overflow-visible print:p-0">
           <Outlet />
         </main>
       </div>
