@@ -14,8 +14,10 @@ import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 import {
   buildRoute,
+  checkoffRoute,
   helpRoute,
   isBuildPath,
+  isCheckoffPath,
   isReviewPath,
   reviewRoute,
   settingsRoute,
@@ -67,6 +69,7 @@ export default function CommandPalette() {
 
   const onBuild = isBuildPath(location.pathname);
   const onReview = isReviewPath(location.pathname);
+  const onCheckoff = isCheckoffPath(location.pathname);
   const onSources = location.pathname === "/sources";
 
   const actions: Action[] = useMemo(() => {
@@ -119,6 +122,18 @@ export default function CommandPalette() {
         run: () => {
           leaveBuildThen(() => {
             navigate(reviewRoute(selectedProfileId));
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "nav-checkoff",
+        label: "Go to Checkoff",
+        hint: onCheckoff ? "current" : undefined,
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(checkoffRoute(selectedProfileId));
             setOpen(false);
           });
         },
@@ -213,14 +228,14 @@ export default function CommandPalette() {
                 completeExportDownload("STL export", snap.result, { pathField: "root_path" });
               },
             );
-            if (!onBuild && !onReview) navigate(reviewRoute(selectedProfileId));
+            if (!onBuild && !onReview && !onCheckoff) navigate(reviewRoute(selectedProfileId));
             setOpen(false);
           },
         },
         {
           id: "export-missing-stl",
           label: "Export missing STLs",
-          hint: onReview ? "Review" : `Plan #${selectedProfileId}`,
+          hint: onCheckoff ? "Checkoff" : onReview ? "Review" : `Plan #${selectedProfileId}`,
           group: "Actions",
           disabled: stlExportJob.busy,
           run: () => {
@@ -237,7 +252,7 @@ export default function CommandPalette() {
                 });
               },
             );
-            if (!onReview) navigate(reviewRoute(selectedProfileId));
+            if (!onReview && !onCheckoff) navigate(checkoffRoute(selectedProfileId));
             setOpen(false);
           },
         },
@@ -302,6 +317,7 @@ export default function CommandPalette() {
     kitExportJob,
     onBuild,
     onReview,
+    onCheckoff,
     onSources,
     flushBuildSaves,
     importSharedBuild,

@@ -2,6 +2,7 @@ import { type ComponentType, type MouseEvent } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   BookOpen,
+  CheckSquare,
   ClipboardCheck,
   FolderGit2,
   FolderOpen,
@@ -28,7 +29,9 @@ import { openKofi } from "../lib/supportLinks";
 import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
 import {
   buildRoute,
+  checkoffRoute,
   isBuildPath,
+  isCheckoffPath,
   isReviewPath,
   reviewRoute,
   sourcesRoute,
@@ -55,7 +58,8 @@ const secondaryNav: Omit<NavEntry, "hint">[] = [
 const NAV_HINTS: Record<string, string> = {
   Sources: "Register repos and set import folders",
   Build: "Manage plans, attach sources, pick files, set colors",
-  Review: "Validate parts, track printing, and export",
+  Review: "Validate parts, edit quantities, and export",
+  Checkoff: "Track what you've printed on the shop floor",
 };
 
 function NavItem({
@@ -121,7 +125,9 @@ export default function AppLayout() {
 
   const showPlanInHeader =
     activePlanName &&
-    (isBuildPath(location.pathname) || isReviewPath(location.pathname));
+    (isBuildPath(location.pathname) ||
+      isReviewPath(location.pathname) ||
+      isCheckoffPath(location.pathname));
 
   const pipelineNav: NavEntry[] = [
     { to: sourcesRoute(), label: "Sources", hint: NAV_HINTS.Sources, icon: FolderGit2 },
@@ -139,6 +145,13 @@ export default function AppLayout() {
       icon: ClipboardCheck,
       isActive: (pathname) => isReviewPath(pathname),
     },
+    {
+      to: checkoffRoute(selectedProfileId),
+      label: "Checkoff",
+      hint: NAV_HINTS.Checkoff,
+      icon: CheckSquare,
+      isActive: (pathname) => isCheckoffPath(pathname),
+    },
   ];
 
   return (
@@ -147,7 +160,7 @@ export default function AppLayout() {
         <div className="border-b border-border px-4 py-4">
           <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
           <p className="text-xs text-muted-foreground">
-            Sources → Build → Review
+            Sources → Build → Review → Checkoff
           </p>
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-3">

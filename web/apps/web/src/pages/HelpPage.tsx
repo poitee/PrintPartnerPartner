@@ -24,7 +24,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
-import { buildRoute, reviewRoute, sourcesRoute } from "../lib/routes";
+import { buildRoute, checkoffRoute, reviewRoute, sourcesRoute } from "../lib/routes";
 
 type LegalTab = "summary" | "license" | "attribution" | "commercial" | "third-party";
 
@@ -53,7 +53,13 @@ const WORKFLOW_STEPS = [
     num: 3,
     label: "Review",
     path: null as string | null,
-    description: "Validate parts, track printing, edit quantities, and export",
+    description: "Validate parts, edit quantities, and export STLs",
+  },
+  {
+    num: 4,
+    label: "Checkoff",
+    path: null as string | null,
+    description: "Print a checklist and mark units as you finish them",
   },
 ] as const;
 
@@ -102,6 +108,7 @@ export default function HelpPage() {
     if (step.path) return step.path;
     if (step.label === "Build") return buildRoute(selectedProfileId);
     if (step.label === "Review") return reviewRoute(selectedProfileId);
+    if (step.label === "Checkoff") return checkoffRoute(selectedProfileId);
     return buildRoute(selectedProfileId);
   });
 

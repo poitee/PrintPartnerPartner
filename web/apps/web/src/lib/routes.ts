@@ -55,14 +55,22 @@ export function isBuildPath(pathname: string): boolean {
 }
 
 export function isReviewPath(pathname: string): boolean {
-  return pathname === "/review" || pathname === "/checkoff";
+  return pathname === "/review";
 }
 
-/** @deprecated Checkoff merged into Review — redirects to /review */
+export function isCheckoffPath(pathname: string): boolean {
+  return pathname === "/checkoff";
+}
+
 export function checkoffRoute(profileId?: number | null): string {
-  return reviewRoute(profileId);
+  return withProfile("/checkoff", profileId ?? null);
 }
 
 export function isPlanWorkflowPath(pathname: string): boolean {
-  return isBuildPath(pathname) || isReviewPath(pathname) || isKitStudioPath(pathname);
+  return (
+    isBuildPath(pathname) ||
+    isReviewPath(pathname) ||
+    isCheckoffPath(pathname) ||
+    isKitStudioPath(pathname)
+  );
 }

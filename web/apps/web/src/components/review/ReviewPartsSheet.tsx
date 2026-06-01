@@ -16,7 +16,6 @@ import {
   loadPersistedReviewPartsUi,
   savePersistedReviewPartsUi,
   type PersistedReviewPartsUi,
-  type ReviewViewMode,
 } from "../../lib/persistedReviewPartsUi";
 import { useProfileSelection } from "../../context/ProfileContext";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -62,7 +61,7 @@ function QuantityStepper({
         </button>
         <input
           type="number"
-          className="qty-input rounded-md border border-input bg-background w-12 text-center text-sm"
+          className="qty-input"
           min={1}
           value={qty}
           disabled={disabled}
@@ -93,35 +92,21 @@ function QuantityStepper({
 
 function ReviewSheetRow({
   part,
-  viewMode,
   busy,
   compact,
-  onToggleUnit,
   onQtyChange,
   onRemove,
   onRestore,
 }: {
   part: ReviewPart;
-  viewMode: ReviewViewMode;
   busy: boolean;
   compact: boolean;
-  onToggleUnit: (part: ReviewPart, unitIndex: number) => void;
   onQtyChange: (part: ReviewPart, qty: number) => void;
   onRemove: (part: ReviewPart) => void;
   onRestore: (part: ReviewPart) => void;
 }) {
-  const done =
-    part.printed_count >= part.quantity_effective && part.quantity_effective > 0;
-  const edit = viewMode === "edit";
-
   return (
-    <tr
-      className={cn(
-        "sheet-row",
-        done && viewMode === "print" && "sheet-row-done",
-        !part.included && "opacity-70",
-      )}
-    >
+    <tr className={cn("sheet-row", !part.included && "opacity-70")}>
       <td className="sheet-cell-part">
         <div className="sheet-part">
           <PartThumb partId={part.id} tintHex={part.filament_hex} compact={compact} />
@@ -141,64 +126,37 @@ function ReviewSheetRow({
         </div>
       </td>
       <td className="sheet-cell-qty">
-        {edit ? (
-          <QuantityStepper
-            part={part}
-            disabled={busy || !part.included}
-            onChange={(n) => onQtyChange(part, n)}
-          />
+        <QuantityStepper
+          part={part}
+          disabled={busy || !part.included}
+          onChange={(n) => onQtyChange(part, n)}
+        />
+      </td>
+      <td className="sheet-cell-actions">
+        {part.included ? (
+          <Button
+            type="button"
+            variant="sheetRemove"
+            size="sm"
+            className="sheet-remove-btn"
+            disabled={busy}
+            onClick={() => onRemove(part)}
+          >
+            Remove
+          </Button>
         ) : (
-          part.quantity_effective
+          <Button
+            type="button"
+            variant="sheetRestore"
+            size="sm"
+            className="sheet-restore-btn"
+            disabled={busy}
+            onClick={() => onRestore(part)}
+          >
+            Restore
+          </Button>
         )}
       </td>
-      {edit ? (
-        <td className="sheet-cell-actions">
-          {part.included ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => onRemove(part)}
-            >
-              Remove
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={busy}
-              onClick={() => onRestore(part)}
-            >
-              Restore
-            </Button>
-          )}
-        </td>
-      ) : (
-        <td className="sheet-cell-printed">
-          <div className="sheet-units">
-            {part.print_units.map((unitDone, idx) => (
-              <label
-                key={idx}
-                className={cn("sheet-unit", unitDone && "sheet-unit-done")}
-                title={`Unit #${idx + 1}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={unitDone}
-                  onChange={() => onToggleUnit(part, idx)}
-                  disabled={busy || !part.included}
-                />
-                <span>{idx + 1}</span>
-              </label>
-            ))}
-            <span className={cn("sheet-printed-count", done && "sheet-printed-done")}>
-              {part.printed_count}/{part.quantity_effective}
-            </span>
-          </div>
-        </td>
-      )}
       <td className="sheet-cell-notes" aria-hidden />
     </tr>
   );
@@ -206,7 +164,7 @@ function ReviewSheetRow({
 
 export default function ReviewPartsSheet({ review, planName, disabled }: Props) {
   const { profiles } = useProfileSelection();
-  const { setQuantity, setIncluded, toggleUnit, reload, busyPartId } = usePlanWorkspace();
+  const { setQuantity, setIncluded, reload, busyPartId } = usePlanWorkspace();
   const persisted = useMemo(() => loadPersistedReviewPartsUi(), []);
   const [ui, setUi] = useState<PersistedReviewPartsUi>(persisted);
   const [removeTarget, setRemoveTarget] = useState<ReviewPart | null>(null);
@@ -261,32 +219,12 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
     void setIncluded(part.id, true).then(() => toast.success(`Restored ${part.filename}`));
   };
 
-  const onToggleUnit = (part: ReviewPart, unitIndex: number) => {
-    const next = !part.print_units[unitIndex];
-    void toggleUnit(part.id, unitIndex, next);
-  };
-
   const displayName = planName || profiles.find((p) => p.id === review.profile_id)?.name || "Review";
 
   return (
     <section className="space-y-3">
       <div className="no-print checkoff-sticky flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-sm font-semibold flex-1">Parts</h3>
-          <div className="flex rounded-md border border-input p-0.5" role="group" aria-label="View mode">
-            {(["edit", "print"] as const).map((mode) => (
-              <Button
-                key={mode}
-                size="sm"
-                variant={ui.viewMode === mode ? "secondary" : "ghost"}
-                className="min-h-8 capitalize"
-                onClick={() => patchUi({ viewMode: mode })}
-              >
-                {mode}
-              </Button>
-            ))}
-          </div>
-        </div>
+        <h3 className="text-sm font-semibold">Parts</h3>
 
         <input
           type="search"
@@ -444,9 +382,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                         <ReviewSheetMobileCard
                           key={part.id}
                           part={part}
-                          viewMode={ui.viewMode}
                           busy={busyPartId === part.id || Boolean(disabled)}
-                          onToggleUnit={onToggleUnit}
                           onQtyChange={onQtyChange}
                           onRemove={() => onRemove(part)}
                           onRestore={() => onRestore(part)}
@@ -465,11 +401,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                         <tr>
                           <th className="sheet-cell-part">Part</th>
                           <th className="sheet-cell-qty">Qty</th>
-                          {ui.viewMode === "edit" ? (
-                            <th className="sheet-cell-actions">Actions</th>
-                          ) : (
-                            <th className="sheet-cell-printed">Printed</th>
-                          )}
+                          <th className="sheet-cell-actions">Actions</th>
                           <th className="sheet-cell-notes">Notes</th>
                         </tr>
                       </thead>
@@ -478,10 +410,8 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                           <ReviewSheetRow
                             key={part.id}
                             part={part}
-                            viewMode={ui.viewMode}
                             busy={busyPartId === part.id || Boolean(disabled)}
                             compact={isMobileLayout || ui.compactMode}
-                            onToggleUnit={onToggleUnit}
                             onQtyChange={onQtyChange}
                             onRemove={onRemove}
                             onRestore={onRestore}
