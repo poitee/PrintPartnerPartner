@@ -35,6 +35,9 @@ export interface JobRunner {
   cancel(jobId: string): Promise<boolean>;
 }
 
+/** External system connectors (Moonraker, Spoolman, etc.) — see integrations/store.ts. */
+export type { IntegrationPort } from "../integrations/store.js";
+
 export interface AppPorts {
   db: DbStore;
   storage: StoragePort;

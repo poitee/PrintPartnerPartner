@@ -24,12 +24,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
-import {
-  checkoffRoute,
-  buildRoute,
-  reviewRoute,
-  sourcesRoute,
-} from "../lib/routes";
+import { buildRoute, reviewRoute, sourcesRoute } from "../lib/routes";
 
 type LegalTab = "summary" | "license" | "attribution" | "commercial" | "third-party";
 
@@ -58,13 +53,7 @@ const WORKFLOW_STEPS = [
     num: 3,
     label: "Review",
     path: null as string | null,
-    description: "Verify totals and export STLs",
-  },
-  {
-    num: 4,
-    label: "Checkoff",
-    path: null as string | null,
-    description: "Track printed units on the shop floor",
+    description: "Validate parts, track printing, edit quantities, and export",
   },
 ] as const;
 
@@ -113,7 +102,6 @@ export default function HelpPage() {
     if (step.path) return step.path;
     if (step.label === "Build") return buildRoute(selectedProfileId);
     if (step.label === "Review") return reviewRoute(selectedProfileId);
-    if (step.label === "Checkoff") return checkoffRoute(selectedProfileId);
     return buildRoute(selectedProfileId);
   });
 
@@ -186,7 +174,7 @@ export default function HelpPage() {
       <Card className="shadow-none">
         <CardHeader>
           <CardTitle className="text-base">Workflow</CardTitle>
-          <CardDescription>Sources → Build → Review → Checkoff</CardDescription>
+          <CardDescription>Sources → Build → Review</CardDescription>
         </CardHeader>
         <CardContent>
           <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -315,7 +303,7 @@ export default function HelpPage() {
           {engineUrl && (
             <p className="text-xs text-muted-foreground">
               Engine API: <code className="font-mono">{engineUrl}</code> · OpenAPI:{" "}
-              <code className="font-mono">{engineUrl}/openapi.json</code>
+              <code className="font-mono">{engineUrl}/api/v1/openapi.json</code>
             </p>
           )}
         </CardContent>

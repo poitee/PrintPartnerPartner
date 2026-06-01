@@ -9,33 +9,20 @@ import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { createSaasPorts } from "./adapters/saas/index.js";
 import type { AppPorts } from "./ports/index.js";
 import { registerHealthRoutes } from "./routes/health.js";
-import { registerSourceRoutes } from "./routes/sources.js";
-import { registerPlanRoutes } from "./routes/plans.js";
 import {
-  registerJobRoutes,
   registerJobWebSocket,
   createJobRunner,
   type InProcessJobRunner,
 } from "./routes/jobs.js";
-import { registerPartRoutes } from "./routes/parts.js";
-import { registerExportRoutes } from "./routes/exports.js";
-import { registerImportRoutes } from "./routes/imports.js";
-import { join } from "node:path";
-import {
-  registerSettingsRoutes,
-  registerSourceNamingRoutes,
-  registerStubRoutes,
-} from "./routes/settings.js";
-import { registerPrinterRoutes } from "./routes/printers.js";
-import { registerPrintPlanRoutes } from "./routes/print-plan.js";
-import { registerManifestRoutes } from "./routes/manifest.js";
-import { registerLegalRoutes } from "./routes/legal.js";
-import { registerRepoManifestRoutes } from "./routes/repo-manifest.js";
+import { registerCoreRoutes } from "./routes/core-routes.js";
+import { registerApiV1Plugin, registerOpenApi, registerOpenApiJsonRoutes } from "./routes/api-v1.js";
 import { registerAuthRoutes, registerTenantMiddleware } from "./routes/auth.js";
+import { registerApiKeyAuth } from "./middleware/api-key.js";
 import { validateProductionConfig } from "./config.js";
 import { setRequestTenantId } from "./middleware/tenant-context.js";
 import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { isBrowserDocumentNavigation, isSpaClientPath } from "./lib/spa-nav.js";
 import type { SaasDbStore } from "./adapters/saas/index.js";
 import type { AppRepository } from "./db/repository.js";
@@ -74,6 +61,7 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
   await app.register(cookie);
   registerTenantMiddleware(app, config);
   registerAuthRoutes(app, config);
+  registerApiKeyAuth(app, config);
 
   await app.register(cors, { origin: config.corsOrigin, credentials: true });
   await app.register(rateLimit, { global: false });
@@ -96,32 +84,30 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
   }
 
   await registerHealthRoutes(app, config, ports);
+  await registerOpenApi(app, config);
 
   const repository = resolveRepository(ports);
   if (repository) {
     const thumbsDir = join(config.dataDir, "thumbs");
     const coversDir = join(config.dataDir, "covers");
-    const routeDeps = {
+    const getRepo = () => repository;
+    const jobs = (ports.jobs as InProcessJobRunner) ?? createJobRunner(getRepo, config.dataDir);
+
+    const coreDeps = {
       repo: repository,
       reposDir: ports.reposDir ?? join(config.dataDir, "repos"),
       sourcesDir: ports.sourcesDir ?? join(config.dataDir, "sources"),
       thumbsDir,
       coversDir,
+      dataDir: config.dataDir,
+      config,
+      jobs,
     };
 
-    await registerSourceRoutes(app, routeDeps);
-    await registerPlanRoutes(app, { repo: repository });
-    await registerPartRoutes(app, { repo: repository, thumbsDir });
-    await registerExportRoutes(app, { dataDir: config.dataDir });
-    await registerImportRoutes(app, { repo: repository });
-    await registerSettingsRoutes(app, { repo: repository, dataDir: config.dataDir });
-    await registerSourceNamingRoutes(app, { repo: repository, dataDir: config.dataDir });
-    await registerStubRoutes(app, { repo: repository, dataDir: config.dataDir });
-    await registerLegalRoutes(app);
-    await registerRepoManifestRoutes(app, { repo: repository });
-    await registerPrinterRoutes(app, { repo: repository });
-    await registerPrintPlanRoutes(app, { repo: repository });
-    await registerManifestRoutes(app, { repo: repository });
+    await registerCoreRoutes(app, coreDeps);
+    await app.register(async (v1) => {
+      await registerApiV1Plugin(v1, coreDeps);
+    }, { prefix: "/api/v1" });
 
     app.post(
       "/admin/import-kit-bundle",
@@ -156,9 +142,6 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
       });
     }
 
-    const getRepo = () => repository;
-    const jobs = (ports.jobs as InProcessJobRunner) ?? createJobRunner(getRepo, config.dataDir);
-    await registerJobRoutes(app, jobs, config);
     registerJobWebSocket(app, jobs);
   } else {
     registerJobWebSocket(
@@ -168,6 +151,8 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
       }, config.dataDir),
     );
   }
+
+  registerOpenApiJsonRoutes(app);
 
   return app;
 }

@@ -11,6 +11,8 @@ services:
       PRINT_PARTNER_DATA_DIR: "/data"
       STATIC_DIR: "/app/web/apps/web/dist"
       DEPLOY_MODE: "self-host"
+      # Optional: require API key for /api/v1 automation (slicers, scripts)
+      # PRINT_PARTNER_API_KEY: "change-me-to-a-long-random-secret"
     volumes:
       - print-partner-data:/data
     restart: unless-stopped

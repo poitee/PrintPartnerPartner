@@ -2,12 +2,10 @@ import { type ComponentType, type MouseEvent } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   BookOpen,
-  CheckSquare,
   ClipboardCheck,
   FolderGit2,
   FolderOpen,
   Hammer,
-  Layers,
   MoreHorizontal,
   Settings,
 } from "lucide-react";
@@ -30,10 +28,7 @@ import { openKofi } from "../lib/supportLinks";
 import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
 import {
   buildRoute,
-  buildsRoute,
-  checkoffRoute,
   isBuildPath,
-  isBuildsPath,
   isReviewPath,
   reviewRoute,
   sourcesRoute,
@@ -59,10 +54,8 @@ const secondaryNav: Omit<NavEntry, "hint">[] = [
 
 const NAV_HINTS: Record<string, string> = {
   Sources: "Register repos and set import folders",
-  Builds: "Create, rename, duplicate, and delete plans",
-  Build: "Attach sources, pick files, set colors and quantities",
-  Review: "Confirm your build and export STLs",
-  Checkoff: "Track what you've printed on the shop floor",
+  Build: "Manage plans, attach sources, pick files, set colors",
+  Review: "Validate parts, track printing, and export",
 };
 
 function NavItem({
@@ -128,20 +121,10 @@ export default function AppLayout() {
 
   const showPlanInHeader =
     activePlanName &&
-    (isBuildPath(location.pathname) ||
-      isBuildsPath(location.pathname) ||
-      isReviewPath(location.pathname) ||
-      location.pathname === "/checkoff");
+    (isBuildPath(location.pathname) || isReviewPath(location.pathname));
 
   const pipelineNav: NavEntry[] = [
     { to: sourcesRoute(), label: "Sources", hint: NAV_HINTS.Sources, icon: FolderGit2 },
-    {
-      to: buildsRoute(selectedProfileId),
-      label: "Builds",
-      hint: NAV_HINTS.Builds,
-      icon: Layers,
-      isActive: (pathname) => pathname === "/builds",
-    },
     {
       to: buildRoute(selectedProfileId),
       label: "Build",
@@ -154,14 +137,7 @@ export default function AppLayout() {
       label: "Review",
       hint: NAV_HINTS.Review,
       icon: ClipboardCheck,
-      isActive: (pathname) => pathname === "/review",
-    },
-    {
-      to: checkoffRoute(selectedProfileId),
-      label: "Checkoff",
-      hint: NAV_HINTS.Checkoff,
-      icon: CheckSquare,
-      isActive: (pathname) => pathname === "/checkoff",
+      isActive: (pathname) => isReviewPath(pathname),
     },
   ];
 
@@ -171,7 +147,7 @@ export default function AppLayout() {
         <div className="border-b border-border px-4 py-4">
           <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
           <p className="text-xs text-muted-foreground">
-            Sources → Build → Review → Checkoff
+            Sources → Build → Review
           </p>
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-3">

@@ -11,6 +11,7 @@ import { exportKitBundle, loadKitBundleBytes, parseKitBundleBuffer } from "../se
 import { checkAllSourceUpdates } from "../services/source-update-check.js";
 import { runExport3mfJob } from "../services/export-3mf-job.js";
 import { runPackPreviewJob } from "../services/plate-workspace.js";
+import { dispatchWebhooks } from "../services/webhook-store.js";
 
 export type JobHandler = (
   jobId: string,
@@ -24,8 +25,20 @@ export type JobRunnerDeps = {
   dataDir: string;
 };
 
+export type JobListFilters = {
+  status?: string;
+  since?: string;
+  profile_id?: number;
+};
+
+type JobMeta = {
+  payload: Record<string, unknown>;
+  updatedAt: number;
+};
+
 export class InProcessJobRunner {
   private readonly jobs = new Map<string, JobSnapshot>();
+  private readonly jobMeta = new Map<string, JobMeta>();
   private readonly listeners = new Map<string, Set<(event: JobSnapshot) => void>>();
 
   constructor(private readonly deps: JobRunnerDeps) {}
@@ -43,12 +56,30 @@ export class InProcessJobRunner {
     };
   }
 
+  private touchMeta(jobId: string): void {
+    const meta = this.jobMeta.get(jobId);
+    if (meta) meta.updatedAt = Date.now();
+  }
+
   private emit(jobId: string, patch: Partial<JobSnapshot>): void {
     const snap = this.jobs.get(jobId);
     if (!snap) return;
     Object.assign(snap, patch);
+    this.touchMeta(jobId);
+    const event = { ...snap, updated_at: new Date().toISOString() } as JobSnapshot & {
+      updated_at?: string;
+    };
     for (const listener of this.listeners.get(jobId) ?? []) {
-      listener({ ...snap });
+      listener(event);
+    }
+    if (event.status === "done" || event.status === "error") {
+      void dispatchWebhooks(this.repo, event.status === "done" ? "job.done" : "job.error", {
+        job_id: event.job_id,
+        kind: event.kind,
+        status: event.status,
+        result: event.result,
+        error: event.error,
+      });
     }
   }
 
@@ -64,8 +95,54 @@ export class InProcessJobRunner {
       error: null,
     };
     this.jobs.set(jobId, snap);
+    this.jobMeta.set(jobId, { payload, updatedAt: Date.now() });
     void this.runJob(jobId, kind, payload);
     return jobId;
+  }
+
+  listJobs(filters: JobListFilters = {}): Array<JobSnapshot & { updated_at?: string }> {
+    let items = [...this.jobs.entries()].map(([jobId, snap]) => {
+      const meta = this.jobMeta.get(jobId);
+      return {
+        ...snap,
+        updated_at: meta ? new Date(meta.updatedAt).toISOString() : undefined,
+      };
+    });
+    if (filters.status) {
+      items = items.filter((j) => j.status === filters.status);
+    }
+    if (filters.since) {
+      const sinceMs = Date.parse(filters.since);
+      if (!Number.isNaN(sinceMs)) {
+        items = items.filter((j) => {
+          const ts = j.finished_at
+            ? Date.parse(j.finished_at)
+            : j.updated_at
+              ? Date.parse(j.updated_at)
+              : NaN;
+          return !Number.isNaN(ts) && ts >= sinceMs;
+        });
+      }
+    }
+    if (filters.profile_id != null) {
+      items = items.filter((j) => {
+        const payload = this.jobMeta.get(j.job_id)?.payload;
+        return Number(payload?.profile_id) === filters.profile_id;
+      });
+    }
+    return items.sort((a, b) => {
+      const ta = a.finished_at
+        ? Date.parse(a.finished_at)
+        : a.updated_at
+          ? Date.parse(a.updated_at)
+          : 0;
+      const tb = b.finished_at
+        ? Date.parse(b.finished_at)
+        : b.updated_at
+          ? Date.parse(b.updated_at)
+          : 0;
+      return tb - ta;
+    });
   }
 
   private downloadUrlForPath(absolutePath: string): string | null {
@@ -107,6 +184,7 @@ export class InProcessJobRunner {
         progress: 100,
         result,
         error: null,
+        finished_at: new Date().toISOString(),
       });
     } catch (e) {
       this.emit(jobId, {
@@ -115,6 +193,7 @@ export class InProcessJobRunner {
         progress: 100,
         error: e instanceof Error ? e.message : String(e),
         result: null,
+        finished_at: new Date().toISOString(),
       });
     }
   }
@@ -148,8 +227,6 @@ export class InProcessJobRunner {
     });
     const fileTotal = Object.values(fileCounts).reduce((a, b) => a + b, 0);
 
-    // The export writes a directory tree; zip it so the web client can download
-    // a single file (the /exports route only serves files, not directories).
     let downloadUrl: string | null = null;
     if (fileTotal > 0) {
       const zipPath = join(dirname(rootPath), `${basename(rootPath)}.zip`);
@@ -274,6 +351,8 @@ export class InProcessJobRunner {
     }
     snap.status = "cancelled";
     snap.message = "Cancelled";
+    snap.finished_at = new Date().toISOString();
+    this.touchMeta(jobId);
     return true;
   }
 }

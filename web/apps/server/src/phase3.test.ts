@@ -9,6 +9,7 @@ import { loadConfig } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { buildStlTreePayload, progressSummary } from "@print-partner/domain";
 import { exportProfileStlPack } from "./services/export-stl-pack.js";
+import { buildPlanReview } from "./services/plan-review.js";
 
 describe("Phase 3 APIs", () => {
   it("builds STL tree from repo folder", () => {
@@ -18,6 +19,42 @@ describe("Phase 3 APIs", () => {
     const payload = buildStlTreePayload(dir, JSON.stringify(["parts/"]));
     expect(payload.total).toBe(1);
     expect(payload.selected).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("plan review includes print_units and include_excluded", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-rev-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+    const source = repo.createSource({ name: "Repo", url: "https://github.com/a/b", source_kind: "github" });
+    const repoPath = join(dir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "x"), { recursive: true });
+    writeFileSync(join(repoPath, "x", "part.stl"), "x");
+    repo.updateSource(source.id, { local_path: repoPath });
+    repo.updateImportRules(source.id, ["x/"]);
+
+    const plan = repo.createProfile("Plan", source.id);
+    await repo.recomputeProfile(plan.id);
+
+    const review = buildPlanReview(repo, plan.id);
+    const parts = review.part_groups.flatMap((g) => g.parts);
+    expect(parts.length).toBeGreaterThan(0);
+    expect(parts[0].print_units).toEqual([false]);
+    expect(parts[0].printed_count).toBe(0);
+    expect(parts[0].missing).toBe(true);
+    expect(parts[0].filament_display).toBeDefined();
+
+    const partId = parts[0].id;
+    repo.patchPart(partId, { included: false });
+    const defaultReview = buildPlanReview(repo, plan.id);
+    expect(defaultReview.part_groups.flatMap((g) => g.parts)).toHaveLength(0);
+
+    const withExcluded = buildPlanReview(repo, plan.id, { includeExcluded: true });
+    const excludedParts = withExcluded.part_groups.flatMap((g) => g.parts);
+    expect(excludedParts.some((p) => !p.included)).toBe(true);
+
+    sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
 

@@ -25,6 +25,8 @@ Open [http://localhost:8080](http://localhost:8080). Data persists in the `print
 | `PP_VERSION` | `0.1.0-web` | Health payload version |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload limit (512 MiB) |
+| `PRINT_PARTNER_API_KEY` | unset | When set (self-host), requires Bearer or `X-Print-Partner-Api-Key` on `/api/v1/*` |
+| `OPENAPI_UI` | unset | Set to `1` to expose `/api/v1/docs` in production |
 | `REDIS_URL` | unset | Optional; when set in SaaS, enables BullMQ job queue (see SaaS) |
 
 ### Local development
@@ -36,6 +38,8 @@ npm run dev
 ```
 
 API: `http://127.0.0.1:18765` · Vite UI: `http://127.0.0.1:5173`
+
+Versioned API for integrations: `http://127.0.0.1:18765/api/v1` — see [`../docs/API.md`](../docs/API.md).
 
 ## SaaS mode (`DEPLOY_MODE=saas`)
 

@@ -12,15 +12,22 @@ export type PlanReviewIssue = {
   link_hint?: string;
 };
 
-function filamentLabel(part: PartDbRow): string {
-  const fid = (part.filamentColorId ?? "").trim();
+export type PlanReviewOptions = {
+  includeExcluded?: boolean;
+};
+
+function filamentLabel(part: {
+  filament_color_id: string | null;
+  filament_display?: string;
+  filament_custom_hex?: string | null;
+}): string {
+  if (part.filament_display?.trim()) return part.filament_display.trim();
+  const fid = (part.filament_color_id ?? "").trim();
   if (fid) {
     const color = getColorById(fid);
     if (color) return color.combo_label;
     return fid;
   }
-  const custom = (part.filamentCustomHex ?? "").trim();
-  if (custom) return custom;
   return "Unassigned";
 }
 
@@ -33,25 +40,6 @@ function stlExists(localRoot: string, relativePath: string): boolean {
   } catch {
     return false;
   }
-}
-
-function partRow(part: PartDbRow) {
-  return {
-    id: part.id,
-    match_key: part.matchKey,
-    relative_path: part.relativePath,
-    filename: part.filename,
-    source_layer: part.sourceLayer,
-    status: part.status,
-    role: part.role,
-    requirement: part.requirement,
-    option_group_id: part.optionGroupId,
-    included: part.included,
-    filament_color_id: part.filamentColorId,
-    quantity_auto: part.quantityAuto,
-    quantity_override: part.quantityOverride,
-    quantity_effective: part.quantityEffective,
-  };
 }
 
 function resolveLayerRoot(
@@ -74,13 +62,19 @@ function resolveLayerRoot(
   return null;
 }
 
-export function buildPlanReview(repo: AppRepository, profileId: number) {
+export function buildPlanReview(
+  repo: AppRepository,
+  profileId: number,
+  options: PlanReviewOptions = {},
+) {
+  const includeExcluded = options.includeExcluded ?? false;
   const profile = repo.getProfile(profileId);
   if (!profile) throw new Error("Profile not found");
 
   const layers = repo.getProfileLayers(profileId);
   const { parts } = repo.listParts(profileId, 10000, 0);
   const included = parts.filter((p) => p.included);
+  const enrichedParts = repo.getEnrichedPartsForReview(profileId, includeExcluded);
 
   const projectByLayer = new Map<number, ReturnType<AppRepository["getProjectRow"]>>();
   const layerPayload = layers.map((layer) => {
@@ -110,12 +104,10 @@ export function buildPlanReview(repo: AppRepository, profileId: number) {
   const byRole: Record<string, number> = {};
   const byFilament: Record<string, number> = {};
   let printUnits = 0;
-  for (const part of included) {
-    const row = repo.getPartRow(part.id);
-    if (!row) continue;
+  for (const part of enrichedParts.filter((p) => p.included)) {
     byRole[part.role || "primary"] = (byRole[part.role || "primary"] ?? 0) + 1;
-    byFilament[filamentLabel(row)] =
-      (byFilament[filamentLabel(row)] ?? 0) + Math.max(1, part.quantity_effective);
+    byFilament[filamentLabel(part)] =
+      (byFilament[filamentLabel(part)] ?? 0) + Math.max(1, part.quantity_effective);
     printUnits += Math.max(1, part.quantity_effective);
   }
 
@@ -189,15 +181,13 @@ export function buildPlanReview(repo: AppRepository, profileId: number) {
     }
   }
 
-  const grouped = new Map<string, PartDbRow[]>();
+  const grouped = new Map<string, typeof enrichedParts>();
   const sourceByFolder = new Map<string, string | null>();
-  for (const part of included) {
-    const row = repo.getPartRow(part.id);
-    if (!row) continue;
-    const folder = folderKeyFromRelativePath(row.relativePath || row.filename);
+  for (const part of enrichedParts) {
+    const folder = folderKeyFromRelativePath(part.relative_path || part.filename);
     if (!grouped.has(folder)) grouped.set(folder, []);
-    grouped.get(folder)!.push(row);
-    if (!sourceByFolder.has(folder)) sourceByFolder.set(folder, row.sourceLayer);
+    grouped.get(folder)!.push(part);
+    if (!sourceByFolder.has(folder)) sourceByFolder.set(folder, part.source_layer);
   }
 
   const folderKeys = [...grouped.keys()].sort((a, b) => {
@@ -209,7 +199,7 @@ export function buildPlanReview(repo: AppRepository, profileId: number) {
   const part_groups = folderKeys.map((key) => ({
     folder: key,
     source_layer: sourceByFolder.get(key) ?? null,
-    parts: (grouped.get(key) ?? []).map(partRow),
+    parts: grouped.get(key) ?? [],
   }));
 
   const has_blockers = issues.some((i) => i.severity === "blocker");

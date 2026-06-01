@@ -39,7 +39,7 @@ describe("workflow routes", () => {
     expect(planRoute(5)).toBe("/build?profile=5");
     expect(reviewRoute(5)).toBe("/review?profile=5");
     expect(plateRoute(5)).toBe("/review?profile=5");
-    expect(checkoffRoute(5)).toBe("/checkoff?profile=5");
+    expect(checkoffRoute(5)).toBe("/review?profile=5");
   });
 });
 

@@ -16,14 +16,16 @@ import {
 export type { HealthResponse, JobEvent, JobSnapshot, PartRow, ProfileSummary, SourceSummary };
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+const API_PREFIX = (import.meta.env.VITE_API_PREFIX ?? "").replace(/\/$/, "");
 
 function resolveEngineUrl(path: string): string {
   const normalized = path.startsWith("/") ? path : `/${path}`;
-  if (API_BASE) return `${API_BASE}${normalized}`;
+  const withPrefix = API_PREFIX ? `${API_PREFIX}${normalized}` : normalized;
+  if (API_BASE) return `${API_BASE}${withPrefix}`;
   if (typeof window !== "undefined") {
-    return `${window.location.origin.replace(/\/$/, "")}${normalized}`;
+    return `${window.location.origin.replace(/\/$/, "")}${withPrefix}`;
   }
-  return normalized;
+  return withPrefix;
 }
 
 /** @deprecated use SourceSummary */
@@ -304,20 +306,22 @@ export type PrintPlan = {
   } | null;
 };
 
-export type CheckoffPart = {
-  id: number;
-  filename: string;
-  match_key: string;
-  relative_path: string;
-  source_layer: string | null;
-  role: string | null;
-  quantity_effective: number;
-  printed_count: number;
-  print_units: boolean[];
-  missing: boolean;
-  filament_display: string;
-  filament_hex?: string | null;
-};
+/** @deprecated Use ReviewPart — checkoff data is merged into plan review. */
+export type CheckoffPart = Pick<
+  ReviewPart,
+  | "id"
+  | "filename"
+  | "match_key"
+  | "relative_path"
+  | "source_layer"
+  | "role"
+  | "quantity_effective"
+  | "printed_count"
+  | "print_units"
+  | "missing"
+  | "filament_display"
+  | "filament_hex"
+>;
 
 export type CustomFilament = {
   id: string;
@@ -1488,10 +1492,19 @@ export type PlanReviewTotals = {
   by_filament: Record<string, number>;
 };
 
+/** Plan part row with print progress (unified Review API). */
+export type ReviewPart = PartRow & {
+  printed_count: number;
+  print_units: boolean[];
+  missing: boolean;
+  filament_display: string;
+  filament_hex?: string | null;
+};
+
 export type PlanReviewPartGroup = {
   folder: string;
   source_layer: string | null;
-  parts: PartRow[];
+  parts: ReviewPart[];
 };
 
 export type PlanReview = {
@@ -1504,8 +1517,13 @@ export type PlanReview = {
   part_groups: PlanReviewPartGroup[];
 };
 
-export async function fetchPlanReview(profileId: number): Promise<PlanReview> {
-  return engineFetch<PlanReview>(`/plans/${profileId}/review`);
+export async function fetchPlanReview(
+  profileId: number,
+  options?: { includeExcluded?: boolean },
+): Promise<PlanReview> {
+  const qs =
+    options?.includeExcluded === true ? "?include_excluded=true" : "";
+  return engineFetch<PlanReview>(`/plans/${profileId}/review${qs}`);
 }
 
 export type KitBundleUnmatchedSource = {

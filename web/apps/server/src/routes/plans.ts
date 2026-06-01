@@ -134,7 +134,11 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.get("/plans/:id/review", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
-    return buildPlanReview(deps.repo, id);
+    const query = request.query as { include_excluded?: string };
+    const include_excluded =
+      query.include_excluded === "1" ||
+      query.include_excluded === "true";
+    return buildPlanReview(deps.repo, id, { includeExcluded: include_excluded });
   });
 
   app.post("/plans/:id/apply-manifest", async (request, reply) => {
