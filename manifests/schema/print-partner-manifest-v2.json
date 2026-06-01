@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://print-partner.dev/schema/print-partner-manifest-v2.json",
+  "title": "Print Partner manifest v2",
+  "type": "object",
+  "required": ["format", "version"],
+  "properties": {
+    "format": { "const": "print-partner-manifest" },
+    "version": { "type": "integer", "const": 2 },
+    "plan": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "base_source_id": { "type": "string" },
+        "addon_source_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind"],
+        "properties": {
+          "id": { "type": "string" },
+          "kind": {
+            "enum": ["github", "local", "printables", "makerworld", "self", "archive"]
+          },
+          "url": { "type": "string" },
+          "branch": { "type": "string" }
+        }
+      }
+    },
+    "option_groups": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["rule", "parts"],
+        "properties": {
+          "rule": { "enum": ["pick_one", "pick_any", "pick_n"] },
+          "label": { "type": "string" },
+          "min": { "type": "integer" },
+          "max": { "type": "integer" },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "parts"],
+              "properties": {
+                "id": { "type": "string" },
+                "label": { "type": "string" },
+                "parts": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      { "type": "string" },
+                      {
+                        "type": "object",
+                        "required": ["match"],
+                        "properties": { "match": { "type": "string" } }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["match"],
+                  "properties": { "match": { "type": "string" } }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["match"],
+        "properties": {
+          "match": { "type": "string" },
+          "requirement": { "enum": ["required", "optional", "recommended"] },
+          "change": { "enum": ["base", "added", "replacement"] },
+          "replaces": { "type": "string" },
+          "default_included": { "type": "boolean" },
+          "option_group": { "type": "string" }
+        }
+      }
+    },
+    "addons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_id": { "type": "string" },
+          "project": { "type": "string" },
+          "parts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["match"],
+              "properties": {
+                "match": { "type": "string" },
+                "change": { "enum": ["base", "added", "replacement"] },
+                "replaces": { "type": "string" },
+                "requirement": { "enum": ["required", "optional", "recommended"] },
+                "default_included": { "type": "boolean" },
+                "option_group": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "selections": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

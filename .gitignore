@@ -1,0 +1,22 @@
+node_modules/
+dist/
+build/
+.DS_Store
+# Local IDE / editor metadata (never ship in releases)
+.cursor/
+.vscode/
+.idea/
+*.db
+.env
+.env.*
+ai_secrets.json
+
+# Web platform (monorepo under web/)
+web/node_modules/
+web/**/node_modules/
+web/**/dist/
+web/.turbo/
+web/**/.turbo/
+web/**/coverage/
+web/**/*.tsbuildinfo
+web/apps/server/data/

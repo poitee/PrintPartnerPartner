@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Print Partner</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --text: #e8eef4;
+      --muted: #8b9cb3;
+      --accent: #3d9ae8;
+      --border: #2a3848;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem 4rem;
+    }
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.5rem;
+    }
+    .tagline { color: var(--muted); font-size: 1.1rem; margin-bottom: 2rem; }
+    section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    h2 {
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 0 0 0.75rem;
+    }
+    p { margin: 0 0 0.75rem; }
+    p:last-child { margin-bottom: 0; }
+    a { color: var(--accent); }
+    ul { margin: 0; padding-left: 1.25rem; }
+    li { margin-bottom: 0.35rem; }
+    .screenshot {
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 1.5rem 1rem;
+      margin-top: 0.75rem;
+    }
+    .pipeline {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem 0.5rem;
+      font-size: 0.95rem;
+    }
+    .pipeline-step {
+      background: rgba(61, 154, 232, 0.12);
+      border: 1px solid rgba(61, 154, 232, 0.35);
+      border-radius: 6px;
+      padding: 0.45rem 0.75rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .pipeline-arrow {
+      color: var(--muted);
+      font-size: 1.1rem;
+      user-select: none;
+    }
+    .pipeline-caption {
+      margin: 0.75rem 0 0;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    figure { margin: 1.25rem 0 0; }
+    figure img {
+      width: 100%;
+      height: auto;
+      display: block;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    figcaption {
+      margin-top: 0.5rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    code.kbd {
+      background: rgba(61, 154, 232, 0.12);
+      border: 1px solid rgba(61, 154, 232, 0.35);
+      border-radius: 4px;
+      padding: 0.1rem 0.35rem;
+      font-size: 0.85em;
+    }
+    .cta {
+      display: inline-block;
+      margin-top: 0.5rem;
+      padding: 0.6rem 1.2rem;
+      background: var(--accent);
+      color: #fff;
+      text-decoration: none;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .cta:hover { filter: brightness(1.08); }
+    footer {
+      margin-top: 2rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Print Partner</h1>
+    <p class="tagline">Self-hostable web workflow for layered STL kits — Sources through Checkoff.</p>
+
+    <section>
+      <h2>What it is</h2>
+      <p>
+        Print Partner runs in your browser and helps you sync GitHub or local repos,
+        merge base and add-on layers, assign role filament colors, export STLs by
+        role and folder, and track what you have already printed. Deploy with
+        <strong>Docker</strong> on one port — data stays in a local volume or
+        directory you control. No cloud account required for self-host.
+      </p>
+    </section>
+
+    <section>
+      <h2>Workflow</h2>
+      <ul>
+        <li><strong>Sources</strong> — add repos or local folders; categories; import rules; update badges; search STLs across repos.</li>
+        <li><strong>Build</strong> — set role filament colors, attach sources to a plan, pick files, set quantities, read repo docs inline, update build.</li>
+        <li><strong>Review</strong> — confirm totals by role and filament and fix sync issues before export.</li>
+        <li><strong>Checkoff</strong> — mark printed units; export an HTML checklist or the missing STLs to a rebuilt <code>stl-missing/</code> folder.</li>
+      </ul>
+      <div class="screenshot">
+        <div class="pipeline" aria-label="Print Partner workflow">
+          <span class="pipeline-step">Sources</span>
+          <span class="pipeline-arrow" aria-hidden="true">→</span>
+          <span class="pipeline-step">Build</span>
+          <span class="pipeline-arrow" aria-hidden="true">→</span>
+          <span class="pipeline-step">Review</span>
+          <span class="pipeline-arrow" aria-hidden="true">→</span>
+          <span class="pipeline-step">Checkoff</span>
+        </div>
+        <p class="pipeline-caption">
+          Sync repos → compose build → validate &amp; export → track prints
+        </p>
+      </div>
+      <p>
+        <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/README.md">README</a>
+        (screenshots and feature details)
+        ·
+        <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/ARCHITECTURE.md">Architecture</a>
+      </p>
+    </section>
+
+    <section>
+      <h2>Screenshots</h2>
+      <figure>
+        <img src="screenshots/sources.png" alt="Sources — source library with categories, sync state, update-available badges, and global STL search.">
+        <figcaption><strong>Sources</strong> — the source library with categories, sync state, update-available badges, and global STL search.</figcaption>
+      </figure>
+      <figure>
+        <img src="screenshots/build.png" alt="Build — role filament colors, attached source cards with an inline Docs viewer, and per-source file pickers.">
+        <figcaption><strong>Build</strong> — role filament colors, attached sources with an inline Docs viewer, and file pickers feeding Update build.</figcaption>
+      </figure>
+      <figure>
+        <img src="screenshots/review.png" alt="Review — validation summary by role and filament with the full parts list and 3D STL previews.">
+        <figcaption><strong>Review</strong> — validation summary by role and filament with the full parts list and 3D STL previews.</figcaption>
+      </figure>
+      <figure>
+        <img src="screenshots/checkoff.png" alt="Checkoff — per-unit print progress with on-scroll 3D thumbnails laid out like a printable checklist.">
+        <figcaption><strong>Checkoff</strong> — per-unit print progress with on-scroll 3D thumbnails laid out like a printable checklist.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Get started</h2>
+      <p>Self-host with Docker Compose:</p>
+      <pre style="background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; overflow-x: auto; font-size: 0.9rem;"><code>git clone https://github.com/poitee/PrintPartnerPartner.git
+cd PrintPartnerPartner
+docker compose up --build</code></pre>
+      <p>Then open <a href="http://localhost:8080">http://localhost:8080</a>.</p>
+      <a class="cta" href="https://github.com/poitee/PrintPartnerPartner">View on GitHub</a>
+    </section>
+
+    <section>
+      <h2>Support</h2>
+      <p>
+        Print Partner is open source. If it saves you time on a kit build,
+        <a href="https://ko-fi.com/poitee">Buy me a Coffee on Ko-fi</a> helps fund development.
+        Tips are voluntary and do not grant commercial license rights.
+      </p>
+    </section>
+
+    <section>
+      <h2>License</h2>
+      <p>
+        Licensed under the <strong>Print Partner Non-Commercial Software License</strong>.
+        Commercial print farms may use the app internally; see
+        <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/LICENSE-SUMMARY.md">LICENSE-SUMMARY.md</a>
+        and <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/COMMERCIAL.md">COMMERCIAL.md</a>.
+        Inspired by <a href="https://annex.engineering">Annex Engineering</a> workflow conventions — see
+        <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/ATTRIBUTION.md">ATTRIBUTION.md</a>.
+      </p>
+    </section>
+
+    <footer>
+      Print Partner — open source. This site is served from <code>/docs</code> on GitHub Pages.
+    </footer>
+  </div>
+</body>
+</html>

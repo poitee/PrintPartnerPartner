@@ -1,0 +1,19 @@
+services:
+  print-partner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      PRINT_PARTNER_DATA_DIR: "/data"
+      STATIC_DIR: "/app/web/apps/web/dist"
+      DEPLOY_MODE: "self-host"
+    volumes:
+      - print-partner-data:/data
+    restart: unless-stopped
+
+volumes:
+  print-partner-data:

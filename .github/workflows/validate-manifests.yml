@@ -1,0 +1,52 @@
+name: Validate manifests
+
+on:
+  pull_request:
+    paths:
+      - "manifests/**"
+      - ".github/workflows/validate-manifests.yml"
+
+jobs:
+  yaml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install PyYAML
+      - name: Parse manifest YAML files
+        run: |
+          python3 <<'PY'
+          import sys
+          from pathlib import Path
+          import yaml
+
+          root = Path("manifests")
+          errors = []
+          for path in sorted(root.rglob("*.yaml")) + sorted(root.rglob("*.yml")):
+              if path.name == "index.yaml" and "registry" in path.parts:
+                  data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                  if data is None:
+                      continue
+                  if not isinstance(data, dict):
+                      errors.append(f"{path}: expected mapping")
+                  continue
+              try:
+                  data = yaml.safe_load(path.read_text(encoding="utf-8"))
+              except yaml.YAMLError as exc:
+                  errors.append(f"{path}: {exc}")
+                  continue
+              if data is None:
+                  continue
+              if not isinstance(data, dict):
+                  errors.append(f"{path}: expected mapping")
+                  continue
+              fmt = data.get("format")
+              if fmt and fmt != "print-partner-manifest":
+                  errors.append(f"{path}: unknown format {fmt!r}")
+          if errors:
+              print("\n".join(errors))
+              sys.exit(1)
+          print("OK:", len(list(root.rglob('*.yaml'))), "yaml files checked")
+          PY
