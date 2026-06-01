@@ -7,9 +7,9 @@ import type {
   SourceSummary,
 } from "@print-partner/contracts";
 import {
-  pickKitBundlePathWeb,
+  pickKitBundleFileWeb,
   pickLocalDirectoryWeb,
-  pickZipArchiveWeb,
+  pickZipArchiveFileWeb,
   saveTextFileWeb,
 } from "@/lib/webFilePickers";
 
@@ -683,6 +683,60 @@ export async function startImportKitBundle(path: string): Promise<string> {
   return body.job_id;
 }
 
+/** Upload a shared kit bundle from the user's computer (web / Docker). */
+export async function uploadKitBundle(
+  file: File,
+  newName?: string,
+): Promise<KitImportJobResult> {
+  const form = new FormData();
+  form.append("file", file);
+  if (newName?.trim()) form.append("new_name", newName.trim());
+  const res = await fetch(resolveEngineUrl("/imports/kit-bundle"), {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    let detail = `Import failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<KitImportJobResult>;
+}
+
+export type KitBundlePick =
+  | { kind: "path"; path: string }
+  | { kind: "file"; file: File };
+
+/** Pick a kit bundle: filesystem path on Tauri desktop, File in the browser. */
+export async function pickKitBundle(): Promise<KitBundlePick | null> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const path = await invoke<string | null>("pick_kit_bundle_file");
+    return path ? { kind: "path", path } : null;
+  } catch {
+    const file = await pickKitBundleFileWeb();
+    return file ? { kind: "file", file } : null;
+  }
+}
+
+/** Import a shared kit bundle from a desktop path or browser file upload. */
+export async function importKitBundle(picked: KitBundlePick): Promise<KitImportJobResult> {
+  if (picked.kind === "file") {
+    return uploadKitBundle(picked.file);
+  }
+  const jobId = await startImportKitBundle(picked.path);
+  const snap = await waitForJobDone(jobId);
+  if (snap.status === "error") {
+    throw new Error(snap.message || "Import failed");
+  }
+  return (snap.result ?? {}) as KitImportJobResult;
+}
+
 export async function startExportKitBundle(
   profileId: number,
   includePrintProgress = false,
@@ -749,12 +803,13 @@ export async function pickLocalDirectory(): Promise<string | null> {
 }
 
 export async function pickKitBundlePath(): Promise<string | null> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<string | null>("pick_kit_bundle_file");
-  } catch {
-    return pickKitBundlePathWeb();
-  }
+  const picked = await pickKitBundle();
+  return picked?.kind === "path" ? picked.path : null;
+}
+
+export async function pickKitBundleFile(): Promise<File | null> {
+  const picked = await pickKitBundle();
+  return picked?.kind === "file" ? picked.file : null;
 }
 
 export async function saveTextFile(
@@ -1785,11 +1840,30 @@ export function formatSyncTime(iso: string | null): string {
 
 export async function importSourceArchive(
   sourceId: number,
-  archivePath: string,
+  archive: string | File,
 ): Promise<SourceSummary & { imported_files?: number }> {
+  if (archive instanceof File) {
+    const form = new FormData();
+    form.append("file", archive);
+    const res = await fetch(resolveEngineUrl(`/sources/${sourceId}/upload-zip`), {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      let detail = `Upload failed: ${res.status}`;
+      try {
+        const body = (await res.json()) as { detail?: string };
+        if (body.detail) detail = body.detail;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail);
+    }
+    return res.json() as Promise<SourceSummary & { imported_files?: number }>;
+  }
   return engineFetch(`/sources/${sourceId}/import-archive`, {
     method: "POST",
-    body: JSON.stringify({ path: archivePath }),
+    body: JSON.stringify({ path: archive }),
   });
 }
 
@@ -1812,12 +1886,12 @@ export async function fetchSourceDocMarkdown(
   return body.markdown;
 }
 
-export async function pickZipArchive(): Promise<string | null> {
+export async function pickZipArchive(): Promise<string | File | null> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     return await invoke<string | null>("pick_zip_file");
   } catch {
-    return pickZipArchiveWeb();
+    return pickZipArchiveFileWeb();
   }
 }
 

@@ -89,7 +89,12 @@ npx tsx scripts/import-sqlite.ts \
   --dest ./data
 ```
 
-Kit import: `POST /admin/import-kit-bundle` or `POST /jobs/import-kit-bundle` with `{ "path": "exports/....zip" }` (path under data dir).
+### Exports and imports (web / Docker)
+
+- **Exports:** job endpoints write files under `exports/` in the data dir and return `download_url` (e.g. `/exports/Plan/checklist.html`). The UI triggers a browser download via `GET /exports/*` with `Content-Disposition: attachment`.
+- **Kit bundle import (browser):** upload `.print-partner-kit.zip` with `POST /imports/kit-bundle` (multipart field `file`). Command palette **Import shared build…** uses this path.
+- **Kit bundle import (server path):** `POST /jobs/import-kit-bundle` or `POST /admin/import-kit-bundle` with `{ "path": "…" }` only works when the file already exists on the engine host (Tauri desktop or admin scripts) — not for remote web users.
+- **Source ZIP import (browser):** `POST /sources/:id/upload-zip` (multipart). Tauri desktop may use `POST /sources/:id/import-archive` with a local filesystem path instead.
 
 ### Smoke test
 

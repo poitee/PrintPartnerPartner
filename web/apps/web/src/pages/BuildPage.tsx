@@ -34,7 +34,7 @@ import {
   type SourceSummary,
 } from "../api/engine";
 import { buildRoute, reviewRoute, sourcesRoute } from "../lib/routes";
-import { notifyExportComplete } from "../lib/exportActions";
+import { completeExportDownload } from "../lib/exportActions";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
@@ -63,7 +63,6 @@ function BuildPageContent() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [addonSourceId, setAddonSourceId] = useState("");
   const [pendingBaseSourceId, setPendingBaseSourceId] = useState("");
-  const [exportNote, setExportNote] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [kitImportSetup, setKitImportSetup] = useState<KitImportJobResult | null>(null);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
@@ -190,11 +189,11 @@ function BuildPageContent() {
     void exportStlJob.runJob(
       () => startExportStlPack(selectedProfileId),
       (snap) => {
-        const root = snap.result?.root_path;
-        if (typeof root === "string") {
-          setExportNote(`Exported STLs: ${root}`);
-          notifyExportComplete("STL export", root);
+        if (snap.status === "error") {
+          toast.error(snap.message || "STL export failed");
+          return;
         }
+        completeExportDownload("STL export", snap.result, { pathField: "root_path" });
       },
     );
   };
@@ -294,8 +293,8 @@ function BuildPageContent() {
         )}
 
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
-      {(exportStlJob.message || exportNote) && (
-        <p className="text-sm text-muted-foreground">{exportStlJob.message ?? exportNote}</p>
+      {exportStlJob.message && (
+        <p className="text-sm text-muted-foreground">{exportStlJob.message}</p>
       )}
 
       <div className="space-y-4">

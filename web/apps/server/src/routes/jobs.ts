@@ -7,7 +7,7 @@ import { syncProjectById } from "./sources.js";
 import { exportProfileStlPack } from "../services/export-stl-pack.js";
 import { zipDirectoryToFile } from "../services/zip-dir.js";
 import { exportProfileHtml } from "../services/export-html.js";
-import { exportKitBundle, loadKitBundleBytes } from "../services/export-kit.js";
+import { exportKitBundle, loadKitBundleBytes, parseKitBundleBuffer } from "../services/export-kit.js";
 import { checkAllSourceUpdates } from "../services/source-update-check.js";
 import { runExport3mfJob } from "../services/export-3mf-job.js";
 import { runPackPreviewJob } from "../services/plate-workspace.js";
@@ -242,11 +242,17 @@ export class InProcessJobRunner {
   }
 
   private async runImportKitBundle(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const path = String(payload.path ?? "");
-    if (!path) throw new Error("path is required");
-    const safe = safeDataDirPath(this.deps.dataDir, path);
-    if (!safe) throw new Error("Kit path must be under the Print Partner data directory");
-    const data = loadKitBundleBytes(safe);
+    let data: Record<string, unknown>;
+    if (payload.bundle_b64) {
+      const buf = Buffer.from(String(payload.bundle_b64), "base64");
+      data = parseKitBundleBuffer(buf);
+    } else {
+      const path = String(payload.path ?? "");
+      if (!path) throw new Error("path is required");
+      const safe = safeDataDirPath(this.deps.dataDir, path);
+      if (!safe) throw new Error("Kit path must be under the Print Partner data directory");
+      data = loadKitBundleBytes(safe);
+    }
     const result = this.repo.importKitBundle(data, (payload.new_name as string) ?? null);
     return {
       profile_id: result.profile_id,

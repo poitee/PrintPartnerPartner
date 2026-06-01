@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import {
-  pickKitBundlePath,
+  importKitBundle,
+  pickKitBundle,
   startExportKitBundle,
   startExportStlPack,
-  startImportKitBundle,
   startRecompute,
   startSync,
-  type KitImportJobResult,
 } from "../api/engine";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useFlushBuildPageSaves } from "../hooks/useFlushBuildPageSaves";
@@ -23,7 +23,7 @@ import {
   settingsRoute,
   sourcesRoute,
 } from "../lib/routes";
-import { notifyExportComplete } from "../lib/exportActions";
+import { completeExportDownload } from "../lib/exportActions";
 import {
   CommandDialog,
   CommandEmpty,
@@ -53,7 +53,6 @@ export default function CommandPalette() {
   const recomputeJob = useJobRunner("recompute");
   const syncJob = useJobRunner("sync");
   const stlExportJob = useJobRunner("stl-export");
-  const importJob = useJobRunner("import-kit");
   const kitExportJob = useJobRunner("kit-export");
 
   useEffect(() => {
@@ -200,8 +199,11 @@ export default function CommandPalette() {
             void kitExportJob.runJob(
               () => startExportKitBundle(selectedProfileId, false),
               (snap) => {
-                const path = snap.result?.path;
-                if (typeof path === "string") notifyExportComplete("Share build", path);
+                if (snap.status === "error") {
+                  toast.error(snap.message || "Export failed");
+                  return;
+                }
+                completeExportDownload("Share build", snap.result);
               },
             );
             if (!onBuild && !onReview) navigate(buildRoute(selectedProfileId));
@@ -218,8 +220,11 @@ export default function CommandPalette() {
             void stlExportJob.runJob(
               () => startExportStlPack(selectedProfileId),
               (snap) => {
-                const root = snap.result?.root_path;
-                if (typeof root === "string") notifyExportComplete("STL export", root);
+                if (snap.status === "error") {
+                  toast.error(snap.message || "STL export failed");
+                  return;
+                }
+                completeExportDownload("STL export", snap.result, { pathField: "root_path" });
               },
             );
             if (!onBuild && !onReview) navigate(reviewRoute(selectedProfileId));
@@ -236,9 +241,14 @@ export default function CommandPalette() {
             void stlExportJob.runJob(
               () => startExportStlPack(selectedProfileId, { missing_only: true }),
               (snap) => {
-                const root = snap.result?.root_path;
-                if (typeof root === "string")
-                  notifyExportComplete("Missing-parts STL", root, { isDirectory: true });
+                if (snap.status === "error") {
+                  toast.error(snap.message || "Export failed");
+                  return;
+                }
+                completeExportDownload("Missing-parts STL", snap.result, {
+                  pathField: "root_path",
+                  isDirectory: true,
+                });
               },
             );
             if (!onCheckoff) navigate(checkoffRoute(selectedProfileId));
@@ -277,21 +287,23 @@ export default function CommandPalette() {
           label: "Import shared build…",
           hint: ".print-partner-kit.zip",
           group: "Actions",
-          disabled: importJob.busy,
           run: () => {
             void (async () => {
-              const path = await pickKitBundlePath();
-              if (!path) return;
-              void importJob.runJob(() => startImportKitBundle(path), (snap) => {
-                const result = snap.result as KitImportJobResult | null;
-                if (result?.profile_id) {
+              const picked = await pickKitBundle();
+              if (!picked) return;
+              try {
+                const result = await importKitBundle(picked);
+                if (result.profile_id) {
                   setSelectedProfileId(result.profile_id);
                   void reloadProfiles();
                   navigate(buildRoute(result.profile_id), {
                     state: { kitImport: result },
                   });
+                  toast.success(`Imported “${result.profile_name}”`);
                 }
-              });
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : String(e));
+              }
             })();
             setOpen(false);
           },
@@ -318,7 +330,6 @@ export default function CommandPalette() {
     recomputeJob,
     syncJob,
     stlExportJob,
-    importJob,
     kitExportJob,
     onBuild,
     onReview,
