@@ -5,18 +5,13 @@ This folder hosts a minimal static landing page for the Print Partner web app (`
 ## Enable GitHub Pages
 
 1. Open the repository on GitHub → **Settings** → **Pages**.
-2. Under **Build and deployment**, set **Source** to **Deploy from a branch** (or use the **GitHub Actions** workflow if you prefer automated deploys).
-3. For branch deploy: choose branch `main`, folder **`/docs`**, then **Save**.
+2. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+3. Push to `main` (or run the **pages** workflow manually); the workflow uploads `/docs` as the site artifact.
 4. After a minute or two, the site is available at  
-   `https://<user-or-org>.github.io/PrintPartnerPartner/`  
+   `https://poitee.github.io/PrintPartnerPartner/`  
    (exact URL is shown on the Pages settings screen).
 
-## Automated deploy (optional)
-
-The workflow [`.github/workflows/pages.yml`](../.github/workflows/pages.yml) uploads the `/docs` folder as a Pages artifact on pushes to `main`. To use it:
-
-1. **Settings** → **Pages** → **Source**: **GitHub Actions**.
-2. Push to `main`; the **pages** workflow publishes `docs/`.
+Branch deploy (`main` + `/docs`) also works if you prefer that over Actions.
 
 ## Local preview
 
