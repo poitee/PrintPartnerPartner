@@ -16,6 +16,8 @@ import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { StlNamingSettingsCard } from "../components/settings/StlNamingEditor";
+import IntegrationsSettingsCard from "../components/settings/IntegrationsSettingsCard";
+import AboutUpdatesCard from "../components/settings/AboutUpdatesCard";
 import SourceCategoryManager from "../components/sources/SourceCategoryManager";
 import { Button } from "../components/ui/button";
 import {
@@ -33,6 +35,7 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import { useEngineHealth } from "../hooks/useEngineHealth";
+import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import { useJobRunner } from "../hooks/useJobRunner";
 import {
   Select,
@@ -52,6 +55,8 @@ const UPDATE_INTERVAL_OPTIONS = [
 
 export default function SettingsPage() {
   const { health } = useEngineHealth();
+  const { updateCheck, refresh: refreshUpdateCheck } = useAppUpdateCheck(Boolean(health));
+  const [updateCheckRefreshing, setUpdateCheckRefreshing] = useState(false);
   const { busy: updateBusy, message: updateMessage, runJob: runUpdateJob } =
     useJobRunner("source-updates");
   const [filaments, setFilaments] = useState<CustomFilament[]>([]);
@@ -156,6 +161,15 @@ export default function SettingsPage() {
     }
   };
 
+  const onCheckAppUpdates = async () => {
+    setUpdateCheckRefreshing(true);
+    try {
+      await refreshUpdateCheck(true);
+    } finally {
+      setUpdateCheckRefreshing(false);
+    }
+  };
+
   const inputClass =
     "rounded-md border border-input bg-background px-2 py-1.5 text-sm";
 
@@ -164,7 +178,7 @@ export default function SettingsPage() {
       <RouteBreadcrumbs items={[{ label: "Settings" }]} />
       <PageHeader
         title="Settings"
-        description="Custom filaments, STL naming, source categories, and optional GitHub token."
+        description="Custom filaments, integrations, STL naming, source categories, and optional GitHub token."
         actions={
           <PageHeaderActions>
             <Button
@@ -182,6 +196,12 @@ export default function SettingsPage() {
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
       {patMessage && <p className="text-sm text-muted-foreground">{patMessage}</p>}
       {updateMessage && <p className="text-sm text-muted-foreground">{updateMessage}</p>}
+
+      <AboutUpdatesCard
+        updateCheck={updateCheck}
+        onRefresh={onCheckAppUpdates}
+        refreshing={updateCheckRefreshing}
+      />
 
       <Card className="shadow-none">
         <CardHeader>
@@ -227,6 +247,8 @@ export default function SettingsPage() {
       </div>
 
       <StlNamingSettingsCard engineReady={Boolean(health)} />
+
+      <IntegrationsSettingsCard engineReady={Boolean(health)} />
 
       <Card className="shadow-none">
         <CardHeader>

@@ -92,7 +92,16 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
 
 **Moonraker** (reference adapter): set `config.base_url` to e.g. `http://192.168.1.50:7125`. Test calls `GET {base_url}/server/info`.
 
-Stub adapters (`prusalink`, `bambu`, `spoolman`) return `{ ok: false, message: "…not implemented" }`.
+**Spoolman** (filament inventory): set `config.base_url` to e.g. `http://192.168.1.50:7912` (no `/api/v1`). Test tries `GET {base}/api/v1/info` then `/health`. Proxy routes:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/integrations/:id/spoolman/filaments` | Filament catalog for Build picker |
+| `GET` | `/api/v1/integrations/:id/spoolman/spools` | Spool inventory (remaining weight) |
+
+`GET /filaments/catalog` includes `spoolman_colors` when `default_spoolman_integration_id` is set (Settings) or when `?spoolman_integration_id=` is passed. User guide: [integrations/SPOOLMAN.md](integrations/SPOOLMAN.md).
+
+Stub adapters (`prusalink`, `bambu`) return `{ ok: false, message: "…not implemented" }`.
 
 ## Webhooks (optional)
 

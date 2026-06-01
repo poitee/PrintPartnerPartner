@@ -30,6 +30,8 @@ import { loadKitManifest, saveKitManifest, type KitManifestRecord } from "../ser
 import { resolvePartStl } from "../services/part-paths.js";
 import { normalizePartRole } from "../services/role-filament.js";
 import { getColorById, resolvePartFilamentHex } from "../services/filament-catalog.js";
+import type { FilamentResolveContext } from "../services/filament-resolve.js";
+import { formatSpoolSummaryBadge } from "../integrations/spoolman-client.js";
 import { REMOTE_CHECKED_AT_KEY, REMOTE_UPDATE_STATUS_KEY } from "../services/source-update-check.js";
 import type { PartRow, ProfileSummary, SourceSummary } from "@print-partner/contracts";
 import { and, asc, count, eq, sql } from "drizzle-orm";
@@ -108,6 +110,7 @@ function partRow(row: PartDbRow): PartRow {
     included: row.included,
     filament_color_id: row.filamentColorId,
     filament_custom_hex: row.filamentCustomHex,
+    spoolman_spool_id: row.spoolmanSpoolId,
     filament_display: "",
     filament_hex: row.filamentCustomHex,
     quantity_auto: row.quantityAuto,
@@ -822,6 +825,7 @@ export class AppRepository {
               role: mp.role,
               filamentColorId: prior.filamentColorId,
               filamentCustomHex: prior.filamentCustomHex,
+              spoolmanSpoolId: prior.spoolmanSpoolId,
             })
             .where(eq(this.schema.parts.id, prior.id))
             .run();
@@ -1022,7 +1026,11 @@ export class AppRepository {
   }
 
   /** Parts with print progress for the unified Review API (optional excluded rows). */
-  getEnrichedPartsForReview(profileId: number, includeExcluded: boolean) {
+  getEnrichedPartsForReview(
+    profileId: number,
+    includeExcluded: boolean,
+    ctx?: FilamentResolveContext,
+  ) {
     const partRows = this.listPartRows(profileId);
     for (const part of partRows) {
       this.ensureProgressForPart(part);
@@ -1033,21 +1041,31 @@ export class AppRepository {
       const units = unitsById.get(p.id) ?? [];
       const printedCount = units.filter(Boolean).length;
       const qty = Math.max(1, p.quantityEffective);
-      const color = p.filamentColorId ? getColorById(p.filamentColorId) : null;
-      const hex = resolvePartFilamentHex(p);
+      const resolved = ctx?.resolve(p.filamentColorId ?? null);
+      const catalogColor = !resolved && p.filamentColorId ? getColorById(p.filamentColorId) : null;
+      const hex = resolved?.hex ?? resolvePartFilamentHex(p);
       const base = partRow(p);
+      const spoolSummary =
+        ctx?.spoolSummariesForPart(p.filamentColorId ?? null, p.spoolmanSpoolId ?? null) ?? [];
       return {
         ...base,
         printed_count: printedCount,
         print_units: units,
         missing: printedCount < qty,
-        filament_display: color?.combo_label ?? base.filament_display ?? "",
+        filament_display:
+          resolved?.combo_label ?? catalogColor?.combo_label ?? base.filament_display ?? "",
         filament_hex: hex ?? base.filament_hex ?? null,
+        ...(spoolSummary.length
+          ? {
+              spool_summary: spoolSummary,
+              spool_badge: formatSpoolSummaryBadge(spoolSummary),
+            }
+          : {}),
       };
     });
   }
 
-  getCheckoff(profileId: number) {
+  getCheckoff(profileId: number, ctx?: FilamentResolveContext) {
     const partRows = this.listPartRows(profileId);
     for (const part of partRows) {
       this.ensureProgressForPart(part);
@@ -1056,8 +1074,11 @@ export class AppRepository {
     const displayRows = partRows.map((p) => {
       const units = unitsById.get(p.id) ?? [];
       const printedCount = units.filter(Boolean).length;
-      const color = p.filamentColorId ? getColorById(p.filamentColorId) : null;
-      const hex = resolvePartFilamentHex(p);
+      const resolved = ctx?.resolve(p.filamentColorId ?? null);
+      const catalogColor = !resolved && p.filamentColorId ? getColorById(p.filamentColorId) : null;
+      const hex = resolved?.hex ?? resolvePartFilamentHex(p);
+      const spoolSummary =
+        ctx?.spoolSummariesForPart(p.filamentColorId ?? null, p.spoolmanSpoolId ?? null) ?? [];
       return {
         id: p.id,
         filename: p.filename,
@@ -1069,9 +1090,15 @@ export class AppRepository {
         printed_count: printedCount,
         print_units: units,
         missing: printedCount < Math.max(1, p.quantityEffective),
-        filament_display: color?.combo_label ?? "",
+        filament_display: resolved?.combo_label ?? catalogColor?.combo_label ?? "",
         filament_hex: hex,
         included: p.included,
+        ...(spoolSummary.length
+          ? {
+              spool_summary: spoolSummary,
+              spool_badge: formatSpoolSummaryBadge(spoolSummary),
+            }
+          : {}),
       };
     });
     const checklist = filterPrintChecklistRows(displayRows);
@@ -1107,6 +1134,7 @@ export class AppRepository {
       included?: boolean;
       filament_color_id?: string | null;
       quantity_override?: number;
+      spoolman_spool_id?: string | null;
       requirement?: string | null;
       option_group_id?: string | null;
       manifest_source?: string | null;
@@ -1118,6 +1146,10 @@ export class AppRepository {
     if (patch.included != null) updates.included = patch.included;
     if (patch.filament_color_id !== undefined) {
       updates.filamentColorId = patch.filament_color_id;
+      updates.spoolmanSpoolId = null;
+    }
+    if (patch.spoolman_spool_id !== undefined) {
+      updates.spoolmanSpoolId = patch.spoolman_spool_id;
     }
     if (patch.quantity_override != null) {
       updates.quantityOverride = patch.quantity_override;
@@ -1196,9 +1228,11 @@ export class AppRepository {
         part_count: number;
         filament_color_id: string | null;
         filament_custom_hex: string | null;
+        spoolman_spool_id: string | null;
         filament_display: string;
         filament_hex: string | null;
         colorCounts: Map<string, number>;
+        spoolCounts: Map<string, number>;
       }
     >();
 
@@ -1212,15 +1246,23 @@ export class AppRepository {
           part_count: 0,
           filament_color_id: null,
           filament_custom_hex: null,
+          spoolman_spool_id: null,
           filament_display: "",
           filament_hex: null,
           colorCounts: new Map(),
+          spoolCounts: new Map(),
         };
         buckets.set(role, row);
       }
       row.part_count += 1;
       if (part.filamentColorId) {
         row.colorCounts.set(part.filamentColorId, (row.colorCounts.get(part.filamentColorId) ?? 0) + 1);
+      }
+      if (part.spoolmanSpoolId) {
+        row.spoolCounts.set(
+          part.spoolmanSpoolId,
+          (row.spoolCounts.get(part.spoolmanSpoolId) ?? 0) + 1,
+        );
       }
       const color = part.filamentColorId ? getColorById(part.filamentColorId) : null;
       if (color?.combo_label && !row.filament_display) row.filament_display = color.combo_label;
@@ -1240,10 +1282,15 @@ export class AppRepository {
         if (row.colorCounts.size) {
           colorId = [...row.colorCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
         }
+        let spoolId: string | null = null;
+        if (row.spoolCounts.size) {
+          spoolId = [...row.spoolCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        }
         return {
           role: row.role,
           part_count: row.part_count,
           filament_color_id: colorId,
+          spoolman_spool_id: spoolId,
           filament_custom_hex: row.filament_custom_hex,
           filament_display: row.filament_display,
           filament_hex: row.filament_hex ?? (colorId ? getColorById(colorId)?.hex ?? null : null),
@@ -1256,16 +1303,24 @@ export class AppRepository {
     role: string,
     colorId: string | null,
     customHex?: string | null,
+    spoolRef?: string | null,
   ): number {
     const partRows = this.listPartRows(profileId);
     let updated = 0;
     for (const part of partRows) {
       if (!part.included || normalizePartRole(part.role) !== role) continue;
+      const nextSpool =
+        spoolRef !== undefined
+          ? spoolRef
+          : colorId !== part.filamentColorId
+            ? null
+            : part.spoolmanSpoolId;
       this.db
         .update(this.schema.parts)
         .set({
           filamentColorId: colorId,
           filamentCustomHex: customHex ?? null,
+          spoolmanSpoolId: nextSpool ?? null,
         })
         .where(eq(this.schema.parts.id, part.id))
         .run();

@@ -429,6 +429,7 @@ function BuildPageContent() {
               profileId={selectedProfileId}
               disabled={!health || busy}
               refreshKey={filamentRefreshKey}
+              onUpdated={() => bumpPlanRevision()}
             />
           )}
         </section>

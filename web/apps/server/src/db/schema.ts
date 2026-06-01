@@ -65,6 +65,7 @@ export const parts = sqliteTable("parts", {
   role: text("role").notNull().default("primary"),
   filamentColorId: text("filament_color_id"),
   filamentCustomHex: text("filament_custom_hex"),
+  spoolmanSpoolId: text("spoolman_spool_id"),
   quantityAuto: integer("quantity_auto").notNull().default(1),
   quantityOverride: integer("quantity_override"),
   quantityEffective: integer("quantity_effective").notNull().default(1),
@@ -104,7 +105,7 @@ export const appSettings = sqliteTable(
 );
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 1;
+export const currentSchemaVersion = 2;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (

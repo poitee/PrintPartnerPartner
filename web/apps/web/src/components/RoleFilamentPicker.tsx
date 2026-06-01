@@ -2,18 +2,31 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchFilamentCatalog,
   fetchRoleFilaments,
+  fetchSpoolmanSpools,
   saveRoleFilament,
   DEFAULT_STL_NAMING_PROFILE,
   type FilamentCatalog,
   type RoleFilamentRow,
+  type SpoolmanSpoolRow,
   type StlNamingRoleId,
 } from "../api/engine";
-import FilamentSwatch, { allCatalogColors } from "./FilamentSwatch";
+import {
+  buildSpoolmanSpoolId,
+  parseSpoolmanFilamentId,
+  parseSpoolmanSpoolId,
+} from "../lib/spoolmanIds";
+import { isSpoolmanIntegrationConfigured } from "../hooks/useSpoolmanEnabled";
+import FilamentSwatch, { catalogColorGroups } from "./FilamentSwatch";
 import { Button } from "./ui/button";
+import { filterFilamentSpools, formatSpoolOptionLabel } from "../lib/spoolPickerUtils";
 
 const ROLE_LABELS = Object.fromEntries(
   DEFAULT_STL_NAMING_PROFILE.roles.map((r) => [r.id, r.label]),
 ) as Record<StlNamingRoleId, string>;
+
+function formatSpoolOption(spool: SpoolmanSpoolRow): string {
+  return formatSpoolOptionLabel(spool);
+}
 
 type Props = {
   profileId: number;
@@ -31,6 +44,7 @@ export default function RoleFilamentPicker({
 }: Props) {
   const [rows, setRows] = useState<RoleFilamentRow[]>([]);
   const [catalog, setCatalog] = useState<FilamentCatalog | null>(null);
+  const [spools, setSpools] = useState<SpoolmanSpoolRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingRole, setSavingRole] = useState<string | null>(null);
 
@@ -43,6 +57,16 @@ export default function RoleFilamentPicker({
       ]);
       setRows(roleRows);
       setCatalog(cat);
+      const integrationId = cat.default_spoolman_integration_id?.trim();
+      if (integrationId && isSpoolmanIntegrationConfigured(cat)) {
+        try {
+          setSpools(await fetchSpoolmanSpools(integrationId));
+        } catch {
+          setSpools([]);
+        }
+      } else {
+        setSpools([]);
+      }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
@@ -52,7 +76,7 @@ export default function RoleFilamentPicker({
     void load();
   }, [load, refreshKey]);
 
-  const colors = useMemo(() => allCatalogColors(catalog), [catalog]);
+  const colorGroups = useMemo(() => catalogColorGroups(catalog), [catalog]);
 
   const onPickCatalog = async (role: string, colorId: string) => {
     setSavingRole(role);
@@ -61,11 +85,34 @@ export default function RoleFilamentPicker({
         role,
         filament_color_id: colorId || null,
         filament_custom_hex: null,
+        spoolman_spool_id: null,
       });
       setRows(result.roles);
       if (result.updated === 0) {
         setLoadError("No included parts matched that role — run Update build first.");
       }
+      onUpdated?.();
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingRole(null);
+    }
+  };
+
+  const onPickSpool = async (row: RoleFilamentRow, spoolId: string) => {
+    const parsed = parseSpoolmanFilamentId(row.filament_color_id ?? "");
+    if (!parsed) return;
+    setSavingRole(row.role);
+    try {
+      const spoolman_spool_id = spoolId
+        ? buildSpoolmanSpoolId(parsed.integrationId, Number(spoolId))
+        : null;
+      const result = await saveRoleFilament(profileId, {
+        role: row.role,
+        filament_color_id: row.filament_color_id,
+        spoolman_spool_id,
+      });
+      setRows(result.roles);
       onUpdated?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -81,6 +128,7 @@ export default function RoleFilamentPicker({
         role,
         filament_color_id: null,
         filament_custom_hex: hex || null,
+        spoolman_spool_id: null,
       });
       setRows(result.roles);
       if (result.updated === 0) {
@@ -94,6 +142,21 @@ export default function RoleFilamentPicker({
     }
   };
 
+  const spoolmanConfigured = isSpoolmanIntegrationConfigured(catalog);
+
+  const spoolmanHint = useMemo(() => {
+    if (!catalog?.default_spoolman_integration_id) return null;
+    const spoolmanCount = catalog.spoolman_colors?.length ?? 0;
+    if (spoolmanCount > 0) return null;
+    if (catalog.spoolman_error) {
+      return `Spoolman: ${catalog.spoolman_error}`;
+    }
+    if (catalog.spoolman_status === "disabled") {
+      return "Spoolman integration is disabled — enable it in Settings → Integrations.";
+    }
+    return "Spoolman is enabled but returned no filaments — use Test connection in Settings (check base URL is reachable from the server, not localhost from Docker).";
+  }, [catalog]);
+
   if (rows.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -104,11 +167,19 @@ export default function RoleFilamentPicker({
 
   return (
     <div className="role-filament-picker space-y-3">
+      {spoolmanHint && (
+        <p className="text-sm text-muted-foreground">{spoolmanHint}</p>
+      )}
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
       <ul className="space-y-2">
         {rows.map((row) => {
           const label = ROLE_LABELS[row.role as StlNamingRoleId] ?? row.role;
           const busy = savingRole === row.role || disabled;
+          const filamentParsed = parseSpoolmanFilamentId(row.filament_color_id ?? "");
+          const roleSpools = filamentParsed
+            ? filterFilamentSpools(spools, filamentParsed.filamentId)
+            : [];
+          const selectedSpoolId = parseSpoolmanSpoolId(row.spoolman_spool_id ?? "")?.spoolId;
           return (
             <li
               key={row.role}
@@ -129,12 +200,32 @@ export default function RoleFilamentPicker({
                 aria-label={`Catalog color for ${label}`}
               >
                 <option value="">Custom / unset catalog</option>
-                {colors.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.combo_label || c.display_name}
-                  </option>
+                {colorGroups.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.colors.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.combo_label || c.display_name}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
+              {spoolmanConfigured && filamentParsed && roleSpools.length > 0 && (
+                <select
+                  className="min-h-10 w-full min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-2 text-base sm:min-w-[10rem] sm:py-1 sm:text-sm"
+                  value={selectedSpoolId != null ? String(selectedSpoolId) : ""}
+                  disabled={busy}
+                  onChange={(e) => void onPickSpool(row, e.target.value)}
+                  aria-label={`Physical spool for ${label}`}
+                >
+                  <option value="">Any spool (inventory summary)</option>
+                  {roleSpools.map((spool) => (
+                    <option key={spool.id} value={String(spool.id)}>
+                      {formatSpoolOption(spool)}
+                    </option>
+                  ))}
+                </select>
+              )}
               <input
                 type="color"
                 className="h-11 w-12 shrink-0 cursor-pointer rounded border border-input bg-background p-0.5 sm:h-8 sm:w-10"

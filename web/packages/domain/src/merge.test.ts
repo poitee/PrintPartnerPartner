@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeLayers, type MergePart } from "./merge.js";
+import { mergeLayers, findActiveSlugConflictKeys, type MergePart } from "./merge.js";
 import type { ScannedPart } from "./scanner.js";
 
 function part(rel: string, slug: string): ScannedPart {
@@ -88,5 +88,47 @@ describe("mergeLayers", () => {
     const result = mergeLayers([["base", [part("x.stl", "x")]]], existing);
     expect(result.parts[0].included).toBe(false);
     expect(result.parts[0].status).toBe("excluded");
+  });
+});
+
+describe("findActiveSlugConflictKeys", () => {
+  it("returns keys only when multiple included parts share a slug", () => {
+    const keys = findActiveSlugConflictKeys([
+      {
+        matchKey: "a/widget.stl",
+        relativePath: "a/widget.stl",
+        filename: "widget.stl",
+        included: true,
+        partSlug: "widget",
+      },
+      {
+        matchKey: "b/widget.stl",
+        relativePath: "b/widget.stl",
+        filename: "widget.stl",
+        included: true,
+        partSlug: "widget",
+      },
+    ]);
+    expect(keys).toEqual(new Set(["a/widget.stl", "b/widget.stl"]));
+  });
+
+  it("clears conflict when all but one duplicate is excluded", () => {
+    const keys = findActiveSlugConflictKeys([
+      {
+        matchKey: "a/widget.stl",
+        relativePath: "a/widget.stl",
+        filename: "widget.stl",
+        included: true,
+        partSlug: "widget",
+      },
+      {
+        matchKey: "b/widget.stl",
+        relativePath: "b/widget.stl",
+        filename: "widget.stl",
+        included: false,
+        partSlug: "widget",
+      },
+    ]);
+    expect(keys.size).toBe(0);
   });
 });

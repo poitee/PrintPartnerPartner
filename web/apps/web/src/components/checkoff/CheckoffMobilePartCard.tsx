@@ -1,6 +1,7 @@
 import { Check } from "lucide-react";
 import type { ReviewPart } from "../../api/engine";
 import PartThumb from "../parts/PartThumb";
+import SpoolRemainingBadge from "../SpoolRemainingBadge";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 
@@ -32,6 +33,7 @@ export default function CheckoffMobilePartCard({ part, busy, onToggleUnit }: Pro
           </h4>
           <p className="checkoff-mobile-sub">
             {part.filament_display && <span>{part.filament_display}</span>}
+            <SpoolRemainingBadge part={part} />
             {part.role && <span className="checkoff-mobile-role">{part.role}</span>}
             <span className="checkoff-mobile-qty">
               {part.printed_count}/{part.quantity_effective} printed

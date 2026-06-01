@@ -50,11 +50,13 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
       included?: boolean;
       filament_color_id?: string | null;
       quantity_override?: number;
+      spoolman_spool_id?: string | null;
     };
     if (
       body.included === undefined &&
       body.filament_color_id === undefined &&
-      body.quantity_override === undefined
+      body.quantity_override === undefined &&
+      body.spoolman_spool_id === undefined
     ) {
       return reply.status(400).send({ detail: "No fields to update" });
     }

@@ -44,6 +44,46 @@ describe("buildPlanReview", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("clears merge_conflict when duplicate is excluded", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-review-conflict-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+
+    const baseSource = repo.createSource({ name: "BaseRepo", url: "https://github.com/a/base" });
+    const addonSource = repo.createSource({ name: "AddonRepo", url: "https://github.com/a/addon" });
+    const basePath = join(dir, "repos", String(baseSource.id));
+    const addonPath = join(dir, "repos", String(addonSource.id));
+    mkdirSync(join(basePath, "a"), { recursive: true });
+    mkdirSync(join(addonPath, "b"), { recursive: true });
+    writeFileSync(join(basePath, "a", "widget.stl"), "solid");
+    writeFileSync(join(addonPath, "b", "widget.stl"), "solid");
+    repo.updateSource(baseSource.id, { local_path: basePath });
+    repo.updateSource(addonSource.id, { local_path: addonPath });
+    repo.updateImportRules(baseSource.id, ["a/"]);
+    repo.updateImportRules(addonSource.id, ["b/"]);
+
+    const plan = repo.createProfile("ConflictPlan", baseSource.id);
+    repo.addAddonLayer(plan.id, addonSource.id);
+    repo.recomputeProfile(plan.id);
+    const parts = repo.listParts(plan.id).parts;
+    expect(parts).toHaveLength(2);
+    expect(parts.every((p) => p.status === "conflict")).toBe(true);
+
+    const withConflict = buildPlanReview(repo, plan.id);
+    expect(withConflict.issues.filter((i) => i.code === "merge_conflict")).toHaveLength(2);
+
+    const keep = parts[0]!;
+    const drop = parts.find((p) => p.id !== keep.id)!;
+    repo.patchPart(drop.id, { included: false });
+
+    const resolved = buildPlanReview(repo, plan.id);
+    expect(resolved.issues.filter((i) => i.code === "merge_conflict")).toHaveLength(0);
+
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("includes print_units and progress fields on each part", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-review-units-"));
     const sqlite = new SqliteDatabase(dir);

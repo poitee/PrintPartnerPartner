@@ -208,7 +208,15 @@ export default function ReviewPage() {
                   key={`w-${i}`}
                   className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
                 >
-                  {issue.message}
+                  <p>{issue.message}</p>
+                  {issue.link_hint && hintRoute(issue.link_hint, selectedProfileId) && (
+                    <Link
+                      to={hintRoute(issue.link_hint, selectedProfileId)!}
+                      className="mt-1 inline-block text-xs text-primary underline"
+                    >
+                      {issue.link_hint === "sources" ? "Go to Sources" : "Go to Build"}
+                    </Link>
+                  )}
                 </div>
               ))}
             </section>

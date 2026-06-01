@@ -28,6 +28,22 @@ Open [http://localhost:8080](http://localhost:8080). Data persists in the `print
 | `PRINT_PARTNER_API_KEY` | unset | When set (self-host), requires Bearer or `X-Print-Partner-Api-Key` on `/api/v1/*` |
 | `OPENAPI_UI` | unset | Set to `1` to expose `/api/v1/docs` in production |
 | `REDIS_URL` | unset | Optional; when set in SaaS, enables BullMQ job queue (see SaaS) |
+| `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
+| `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
+| `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped override — skip GitHub and compare against this version |
+| `PRINT_PARTNER_UPDATE_CHECK_CACHE_HOURS` | `12` | How long to cache the latest release lookup |
+
+### Checking for app updates
+
+When update checks are enabled (default), the server compares `PP_VERSION` to the latest [GitHub release](https://github.com/poitee/PrintPartnerPartner/releases) (cached ~12 hours). The web UI shows a dismissible banner when a newer version exists, and **Settings → About & updates** lists your version with a manual refresh.
+
+Self-host Docker upgrade:
+
+```bash
+docker compose pull && docker compose up --build
+```
+
+Disable checks entirely with `PRINT_PARTNER_UPDATE_CHECK=0`. Offline or failed lookups never show an error banner.
 
 ### Local development
 
@@ -39,7 +55,7 @@ npm run dev
 
 API: `http://127.0.0.1:18765` · Vite UI: `http://127.0.0.1:5173`
 
-Versioned API for integrations: `http://127.0.0.1:18765/api/v1` — see [`../docs/API.md`](../docs/API.md).
+Versioned API for integrations: `http://127.0.0.1:18765/api/v1` — see [`../docs/API.md`](../docs/API.md). Optional [Spoolman](../docs/integrations/SPOOLMAN.md) filament inventory connects in **Settings → Integrations**.
 
 ## SaaS mode (`DEPLOY_MODE=saas`)
 

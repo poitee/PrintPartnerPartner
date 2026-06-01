@@ -17,6 +17,10 @@ export type FilamentCatalogPayload = {
   status: string;
   colors: CatalogColor[];
   custom_colors: CatalogColor[];
+  spoolman_colors?: CatalogColor[];
+  default_spoolman_integration_id?: string | null;
+  spoolman_status?: "ok" | "empty" | "error" | "disabled" | "not_found";
+  spoolman_error?: string | null;
 };
 
 function catalogColorFromRaw(c: Record<string, unknown>): CatalogColor {

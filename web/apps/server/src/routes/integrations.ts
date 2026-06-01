@@ -1,10 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import type { IntegrationType } from "@print-partner/contracts";
 import type { IntegrationPort } from "../integrations/store.js";
+import type { AppRepository } from "../db/repository.js";
 import { sendProblem } from "../lib/api-error.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
+import { registerSpoolmanProxyRoutes } from "./spoolman-proxy.js";
 
-type RouteDeps = { integrations: IntegrationPort };
+type RouteDeps = { integrations: IntegrationPort; repo: AppRepository };
 
 const VALID_TYPES = new Set<IntegrationType>([
   "moonraker",
@@ -82,4 +84,6 @@ export async function registerIntegrationRoutes(
     const devices = await deps.integrations.listDevices(id);
     return { devices };
   });
+
+  await registerSpoolmanProxyRoutes(app, deps);
 }

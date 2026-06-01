@@ -45,6 +45,20 @@ const SECRET_KEYS = new Set([
   "access_token",
 ]);
 
+const REDACTED = "****";
+
+function mergeIntegrationConfig(
+  existing: IntegrationConfig,
+  patch: IntegrationConfig,
+): IntegrationConfig {
+  const out = { ...existing };
+  for (const [key, value] of Object.entries(patch)) {
+    if (SECRET_KEYS.has(key.toLowerCase()) && value === REDACTED) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 function redactConfig(config: IntegrationConfig): IntegrationConfig {
   const out: IntegrationConfig = {};
   for (const [key, value] of Object.entries(config)) {
@@ -109,7 +123,7 @@ export function createIntegrationPort(deps: IntegrationStoreDeps): IntegrationPo
       if (idx < 0) return null;
       const existing = items[idx]!;
       const mergedConfig = patch.config
-        ? { ...existing.config, ...patch.config }
+        ? mergeIntegrationConfig(existing.config, patch.config)
         : existing.config;
       const updated: IntegrationSummary = {
         ...existing,

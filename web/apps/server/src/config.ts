@@ -27,6 +27,14 @@ export type ServerConfig = {
   uploadMaxBytes: number;
   /** Self-host: optional key for /api/v1 automation clients */
   integrationApiKey: string | null;
+  /** When false, skip GitHub / override version checks for app updates */
+  updateCheckEnabled: boolean;
+  /** GitHub owner/repo for release lookup (e.g. poitee/PrintPartnerPartner) */
+  githubRepo: string;
+  /** Air-gapped override: treat this as the latest published version */
+  latestVersionOverride: string | null;
+  /** In-memory cache TTL for update checks (hours) */
+  updateCheckCacheHours: number;
 };
 
 const DEFAULT_DATA_DIR = process.env.PRINT_PARTNER_DATA_DIR ?? "./data";
@@ -114,5 +122,9 @@ export function loadConfig(): ServerConfig {
     s3Region: process.env.S3_REGION ?? process.env.AWS_REGION ?? null,
     uploadMaxBytes: Number(process.env.UPLOAD_MAX_BYTES ?? 512 * 1024 * 1024),
     integrationApiKey: process.env.PRINT_PARTNER_API_KEY?.trim() || null,
+    updateCheckEnabled: process.env.PRINT_PARTNER_UPDATE_CHECK !== "0",
+    githubRepo: process.env.GITHUB_REPO?.trim() || "poitee/PrintPartnerPartner",
+    latestVersionOverride: process.env.PRINT_PARTNER_LATEST_VERSION?.trim() || null,
+    updateCheckCacheHours: Number(process.env.PRINT_PARTNER_UPDATE_CHECK_CACHE_HOURS ?? 12),
   };
 }

@@ -108,6 +108,18 @@ export type HealthResponse = {
   };
 };
 
+/** Response from GET /settings/update-check — app release availability. */
+export type AppUpdateCheckResponse = {
+  enabled: boolean;
+  update_available: boolean;
+  current_version: string;
+  latest_version: string | null;
+  release_url: string | null;
+  release_notes_url: string | null;
+  deploy_mode: DeployMode;
+  checked_at: string | null;
+};
+
 export type ProfileSummary = {
   id: number;
   name: string;
@@ -149,6 +161,7 @@ export type PartRow = {
   included: boolean;
   filament_color_id: string | null;
   filament_custom_hex?: string | null;
+  spoolman_spool_id?: string | null;
   filament_display?: string;
   filament_hex?: string | null;
   quantity_auto: number;
