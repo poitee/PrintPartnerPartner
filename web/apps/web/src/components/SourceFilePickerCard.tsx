@@ -220,12 +220,12 @@ export default function SourceFilePickerCard({
               </CardDescription>
             </div>
           </button>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
             {source?.local_path && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                className="min-h-9 w-full gap-1 px-2 text-xs text-muted-foreground sm:w-auto"
                 disabled={disabled}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -239,7 +239,7 @@ export default function SourceFilePickerCard({
             )}
             {allSources && onChangeSource && (
               <select
-                className="max-w-[180px] rounded-md border border-input bg-background px-2 py-1 text-xs"
+                className="min-h-10 w-full max-w-none rounded-md border border-input bg-background px-2 py-2 text-base sm:max-w-[180px] sm:py-1 sm:text-xs"
                 value={sourceId}
                 disabled={disabled}
                 aria-label={`Change ${layerType} source`}
@@ -297,7 +297,7 @@ export default function SourceFilePickerCard({
               </Button>
             )}
           </div>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]">
             <ImportRulesTree
               key={sourceId}
               projectId={sourceId}

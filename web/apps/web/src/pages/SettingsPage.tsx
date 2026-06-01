@@ -13,6 +13,7 @@ import {
   type GitHubPatSettings,
 } from "../api/engine";
 import PageHeader from "../components/layout/PageHeader";
+import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { StlNamingSettingsCard } from "../components/settings/StlNamingEditor";
 import SourceCategoryManager from "../components/sources/SourceCategoryManager";
@@ -165,12 +166,16 @@ export default function SettingsPage() {
         title="Settings"
         description="Custom filaments, STL naming, source categories, and optional GitHub token."
         actions={
-          <>
-            <Button variant="secondary" size="sm" onClick={() => void openDataFolder()}>
+          <PageHeaderActions>
+            <Button
+              variant="secondary"
+              className="min-h-10 w-full sm:w-auto"
+              onClick={() => void openDataFolder()}
+            >
               Open data folder
             </Button>
-            <SupportCta size="sm" />
-          </>
+            <SupportCta size="sm" className="col-span-2 min-h-10 w-full sm:col-span-1 sm:w-auto" />
+          </PageHeaderActions>
         }
       />
 
@@ -194,7 +199,7 @@ export default function SettingsPage() {
               onValueChange={(v) => void onUpdateIntervalChange(v)}
               disabled={!health || updateIntervalSaving || updateBusy}
             >
-              <SelectTrigger className="max-w-xs">
+              <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -208,6 +213,7 @@ export default function SettingsPage() {
           </label>
           <Button
             variant="secondary"
+            className="min-h-10 w-full sm:w-auto"
             onClick={onCheckSourceUpdatesNow}
             disabled={!health || updateBusy || updateIntervalSaving}
           >

@@ -201,8 +201,8 @@ export default function PlanManager({ disabled, hideSelector, collapsible }: Pla
         </label>
       )}
 
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="min-w-[12rem] flex-1 space-y-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+        <div className="min-w-0 flex-1 space-y-1 sm:min-w-[12rem]">
           <Label htmlFor="plan-new-name" className="text-xs text-muted-foreground">
             New plan
           </Label>
@@ -217,14 +217,19 @@ export default function PlanManager({ disabled, hideSelector, collapsible }: Pla
             disabled={disabled || busy}
           />
         </div>
-        <Button size="sm" onClick={onCreate} disabled={disabled || busy || !newName.trim()}>
+        <Button
+          size="sm"
+          className="min-h-10 w-full sm:w-auto"
+          onClick={onCreate}
+          disabled={disabled || busy || !newName.trim()}
+        >
           Create
         </Button>
       </div>
 
       {selectedProfileId != null && (
-        <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
-          <div className="min-w-[12rem] flex-1 space-y-1">
+        <div className="flex flex-col gap-2 border-t border-border pt-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="min-w-0 flex-1 space-y-1 sm:min-w-[12rem]">
             <Label htmlFor="plan-rename" className="text-xs text-muted-foreground">
               Rename current plan
             </Label>
@@ -238,25 +243,35 @@ export default function PlanManager({ disabled, hideSelector, collapsible }: Pla
               disabled={disabled || busy}
             />
           </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={onRename}
-            disabled={disabled || busy || !renameName.trim()}
-          >
-            Rename
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={openDuplicateDialog}
-            disabled={disabled || busy}
-          >
-            Duplicate
-          </Button>
-          <Button size="sm" variant="ghost" onClick={openDeleteDialog} disabled={disabled || busy}>
-            Delete
-          </Button>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+            <Button
+              size="sm"
+              className="min-h-10"
+              variant="secondary"
+              onClick={onRename}
+              disabled={disabled || busy || !renameName.trim()}
+            >
+              Rename
+            </Button>
+            <Button
+              size="sm"
+              className="min-h-10"
+              variant="secondary"
+              onClick={openDuplicateDialog}
+              disabled={disabled || busy}
+            >
+              Duplicate
+            </Button>
+            <Button
+              size="sm"
+              className="col-span-2 min-h-10 sm:col-span-1"
+              variant="ghost"
+              onClick={openDeleteDialog}
+              disabled={disabled || busy}
+            >
+              Delete
+            </Button>
+          </div>
         </div>
       )}
 

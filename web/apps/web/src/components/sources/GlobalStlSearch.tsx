@@ -73,7 +73,7 @@ export default function GlobalStlSearch({
         <Input
           ref={inputRef}
           id="global-stl-search"
-          className="pl-9"
+          className="min-h-10 pl-9 text-base sm:text-sm"
           placeholder="Filename or path (e.g. klicky)…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -100,7 +100,7 @@ export default function GlobalStlSearch({
                     <button
                       type="button"
                       className={cn(
-                        "flex w-full flex-col gap-0.5 rounded-sm px-2 py-2 text-left text-sm hover:bg-accent",
+                        "flex min-h-11 w-full flex-col gap-0.5 rounded-sm px-2 py-2.5 text-left text-sm hover:bg-accent",
                       )}
                       onClick={() => onSelectHit(hit)}
                     >

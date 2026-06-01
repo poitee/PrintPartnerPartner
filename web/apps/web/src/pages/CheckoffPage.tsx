@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ClipboardCheck, Printer } from "lucide-react";
 import { toast } from "sonner";
 import PageHeader from "../components/layout/PageHeader";
+import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import EmptyState from "../components/layout/EmptyState";
 import { buildRoute, reviewRoute } from "../lib/routes";
@@ -362,11 +363,10 @@ export default function CheckoffPage() {
         title="Checkoff"
         description="Track what you've printed on the shop floor."
         actions={
-          <>
+          <PageHeaderActions>
             <Button
               variant="ghost"
-              size="sm"
-              className="flex-1 sm:flex-none"
+              className="min-h-10 w-full sm:w-auto"
               onClick={() => window.print()}
               disabled={selectedProfileId == null || parts.length === 0}
             >
@@ -375,22 +375,20 @@ export default function CheckoffPage() {
             </Button>
             <Button
               variant="secondary"
-              size="sm"
-              className="flex-1 sm:flex-none"
+              className="min-h-10 w-full sm:w-auto"
               onClick={onExportChecklist}
               disabled={selectedProfileId == null || busy}
             >
               Export checklist
             </Button>
             <Button
-              size="sm"
-              className="flex-1 sm:flex-none"
+              className="col-span-2 min-h-10 w-full sm:col-span-1 sm:w-auto"
               onClick={onExportMissing}
               disabled={selectedProfileId == null || busy || missingCount === 0}
             >
-              Export missing
+              Export missing STLs
             </Button>
-          </>
+          </PageHeaderActions>
         }
       />
 

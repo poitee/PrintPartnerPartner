@@ -14,6 +14,7 @@ import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 import {
   buildRoute,
+  buildsRoute,
   checkoffRoute,
   helpRoute,
   isBuildPath,
@@ -160,13 +161,13 @@ export default function CommandPalette() {
         },
       },
       {
-        id: "new-plan",
-        label: "New plan",
-        hint: "Build → create plan",
+        id: "manage-builds",
+        label: "Manage builds",
+        hint: "Create, rename, duplicate, delete",
         group: "Workflow",
         run: () => {
           leaveBuildThen(() => {
-            navigate(buildRoute());
+            navigate(buildsRoute(selectedProfileId));
             setOpen(false);
           });
         },

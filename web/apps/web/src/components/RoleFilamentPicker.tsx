@@ -112,15 +112,17 @@ export default function RoleFilamentPicker({
           return (
             <li
               key={row.role}
-              className="flex flex-wrap items-center gap-2 rounded-md border border-border px-2 py-1.5"
+              className="flex flex-col gap-2 rounded-md border border-border px-3 py-2.5 sm:flex-row sm:flex-wrap sm:items-center"
             >
-              <FilamentSwatch hex={row.filament_hex} label={row.filament_display || label} />
-              <span className="min-w-[5rem] text-sm font-medium">{label}</span>
-              <span className="text-xs text-muted-foreground">
-                {row.part_count} part{row.part_count === 1 ? "" : "s"}
-              </span>
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <FilamentSwatch hex={row.filament_hex} label={row.filament_display || label} />
+                <span className="text-sm font-medium">{label}</span>
+                <span className="text-xs text-muted-foreground">
+                  {row.part_count} part{row.part_count === 1 ? "" : "s"}
+                </span>
+              </div>
               <select
-                className="min-w-[10rem] flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+                className="min-h-10 w-full min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-2 text-base sm:min-w-[10rem] sm:py-1 sm:text-sm"
                 value={row.filament_color_id ?? ""}
                 disabled={busy || !catalog}
                 onChange={(e) => void onPickCatalog(row.role, e.target.value)}
@@ -135,7 +137,7 @@ export default function RoleFilamentPicker({
               </select>
               <input
                 type="color"
-                className="h-8 w-10 cursor-pointer rounded border border-input bg-background p-0.5"
+                className="h-11 w-12 shrink-0 cursor-pointer rounded border border-input bg-background p-0.5 sm:h-8 sm:w-10"
                 defaultValue={row.filament_hex?.slice(0, 7) ?? "#c41230"}
                 key={`${row.role}-${row.filament_hex ?? "none"}-${row.filament_color_id ?? ""}`}
                 disabled={busy}

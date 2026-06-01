@@ -53,22 +53,23 @@ export default function SourcesToolbar({
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="min-w-[12rem] flex-1">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-end">
+        <div className="min-w-0 sm:col-span-2 lg:min-w-[12rem] lg:flex-1">
           <Label htmlFor="source-search" className="text-xs text-muted-foreground">
             Search sources
           </Label>
           <Input
             id="source-search"
+            className="mt-1 min-h-10 text-base sm:text-sm"
             placeholder="Name or URL…"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
           />
         </div>
-        <div className="w-40">
+        <div className="w-full min-w-0">
           <Label className="text-xs text-muted-foreground">Category</Label>
           <Select value={categoryFilter} onValueChange={onCategoryFilterChange}>
-            <SelectTrigger>
+            <SelectTrigger className="mt-1 min-h-10 w-full">
               <SelectValue placeholder="All" />
             </SelectTrigger>
             <SelectContent>
@@ -82,13 +83,13 @@ export default function SourcesToolbar({
             </SelectContent>
           </Select>
         </div>
-        <div className="w-36">
+        <div className="w-full min-w-0">
           <Label className="text-xs text-muted-foreground">Sync</Label>
           <Select
             value={syncFilter}
             onValueChange={(v) => onSyncFilterChange(v as SyncFilter)}
           >
-            <SelectTrigger>
+            <SelectTrigger className="mt-1 min-h-10 w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -98,10 +99,10 @@ export default function SourcesToolbar({
             </SelectContent>
           </Select>
         </div>
-        <div className="w-40">
+        <div className="w-full min-w-0">
           <Label className="text-xs text-muted-foreground">Platform</Label>
           <Select value={platformFilter} onValueChange={onPlatformFilterChange}>
-            <SelectTrigger>
+            <SelectTrigger className="mt-1 min-h-10 w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -114,22 +115,24 @@ export default function SourcesToolbar({
             </SelectContent>
           </Select>
         </div>
-        <div className="flex gap-1 self-end">
+        <div className="flex flex-wrap items-center gap-1 sm:col-span-2 lg:col-span-1 lg:self-end">
           {onManageCategories && (
             <Button
               type="button"
               size="sm"
               variant="secondary"
+              className="min-h-10 flex-1 sm:flex-none"
               onClick={onManageCategories}
             >
               <Tags className="mr-1.5 h-4 w-4" />
-              Manage categories
+              Categories
             </Button>
           )}
           <Button
             type="button"
             size="sm"
             variant={viewMode === "grid" ? "secondary" : "ghost"}
+            className="min-h-10 min-w-10"
             aria-label="Grid view"
             onClick={() => onViewModeChange("grid")}
           >
@@ -139,6 +142,7 @@ export default function SourcesToolbar({
             type="button"
             size="sm"
             variant={viewMode === "list" ? "secondary" : "ghost"}
+            className="min-h-10 min-w-10"
             aria-label="List view"
             onClick={() => onViewModeChange("list")}
           >
@@ -146,10 +150,11 @@ export default function SourcesToolbar({
           </Button>
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex gap-1.5 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
         <Button
           type="button"
           size="sm"
+          className="shrink-0"
           variant={categoryFilter === "all" ? "secondary" : "ghost"}
           onClick={() => onCategoryFilterChange("all")}
         >
@@ -158,6 +163,7 @@ export default function SourcesToolbar({
         <Button
           type="button"
           size="sm"
+          className="shrink-0"
           variant={categoryFilter === UNCategorized_FILTER ? "secondary" : "ghost"}
           onClick={() => onCategoryFilterChange(UNCategorized_FILTER)}
         >
@@ -168,6 +174,7 @@ export default function SourcesToolbar({
             key={c}
             type="button"
             size="sm"
+            className="shrink-0"
             variant={categoryFilter === c ? "secondary" : "ghost"}
             onClick={() => onCategoryFilterChange(c)}
           >
