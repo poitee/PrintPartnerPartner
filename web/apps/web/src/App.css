@@ -417,6 +417,21 @@ select:not([class*="rounded-md"]) {
   height: 1.5rem;
   padding: 0;
   line-height: 1;
+  touch-action: manipulation;
+}
+
+@media (max-width: 767px) {
+  .qty-btn {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    font-size: 1.1rem;
+  }
+
+  .qty-input {
+    min-height: 2.75rem;
+    width: 3.25rem;
+    font-size: 1rem;
+  }
 }
 
 .qty-input {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "../components/layout/PageHeader";
+import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
 import { Badge } from "../components/ui/badge";
@@ -98,17 +99,23 @@ export default function ReviewPage() {
         title="Review"
         description="Confirm parts, quantities, and sources before exporting STLs."
         actions={
-          <>
+          <PageHeaderActions>
             <Button
+              className="min-h-10 w-full sm:w-auto"
               onClick={onExportStls}
               disabled={selectedProfileId == null || hasBlockers || exportStlJob.busy || !health}
             >
               {exportStlJob.busy ? "Exporting…" : "Export STLs"}
             </Button>
-            <Button variant="secondary" onClick={() => setShareOpen(true)} disabled={selectedProfileId == null}>
+            <Button
+              variant="secondary"
+              className="min-h-10 w-full sm:w-auto"
+              onClick={() => setShareOpen(true)}
+              disabled={selectedProfileId == null}
+            >
               Share build…
             </Button>
-          </>
+          </PageHeaderActions>
         }
       />
 
@@ -227,11 +234,11 @@ export default function ReviewPage() {
             }}
           />
 
-          <div className="flex flex-wrap gap-2">
-            <Button asChild disabled={hasBlockers}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button className="min-h-10 w-full sm:w-auto" asChild disabled={hasBlockers}>
               <Link to={checkoffRoute(selectedProfileId)}>Continue to Checkoff</Link>
             </Button>
-            <Button variant="ghost" asChild>
+            <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
               <Link to={buildRoute(selectedProfileId)}>Back to Build</Link>
             </Button>
           </div>

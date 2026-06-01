@@ -294,11 +294,21 @@ export default function HelpPage() {
               "Start the engine to see the data directory path."
             )}
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={() => void openDataFolder()}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button
+              type="button"
+              variant="secondary"
+              className="min-h-10 w-full sm:w-auto"
+              onClick={() => void openDataFolder()}
+            >
               Open data folder
             </Button>
-            <Button type="button" variant="secondary" onClick={() => void openExportsFolder()}>
+            <Button
+              type="button"
+              variant="secondary"
+              className="min-h-10 w-full sm:w-auto"
+              onClick={() => void openExportsFolder()}
+            >
               Open exports folder
             </Button>
           </div>
@@ -317,9 +327,9 @@ export default function HelpPage() {
         </CardHeader>
         <CardContent>
           <Tabs value={legalTab} onValueChange={(v) => setLegalTab(v as LegalTab)}>
-            <TabsList>
+            <TabsList className="flex h-auto w-full flex-wrap gap-1 sm:flex-nowrap">
               {LEGAL_TABS.map((t) => (
-                <TabsTrigger key={t.id} value={t.id}>
+                <TabsTrigger key={t.id} value={t.id} className="min-h-9 flex-1 text-xs sm:flex-none sm:text-sm">
                   {t.label}
                 </TabsTrigger>
               ))}

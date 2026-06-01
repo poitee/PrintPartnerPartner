@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import PageHeader from "../components/layout/PageHeader";
-import PlanManager from "../components/PlanManager";
+import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import KitManifestOptions from "../components/KitManifestOptions";
 import RoleFilamentPicker from "../components/RoleFilamentPicker";
@@ -34,7 +34,7 @@ import {
   type ProfileLayer,
   type SourceSummary,
 } from "../api/engine";
-import { buildRoute, reviewRoute, sourcesRoute } from "../lib/routes";
+import { buildRoute, buildsRoute, reviewRoute, sourcesRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
@@ -252,10 +252,11 @@ function BuildPageContent() {
       <RouteBreadcrumbs items={[{ label: "Build", to: buildRoute(selectedProfileId) }]} />
       <PageHeader
         title="Build"
-        description="Attach sources, pick STL files, set kit variants and role colors, then update the build."
+        description="Attach sources, pick STL files, set role colors, then update the build."
         actions={
-          <>
+          <PageHeaderActions>
             <Button
+              className="min-h-10 w-full sm:w-auto"
               onClick={() => void onUpdateBuild()}
               disabled={selectedProfileId == null || busy || !health}
             >
@@ -263,6 +264,7 @@ function BuildPageContent() {
             </Button>
             <Button
               variant="secondary"
+              className="min-h-10 w-full sm:w-auto"
               onClick={onExportStls}
               disabled={selectedProfileId == null || exportStlJob.busy || !health}
             >
@@ -270,21 +272,32 @@ function BuildPageContent() {
             </Button>
             <Button
               variant="secondary"
+              className="min-h-10 w-full sm:w-auto"
               onClick={() => setShareOpen(true)}
               disabled={selectedProfileId == null || !health}
             >
               Share build…
             </Button>
             {selectedProfileId != null && (
-              <Button variant="ghost" onClick={onNavigateToReview}>
+              <Button
+                variant="ghost"
+                className="col-span-2 min-h-10 w-full sm:col-span-1 sm:w-auto"
+                onClick={onNavigateToReview}
+              >
                 Review →
               </Button>
             )}
-          </>
+          </PageHeaderActions>
         }
       />
 
-      <PlanManager hideSelector disabled={!health} collapsible />
+      <p className="text-sm text-muted-foreground">
+        <Button variant="ghost" className="h-auto px-0 text-sm text-primary" asChild>
+          <Link to={buildsRoute(selectedProfileId)}>Manage builds</Link>
+        </Button>
+        {" "}
+        — create, rename, duplicate, or delete plans.
+      </p>
 
       {kitImportSetup &&
         ((kitImportSetup.unmatched_sources?.length ?? 0) > 0 ||
@@ -392,9 +405,9 @@ function BuildPageContent() {
             />
           ))}
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <select
-              className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+              className="min-h-10 w-full min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-2 text-base sm:py-1.5 sm:text-sm"
               value={addonSourceId}
               onChange={(e) => setAddonSourceId(e.target.value)}
               disabled={!health || selectedProfileId == null || needsBaseSource}
@@ -408,6 +421,7 @@ function BuildPageContent() {
             </select>
             <Button
               size="sm"
+              className="min-h-10 w-full sm:w-auto"
               onClick={() => void onAddAddon()}
               disabled={!addonSourceId || needsBaseSource}
             >

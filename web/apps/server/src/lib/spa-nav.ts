@@ -5,6 +5,7 @@ const SPA_PATHS = new Set([
   "/",
   "/sources",
   "/build",
+  "/builds",
   "/review",
   "/checkoff",
   "/settings",

@@ -5,6 +5,7 @@ import { ImportRulesSaveProvider } from "./context/ImportRulesSaveContext";
 import { KitManifestSaveProvider } from "./context/KitManifestSaveContext";
 import AppLayout from "./layout/AppLayout";
 import BuildPage from "./pages/BuildPage";
+import BuildsPage from "./pages/BuildsPage";
 import CheckoffPage from "./pages/CheckoffPage";
 import HelpPage from "./pages/HelpPage";
 import ReviewPage from "./pages/ReviewPage";
@@ -35,6 +36,7 @@ export default function App() {
               <Route element={<AppLayout />}>
                 <Route index element={<Navigate to="/sources" replace />} />
                 <Route path="sources" element={<SourcesPage />} />
+                <Route path="builds" element={<BuildsPage />} />
                 <Route path="build" element={<BuildPage />} />
                 <Route path="plan" element={<Navigate to="/build" replace />} />
                 <Route path="review" element={<ReviewPage />} />

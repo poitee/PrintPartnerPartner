@@ -10,6 +10,10 @@ export function buildRoute(profileId?: number | null): string {
   return withProfile("/build", profileId ?? null);
 }
 
+export function buildsRoute(profileId?: number | null): string {
+  return withProfile("/builds", profileId ?? null);
+}
+
 /** @deprecated use buildRoute */
 export function planRoute(profileId?: number | null): string {
   return buildRoute(profileId);
@@ -51,6 +55,10 @@ export function isKitStudioPath(pathname: string): boolean {
 
 export function isBuildPath(pathname: string): boolean {
   return pathname === "/build" || pathname === "/plan";
+}
+
+export function isBuildsPath(pathname: string): boolean {
+  return pathname === "/builds";
 }
 
 export function isReviewPath(pathname: string): boolean {

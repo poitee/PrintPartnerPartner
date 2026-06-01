@@ -17,6 +17,8 @@ import {
   partitionIncludedParts,
   sourceLabelFromLayer,
 } from "../../lib/reviewParts";
+import ReviewMobilePartCard from "./ReviewMobilePartCard";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 
 type Props = {
   review: PlanReview;
@@ -107,6 +109,7 @@ export default function ReviewPartsEditor({
   const [selectedPartId, setSelectedPartId] = useState<number | null>(null);
 
   const [sortBy, setSortBy] = useState<ReviewSortKey>("repo");
+  const isMobileLayout = useMediaQuery("(max-width: 767px)");
 
   const allParts = useMemo(
     () => flattenReviewParts(review.part_groups),
@@ -189,10 +192,25 @@ export default function ReviewPartsEditor({
         <p className="text-sm text-muted-foreground">
           No parts included yet. Go back to Build to include parts from your sources.
         </p>
+      ) : isMobileLayout ? (
+        <div className="review-mobile-list space-y-2">
+          {included.map((part) => (
+            <ReviewMobilePartCard
+              key={part.id}
+              part={part}
+              selected={selectedPartId === part.id}
+              disabled={disabled}
+              busy={busyId === part.id}
+              onSelect={() => setSelectedPartId(part.id)}
+              onQtyChange={(n) => onQtyChange(part, n)}
+              onRemove={() => setRemoveTarget(part)}
+            />
+          ))}
+        </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="table-scroll overflow-x-auto">
+            <table className="w-full min-w-[32rem] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground">
                   <th className="pb-2 pr-3 font-medium">

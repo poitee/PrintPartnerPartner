@@ -24,6 +24,7 @@ import {
 import GitHubBranchField from "../components/GitHubBranchField";
 import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
+import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import SourceCardCover from "../components/SourceCardCover";
 import GlobalStlSearch from "../components/sources/GlobalStlSearch";
@@ -460,7 +461,7 @@ export default function SourcesPage() {
   const renderSourceRow = (s: SourceSummary) => (
     <div
       key={s.id}
-      className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3"
+      className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center"
     >
       <div className="min-w-0 flex-1">
         <p className="font-medium">{s.name}</p>
@@ -504,13 +505,17 @@ export default function SourcesPage() {
         title="Sources"
         description="Register repos, sync local trees, and choose import folders for each build."
         actions={
-          <>
-            <Button size="sm" onClick={openAddWizard} disabled={!health}>
+          <PageHeaderActions>
+            <Button
+              className="min-h-10 w-full sm:w-auto"
+              onClick={openAddWizard}
+              disabled={!health}
+            >
               Add source
             </Button>
             <Button
               variant="secondary"
-              size="sm"
+              className="min-h-10 w-full sm:w-auto"
               onClick={() => void importSharedBuild()}
               disabled={!health}
             >
@@ -518,7 +523,7 @@ export default function SourcesPage() {
             </Button>
             <Button
               variant="secondary"
-              size="sm"
+              className="min-h-10 w-full sm:w-auto"
               onClick={() => syncSources()}
               disabled={busy || updateBusy || !health || sources.length === 0}
             >
@@ -526,7 +531,7 @@ export default function SourcesPage() {
             </Button>
             <Button
               variant="secondary"
-              size="sm"
+              className="min-h-10 w-full sm:w-auto"
               onClick={checkUpdates}
               disabled={busy || updateBusy || !health || sources.length === 0}
             >
@@ -534,7 +539,11 @@ export default function SourcesPage() {
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" disabled={!health}>
+                <Button
+                  variant="ghost"
+                  className="col-span-2 min-h-10 w-full sm:col-span-1 sm:w-auto"
+                  disabled={!health}
+                >
                   More
                 </Button>
               </DropdownMenuTrigger>
@@ -562,7 +571,7 @@ export default function SourcesPage() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </>
+          </PageHeaderActions>
         }
       />
 

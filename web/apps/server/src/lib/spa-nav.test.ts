@@ -5,6 +5,7 @@ describe("isSpaClientPath", () => {
   it("matches workflow routes", () => {
     expect(isSpaClientPath("/sources")).toBe(true);
     expect(isSpaClientPath("/build?profile=3")).toBe(true);
+    expect(isSpaClientPath("/builds")).toBe(true);
     expect(isSpaClientPath("/plans/7/studio")).toBe(true);
   });
 
