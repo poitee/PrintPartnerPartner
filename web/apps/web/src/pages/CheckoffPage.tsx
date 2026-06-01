@@ -6,9 +6,8 @@ import PageHeader from "../components/layout/PageHeader";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import EmptyState from "../components/layout/EmptyState";
 import { buildRoute, reviewRoute } from "../lib/routes";
-import { notifyExportComplete } from "../lib/exportActions";
+import { completeExportDownload } from "../lib/exportActions";
 import {
-  downloadExport,
   fetchCheckoff,
   patchPartProgress,
   startExportChecklistHtml,
@@ -183,8 +182,6 @@ export default function CheckoffPage() {
   const [search, setSearch] = useState("");
   const [compactMode, setCompactMode] = useState(persistedUi.compactMode);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [exportPath, setExportPath] = useState<string | null>(null);
-  const [checklistPath, setChecklistPath] = useState<string | null>(null);
   const loadGenRef = useRef(0);
   const engineReady = Boolean(health?.ok);
 
@@ -282,15 +279,7 @@ export default function CheckoffPage() {
           toast.error(snap.message || "Checklist export failed");
           return;
         }
-        const downloadUrl = snap.result?.download_url;
-        const path = snap.result?.path;
-        if (typeof path === "string") setChecklistPath(path);
-        if (typeof downloadUrl === "string") {
-          downloadExport(downloadUrl);
-          toast.success("Checklist downloaded");
-        } else if (typeof path === "string") {
-          notifyExportComplete("Checklist HTML", path);
-        }
+        completeExportDownload("Checklist HTML", snap.result);
       },
     );
   };
@@ -304,15 +293,10 @@ export default function CheckoffPage() {
           toast.error(snap.message || "Missing-STL export failed");
           return;
         }
-        const downloadUrl = snap.result?.download_url;
-        const path = snap.result?.root_path;
-        if (typeof path === "string") setExportPath(path);
-        if (typeof downloadUrl === "string") {
-          downloadExport(downloadUrl);
-          toast.success("Missing-parts STLs downloaded");
-        } else if (typeof path === "string") {
-          notifyExportComplete("Missing-parts STL", path, { isDirectory: true });
-        }
+        completeExportDownload("Missing-parts STL", snap.result, {
+          pathField: "root_path",
+          isDirectory: true,
+        });
         if (selectedProfileId != null) void loadCheckoff(selectedProfileId);
       },
     );
@@ -446,8 +430,6 @@ export default function CheckoffPage() {
         {summary && <p className="text-sm text-muted-foreground">{summary}</p>}
         {loadError && <p className="text-sm text-destructive">{loadError}</p>}
         {message && <p className="text-sm text-muted-foreground">{message}</p>}
-        {exportPath && <p className="text-sm text-emerald-400">Saved: {exportPath}</p>}
-        {checklistPath && <p className="text-sm text-emerald-400">Checklist: {checklistPath}</p>}
       </div>
       </div>
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { notifyExportComplete } from "../../lib/exportActions";
+import { completeExportDownload } from "../../lib/exportActions";
 import { startExportKitBundle } from "../../api/engine";
 import { useJobRunner } from "../../hooks/useJobRunner";
 import { Button } from "../ui/button";
@@ -20,7 +20,6 @@ type Props = {
 export default function ShareBuildExportDialog({ open, onOpenChange, profileId }: Props) {
   const exportJob = useJobRunner("kit-export");
   const [includeProgress, setIncludeProgress] = useState(false);
-  const [exportPath, setExportPath] = useState<string | null>(null);
 
   const onExport = () => {
     void exportJob.runJob(
@@ -30,11 +29,7 @@ export default function ShareBuildExportDialog({ open, onOpenChange, profileId }
           toast.error(snap.message || "Export failed");
           return;
         }
-        const p = snap.result?.path;
-        if (typeof p === "string") {
-          setExportPath(p);
-          notifyExportComplete("Share build", p);
-        }
+        completeExportDownload("Share build", snap.result);
       },
     );
   };
@@ -58,9 +53,6 @@ export default function ShareBuildExportDialog({ open, onOpenChange, profileId }
           />
           <span>Include print progress (done/not-done per unit only)</span>
         </label>
-        {exportPath && (
-          <p className="text-xs text-muted-foreground break-all">Saved: {exportPath}</p>
-        )}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Close

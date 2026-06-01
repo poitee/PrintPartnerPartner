@@ -186,6 +186,34 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
     return { ...updated, imported_files: buffer.length };
   });
 
+  /** Tauri desktop: import a ZIP from a local filesystem path (same machine as the engine). */
+  app.post("/sources/:id/import-archive", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    const row = deps.repo.getProjectRow(id);
+    if (!row) return reply.status(404).send({ detail: "Source not found" });
+    const body = request.body as { path?: string };
+    const userPath = String(body.path ?? "").trim();
+    if (!userPath) return reply.status(400).send({ detail: "path is required" });
+    const abs = resolve(userPath);
+    try {
+      if (!statSync(abs).isFile()) {
+        return reply.status(400).send({ detail: "File not found" });
+      }
+    } catch {
+      return reply.status(400).send({ detail: "File not found" });
+    }
+    const buffer = readFileSync(abs);
+    const extractDir = writeUploadedZip(buffer, deps.sourcesDir, id);
+    const updated = deps.repo.updateSource(id, {
+      localPath: extractDir,
+      source_kind: "archive",
+      last_synced_at: new Date().toISOString(),
+      last_commit_sha: null,
+    });
+    void prefetchSourceCover(deps, id);
+    return { ...updated, imported_files: buffer.length };
+  });
+
   app.get("/sources/:id/has-manifest", async () => ({
     has_manifest: false,
     manifest_kind: null,

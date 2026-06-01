@@ -1,15 +1,15 @@
 /** Browser file-picker fallbacks when Tauri invoke is unavailable. */
 
-function pickFile(accept: string): Promise<string | null> {
+function pickFileObject(accept: string): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = accept;
     input.style.display = "none";
     input.addEventListener("change", () => {
-      const file = input.files?.[0];
+      const file = input.files?.[0] ?? null;
       input.remove();
-      resolve(file ? file.name : null);
+      resolve(file);
     });
     input.addEventListener("cancel", () => {
       input.remove();
@@ -22,7 +22,8 @@ function pickFile(accept: string): Promise<string | null> {
 
 export async function pickLocalDirectoryWeb(): Promise<string | null> {
   if (!("showDirectoryPicker" in window)) {
-    return pickFile("");
+    const file = await pickFileObject("");
+    return file?.name ?? null;
   }
   try {
     const handle = await (
@@ -36,12 +37,12 @@ export async function pickLocalDirectoryWeb(): Promise<string | null> {
   }
 }
 
-export async function pickKitBundlePathWeb(): Promise<string | null> {
-  return pickFile(".zip,.kit,.json,application/zip");
+export async function pickKitBundleFileWeb(): Promise<File | null> {
+  return pickFileObject(".zip,.kit,.json,application/zip");
 }
 
-export async function pickZipArchiveWeb(): Promise<string | null> {
-  return pickFile(".zip,application/zip");
+export async function pickZipArchiveFileWeb(): Promise<File | null> {
+  return pickFileObject(".zip,application/zip");
 }
 
 export async function saveTextFileWeb(

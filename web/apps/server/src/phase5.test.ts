@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getDb, SqliteDatabase } from "./db/client.js";
@@ -7,7 +7,7 @@ import { AppRepository } from "./db/repository.js";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { matchKeyMatches } from "./services/manifest-apply.js";
-import { exportKitBundle, loadKitBundleBytes, KIT_FORMAT } from "./services/export-kit.js";
+import { exportKitBundle, loadKitBundleBytes, parseKitBundleBuffer, KIT_FORMAT } from "./services/export-kit.js";
 import { setRequestTenantId } from "./middleware/tenant-context.js";
 import { SaasS3StoragePort } from "./adapters/saas/storage-s3.js";
 import { fetchPrintablesMetadata } from "./services/source-adapters.js";
@@ -60,6 +60,20 @@ describe("Phase 5", () => {
     expect(data.format).toBe(KIT_FORMAT);
     const imported = repo.importKitBundle(data, "Imported");
     expect(imported.parts_imported).toBeGreaterThan(0);
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("parseKitBundleBuffer reads zip bytes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-kit-buf-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+    const source = repo.createSource({ name: "R", url: "https://github.com/a/b" });
+    const plan = repo.createProfile("KitPlan", source.id);
+    const bundlePath = exportKitBundle(repo, plan.id, join(dir, "exports"), false);
+    const data = parseKitBundleBuffer(readFileSync(bundlePath), bundlePath);
+    expect(data.format).toBe(KIT_FORMAT);
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });

@@ -10,9 +10,9 @@ import {
   CardContent,
 } from "../components/ui/card";
 import ReviewPartsEditor from "../components/review/ReviewPartsEditor";
-import { downloadExport, fetchPlanReview, startExportStlPack, type PlanReview } from "../api/engine";
+import { fetchPlanReview, startExportStlPack, type PlanReview } from "../api/engine";
 import { buildRoute, checkoffRoute, sourcesRoute } from "../lib/routes";
-import { notifyExportComplete } from "../lib/exportActions";
+import { completeExportDownload } from "../lib/exportActions";
 import { toast } from "sonner";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
@@ -81,14 +81,7 @@ export default function ReviewPage() {
           toast.error(snap.message || "STL export failed");
           return;
         }
-        const downloadUrl = snap.result?.download_url;
-        const root = snap.result?.root_path;
-        if (typeof downloadUrl === "string") {
-          downloadExport(downloadUrl);
-          toast.success("STL pack downloaded");
-        } else if (typeof root === "string") {
-          notifyExportComplete("STL export", root);
-        }
+        completeExportDownload("STL export", snap.result, { pathField: "root_path" });
       },
     );
   };

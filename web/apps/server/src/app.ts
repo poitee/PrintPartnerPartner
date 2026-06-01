@@ -19,6 +19,7 @@ import {
 } from "./routes/jobs.js";
 import { registerPartRoutes } from "./routes/parts.js";
 import { registerExportRoutes } from "./routes/exports.js";
+import { registerImportRoutes } from "./routes/imports.js";
 import { join } from "node:path";
 import {
   registerSettingsRoutes,
@@ -112,6 +113,7 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     await registerPlanRoutes(app, { repo: repository });
     await registerPartRoutes(app, { repo: repository, thumbsDir });
     await registerExportRoutes(app, { dataDir: config.dataDir });
+    await registerImportRoutes(app, { repo: repository });
     await registerSettingsRoutes(app, { repo: repository, dataDir: config.dataDir });
     await registerSourceNamingRoutes(app, { repo: repository, dataDir: config.dataDir });
     await registerStubRoutes(app, { repo: repository, dataDir: config.dataDir });
