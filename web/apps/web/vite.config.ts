@@ -22,6 +22,7 @@ const API_PREFIXES = [
   "manifest-registry",
   "manifest-templates",
   "community",
+  "imports",
   "ws",
 ];
 

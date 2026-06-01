@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  importKitBundle,
-  pickKitBundle,
   startExportKitBundle,
   startExportStlPack,
   startRecompute,
@@ -11,6 +9,7 @@ import {
 } from "../api/engine";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useFlushBuildPageSaves } from "../hooks/useFlushBuildPageSaves";
+import { useImportSharedBuild } from "../hooks/useImportSharedBuild";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 import {
@@ -50,6 +49,7 @@ export default function CommandPalette() {
   const { health } = useEngineHealth();
   const { selectedProfileId, setSelectedProfileId, reloadProfiles } = useProfileSelection();
   const flushBuildSaves = useFlushBuildPageSaves();
+  const importSharedBuild = useImportSharedBuild();
   const recomputeJob = useJobRunner("recompute");
   const syncJob = useJobRunner("sync");
   const stlExportJob = useJobRunner("stl-export");
@@ -288,24 +288,7 @@ export default function CommandPalette() {
           hint: ".print-partner-kit.zip",
           group: "Actions",
           run: () => {
-            void (async () => {
-              const picked = await pickKitBundle();
-              if (!picked) return;
-              try {
-                const result = await importKitBundle(picked);
-                if (result.profile_id) {
-                  setSelectedProfileId(result.profile_id);
-                  void reloadProfiles();
-                  navigate(buildRoute(result.profile_id), {
-                    state: { kitImport: result },
-                  });
-                  toast.success(`Imported “${result.profile_name}”`);
-                }
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : String(e));
-              }
-            })();
-            setOpen(false);
+            void importSharedBuild().finally(() => setOpen(false));
           },
         },
         {
@@ -336,6 +319,7 @@ export default function CommandPalette() {
     onCheckoff,
     onSources,
     flushBuildSaves,
+    importSharedBuild,
     setSelectedProfileId,
     reloadProfiles,
   ]);

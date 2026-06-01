@@ -8,6 +8,7 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { matchKeyMatches } from "./services/manifest-apply.js";
 import { exportKitBundle, loadKitBundleBytes, parseKitBundleBuffer, KIT_FORMAT } from "./services/export-kit.js";
+import { loadKitManifest, saveKitManifest } from "./services/kit-manifest-store.js";
 import { setRequestTenantId } from "./middleware/tenant-context.js";
 import { SaasS3StoragePort } from "./adapters/saas/storage-s3.js";
 import { fetchPrintablesMetadata } from "./services/source-adapters.js";
@@ -54,12 +55,21 @@ describe("Phase 5", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["p/"]);
     const plan = repo.createProfile("KitPlan", source.id);
+    saveKitManifest(repo, plan.id, { selections: { toolhead: "stealthburner" }, include: ["p/"] });
     repo.recomputeProfile(plan.id);
     const bundlePath = exportKitBundle(repo, plan.id, join(dir, "exports"), false);
     const data = loadKitBundleBytes(bundlePath);
     expect(data.format).toBe(KIT_FORMAT);
+    // Simulate a recipient who has the repo but different local import rules.
+    repo.updateImportRules(source.id, []);
+
     const imported = repo.importKitBundle(data, "Imported");
     expect(imported.parts_imported).toBeGreaterThan(0);
+    expect(imported.unmatched_sources ?? []).toHaveLength(0);
+    expect(repo.getProjectRow(source.id)?.importedPaths).toContain("p");
+
+    const importedManifest = loadKitManifest(repo, imported.profile_id);
+    expect(importedManifest.selections.toolhead).toBe("stealthburner");
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
