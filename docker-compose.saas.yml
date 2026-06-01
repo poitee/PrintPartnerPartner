@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: printpartner
+      POSTGRES_PASSWORD: printpartner
+      POSTGRES_DB: printpartner
+    ports:
+      - "5432:5432"
+    volumes:
+      - pp-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U printpartner"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - pp-minio:/data
+
+  print-partner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      DEPLOY_MODE: "saas"
+      SAAS_DATA_DIR: "/data"
+      STATIC_DIR: "/app/web/apps/web/dist"
+      DATABASE_URL: "postgresql://printpartner:printpartner@postgres:5432/printpartner"
+      S3_BUCKET: "print-partner"
+      S3_REGION: "us-east-1"
+      AWS_ACCESS_KEY_ID: "minioadmin"
+      AWS_SECRET_ACCESS_KEY: "minioadmin"
+      S3_ENDPOINT: "http://minio:9000"
+      S3_FORCE_PATH_STYLE: "1"
+      SAAS_ALLOW_ANONYMOUS: "1"
+      CORS_ORIGIN: "true"
+    volumes:
+      - print-partner-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pp-postgres:
+  pp-minio:
+  print-partner-data:

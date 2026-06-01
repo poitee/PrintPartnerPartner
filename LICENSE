@@ -1,0 +1,104 @@
+# Print Partner Non-Commercial Software License
+
+## TLDR
+
+- **Run Print Partner** on your own machines for personal, hobby, academic, or other non-commercial use — including organizing STL kits, manifests, and exports for your shop or club.
+- **Commercial print farms and print businesses** may use Print Partner **internally** to run a 3D printing operation (plate planning, checkoff, manifests, etc.) when you sell **printed parts or services** — no separate commercial license required for that internal use.
+- **Study and modify** the source code for non-commercial use. Share your changes **share-alike**: recipients must get this same license and required notices.
+- **Fork or redistribute?** Include a copy of this license, [ATTRIBUTION.md](ATTRIBUTION.md), and visible credit to Chad Lynch / Print Partner. Do not imply endorsement without permission.
+- **Sell the software?** (installers, paid downloads, SaaS, bundling in a product you sell, etc.) You need **written permission** from Chad Lynch — see [COMMERCIAL.md](COMMERCIAL.md).
+- **Sell printed parts?** Yes. This license applies to the **software**, not the physical parts you print.
+- **Warranty:** The software is provided **as is** with no warranty. Use at your own risk; back up important data.
+
+---
+
+## Preamble
+
+This license is **inspired by** the [Annex Engineering License Agreement](https://github.com/Annex-Engineering/ANNEX-Engineering-License-Agreement), used **with permission** from Annex Engineering. Print Partner is an **independent** project by Chad Lynch; it is **not** an Annex Engineering product and is not endorsed by Annex Engineering. See [ATTRIBUTION.md](ATTRIBUTION.md).
+
+---
+
+## Agreement
+
+This Non-Commercial Software License Agreement (the "Agreement") is between you (the "Licensee") and **Chad Lynch** (the "Licensor"), for the Print Partner software project ("Print Partner"). By installing, copying, or using Print Partner (the "Software"), you agree to these terms. If you do not agree, do not use the Software.
+
+**Software** means the Print Partner desktop application, engine, source code, documentation, and any related electronic materials distributed with this project (excluding third-party libraries, which remain under their own licenses — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+
+### Non-commercial use (the Software)
+
+This license is **non-commercial with respect to the Software**: you may not sell or commercially redistribute Print Partner itself without written permission (see Restrictions). That limitation does **not** apply to the **physical parts or print services** you sell using the Software.
+
+Licensor grants Licensee one (1) non-exclusive, non-transferable license to install and use the Software for **personal, academic, and non-commercial hobby** purposes, and for **Commercial Print Farm Use** as defined below (together, the "Intended Purpose").
+
+### Commercial print farm and business use
+
+Licensor grants Licensee permission to install and use the Software **internally** to operate a commercial 3D printing business, print farm, contract print shop, or similar enterprise that **sells physical printed parts, kits, or finished goods**, or **printing, fulfillment, or related services** ("Commercial Print Farm Use"), provided that Licensee:
+
+1. Uses the Software only for Licensee's own operations (not as a product Licensee sells or hosts for others).
+2. Does **not** sell, sublicense, lease, assign, transmit, distribute for a fee, or otherwise transfer rights in the Software or derivative works.
+3. Does **not** offer the Software or derivative works as a paid hosted service, managed service, or commercial API.
+
+Commercial Print Farm Use is **expressly permitted** without a separate commercial license from Licensor.
+
+### Allowables
+
+Licensee may:
+
+1. Use the Software for the Intended Purpose.
+2. Modify, enhance, or create derivative works of the Software for **personal, academic, or non-commercial use only**, provided such works are shared **share-alike** under this Agreement.
+3. Redistribute the Software or derivative works **only** under this Agreement, with this license text, [ATTRIBUTION.md](ATTRIBUTION.md), and visible attribution to Chad Lynch / Print Partner.
+
+### Restrictions
+
+Licensee may not, without **prior written permission** from Licensor:
+
+1. Sell, sublicense, lease, assign, transmit, distribute for a fee, or otherwise transfer rights in the Software or derivative works.
+2. Offer the Software or derivative works as a paid hosted service, managed service, or commercial API.
+3. Bundle the Software in another product sold or licensed for commercial use.
+4. Commercialize the **Software** itself (as distinct from physical printed products or print services): any use not covered by Allowables or Commercial Print Farm Use that treats the Software as a commercial product, service, or revenue-generating offering.
+
+**Selling physical parts** or **print services** produced or delivered with the help of Print Partner (e.g. printed STL kits, contract printing) is **not** restricted by this Agreement. This Agreement applies to the **Software**, not your printed products or your printing business operations when using the Software internally under Commercial Print Farm Use.
+
+### Forks, modifications, and redistribution
+
+All forks, modifications, and redistributions must include a copy of this license and [ATTRIBUTION.md](ATTRIBUTION.md) (or equivalent visible credit). Licensee must give appropriate credit to Chad Lynch / Print Partner, provide a link to this license, and indicate if changes were made, in any reasonable manner that does not suggest Licensor endorses Licensee's use without permission.
+
+### No warranty
+
+The Software is provided **"as is"** without warranty of any kind. Licensor disclaims all express and implied warranties, including merchantability, fitness for a particular purpose, and non-infringement. Licensee uses the Software at its own risk and should safeguard important data.
+
+### Limitation of liability
+
+To the fullest extent permitted by law, Licensor is not liable for any damages arising from this Agreement or use of the Software, whether in contract, tort, or otherwise, including negligence. Licensee should not rely on the Software for critical operations without independent verification.
+
+### Ownership and intellectual property
+
+Licensor retains all right, title, and interest in the Software and associated intellectual property. Nothing in this Agreement grants ownership of the Software to Licensee.
+
+### Feedback
+
+If Licensee provides suggestions or comments about the Software ("Feedback"), Licensor may use Feedback without obligation or compensation to Licensee.
+
+### Suspension and termination
+
+Licensor may modify, suspend, or discontinue the Software at any time. Licensor may terminate this Agreement if Licensee breaches it. Upon termination, Licensee must stop using and distributing the Software except as already lawfully shared under this Agreement.
+
+### Governing law
+
+This Agreement is governed by the laws of the **State of North Carolina** and applicable **United States** federal law, without regard to conflict-of-law rules. The parties submit to the exclusive jurisdiction of courts in North Carolina, USA.
+
+### Severability
+
+If any provision is held invalid, the remaining provisions remain in effect to the maximum extent permitted.
+
+### No agency
+
+Nothing in this Agreement creates a partnership, joint venture, or agency relationship between Licensor and Licensee.
+
+### Entire agreement
+
+This Agreement, together with [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md), [ATTRIBUTION.md](ATTRIBUTION.md), and [COMMERCIAL.md](COMMERCIAL.md) as referenced, constitutes the entire agreement regarding the Software and supersedes prior understandings on that subject.
+
+---
+
+Copyright (c) Chad Lynch — Print Partner. All rights reserved except as expressly granted above.

@@ -1,0 +1,93 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Surfaces */
+  --color-background: hsl(222 22% 9%);
+  --color-foreground: hsl(210 22% 96%);
+  --color-card: hsl(222 20% 14%);
+  --color-card-foreground: hsl(210 22% 96%);
+
+  /* Brand / actions */
+  --color-primary: hsl(214 88% 58%);
+  --color-primary-foreground: hsl(222 28% 8%);
+
+  --color-secondary: hsl(222 18% 20%);
+  --color-secondary-foreground: hsl(210 18% 90%);
+
+  --color-muted: hsl(222 16% 22%);
+  --color-muted-foreground: hsl(215 14% 72%);
+
+  --color-accent: hsl(222 16% 24%);
+  --color-accent-foreground: hsl(210 22% 96%);
+
+  --color-destructive: hsl(0 72% 58%);
+  --color-destructive-foreground: hsl(210 25% 98%);
+
+  --color-success: hsl(152 52% 48%);
+  --color-warning: hsl(38 92% 55%);
+
+  --color-border: hsl(222 14% 30%);
+  --color-input: hsl(222 18% 18%);
+  --color-ring: hsl(214 88% 58%);
+
+  --radius-lg: 0.5rem;
+  --radius-md: calc(0.5rem - 2px);
+  --radius-sm: calc(0.5rem - 4px);
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    margin: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply text-foreground;
+  }
+
+  /* Legacy App.css pages use .muted — align with design tokens */
+  .muted,
+  .subtitle {
+    color: var(--color-muted-foreground);
+  }
+}
+
+@layer utilities {
+  /* Tailwind maps text-muted to --color-muted (a surface). Use foreground for copy. */
+  .text-muted {
+    color: var(--color-muted-foreground);
+  }
+}
+
+@layer components {
+  .source-card {
+    @apply overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-md transition-colors;
+    box-shadow:
+      0 1px 0 hsl(222 14% 38% / 0.35),
+      0 4px 12px hsl(222 40% 4% / 0.45);
+  }
+
+  .source-card:hover {
+    @apply border-primary/50;
+  }
+
+  .source-card__body {
+    @apply p-4;
+  }
+
+  .drawer-panel {
+    @apply fixed inset-y-0 right-0 z-40 flex w-full max-w-xl flex-col border-l border-border bg-card text-card-foreground shadow-xl;
+  }
+
+  .card {
+    @apply rounded-lg border border-border bg-card text-card-foreground;
+  }
+}

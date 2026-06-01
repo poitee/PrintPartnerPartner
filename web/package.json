@@ -1,0 +1,25 @@
+{
+  "name": "print-partner-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @print-partner/server\" \"npm run dev -w @print-partner/web\"",
+    "build": "npm run build -w @print-partner/contracts && npm run build -w @print-partner/domain && npm run build -w @print-partner/server && npm run build -w @print-partner/web",
+    "test": "npm run test -w @print-partner/domain --if-present && npm run test -w @print-partner/web --if-present && npm run test -w @print-partner/server --if-present",
+    "lint": "eslint .",
+    "typecheck": "npm run build -w @print-partner/contracts && npm run build -w @print-partner/domain && npm run typecheck -w @print-partner/server && npm run typecheck -w @print-partner/web",
+    "db:migrate": "npm run db:migrate -w @print-partner/server"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.28.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript-eslint": "^8.33.0"
+  }
+}

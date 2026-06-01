@@ -1,0 +1,366 @@
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import {
+  pickKitBundlePath,
+  startExportKitBundle,
+  startExportStlPack,
+  startImportKitBundle,
+  startRecompute,
+  startSync,
+  type KitImportJobResult,
+} from "../api/engine";
+import { useProfileSelection } from "../context/ProfileContext";
+import { useFlushBuildPageSaves } from "../hooks/useFlushBuildPageSaves";
+import { useEngineHealth } from "../hooks/useEngineHealth";
+import { useJobRunner } from "../hooks/useJobRunner";
+import {
+  buildRoute,
+  checkoffRoute,
+  helpRoute,
+  isBuildPath,
+  isReviewPath,
+  reviewRoute,
+  settingsRoute,
+  sourcesRoute,
+} from "../lib/routes";
+import { notifyExportComplete } from "../lib/exportActions";
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "./ui/command";
+
+type Action = {
+  id: string;
+  label: string;
+  hint?: string;
+  group: "Navigate" | "Workflow" | "Actions";
+  disabled?: boolean;
+  run: () => void;
+};
+
+export default function CommandPalette() {
+  const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { health } = useEngineHealth();
+  const { selectedProfileId, setSelectedProfileId, reloadProfiles } = useProfileSelection();
+  const flushBuildSaves = useFlushBuildPageSaves();
+  const recomputeJob = useJobRunner("recompute");
+  const syncJob = useJobRunner("sync");
+  const stlExportJob = useJobRunner("stl-export");
+  const importJob = useJobRunner("import-kit");
+  const kitExportJob = useJobRunner("kit-export");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const onBuild = isBuildPath(location.pathname);
+  const onReview = isReviewPath(location.pathname);
+  const onCheckoff = location.pathname === "/checkoff";
+  const onSources = location.pathname === "/sources";
+
+  const actions: Action[] = useMemo(() => {
+    const leaveBuildThen = (go: () => void) => {
+      if (onBuild) void flushBuildSaves().then(go);
+      else go();
+    };
+
+    const list: Action[] = [
+      {
+        id: "nav-sources",
+        label: "Go to Sources",
+        hint: onSources ? "current" : undefined,
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(sourcesRoute());
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "search-stl",
+        label: "Search all repos for part…",
+        hint: "Sources · cross-repo STL",
+        group: "Navigate",
+        disabled: !health,
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(sourcesRoute(), { state: { stlSearch: true } });
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "nav-build",
+        label: "Go to Build",
+        hint: onBuild ? "current" : undefined,
+        group: "Navigate",
+        run: () => {
+          navigate(buildRoute(selectedProfileId));
+          setOpen(false);
+        },
+      },
+      {
+        id: "nav-review",
+        label: "Go to Review",
+        hint: onReview ? "current" : undefined,
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(reviewRoute(selectedProfileId));
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "nav-checkoff",
+        label: "Go to Checkoff",
+        hint: onCheckoff ? "current" : undefined,
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(checkoffRoute(selectedProfileId));
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "nav-settings",
+        label: "Go to Settings",
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(settingsRoute());
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "nav-help",
+        label: "Go to Help",
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(helpRoute());
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "new-plan",
+        label: "New plan",
+        hint: "Build → create plan",
+        group: "Workflow",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(buildRoute());
+            setOpen(false);
+          });
+        },
+      },
+    ];
+
+    if (health && selectedProfileId != null) {
+      list.push(
+        {
+          id: "update-build",
+          label: "Update build",
+          hint: "Scan layers and merge parts",
+          group: "Workflow",
+          disabled: recomputeJob.busy,
+          run: () => {
+            void recomputeJob.runJob(() =>
+              startRecompute(selectedProfileId, { apply_manifest: false }),
+            );
+            if (!onBuild) navigate(buildRoute(selectedProfileId));
+            setOpen(false);
+          },
+        },
+        {
+          id: "export-share",
+          label: "Share build…",
+          hint: "Export .print-partner-kit.zip",
+          group: "Workflow",
+          disabled: kitExportJob.busy,
+          run: () => {
+            void kitExportJob.runJob(
+              () => startExportKitBundle(selectedProfileId, false),
+              (snap) => {
+                const path = snap.result?.path;
+                if (typeof path === "string") notifyExportComplete("Share build", path);
+              },
+            );
+            if (!onBuild && !onReview) navigate(buildRoute(selectedProfileId));
+            setOpen(false);
+          },
+        },
+        {
+          id: "export-stl",
+          label: "Export STLs",
+          hint: `Plan #${selectedProfileId}`,
+          group: "Actions",
+          disabled: stlExportJob.busy,
+          run: () => {
+            void stlExportJob.runJob(
+              () => startExportStlPack(selectedProfileId),
+              (snap) => {
+                const root = snap.result?.root_path;
+                if (typeof root === "string") notifyExportComplete("STL export", root);
+              },
+            );
+            if (!onBuild && !onReview) navigate(reviewRoute(selectedProfileId));
+            setOpen(false);
+          },
+        },
+        {
+          id: "export-missing-stl",
+          label: "Export missing STLs",
+          hint: onCheckoff ? "Checkoff" : `Plan #${selectedProfileId}`,
+          group: "Actions",
+          disabled: stlExportJob.busy,
+          run: () => {
+            void stlExportJob.runJob(
+              () => startExportStlPack(selectedProfileId, { missing_only: true }),
+              (snap) => {
+                const root = snap.result?.root_path;
+                if (typeof root === "string")
+                  notifyExportComplete("Missing-parts STL", root, { isDirectory: true });
+              },
+            );
+            if (!onCheckoff) navigate(checkoffRoute(selectedProfileId));
+            setOpen(false);
+          },
+        },
+        {
+          id: "recompute",
+          label: "Recompute plan",
+          group: "Actions",
+          disabled: recomputeJob.busy,
+          run: () => {
+            void recomputeJob.runJob(() =>
+              startRecompute(selectedProfileId, { apply_manifest: false }),
+            );
+            setOpen(false);
+          },
+        },
+      );
+    }
+
+    if (health) {
+      list.push(
+        {
+          id: "search-stl-global",
+          label: "Search all repos for part…",
+          hint: "Cross-repo STL discovery",
+          group: "Actions",
+          run: () => {
+            navigate(sourcesRoute(), { state: { stlSearch: true } });
+            setOpen(false);
+          },
+        },
+        {
+          id: "import-shared-build",
+          label: "Import shared build…",
+          hint: ".print-partner-kit.zip",
+          group: "Actions",
+          disabled: importJob.busy,
+          run: () => {
+            void (async () => {
+              const path = await pickKitBundlePath();
+              if (!path) return;
+              void importJob.runJob(() => startImportKitBundle(path), (snap) => {
+                const result = snap.result as KitImportJobResult | null;
+                if (result?.profile_id) {
+                  setSelectedProfileId(result.profile_id);
+                  void reloadProfiles();
+                  navigate(buildRoute(result.profile_id), {
+                    state: { kitImport: result },
+                  });
+                }
+              });
+            })();
+            setOpen(false);
+          },
+        },
+        {
+          id: "sync-all",
+          label: "Sync all sources",
+          group: "Actions",
+          disabled: syncJob.busy,
+          run: () => {
+            navigate(sourcesRoute());
+            void syncJob.runJob(() => startSync());
+            setOpen(false);
+          },
+        },
+      );
+    }
+
+    return list;
+  }, [
+    health,
+    selectedProfileId,
+    navigate,
+    recomputeJob,
+    syncJob,
+    stlExportJob,
+    importJob,
+    kitExportJob,
+    onBuild,
+    onReview,
+    onCheckoff,
+    onSources,
+    flushBuildSaves,
+    setSelectedProfileId,
+    reloadProfiles,
+  ]);
+
+  const groups = ["Navigate", "Workflow", "Actions"] as const;
+
+  return (
+    <CommandDialog open={open} onOpenChange={setOpen}>
+      <CommandInput placeholder="Type a command…" />
+      <CommandList>
+        <CommandEmpty>No matching commands.</CommandEmpty>
+        {groups.map((group, index) => {
+          const items = actions.filter((a) => a.group === group);
+          if (items.length === 0) return null;
+          return (
+            <div key={group}>
+              {index > 0 && <CommandSeparator />}
+              <CommandGroup heading={group}>
+                {items.map((a) => (
+                  <CommandItem
+                    key={a.id}
+                    value={`${a.label} ${a.hint ?? ""}`}
+                    disabled={a.disabled}
+                    onSelect={a.run}
+                  >
+                    <span>{a.label}</span>
+                    {a.hint && (
+                      <span className="ml-auto text-xs text-muted-foreground">{a.hint}</span>
+                    )}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </div>
+          );
+        })}
+      </CommandList>
+    </CommandDialog>
+  );
+}
