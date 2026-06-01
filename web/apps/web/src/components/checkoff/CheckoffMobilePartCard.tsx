@@ -1,70 +1,13 @@
 import { Check } from "lucide-react";
-import type { CheckoffPart } from "../../api/engine";
+import type { ReviewPart } from "../../api/engine";
+import PartThumb from "../parts/PartThumb";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
-import { generatePartThumbnail } from "../../lib/stlThumbnail";
-import { useEffect, useRef, useState } from "react";
-
-function MobileThumb({ partId, tintHex }: { partId: number; tintHex?: string | null }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [src, setSrc] = useState<string | null>(null);
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || visible) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [visible]);
-
-  useEffect(() => {
-    if (!visible) return;
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    void generatePartThumbnail(partId, tintHex).then((url) => {
-      if (cancelled) {
-        if (url) URL.revokeObjectURL(url);
-        return;
-      }
-      if (url) {
-        objectUrl = url;
-        setSrc(url);
-      }
-    });
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [visible, partId, tintHex]);
-
-  return (
-    <div ref={ref} className="checkoff-mobile-thumb">
-      {src ? (
-        <img className="checkoff-mobile-thumb-img" src={src} alt="" />
-      ) : (
-        <div
-          className="checkoff-mobile-thumb-ph"
-          style={{ background: tintHex ?? "#e5e7eb" }}
-          aria-hidden
-        />
-      )}
-    </div>
-  );
-}
 
 type Props = {
-  part: CheckoffPart;
+  part: ReviewPart;
   busy: boolean;
-  onToggleUnit: (part: CheckoffPart, unitIndex: number) => void;
+  onToggleUnit: (part: ReviewPart, unitIndex: number) => void;
 };
 
 /** Touch-first checkoff row for narrow viewports (shop floor / phone). */
@@ -82,7 +25,7 @@ export default function CheckoffMobilePartCard({ part, busy, onToggleUnit }: Pro
       className={cn("checkoff-mobile-card", done && "checkoff-mobile-card-done")}
     >
       <div className="checkoff-mobile-card-head">
-        <MobileThumb partId={part.id} tintHex={part.filament_hex} />
+        <PartThumb partId={part.id} tintHex={part.filament_hex} sizePx={72} />
         <div className="checkoff-mobile-card-meta">
           <h4 className="checkoff-mobile-filename" title={part.relative_path || part.filename}>
             {part.filename}

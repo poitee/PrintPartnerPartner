@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Printer } from "lucide-react";
 import { toast } from "sonner";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -10,11 +9,8 @@ import ReviewPartsSheet from "../components/review/ReviewPartsSheet";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
-import {
-  startExportChecklistHtml,
-  startExportStlPack,
-} from "../api/engine";
-import { buildRoute, sourcesRoute } from "../lib/routes";
+import { startExportStlPack } from "../api/engine";
+import { buildRoute, checkoffRoute, sourcesRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
@@ -39,7 +35,6 @@ export default function ReviewPage() {
     loadedRevision,
   } = usePlanWorkspace();
   const exportStlJob = useJobRunner("stl-export");
-  const exportJob = useJobRunner("export");
   const [shareOpen, setShareOpen] = useState(false);
 
   useEffect(() => {
@@ -65,13 +60,6 @@ export default function ReviewPage() {
   );
   const hasBlockers = review?.has_blockers ?? blockers.length > 0;
 
-  const missingCount = useMemo(() => {
-    if (!review) return 0;
-    return review.part_groups
-      .flatMap((g) => g.parts)
-      .filter((p) => p.included && p.missing).length;
-  }, [review]);
-
   const onExportStls = () => {
     if (selectedProfileId == null) return;
     void exportStlJob.runJob(
@@ -86,38 +74,6 @@ export default function ReviewPage() {
     );
   };
 
-  const onExportChecklist = () => {
-    if (selectedProfileId == null) return;
-    void exportJob.runJob(
-      () => startExportChecklistHtml(selectedProfileId),
-      (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "Checklist export failed");
-          return;
-        }
-        completeExportDownload("Checklist HTML", snap.result);
-      },
-    );
-  };
-
-  const onExportMissing = () => {
-    if (selectedProfileId == null) return;
-    void exportJob.runJob(
-      () => startExportStlPack(selectedProfileId, { missing_only: true }),
-      (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "Missing-STL export failed");
-          return;
-        }
-        completeExportDownload("Missing-parts STL", snap.result, {
-          pathField: "root_path",
-          isDirectory: true,
-        });
-        if (selectedProfileId != null) void reload(selectedProfileId);
-      },
-    );
-  };
-
   return (
     <div className="space-y-4">
       <RouteBreadcrumbs
@@ -128,39 +84,9 @@ export default function ReviewPage() {
       />
       <PageHeader
         title="Review"
-        description="Confirm parts, edit quantities, track printing, and export."
+        description="Validate parts, edit quantities, and export before shop-floor checkoff."
         actions={
           <PageHeaderActions>
-            <Button
-              variant="ghost"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={() => window.print()}
-              disabled={!review}
-            >
-              <Printer className="mr-1 h-4 w-4" />
-              Print
-            </Button>
-            <Button
-              variant="secondary"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={onExportChecklist}
-              disabled={selectedProfileId == null || exportJob.busy || !review}
-            >
-              Export checklist
-            </Button>
-            <Button
-              variant="secondary"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={onExportMissing}
-              disabled={
-                selectedProfileId == null ||
-                exportJob.busy ||
-                !review ||
-                missingCount === 0
-              }
-            >
-              Export missing STLs
-            </Button>
             <Button
               className="min-h-10 w-full sm:w-auto"
               onClick={onExportStls}
@@ -297,6 +223,9 @@ export default function ReviewPage() {
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
               <Link to={buildRoute(selectedProfileId)}>Back to Build</Link>
+            </Button>
+            <Button className="min-h-10 w-full sm:w-auto" asChild>
+              <Link to={checkoffRoute(selectedProfileId)}>Continue to Checkoff</Link>
             </Button>
           </div>
         </>

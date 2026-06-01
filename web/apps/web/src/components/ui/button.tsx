@@ -13,6 +13,11 @@ const buttonVariants = cva(
           "border border-border bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground",
         ghost: "text-foreground hover:bg-accent hover:text-accent-foreground",
         destructive: "bg-destructive/20 text-destructive hover:bg-destructive/30",
+        /** Light printable checkoff/review sheet — explicit colors (not theme tokens). */
+        sheetRemove:
+          "border border-[#fca5a5] bg-white text-[#dc2626] shadow-none hover:bg-[#fef2f2] hover:text-[#b91c1c] hover:border-[#f87171]",
+        sheetRestore:
+          "border border-[#d1d5db] bg-white text-[#374151] shadow-none hover:bg-[#f3f4f6] hover:text-[#111827] hover:border-[#9ca3af]",
       },
       size: {
         default: "h-9 px-4 py-2",
@@ -42,6 +47,6 @@ export function Button({
 }: ButtonProps) {
   const Comp = asChild ? Slot : "button";
   return (
-    <Comp className={cn(buttonVariants({ variant, size, className }))} {...props} />
+    <Comp className={cn(buttonVariants({ variant, size }), className)} {...props} />
   );
 }

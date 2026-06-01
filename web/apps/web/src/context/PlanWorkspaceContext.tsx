@@ -257,7 +257,7 @@ export function usePlanRevisionBump(): () => void {
   return ctx?.invalidate ?? (() => {});
 }
 
-/** Refetch review when entering Review if build revision changed since last load. */
+/** Refetch plan review when a workflow page mounts after Build bumped revision. */
 export function useReviewEnterRefetch(active: boolean) {
   const { selectedProfileId } = useProfileSelection();
   const { revision, loadedRevision, reload } = usePlanWorkspace();
