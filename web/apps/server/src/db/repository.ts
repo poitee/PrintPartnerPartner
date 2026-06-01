@@ -26,6 +26,7 @@ import {
 } from "@print-partner/domain";
 import { inArray } from "drizzle-orm";
 import { applyManifestToProfile } from "../services/manifest-apply.js";
+import { loadKitManifest, saveKitManifest, type KitManifestRecord } from "../services/kit-manifest-store.js";
 import { resolvePartStl } from "../services/part-paths.js";
 import { getColorById, resolvePartFilamentHex } from "../services/filament-catalog.js";
 import { REMOTE_CHECKED_AT_KEY, REMOTE_UPDATE_STATUS_KEY } from "../services/source-update-check.js";
@@ -1303,6 +1304,8 @@ export class AppRepository {
       });
     }
 
+    const kitManifest = loadKitManifest(this, profileId);
+
     return {
       profile: { name, orderNumber },
       data: {
@@ -1312,6 +1315,7 @@ export class AppRepository {
         profile: { name, order_number: orderNumber },
         layers: layersOut,
         parts: partsOut,
+        kit_manifest: kitManifest,
         ...(sourcesOut.length ? { sources: sourcesOut } : {}),
       },
     };
@@ -1326,6 +1330,14 @@ export class AppRepository {
     parts_imported: number;
     layers_imported: number;
     warnings: string[];
+    unmatched_sources: Array<{
+      name: string;
+      url: string;
+      branch: string;
+      source_kind: string;
+      role: string;
+      import_rules: string[];
+    }>;
   } {
     const profileData = (data.profile as Record<string, unknown>) ?? {};
     const desired = (newName || profileData.name || "Imported kit").toString().trim() || "Imported kit";
@@ -1355,20 +1367,68 @@ export class AppRepository {
     if (!profile) throw new Error("Failed to create profile");
 
     const warnings: string[] = [];
+    const unmatched_sources: Array<{
+      name: string;
+      url: string;
+      branch: string;
+      source_kind: string;
+      role: string;
+      import_rules: string[];
+    }> = [];
     let layersImported = 0;
+
+    const allProjects = this.db
+      .select()
+      .from(this.schema.projects)
+      .where(eq(this.schema.projects.tenantId, this.tenantId))
+      .all();
 
     const resolveProjectId = (ref: Record<string, unknown> | null): number | null => {
       if (!ref) return null;
       const refName = String(ref.name ?? "").trim();
       const refUrl = String(ref.url ?? "").trim();
-      for (const p of this.db.select().from(this.schema.projects).where(eq(this.schema.projects.tenantId, this.tenantId)).all()) {
+      for (const p of allProjects) {
         if (refName && p.name === refName) return p.id;
       }
-      for (const p of this.db.select().from(this.schema.projects).where(eq(this.schema.projects.tenantId, this.tenantId)).all()) {
+      for (const p of allProjects) {
         if (refUrl && p.url === refUrl) return p.id;
       }
       return null;
     };
+
+    const rulesFromSourceEntry = (entry: Record<string, unknown>): string[] => {
+      const raw = entry.import_rules;
+      if (!Array.isArray(raw)) return [];
+      return raw.map((r) => String(r)).filter(Boolean);
+    };
+
+    for (const sourceEntry of (data.sources as Array<Record<string, unknown>>) ?? []) {
+      const ref = {
+        name: sourceEntry.name,
+        url: sourceEntry.url,
+      };
+      const projectId = resolveProjectId(ref);
+      const importRules = rulesFromSourceEntry(sourceEntry);
+      if (projectId != null) {
+        if (importRules.length > 0) {
+          this.updateImportRules(projectId, importRules);
+        }
+        continue;
+      }
+      unmatched_sources.push({
+        name: String(sourceEntry.name ?? ""),
+        url: String(sourceEntry.url ?? ""),
+        branch: String(sourceEntry.branch ?? "main"),
+        source_kind: String(sourceEntry.source_kind ?? "github"),
+        role: String(sourceEntry.category ?? sourceEntry.role ?? "unassigned"),
+        import_rules: importRules,
+      });
+    }
+
+    const kitManifestRaw = data.kit_manifest;
+    if (kitManifestRaw && typeof kitManifestRaw === "object") {
+      saveKitManifest(this, profile.id, kitManifestRaw as Partial<KitManifestRecord>);
+    }
 
     for (const layerData of (data.layers as Array<Record<string, unknown>>) ?? []) {
       const ref = (layerData.project as Record<string, unknown>) ?? null;
@@ -1437,6 +1497,7 @@ export class AppRepository {
       parts_imported: partsImported,
       layers_imported: layersImported,
       warnings,
+      unmatched_sources,
     };
   }
 }

@@ -36,6 +36,7 @@ import { kindLabel, type SourceKind } from "../components/sources/sourceLabels";
 import { UNCategorized_FILTER } from "../components/sources/sourceLabels";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { useImportSharedBuild } from "../hooks/useImportSharedBuild";
 import {
   Card,
   CardContent,
@@ -155,6 +156,7 @@ export default function SourcesPage() {
   const searchSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stlSearchFocus, setStlSearchFocus] = useState(false);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
+  const importSharedBuild = useImportSharedBuild();
 
   useEffect(() => {
     const state = location.state as { stlSearch?: boolean } | null;
@@ -494,6 +496,14 @@ export default function SourcesPage() {
               disabled={busy || updateBusy || !health}
             >
               Refresh
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void importSharedBuild()}
+              disabled={!health}
+            >
+              Import shared build…
             </Button>
             <Button
               variant="secondary"
