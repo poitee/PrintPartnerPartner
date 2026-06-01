@@ -24,7 +24,7 @@ export default function JobTray() {
 
   return (
     <footer
-      className="job-tray fixed bottom-0 left-56 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-sm"
+      className="job-tray fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-sm lg:left-56"
       role="status"
       aria-live="polite"
       aria-label={`${jobKindLabel(activeJob.kind)}: ${activeJob.message}`}

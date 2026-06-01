@@ -32,6 +32,8 @@ import {
   type CheckoffFilterMode,
 } from "../lib/persistedCheckoffUi";
 import { groupCheckoffParts } from "../lib/checkoffGroups";
+import CheckoffMobilePartCard from "../components/checkoff/CheckoffMobilePartCard";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 
 const SHEET_THUMB_PX = 96;
 
@@ -175,6 +177,7 @@ export default function CheckoffPage() {
   const { busy, message, runJob } = useJobRunner("export");
   const planName =
     profiles.find((p) => p.id === selectedProfileId)?.name ?? "Checkoff";
+  const isMobileLayout = useMediaQuery("(max-width: 767px)");
   const persistedUi = useMemo(() => loadPersistedCheckoffUi(), []);
   const [parts, setParts] = useState<CheckoffPart[]>([]);
   const [summary, setSummary] = useState("");
@@ -363,6 +366,7 @@ export default function CheckoffPage() {
             <Button
               variant="ghost"
               size="sm"
+              className="flex-1 sm:flex-none"
               onClick={() => window.print()}
               disabled={selectedProfileId == null || parts.length === 0}
             >
@@ -372,6 +376,7 @@ export default function CheckoffPage() {
             <Button
               variant="secondary"
               size="sm"
+              className="flex-1 sm:flex-none"
               onClick={onExportChecklist}
               disabled={selectedProfileId == null || busy}
             >
@@ -379,35 +384,37 @@ export default function CheckoffPage() {
             </Button>
             <Button
               size="sm"
+              className="flex-1 sm:flex-none"
               onClick={onExportMissing}
               disabled={selectedProfileId == null || busy || missingCount === 0}
             >
-              Export missing STLs
+              Export missing
             </Button>
           </>
         }
       />
 
-      <p className="text-sm text-muted-foreground">
+      <p className="hidden text-sm text-muted-foreground md:block">
         <strong className="font-medium text-foreground">Export checklist</strong> downloads a
         printable HTML; <strong className="font-medium text-foreground">Export missing STLs</strong>{" "}
         downloads a ZIP of every still-unprinted unit, organized by role and folder.
       </p>
 
-      <div className="checkoff-sticky no-print flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
+      <div className="checkoff-sticky no-print flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
         <input
           type="search"
-          className="checkoff-search min-w-[10rem] flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+          className="checkoff-search w-full min-w-0 rounded-md border border-input bg-background px-3 py-2.5 text-base sm:flex-1 sm:py-1.5 sm:text-sm"
           placeholder="Search parts…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           disabled={busy}
         />
-        <div className="filter-group" role="group" aria-label="Filter">
+        <div className="checkoff-filter-group grid w-full grid-cols-3 gap-1 sm:flex sm:w-auto" role="group" aria-label="Filter">
           {(["all", "missing", "done"] as const).map((mode) => (
             <Button
               key={mode}
               size="sm"
+              className="min-h-10 sm:min-h-8"
               variant={filter === mode ? "secondary" : "ghost"}
               onClick={() => setFilter(mode)}
               disabled={busy}
@@ -416,14 +423,16 @@ export default function CheckoffPage() {
             </Button>
           ))}
         </div>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={compactMode}
-            onChange={(e) => setCompactMode(e.target.checked)}
-          />
-          Compact rows
-        </label>
+        {!isMobileLayout && (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={compactMode}
+              onChange={(e) => setCompactMode(e.target.checked)}
+            />
+            Compact rows
+          </label>
+        )}
       </div>
 
       <div className="no-print">
@@ -436,7 +445,13 @@ export default function CheckoffPage() {
       {selectedProfileId == null || parts.length === 0 || filtered.length === 0 ? (
         renderEmpty()
       ) : (
-        <article className={cn("checkoff-sheet", compactMode && "compact")}>
+        <article
+          className={cn(
+            "checkoff-sheet",
+            compactMode && !isMobileLayout && "compact",
+            isMobileLayout && "checkoff-sheet-mobile",
+          )}
+        >
           <header className="sheet-header">
             <h1 className="sheet-title">{planName}</h1>
             <p className="sheet-subtitle">
@@ -453,27 +468,46 @@ export default function CheckoffPage() {
               {repo.folders.map((group) => (
                 <div key={group.folder} className="sheet-folder">
                   <h3 className="sheet-folder-title">{group.folder}</h3>
-                  <table className="sheet-table">
-                    <thead>
-                      <tr>
-                        <th className="sheet-cell-part">Part</th>
-                        <th className="sheet-cell-qty">Qty</th>
-                        <th className="sheet-cell-printed">Printed</th>
-                        <th className="sheet-cell-notes">Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+                  {isMobileLayout && (
+                    <div className="checkoff-mobile-list no-print">
                       {group.parts.map((part) => (
-                        <CheckoffSheetRow
+                        <CheckoffMobilePartCard
                           key={part.id}
                           part={part}
                           busy={busy}
-                          compact={compactMode}
                           onToggleUnit={toggleUnit}
                         />
                       ))}
-                    </tbody>
-                  </table>
+                    </div>
+                  )}
+                  <div
+                    className={cn(
+                      "sheet-table-wrap",
+                      isMobileLayout && "checkoff-print-table hidden print:block",
+                    )}
+                  >
+                    <table className="sheet-table">
+                      <thead>
+                        <tr>
+                          <th className="sheet-cell-part">Part</th>
+                          <th className="sheet-cell-qty">Qty</th>
+                          <th className="sheet-cell-printed">Printed</th>
+                          <th className="sheet-cell-notes">Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.parts.map((part) => (
+                          <CheckoffSheetRow
+                            key={part.id}
+                            part={part}
+                            busy={busy}
+                            compact={isMobileLayout || compactMode}
+                            onToggleUnit={toggleUnit}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ))}
             </section>

@@ -41,9 +41,14 @@
 }
 
 @layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
     margin: 0;
+    overflow-x: hidden;
   }
 
   h1,
@@ -85,6 +90,7 @@
 
   .drawer-panel {
     @apply fixed inset-y-0 right-0 z-40 flex w-full max-w-xl flex-col border-l border-border bg-card text-card-foreground shadow-xl;
+    max-width: min(36rem, 100vw);
   }
 
   .card {
