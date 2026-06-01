@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import PageHeader from "../components/layout/PageHeader";
+import PlanManager from "../components/PlanManager";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import KitManifestOptions from "../components/KitManifestOptions";
 import RoleFilamentPicker from "../components/RoleFilamentPicker";
@@ -251,6 +252,15 @@ function BuildPageContent() {
         title="Build"
         description="Attach sources, pick files, and set role colors."
       />
+
+      <section className="rounded-lg border border-border bg-card p-4">
+        <h3 className="mb-1 text-sm font-semibold">Manage builds</h3>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Create, rename, duplicate, or delete build plans. Switch the active plan from the header
+          dropdown.
+        </p>
+        <PlanManager hideSelector disabled={!health} />
+      </section>
 
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
         <Button

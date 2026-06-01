@@ -17,8 +17,14 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { useProfileSelection } from "../context/ProfileContext";
 
-/** Full plan CRUD — use on Plan and Kit Studio only; workflow pages use header PlanPicker. */
-export default function PlanManager({ disabled }: { disabled?: boolean }) {
+type PlanManagerProps = {
+  disabled?: boolean;
+  /** When true, omit the plan dropdown (header PlanPicker handles selection). */
+  hideSelector?: boolean;
+};
+
+/** Full plan CRUD — use on Build; workflow pages use header PlanPicker for switching. */
+export default function PlanManager({ disabled, hideSelector }: PlanManagerProps) {
   const {
     profiles,
     selectedProfileId,
@@ -124,29 +130,31 @@ export default function PlanManager({ disabled }: { disabled?: boolean }) {
 
   return (
     <div className="plan-manager space-y-2">
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-xs text-muted-foreground">Plan</span>
-        <select
-          className="rounded-md border border-input bg-background px-2 py-1.5"
-          value={selectedProfileId ?? ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            setSelectedProfileId(v === "" ? null : Number(v));
-            setRenameName("");
-          }}
-          disabled={disabled || loading || busy || profiles.length === 0}
-        >
-          {profiles.length === 0 ? (
-            <option value="">No plans yet</option>
-          ) : (
-            profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} ({p.part_count} parts)
-              </option>
-            ))
-          )}
-        </select>
-      </label>
+      {!hideSelector && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-xs text-muted-foreground">Plan</span>
+          <select
+            className="rounded-md border border-input bg-background px-2 py-1.5"
+            value={selectedProfileId ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSelectedProfileId(v === "" ? null : Number(v));
+              setRenameName("");
+            }}
+            disabled={disabled || loading || busy || profiles.length === 0}
+          >
+            {profiles.length === 0 ? (
+              <option value="">No plans yet</option>
+            ) : (
+              profiles.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.part_count} parts)
+                </option>
+              ))
+            )}
+          </select>
+        </label>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <input

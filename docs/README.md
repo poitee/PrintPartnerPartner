@@ -1,6 +1,6 @@
 # GitHub Pages (project site)
 
-This folder hosts a minimal static landing page for the Print Partner web app (`index.html`). It describes the self-hostable web platform and embeds the workflow screenshots from [`screenshots/`](./screenshots/). No build step is required.
+This folder hosts a minimal static landing page for the Print Partner web app (`index.html`). It describes the self-hostable web platform, shows the project logo (`logo.png`), and embeds the workflow screenshots from [`screenshots/`](./screenshots/). No build step is required.
 
 ## Enable GitHub Pages
 

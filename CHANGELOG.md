@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Build plan management** — create, rename, duplicate, and delete plans from the Build tab (restores `PlanManager` wiring lost during the web migration).
+- **Branding** — project logo (`docs/logo.png`) on the README and GitHub Pages landing page; Ko-fi support badge near the top of both.
+
 ## [3.0.0-web] - 2026-05-31
 
 Print Partner is now a **single web platform**. The **Sources → Build → Review → Checkoff** workflow moves to a TypeScript monorepo under `web/`: a Vite + React single-page app (`web/apps/web`) and a Fastify API (`web/apps/server`) served together on one port, with shared `contracts` and `domain` packages.
