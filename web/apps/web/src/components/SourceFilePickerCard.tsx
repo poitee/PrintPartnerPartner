@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BookOpen, ChevronDown, ChevronRight } from "lucide-react";
 import ImportRulesTree from "./ImportRulesTree";
 import Preview3D from "./Preview3D";
@@ -31,6 +31,8 @@ type Props = {
   defaultExpanded?: boolean;
   onChangeSource?: (projectId: number) => void;
   onRemove?: () => void;
+  /** Shown inside expanded card (e.g. kit manifest variants for base layer). */
+  expandedExtra?: ReactNode;
 };
 
 function syncLabel(source: SourceSummary | null | undefined): string {
@@ -52,6 +54,7 @@ export default function SourceFilePickerCard({
   defaultExpanded = false,
   onChangeSource,
   onRemove,
+  expandedExtra,
 }: Props) {
   const expandedKey = `pp-build-source-${sourceId}-expanded`;
   const [expanded, setExpanded] = useState(() => {
@@ -273,6 +276,7 @@ export default function SourceFilePickerCard({
 
       {source?.local_path && (
         <CardContent className={cn("space-y-3 p-4 pt-0", !expanded && "hidden")}>
+          {expandedExtra}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
               Check STL files or folders to include on the next{" "}

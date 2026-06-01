@@ -28,6 +28,7 @@ import { inArray } from "drizzle-orm";
 import { applyManifestToProfile } from "../services/manifest-apply.js";
 import { loadKitManifest, saveKitManifest, type KitManifestRecord } from "../services/kit-manifest-store.js";
 import { resolvePartStl } from "../services/part-paths.js";
+import { normalizePartRole } from "../services/role-filament.js";
 import { getColorById, resolvePartFilamentHex } from "../services/filament-catalog.js";
 import { REMOTE_CHECKED_AT_KEY, REMOTE_UPDATE_STATUS_KEY } from "../services/source-update-check.js";
 import type { PartRow, ProfileSummary, SourceSummary } from "@print-partner/contracts";
@@ -878,11 +879,19 @@ export class AppRepository {
   }
 
   markSourceSynced(id: number, commitSha: string | null): void {
+    const row = this.getProjectRow(id);
+    if (!row) return;
+    const metadata = parseProjectMetadata(row.metadataJson) ?? {};
+    if (commitSha) {
+      metadata[REMOTE_UPDATE_STATUS_KEY] = "up_to_date";
+      metadata[REMOTE_CHECKED_AT_KEY] = new Date().toISOString();
+    }
     this.db
       .update(this.schema.projects)
       .set({
         lastSyncedAt: new Date().toISOString(),
         lastCommitSha: commitSha,
+        metadataJson: JSON.stringify(metadata),
       })
       .where(eq(this.schema.projects.id, id))
       .run();
@@ -1169,7 +1178,7 @@ export class AppRepository {
 
     for (const part of partRows) {
       if (!part.included) continue;
-      const role = (part.role || "primary").trim() || "primary";
+      const role = normalizePartRole(part.role);
       let row = buckets.get(role);
       if (!row) {
         row = {
@@ -1225,7 +1234,7 @@ export class AppRepository {
     const partRows = this.listPartRows(profileId);
     let updated = 0;
     for (const part of partRows) {
-      if (!part.included || part.role !== role) continue;
+      if (!part.included || normalizePartRole(part.role) !== role) continue;
       this.db
         .update(this.schema.parts)
         .set({

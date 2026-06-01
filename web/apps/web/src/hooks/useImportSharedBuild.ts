@@ -23,8 +23,11 @@ export function useImportSharedBuild() {
         return;
       }
       setSelectedProfileId(result.profile_id);
+      navigate(buildRoute(result.profile_id), {
+        replace: true,
+        state: { kitImport: result },
+      });
       void reloadProfiles();
-      navigate(buildRoute(result.profile_id), { state: { kitImport: result } });
       toast.success(`Imported “${result.profile_name}”`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));

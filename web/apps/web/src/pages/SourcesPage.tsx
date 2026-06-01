@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { toast } from "sonner";
 import { FolderGit2, MoreHorizontal } from "lucide-react";
 import {
   createSource,
@@ -69,6 +70,7 @@ import {
   loadPersistedSourcesUi,
   savePersistedSourcesUi,
 } from "../lib/persistedSourcesUi";
+import { toastJobResult } from "../lib/jobToasts";
 
 type WizardForm = {
   name: string;
@@ -124,12 +126,8 @@ function UpdateStatusBadge({ status }: { status?: SourceSummary["update_status"]
 export default function SourcesPage() {
   const location = useLocation();
   const { health } = useEngineHealth();
-  const { busy, message, runJob } = useJobRunner("sync");
-  const {
-    busy: updateBusy,
-    message: updateMessage,
-    runJob: runUpdateJob,
-  } = useJobRunner("source-updates");
+  const { busy, runJob } = useJobRunner("sync");
+  const { busy: updateBusy, runJob: runUpdateJob } = useJobRunner("source-updates");
   const persistedUi = useMemo(() => loadPersistedSourcesUi(), []);
   const [sources, setSources] = useState<SourceSummary[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -237,11 +235,29 @@ export default function SourcesPage() {
   };
 
   const syncSources = (ids?: number[]) => {
-    void runJob(() => startSync(ids), () => void refresh());
+    const label =
+      ids?.length === 1
+        ? "Source synced"
+        : ids && ids.length > 1
+          ? `Synced ${ids.length} sources`
+          : "All sources synced";
+    void runJob(
+      () => startSync(ids),
+      (snap) => {
+        void refresh();
+        toastJobResult(snap, label, "Sync failed");
+      },
+    );
   };
 
   const checkUpdates = () => {
-    void runUpdateJob(() => startCheckSourceUpdates(), () => void refresh());
+    void runUpdateJob(
+      () => startCheckSourceUpdates(),
+      (snap) => {
+        void refresh();
+        toastJobResult(snap, "Update check finished", "Update check failed");
+      },
+    );
   };
 
   const openAddWizard = () => {
@@ -361,9 +377,9 @@ export default function SourcesPage() {
         result.skipped > 0
           ? ` Skipped ${result.skipped} line(s) without URL${result.skipped_names.length ? `: ${result.skipped_names.join(", ")}` : ""}.`
           : "";
-      setReposImportNote(
-        `Imported ${result.created} new and updated ${result.updated} source(s).${skipped}`,
-      );
+      const importMsg = `Imported ${result.created} new and updated ${result.updated} source(s).${skipped}`;
+      setReposImportNote(importMsg);
+      toast.success(importMsg.trim());
       const newSources = result.results
         .filter((r) => r.action === "created" && r.source_id != null)
         .map((r) => ({ source_id: r.source_id as number, name: r.name }));
@@ -486,16 +502,11 @@ export default function SourcesPage() {
       <RouteBreadcrumbs items={[{ label: "Sources" }]} />
       <PageHeader
         title="Sources"
-        description="Add repos and choose which STL folders each contributes. Assign categories when adding a source, or manage the list via Manage categories."
+        description="Register repos, sync local trees, and choose import folders for each build."
         actions={
           <>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void refresh()}
-              disabled={busy || updateBusy || !health}
-            >
-              Refresh
+            <Button size="sm" onClick={openAddWizard} disabled={!health}>
+              Add source
             </Button>
             <Button
               variant="secondary"
@@ -508,24 +519,61 @@ export default function SourcesPage() {
             <Button
               variant="secondary"
               size="sm"
+              onClick={() => syncSources()}
+              disabled={busy || updateBusy || !health || sources.length === 0}
+            >
+              {busy ? "Syncing…" : "Sync all"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={checkUpdates}
               disabled={busy || updateBusy || !health || sources.length === 0}
             >
-              Check updates
+              {updateBusy ? "Checking…" : "Check updates"}
             </Button>
-            <label className="cursor-pointer">
-              <span className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted/50">
-                Choose repos.txt…
-              </span>
-              <input
-                type="file"
-                accept=".txt,text/plain"
-                className="sr-only"
-                onChange={(e) => onReposFilePicked(e.target.files?.[0] ?? null)}
-              />
-            </label>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" disabled={!health}>
+                  More
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => void refresh()}
+                  disabled={busy || updateBusy || !health}
+                >
+                  Refresh list
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setReposImportOpen(true)}>
+                  Import repos.txt…
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    document.getElementById("repos-txt-file-input")?.click();
+                  }}
+                >
+                  Choose repos.txt file…
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setCategoriesSheetOpen(true)}>
+                  Manage categories…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         }
+      />
+
+      <input
+        id="repos-txt-file-input"
+        type="file"
+        accept=".txt,text/plain"
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden
+        onChange={(e) => onReposFilePicked(e.target.files?.[0] ?? null)}
       />
 
       <GlobalStlSearch
@@ -551,36 +599,9 @@ export default function SourcesPage() {
         onManageCategories={() => setCategoriesSheetOpen(true)}
       />
 
-      <div className="mb-3 flex flex-wrap gap-2">
-        <Button variant="secondary" size="sm" onClick={() => setReposImportOpen(true)} disabled={!health}>
-          Import repos.txt
-        </Button>
-        <Button size="sm" onClick={openAddWizard} disabled={!health}>
-          Add source
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => syncSources()}
-          disabled={busy || updateBusy || !health || sources.length === 0}
-        >
-          Sync all
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={checkUpdates}
-          disabled={busy || updateBusy || !health || sources.length === 0}
-        >
-          Check updates
-        </Button>
-      </div>
-
-      {(loadError || message || updateMessage || reposImportNote || reposImportSyncNote) && (
+      {(loadError || reposImportNote || reposImportSyncNote) && (
         <div className="mb-4 space-y-1 text-sm">
           {loadError && <p className="text-destructive">{loadError}</p>}
-          {message && <p className="text-muted-foreground">{message}</p>}
-          {updateMessage && <p className="text-muted-foreground">{updateMessage}</p>}
           {reposImportNote && <p className="text-muted-foreground">{reposImportNote}</p>}
           {reposImportSyncNote && <p className="text-muted-foreground">{reposImportSyncNote}</p>}
         </div>

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import {
   createProfile,
@@ -6,6 +8,7 @@ import {
   duplicateProfile,
   updateProfile,
 } from "../api/engine";
+import { buildRoute } from "../lib/routes";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -21,10 +24,19 @@ type PlanManagerProps = {
   disabled?: boolean;
   /** When true, omit the plan dropdown (header PlanPicker handles selection). */
   hideSelector?: boolean;
+  /** Collapse CRUD behind a summary row (Build page). */
+  collapsible?: boolean;
 };
 
 /** Full plan CRUD — use on Build; workflow pages use header PlanPicker for switching. */
-export default function PlanManager({ disabled, hideSelector }: PlanManagerProps) {
+type SwitchPrompt = {
+  targetId: number;
+  targetName: string;
+  actionLabel: "created" | "duplicated";
+};
+
+export default function PlanManager({ disabled, hideSelector, collapsible }: PlanManagerProps) {
+  const navigate = useNavigate();
   const {
     profiles,
     selectedProfileId,
@@ -39,8 +51,29 @@ export default function PlanManager({ disabled, hideSelector }: PlanManagerProps
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [duplicateName, setDuplicateName] = useState("");
+  const [switchPrompt, setSwitchPrompt] = useState<SwitchPrompt | null>(null);
 
   const selected = profiles.find((p) => p.id === selectedProfileId);
+
+  const shouldAskToSwitch = () => {
+    if (selectedProfileId == null) return false;
+    return (selected?.part_count ?? 0) > 0;
+  };
+
+  const activatePlan = (id: number) => {
+    setSelectedProfileId(id);
+    navigate(buildRoute(id), { replace: true });
+  };
+
+  const offerSwitchOrActivate = (targetId: number, targetName: string, actionLabel: SwitchPrompt["actionLabel"]) => {
+    if (shouldAskToSwitch() && selectedProfileId !== targetId) {
+      setSwitchPrompt({ targetId, targetName, actionLabel });
+      return;
+    }
+    activatePlan(targetId);
+    const verb = actionLabel === "created" ? "Created" : "Duplicated";
+    toast.success(`${verb} plan “${targetName}”`);
+  };
 
   useEffect(() => {
     setRenameName(selected?.name ?? "");
@@ -65,14 +98,11 @@ export default function PlanManager({ disabled, hideSelector }: PlanManagerProps
   const onCreate = () => {
     const name = newName.trim();
     if (!name) return;
-    void run(
-      async () => {
-        const created = await createProfile(name);
-        setSelectedProfileId(created.id);
-        setNewName("");
-      },
-      `Created plan “${name}”`,
-    );
+    void run(async () => {
+      const created = await createProfile(name);
+      setNewName("");
+      offerSwitchOrActivate(created.id, name, "created");
+    });
   };
 
   const onRename = () => {
@@ -100,13 +130,28 @@ export default function PlanManager({ disabled, hideSelector }: PlanManagerProps
     const name = duplicateName.trim();
     if (!name) return;
     setDuplicateOpen(false);
-    void run(
-      async () => {
-        const copy = await duplicateProfile(selectedProfileId, name);
-        setSelectedProfileId(copy.id);
-      },
-      `Duplicated plan as “${name}”`,
-    );
+    void run(async () => {
+      const copy = await duplicateProfile(selectedProfileId, name);
+      offerSwitchOrActivate(copy.id, name, "duplicated");
+    });
+  };
+
+  const confirmSwitchToNewPlan = () => {
+    if (!switchPrompt) return;
+    const { targetId, targetName, actionLabel } = switchPrompt;
+    setSwitchPrompt(null);
+    activatePlan(targetId);
+    const verb = actionLabel === "created" ? "Created" : "Duplicated";
+    toast.success(`${verb} plan “${targetName}”`);
+  };
+
+  const stayOnCurrentPlan = () => {
+    if (!switchPrompt) return;
+    const { targetName, actionLabel } = switchPrompt;
+    const currentName = selected?.name ?? "current plan";
+    setSwitchPrompt(null);
+    const verb = actionLabel === "created" ? "Created" : "Duplicated";
+    toast.success(`${verb} “${targetName}” — still on “${currentName}”`);
   };
 
   const openDeleteDialog = () => {
@@ -128,8 +173,8 @@ export default function PlanManager({ disabled, hideSelector }: PlanManagerProps
     );
   };
 
-  return (
-    <div className="plan-manager space-y-2">
+  const body = (
+    <div className="space-y-3">
       {!hideSelector && (
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-xs text-muted-foreground">Plan</span>
@@ -156,34 +201,43 @@ export default function PlanManager({ disabled, hideSelector }: PlanManagerProps
         </label>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <input
-          className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
-          placeholder="New plan name"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onCreate();
-          }}
-          disabled={disabled || busy}
-        />
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[12rem] flex-1 space-y-1">
+          <Label htmlFor="plan-new-name" className="text-xs text-muted-foreground">
+            New plan
+          </Label>
+          <Input
+            id="plan-new-name"
+            placeholder="Name"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onCreate();
+            }}
+            disabled={disabled || busy}
+          />
+        </div>
         <Button size="sm" onClick={onCreate} disabled={disabled || busy || !newName.trim()}>
-          New
+          Create
         </Button>
       </div>
 
       {selectedProfileId != null && (
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
-            placeholder="Rename plan"
-            value={renameName}
-            onChange={(e) => setRenameName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") onRename();
-            }}
-            disabled={disabled || busy}
-          />
+        <div className="flex flex-wrap items-end gap-2 border-t border-border pt-3">
+          <div className="min-w-[12rem] flex-1 space-y-1">
+            <Label htmlFor="plan-rename" className="text-xs text-muted-foreground">
+              Rename current plan
+            </Label>
+            <Input
+              id="plan-rename"
+              value={renameName}
+              onChange={(e) => setRenameName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") onRename();
+              }}
+              disabled={disabled || busy}
+            />
+          </div>
           <Button
             size="sm"
             variant="secondary"
@@ -207,6 +261,29 @@ export default function PlanManager({ disabled, hideSelector }: PlanManagerProps
       )}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+
+  return (
+    <div className="plan-manager">
+      {collapsible ? (
+        <details className="group rounded-lg border border-border bg-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">Plan settings</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {selected
+                  ? `${selected.name} · ${selected.part_count} part${selected.part_count === 1 ? "" : "s"}`
+                  : "No plan selected — use the header dropdown"}
+              </p>
+            </div>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="border-t border-border px-4 pb-4 pt-3">{body}</div>
+        </details>
+      ) : (
+        body
+      )}
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="max-w-md">
@@ -224,6 +301,27 @@ export default function PlanManager({ disabled, hideSelector }: PlanManagerProps
             </Button>
             <Button variant="ghost" disabled={busy} onClick={confirmDelete}>
               {busy ? "Deleting…" : "Delete"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={switchPrompt != null} onOpenChange={(open) => !open && setSwitchPrompt(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Switch to {switchPrompt?.actionLabel === "created" ? "new" : "duplicated"} plan?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {switchPrompt && selected
+              ? `${switchPrompt.actionLabel === "created" ? "Created" : "Duplicated"} “${switchPrompt.targetName}”. Switch to it now, or stay on “${selected.name}”?`
+              : ""}
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" disabled={busy} onClick={stayOnCurrentPlan}>
+              Stay on current
+            </Button>
+            <Button disabled={busy} onClick={confirmSwitchToNewPlan}>
+              Switch plan
             </Button>
           </div>
         </DialogContent>
