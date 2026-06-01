@@ -47,6 +47,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   selectedProfileIdRef.current = selectedProfileId;
 
   const setSelectedProfileId = useCallback((id: number | null) => {
+    selectedProfileIdRef.current = id;
     setSelectedProfileIdState(id);
     try {
       if (id == null) sessionStorage.removeItem(STORAGE_KEY);

@@ -56,7 +56,7 @@ function BuildPageContent() {
   const navigate = useNavigate();
   const { health } = useEngineHealth();
   const { selectedProfileId, reloadProfiles } = useProfileSelection();
-  const { busy, message, runJob } = useJobRunner("recompute");
+  const { busy, runJob } = useJobRunner("recompute");
   const exportStlJob = useJobRunner("stl-export");
 
   const [layers, setLayers] = useState<ProfileLayer[]>([]);
@@ -67,6 +67,7 @@ function BuildPageContent() {
   const [shareOpen, setShareOpen] = useState(false);
   const [kitImportSetup, setKitImportSetup] = useState<KitImportJobResult | null>(null);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
+  const [filamentRefreshKey, setFilamentRefreshKey] = useState(0);
 
   useEffect(() => {
     const state = location.state as BuildLocationState | null;
@@ -179,6 +180,7 @@ function BuildPageContent() {
           return;
         }
         toast.success("Build updated");
+        setFilamentRefreshKey((k) => k + 1);
         void loadProfileData(selectedProfileId);
         void reloadProfiles();
       },
@@ -250,46 +252,39 @@ function BuildPageContent() {
       <RouteBreadcrumbs items={[{ label: "Build", to: buildRoute(selectedProfileId) }]} />
       <PageHeader
         title="Build"
-        description="Attach sources, pick files, and set role colors."
+        description="Attach sources, pick STL files, set kit variants and role colors, then update the build."
+        actions={
+          <>
+            <Button
+              onClick={() => void onUpdateBuild()}
+              disabled={selectedProfileId == null || busy || !health}
+            >
+              {busy ? "Updating…" : "Update build"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={onExportStls}
+              disabled={selectedProfileId == null || exportStlJob.busy || !health}
+            >
+              {exportStlJob.busy ? "Exporting…" : "Export STLs"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setShareOpen(true)}
+              disabled={selectedProfileId == null || !health}
+            >
+              Share build…
+            </Button>
+            {selectedProfileId != null && (
+              <Button variant="ghost" onClick={onNavigateToReview}>
+                Review →
+              </Button>
+            )}
+          </>
+        }
       />
 
-      <section className="rounded-lg border border-border bg-card p-4">
-        <h3 className="mb-1 text-sm font-semibold">Manage builds</h3>
-        <p className="mb-3 text-xs text-muted-foreground">
-          Create, rename, duplicate, or delete build plans. Switch the active plan from the header
-          dropdown.
-        </p>
-        <PlanManager hideSelector disabled={!health} />
-      </section>
-
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
-        <Button
-          onClick={() => void onUpdateBuild()}
-          disabled={selectedProfileId == null || busy || !health}
-        >
-          {busy ? "Updating…" : "Update build"}
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={onExportStls}
-          disabled={selectedProfileId == null || exportStlJob.busy}
-        >
-          Export STLs
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => setShareOpen(true)}
-          disabled={selectedProfileId == null}
-        >
-          Share build…
-        </Button>
-        {selectedProfileId != null && (
-          <Button variant="ghost" onClick={onNavigateToReview}>
-            Review →
-          </Button>
-        )}
-        {message && <span className="text-sm text-muted-foreground">{message}</span>}
-      </div>
+      <PlanManager hideSelector disabled={!health} collapsible />
 
       {kitImportSetup &&
         ((kitImportSetup.unmatched_sources?.length ?? 0) > 0 ||
@@ -303,43 +298,30 @@ function BuildPageContent() {
         )}
 
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
-      {exportStlJob.message && (
-        <p className="text-sm text-muted-foreground">{exportStlJob.message}</p>
-      )}
 
       <div className="space-y-4">
-        <section className="rounded-lg border border-border bg-card p-4">
-          <h3 className="mb-1 text-sm font-semibold">Role filament colors</h3>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Pick a catalog or custom color for each STL role. Changes apply immediately to all
-            included parts with that role.
-          </p>
-          {selectedProfileId == null ? (
-            <p className="text-sm text-muted-foreground">Select a build plan first.</p>
-          ) : (
-            <RoleFilamentPicker
-              profileId={selectedProfileId}
-              disabled={!health || busy}
-              onUpdated={() => {}}
-            />
-          )}
-        </section>
-
-        {selectedProfileId != null && baseLayer?.project_id != null && (
-          <KitManifestOptions
-            profileId={selectedProfileId}
-            baseSourceName={baseLayer.project_name}
-            disabled={!health || busy}
-          />
-        )}
-
         <section className="space-y-3">
-          <div>
-            <h3 className="text-sm font-semibold">Sources &amp; files</h3>
-            <p className="text-xs text-muted-foreground">
-              Expand a source to choose STL files (saved automatically), then click{" "}
-              <strong className="font-medium text-foreground">Update build</strong>.
-            </p>
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold">Sources &amp; files</h3>
+              <p className="text-xs text-muted-foreground">
+                Expand each source to pick STL files, then run{" "}
+                <strong className="font-medium text-foreground">Update build</strong>.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" asChild>
+                <Link to={sourcesRoute()}>Manage sources</Link>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={() => setCategoriesSheetOpen(true)}
+              >
+                Categories…
+              </Button>
+            </div>
           </div>
 
           {needsBaseSource && (
@@ -389,13 +371,23 @@ function BuildPageContent() {
               layerType={row.layerType}
               source={sourceById.get(row.sourceId) ?? null}
               allSources={sources}
-              disabled={!health}
+              disabled={!health || busy}
               defaultExpanded={index === 0}
               onChangeSource={(projectId) => void onChangeLayerProject(row.layer, projectId)}
               onRemove={
                 row.layerType === "addon"
                   ? () => void onRemoveLayer(row.layer)
                   : undefined
+              }
+              expandedExtra={
+                row.layerType === "base" && selectedProfileId != null ? (
+                  <KitManifestOptions
+                    profileId={selectedProfileId}
+                    baseSourceName={row.sourceName}
+                    disabled={!health || busy}
+                    compact
+                  />
+                ) : undefined
               }
             />
           ))}
@@ -422,21 +414,22 @@ function BuildPageContent() {
               Add addon
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Sync repos on{" "}
-            <Link to={sourcesRoute()} className="text-primary underline">
-              Sources
-            </Link>{" "}
-            first.{" "}
-            <button
-              type="button"
-              className="text-primary underline"
-              onClick={() => setCategoriesSheetOpen(true)}
-            >
-              Manage source categories
-            </button>
-            .
+        </section>
+
+        <section className="rounded-lg border border-border bg-card p-4">
+          <h3 className="mb-1 text-sm font-semibold">Role filament colors</h3>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Catalog or custom color per STL role — applies to all included parts with that role.
           </p>
+          {selectedProfileId == null ? (
+            <p className="text-sm text-muted-foreground">Select a build plan in the header first.</p>
+          ) : (
+            <RoleFilamentPicker
+              profileId={selectedProfileId}
+              disabled={!health || busy}
+              refreshKey={filamentRefreshKey}
+            />
+          )}
         </section>
       </div>
 

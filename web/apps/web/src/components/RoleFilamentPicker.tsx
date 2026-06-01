@@ -18,10 +18,17 @@ const ROLE_LABELS = Object.fromEntries(
 type Props = {
   profileId: number;
   disabled?: boolean;
-  onUpdated: () => void;
+  /** Bump after Update build so roles/part counts reload. */
+  refreshKey?: number;
+  onUpdated?: () => void;
 };
 
-export default function RoleFilamentPicker({ profileId, disabled, onUpdated }: Props) {
+export default function RoleFilamentPicker({
+  profileId,
+  disabled,
+  refreshKey = 0,
+  onUpdated,
+}: Props) {
   const [rows, setRows] = useState<RoleFilamentRow[]>([]);
   const [catalog, setCatalog] = useState<FilamentCatalog | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -43,7 +50,7 @@ export default function RoleFilamentPicker({ profileId, disabled, onUpdated }: P
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   const colors = useMemo(() => allCatalogColors(catalog), [catalog]);
 
@@ -56,7 +63,10 @@ export default function RoleFilamentPicker({ profileId, disabled, onUpdated }: P
         filament_custom_hex: null,
       });
       setRows(result.roles);
-      onUpdated();
+      if (result.updated === 0) {
+        setLoadError("No included parts matched that role — run Update build first.");
+      }
+      onUpdated?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -73,7 +83,10 @@ export default function RoleFilamentPicker({ profileId, disabled, onUpdated }: P
         filament_custom_hex: hex || null,
       });
       setRows(result.roles);
-      onUpdated();
+      if (result.updated === 0) {
+        setLoadError("No included parts matched that role — run Update build first.");
+      }
+      onUpdated?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -123,10 +136,11 @@ export default function RoleFilamentPicker({ profileId, disabled, onUpdated }: P
               <input
                 type="color"
                 className="h-8 w-10 cursor-pointer rounded border border-input bg-background p-0.5"
-                value={row.filament_hex?.slice(0, 7) ?? "#c41230"}
+                defaultValue={row.filament_hex?.slice(0, 7) ?? "#c41230"}
+                key={`${row.role}-${row.filament_hex ?? "none"}-${row.filament_color_id ?? ""}`}
                 disabled={busy}
                 title={`Custom hex for ${label}`}
-                onChange={(e) => void onPickCustomHex(row.role, e.target.value)}
+                onBlur={(e) => void onPickCustomHex(row.role, e.target.value)}
               />
               {row.filament_display && (
                 <span className="text-xs text-muted-foreground">{row.filament_display}</span>

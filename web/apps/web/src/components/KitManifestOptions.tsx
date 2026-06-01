@@ -19,6 +19,8 @@ type Props = {
   profileId: number;
   baseSourceName?: string | null;
   disabled?: boolean;
+  /** Nested inside a source card — omit outer card chrome. */
+  compact?: boolean;
 };
 
 function groupLabel(groupId: string, group: RepoManifestOptionGroup): string {
@@ -29,7 +31,12 @@ function variantLabel(variant: { id: string; label?: string | null }): string {
   return variant.label?.trim() || variant.id.replace(/_/g, " ");
 }
 
-export default function KitManifestOptions({ profileId, baseSourceName, disabled = false }: Props) {
+export default function KitManifestOptions({
+  profileId,
+  baseSourceName,
+  disabled = false,
+  compact = false,
+}: Props) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savedKit, setSavedKit] = useState<KitManifest | null>(null);
@@ -144,22 +151,25 @@ export default function KitManifestOptions({ profileId, baseSourceName, disabled
     return null;
   }
 
-  const title = baseSourceName ? `${baseSourceName} options` : "Kit options";
+  const title = baseSourceName ? `${baseSourceName} kit variants` : "Kit variants";
 
   return (
     <section
       className={cn(
-        "rounded-lg border border-border bg-card p-4",
-        dirty && "border-primary/40",
+        compact ? "space-y-3" : "rounded-lg border border-border bg-card p-4",
+        !compact && dirty && "border-primary/40",
+        compact && dirty && "rounded-md border border-primary/40 p-3",
       )}
     >
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold">{title}</h3>
-          <p className="text-xs text-muted-foreground">
-            Pick variants for this build. Changes save automatically and are kept after{" "}
-            <strong className="font-medium text-foreground">Update build</strong>.
-          </p>
+          <h3 className={cn("font-semibold", compact ? "text-xs" : "text-sm")}>{title}</h3>
+          {!compact && (
+            <p className="text-xs text-muted-foreground">
+              Pick variants for this build. Changes save automatically and are kept after{" "}
+              <strong className="font-medium text-foreground">Update build</strong>.
+            </p>
+          )}
         </div>
         {(saveStatusLabel || showRetry) && (
           <div className="flex shrink-0 items-center gap-2 text-xs" aria-live="polite">
