@@ -11,8 +11,10 @@ Workflow screenshots of the Print Partner web app, used by the root [README](../
 
 ## Capture
 
-1. Run the app. Either start the dev servers (`cd web && npm run dev`, UI on `http://127.0.0.1:5173`), or build and run the single-port container (`docker compose up --build`, app on `http://localhost:8080`).
-2. Ensure demo data exists — synced sources and a populated plan (e.g. "Voron V2.4 LDO Full 300 Black") so each page has representative content.
-3. Open each route (`/sources`, `/build`, `/review`, `/checkoff`) in a browser at a consistent window size and capture the viewport into this folder, overwriting the four PNGs above.
+1. Run the app with representative data — e.g. `docker compose up --build` (UI on `http://localhost:8080`) or `cd web && npm run dev` (UI on `http://localhost:5173`).
+2. Ensure synced sources and a populated plan (e.g. "Voron V2.4 LDO Full 300 Black") so each page has content.
+3. In a browser at **1440×900**, open the app **home** (`/` or `/build?profile=…`), then use the sidebar to open **Sources**, **Build**, **Review**, and **Checkoff**. Capture each viewport into this folder.
+
+**Important:** Do not paste `/sources` (or `/build`, `/review`, `/checkoff`) into the address bar on a cold load in dev or Docker single-port mode — those paths are also API routes, so a full navigation can return raw JSON instead of the React UI. Client-side navigation from `/` avoids that.
 
 Three.js renders the STL previews and Checkoff thumbnails client-side, so allow a moment for previews to load before capturing.
