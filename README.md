@@ -1,8 +1,40 @@
-# Print Partner
+<p align="center">
+  <img src="docs/logo.png" alt="Print Partner logo" width="128" />
+</p>
 
-**Print Partner** is a self-hostable web app for layered STL kit workflows — base repo plus add-ons, accent parts, quantities baked into filenames, and a pile of folders to keep straight. It syncs GitHub (or local) repos and walks you through **Sources → Build → Review → Checkoff**.
+<h1 align="center">Print Partner</h1>
 
-It ships as a single container: a **Fastify** API and a **React** single-page app served together on one port. Run it on your own machine or a small server with `docker compose up --build`, and your data lives in a `/data` volume. A multi-tenant **SaaS** mode (Postgres + S3 + OAuth) is available for hosted deployments.
+<p align="center">
+  <strong>Self-hostable web workflow for layered STL kits</strong><br>
+  Base repo plus add-ons, accent parts, quantities in filenames, and a pile of folders to keep straight.
+</p>
+
+<p align="center">
+  <a href="https://ko-fi.com/poitee"><img src="https://img.shields.io/badge/Ko--fi-Buy_me_a_coffee-ff5e5b?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Buy me a coffee on Ko-fi"></a>
+</p>
+
+<p align="center">
+  <a href="https://poitee.github.io/PrintPartnerPartner/">Project site</a>
+  ·
+  <a href="#quick-start--docker-self-host">Quick start</a>
+  ·
+  <a href="#screenshots">Screenshots</a>
+  ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a>
+  ·
+  <a href="LICENSE-SUMMARY.md">License</a>
+</p>
+
+<p align="center">
+  <code>Sources</code> → <code>Build</code> → <code>Review</code> → <code>Checkoff</code>
+</p>
+
+<p align="center">
+  <sub>
+    Ships as a single Docker container — <strong>Fastify</strong> API + <strong>React</strong> SPA on one port.
+    Data stays in a volume you control. Multi-tenant <strong>SaaS</strong> mode (Postgres + S3 + OAuth) is available for hosted deployments.
+  </sub>
+</p>
 
 ---
 
@@ -11,7 +43,7 @@ It ships as a single container: a **Fastify** API and a **React** single-page ap
 | Step | What you are doing |
 |------|--------------------|
 | **Sources** | Add GitHub repos, local folders, or zips; assign categories; search STLs across every synced repo; see **update available** badges; sync and set import rules. |
-| **Build** | Pick **role filament colors** (primary/accent), attach sources, choose files and quantities; **Update build**; read repo docs inline; pick kit/manifest options; export STLs or share a plan bundle. |
+| **Build** | Manage plans (create, rename, duplicate, delete); pick **role filament colors** (primary/accent); attach sources; choose files and quantities; **Update build**; read repo docs inline; pick kit/manifest options; export STLs or share a plan bundle. |
 | **Review** | Confirm a validation summary grouped by role and filament, browse the full included-parts list with 3D STL previews, and **Export STLs** by role and folder. |
 | **Checkoff** | Track per-unit print progress (saved per plan), filter missing/done, print the checklist, and **Export missing STLs** for the next batch. |
 
@@ -143,6 +175,12 @@ The application lives in the `web/` TypeScript monorepo; the `Dockerfile` and Co
 ```
 
 The server uses a **ports/adapters** design: a `self-host` adapter (SQLite + local disk) and a `saas` adapter (Postgres + S3) implement the same ports. STL rendering happens client-side with Three.js, and long-running work (sync, recompute, exports) runs in a background job runner that streams progress over a WebSocket. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for details.
+
+---
+
+## Support
+
+If Print Partner saves you time on a kit build, tips on **[Ko-fi](https://ko-fi.com/poitee)** help fund development. Tips are voluntary and do not grant commercial license rights — see [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md).
 
 ---
 

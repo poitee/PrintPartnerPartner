@@ -121,12 +121,36 @@
       font-size: 0.85rem;
       color: var(--muted);
     }
+    .hero-logo {
+      display: block;
+      width: 96px;
+      height: 96px;
+      margin: 0 auto 1rem;
+      border-radius: 12px;
+    }
+    .hero-badges {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.5rem;
+      margin: 0 0 2rem;
+    }
+    .kofi-badge img {
+      display: block;
+      height: 28px;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Print Partner</h1>
-    <p class="tagline">Self-hostable web workflow for layered STL kits — Sources through Checkoff.</p>
+    <img class="hero-logo" src="logo.png" alt="Print Partner logo" width="96" height="96">
+    <h1 style="text-align:center;">Print Partner</h1>
+    <p class="tagline" style="text-align:center;">Self-hostable web workflow for layered STL kits — Sources through Checkoff.</p>
+    <div class="hero-badges">
+      <a class="kofi-badge" href="https://ko-fi.com/poitee">
+        <img src="https://img.shields.io/badge/Ko--fi-Buy_me_a_coffee-ff5e5b?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Buy me a coffee on Ko-fi">
+      </a>
+    </div>
 
     <section>
       <h2>What it is</h2>
