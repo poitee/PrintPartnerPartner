@@ -5,8 +5,8 @@ import {
   CheckSquare,
   ClipboardCheck,
   FolderGit2,
-  FolderOpen,
   Hammer,
+  Layers,
   MoreHorizontal,
   Settings,
 } from "lucide-react";
@@ -28,14 +28,15 @@ import UpdateAvailableBanner, {
   dismissUpdateBanner,
   isUpdateBannerDismissed,
 } from "../components/UpdateAvailableBanner";
-import { openDataFolder } from "../api/engine";
 import { openKofi } from "../lib/supportLinks";
 import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
 import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import {
   buildRoute,
+  buildsRoute,
   checkoffRoute,
   isBuildPath,
+  isBuildsPath,
   isCheckoffPath,
   isReviewPath,
   reviewRoute,
@@ -45,6 +46,7 @@ import { cn } from "../lib/utils";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
+import ThemePreferenceControl from "../components/ThemePreferenceControl";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 
 type NavEntry = {
@@ -62,10 +64,37 @@ const secondaryNav: Omit<NavEntry, "hint">[] = [
 
 const NAV_HINTS: Record<string, string> = {
   Sources: "Register repos and set import folders",
-  Build: "Manage plans, attach sources, pick files, set colors",
+  Builds: "Create, rename, duplicate, and delete plans",
+  Build: "Attach sources, pick files, set colors and quantities",
   Review: "Validate parts, edit quantities, and export",
   Checkoff: "Track what you've printed on the shop floor",
 };
+
+function BrandMark({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent-brand text-primary-foreground shadow-sm",
+        className,
+      )}
+      aria-hidden
+    >
+      <Layers className="h-4 w-4" />
+    </span>
+  );
+}
+
+function navLinkClass(active: boolean, compact = false) {
+  return cn(
+    "relative flex transition-colors",
+    compact
+      ? "shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium"
+      : "flex-col gap-0.5 rounded-md px-3 py-2 text-sm font-medium",
+    active
+      ? "bg-primary/12 text-primary shadow-sm before:absolute before:left-0 before:top-1/2 before:h-[60%] before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary"
+      : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+  );
+}
 
 function NavItem({
   to,
@@ -83,17 +112,15 @@ function NavItem({
       to={to}
       end={matchPath == null}
       onClick={(e) => onNavigate?.(to, e)}
-      className={({ isActive }) =>
-        cn(
-          "flex flex-col gap-0.5 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-          (matchPath ? customActive : isActive)
-            ? "bg-primary/15 text-primary"
-            : "text-muted-foreground hover:bg-accent hover:text-foreground",
-        )
-      }
+      className={({ isActive }) => navLinkClass(matchPath ? Boolean(customActive) : isActive)}
     >
-      <span className="flex items-center gap-2">
-        <Icon className="h-4 w-4 shrink-0" />
+      <span className="flex items-center gap-2 pl-0.5">
+        <Icon
+          className={cn(
+            "h-4 w-4 shrink-0",
+            (matchPath ? customActive : location.pathname === to.split("?")[0]) && "text-primary",
+          )}
+        />
         {label}
       </span>
       {(matchPath ? customActive : location.pathname === to.split("?")[0]) && (
@@ -102,6 +129,39 @@ function NavItem({
         </span>
       )}
     </NavLink>
+  );
+}
+
+function EngineStatusPill({
+  health,
+  error,
+}: {
+  health: ReturnType<typeof useEngineHealth>["health"];
+  error: ReturnType<typeof useEngineHealth>["error"];
+}) {
+  const online = Boolean(health);
+  const offline = Boolean(error);
+  const label = online ? "Engine online" : offline ? "Engine offline" : "Connecting…";
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium",
+        online && "border-success/30 bg-success/10 text-success",
+        offline && "border-destructive/30 bg-destructive/10 text-destructive",
+        !online && !offline && "border-warning/30 bg-warning/10 text-warning",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-flex h-1.5 w-1.5 shrink-0 rounded-full",
+          online && "bg-success shadow-[0_0_6px_color-mix(in_srgb,var(--success)_60%,transparent)]",
+          offline && "bg-destructive",
+          !online && !offline && "animate-pulse bg-warning",
+        )}
+      />
+      {label}
+    </span>
   );
 }
 
@@ -146,11 +206,19 @@ export default function AppLayout() {
   const showPlanInHeader =
     activePlanName &&
     (isBuildPath(location.pathname) ||
+      isBuildsPath(location.pathname) ||
       isReviewPath(location.pathname) ||
       isCheckoffPath(location.pathname));
 
   const pipelineNav: NavEntry[] = [
     { to: sourcesRoute(), label: "Sources", hint: NAV_HINTS.Sources, icon: FolderGit2 },
+    {
+      to: buildsRoute(selectedProfileId),
+      label: "Builds",
+      hint: NAV_HINTS.Builds,
+      icon: Layers,
+      isActive: (pathname) => isBuildsPath(pathname),
+    },
     {
       to: buildRoute(selectedProfileId),
       label: "Build",
@@ -178,10 +246,15 @@ export default function AppLayout() {
     <div className="flex min-h-screen min-w-0 bg-background">
       <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-card lg:flex print:hidden">
         <div className="border-b border-border px-4 py-4">
-          <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
-          <p className="text-xs text-muted-foreground">
-            Sources → Build → Review → Checkoff
-          </p>
+          <div className="flex items-center gap-2.5">
+            <BrandMark />
+            <div className="min-w-0">
+              <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
+              <p className="text-xs text-muted-foreground">
+                Sources → Build → Review → Checkoff
+              </p>
+            </div>
+          </div>
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-3">
           {pipelineNav.map((item) => (
@@ -193,12 +266,7 @@ export default function AppLayout() {
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                )
+                cn(navLinkClass(isActive), "flex-row items-center gap-2 pl-0.5")
               }
             >
               <item.icon className="h-4 w-4 shrink-0" />
@@ -207,40 +275,30 @@ export default function AppLayout() {
           ))}
         </nav>
         <div className="space-y-2 border-t border-border p-3">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start text-muted-foreground"
-            onClick={() => void openDataFolder()}
-          >
-            <FolderOpen className="mr-2 h-4 w-4 shrink-0" />
-            Open data folder
-          </Button>
+          <div className="px-1">
+            <p className="mb-1.5 text-xs font-medium text-muted-foreground">Theme</p>
+            <ThemePreferenceControl compact className="w-full" />
+          </div>
           <SupportCta variant="ghost" size="sm" className="w-full justify-start text-muted-foreground" />
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex flex-col gap-2 border-b border-border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 print:hidden">
-          <div className="flex min-w-0 items-center gap-2 text-sm">
-            <span
-              className={cn(
-                "inline-flex h-2 w-2 shrink-0 rounded-full",
-                health ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" : error ? "bg-red-400" : "bg-amber-400",
-              )}
-            />
-            <span className="truncate text-muted-foreground">
-              {health ? "Engine online" : error ? "Engine offline" : "Connecting…"}
-            </span>
+        <header
+          className="flex flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 print:hidden"
+          style={{ background: "var(--gradient-header)" }}
+        >
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+            <EngineStatusPill health={health} error={error} />
             {showPlanInHeader && activePlanName && (
-              <span className="hidden truncate text-foreground md:inline">
-                · <span className="font-medium">{activePlanName}</span>
+              <span className="hidden truncate text-muted-foreground md:inline">
+                · <span className="font-medium text-foreground">{activePlanName}</span>
               </span>
             )}
           </div>
           <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:justify-end">
             <SupportCta variant="secondary" size="sm" className="hidden shrink-0 sm:inline-flex" />
+            <ThemePreferenceControl compact className="hidden shrink-0 md:inline-flex" />
             <PlanPicker className="min-w-0 flex-1 sm:min-w-[200px] sm:max-w-xs" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -270,11 +328,6 @@ export default function AppLayout() {
                     </NavLink>
                   </DropdownMenuItem>
                 ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => void openDataFolder()}>
-                  <FolderOpen className="mr-2 h-4 w-4" />
-                  Open data folder
-                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -291,12 +344,7 @@ export default function AppLayout() {
               onClick={(e) => onPipelineNavigate(item.to, e)}
               className={({ isActive }) => {
                 const active = item.isActive?.(location.pathname) ?? isActive;
-                return cn(
-                  "flex shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-colors",
-                  active
-                    ? "bg-primary/15 text-primary"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                );
+                return navLinkClass(active, true);
               }}
             >
               <item.icon className="h-4 w-4 shrink-0" />

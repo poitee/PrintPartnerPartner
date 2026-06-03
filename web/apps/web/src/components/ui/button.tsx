@@ -1,27 +1,33 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Loader2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-[color,background-color,box-shadow,border-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 active:scale-[0.98]",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        default:
+          "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md",
         secondary:
-          "border border-border bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground",
-        ghost: "text-foreground hover:bg-accent hover:text-accent-foreground",
-        destructive: "bg-destructive/20 text-destructive hover:bg-destructive/30",
-        /** Light printable checkoff/review sheet — explicit colors (not theme tokens). */
+          "border border-border bg-secondary text-secondary-foreground shadow-sm hover:border-primary/25 hover:bg-accent hover:text-accent-foreground",
+        ghost: "text-foreground hover:bg-accent/80 hover:text-accent-foreground",
+        outline:
+          "border border-border bg-background shadow-sm hover:border-primary/30 hover:bg-accent hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 hover:underline",
+        destructive:
+          "bg-destructive/20 text-destructive hover:bg-destructive/30",
         sheetRemove:
-          "border border-[#fca5a5] bg-white text-[#dc2626] shadow-none hover:bg-[#fef2f2] hover:text-[#b91c1c] hover:border-[#f87171]",
+          "border border-[var(--paper-destructive-border)] bg-[var(--paper-bg)] text-[var(--paper-destructive)] shadow-none hover:border-[var(--paper-destructive-border-hover)] hover:bg-[var(--paper-destructive-bg-hover)] hover:text-[var(--paper-destructive-hover)]",
         sheetRestore:
-          "border border-[#d1d5db] bg-white text-[#374151] shadow-none hover:bg-[#f3f4f6] hover:text-[#111827] hover:border-[#9ca3af]",
+          "border border-[var(--paper-border)] bg-[var(--paper-bg)] text-[var(--paper-muted-fg)] shadow-none hover:border-[var(--paper-border-strong)] hover:bg-[var(--paper-surface-hover)] hover:text-[var(--paper-fg)]",
       },
       size: {
         default: "h-9 px-4 py-2",
         sm: "h-8 rounded-md px-3 text-xs",
+        lg: "h-10 rounded-md px-6",
         icon: "h-9 w-9",
       },
     },
@@ -36,6 +42,7 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  loading?: boolean;
 }
 
 export function Button({
@@ -43,10 +50,34 @@ export function Button({
   variant,
   size,
   asChild = false,
+  loading = false,
+  disabled,
+  children,
   ...props
 }: ButtonProps) {
-  const Comp = asChild ? Slot : "button";
+  const classes = cn(buttonVariants({ variant, size }), className);
+
+  if (asChild) {
+    return (
+      <Slot
+        className={classes}
+        {...props}
+        aria-busy={loading || undefined}
+      >
+        {children}
+      </Slot>
+    );
+  }
+
   return (
-    <Comp className={cn(buttonVariants({ variant, size }), className)} {...props} />
+    <button
+      className={classes}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      {...props}
+    >
+      {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+      {children}
+    </button>
   );
 }

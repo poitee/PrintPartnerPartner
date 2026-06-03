@@ -14,6 +14,7 @@ import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 import {
   buildRoute,
+  buildsRoute,
   checkoffRoute,
   helpRoute,
   isBuildPath,
@@ -163,11 +164,11 @@ export default function CommandPalette() {
       {
         id: "manage-builds",
         label: "Manage builds",
-        hint: "Build → create, rename, duplicate, delete",
+        hint: "Builds → create, rename, duplicate, delete",
         group: "Workflow",
         run: () => {
           leaveBuildThen(() => {
-            navigate(buildRoute(selectedProfileId));
+            navigate(buildsRoute(selectedProfileId));
             setOpen(false);
           });
         },
