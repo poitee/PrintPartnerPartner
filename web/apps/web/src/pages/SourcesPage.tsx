@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { FolderGit2, MoreHorizontal } from "lucide-react";
+import { FolderGit2, MoreHorizontal, ArrowDownCircle, CheckCircle2 } from "lucide-react";
 import {
   createSource,
   deleteSource,
@@ -116,10 +116,18 @@ function matchesFilters(
 
 function UpdateStatusBadge({ status }: { status?: SourceSummary["update_status"] }) {
   if (status === "updates_available") {
-    return <Badge variant="addon">Update available</Badge>;
+    return (
+      <Badge variant="warning" icon={ArrowDownCircle}>
+        Update available
+      </Badge>
+    );
   }
   if (status === "up_to_date") {
-    return <Badge variant="muted">Up to date</Badge>;
+    return (
+      <Badge variant="success" icon={CheckCircle2}>
+        Up to date
+      </Badge>
+    );
   }
   return null;
 }
@@ -502,6 +510,8 @@ export default function SourcesPage() {
     <>
       <RouteBreadcrumbs items={[{ label: "Sources" }]} />
       <PageHeader
+        icon={FolderGit2}
+        accent
         title="Sources"
         description="Register repos, sync local trees, and choose import folders for each build."
         actions={

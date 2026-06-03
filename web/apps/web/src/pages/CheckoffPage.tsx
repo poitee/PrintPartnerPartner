@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ClipboardCheck, Printer } from "lucide-react";
+import { ClipboardCheck, CheckSquare, Printer } from "lucide-react";
 import { toast } from "sonner";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -250,6 +250,8 @@ export default function CheckoffPage() {
           ]}
         />
         <PageHeader
+          icon={CheckSquare}
+          accent
           title="Checkoff"
           description="Print this sheet and mark each unit as you finish it on the shop floor."
           actions={
@@ -288,7 +290,7 @@ export default function CheckoffPage() {
           downloads a ZIP of every still-unprinted unit, organized by role and folder.
         </p>
 
-        <div className="checkoff-sticky no-print flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+        <div className="checkoff-sticky no-print section-card flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <input
             type="search"
             className="checkoff-search w-full min-w-0 rounded-md border border-input bg-background px-3 py-2.5 text-base sm:flex-1 sm:py-1.5 sm:text-sm"

@@ -6,6 +6,7 @@ import { ImportRulesSaveProvider } from "./context/ImportRulesSaveContext";
 import { KitManifestSaveProvider } from "./context/KitManifestSaveContext";
 import AppLayout from "./layout/AppLayout";
 import BuildPage from "./pages/BuildPage";
+import BuildsPage from "./pages/BuildsPage";
 import HelpPage from "./pages/HelpPage";
 import ReviewPage from "./pages/ReviewPage";
 import CheckoffPage from "./pages/CheckoffPage";
@@ -26,11 +27,6 @@ function PlateRedirect() {
   return <Navigate to={`/review${location.search}`} replace />;
 }
 
-function BuildsRedirect() {
-  const location = useLocation();
-  return <Navigate to={`/build${location.search}`} replace />;
-}
-
 export default function App() {
   return (
     <JobProvider>
@@ -42,7 +38,7 @@ export default function App() {
               <Route element={<AppLayout />}>
                 <Route index element={<Navigate to="/sources" replace />} />
                 <Route path="sources" element={<SourcesPage />} />
-                <Route path="builds" element={<BuildsRedirect />} />
+                <Route path="builds" element={<BuildsPage />} />
                 <Route path="build" element={<BuildPage />} />
                 <Route path="plan" element={<Navigate to="/build" replace />} />
                 <Route path="review" element={<ReviewPage />} />

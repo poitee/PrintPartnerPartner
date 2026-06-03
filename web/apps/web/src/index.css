@@ -2,42 +2,207 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Drive the `dark:` utility variant from the .dark class set by ThemeProvider
+   (not the prefers-color-scheme media query). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+  Single source of truth for design tokens.
+
+  - `:root` holds the light theme; `.dark` overrides the same custom
+    properties with the original dark palette so existing users keep the
+    current look. `@theme inline` (below) maps Tailwind color utilities
+    (`bg-background`, `text-muted-foreground`, …) onto these variables, so a
+    single class set adapts to either theme at runtime.
+  - The `paper` token group is intentionally theme-independent: it always
+    renders the light printable sheet, matching `server/.../export-html.ts`.
+*/
+:root {
+  /* ---- Light theme (default) ---- */
+  --background: hsl(210 20% 99%);
+  --foreground: hsl(222 30% 12%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(222 30% 12%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(222 30% 12%);
+
+  --primary: hsl(16 72% 45%);
+  --primary-foreground: hsl(0 0% 100%);
+
+  --accent-brand: hsl(28 68% 42%);
+  --accent-brand-foreground: hsl(0 0% 100%);
+
+  --secondary: hsl(214 20% 94%);
+  --secondary-foreground: hsl(222 25% 20%);
+
+  --muted: hsl(214 20% 95%);
+  --muted-foreground: hsl(215 16% 40%);
+
+  --accent: hsl(214 24% 92%);
+  --accent-foreground: hsl(222 28% 18%);
+
+  --destructive: hsl(0 70% 45%);
+  --destructive-foreground: hsl(0 0% 100%);
+
+  --success: hsl(152 55% 34%);
+  --warning: hsl(33 90% 38%);
+  --info: hsl(199 89% 42%);
+  --info-foreground: hsl(0 0% 100%);
+
+  --border: hsl(214 20% 88%);
+  --input: hsl(214 18% 84%);
+  --ring: hsl(16 72% 45%);
+
+  /* Secondary surfaces used by legacy component CSS */
+  --surface-sunken: hsl(214 24% 95%);
+  --media-bg: hsl(214 16% 93%);
+
+  --gradient-header: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--primary) 8%, transparent) 0%,
+    color-mix(in srgb, var(--accent-brand) 6%, transparent) 100%
+  );
+  --gradient-surface: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--card) 100%, transparent) 0%,
+    color-mix(in srgb, var(--surface-sunken) 80%, transparent) 100%
+  );
+  /* Vivid primary->accent-brand line for .page-accent-bar (resolves per theme
+     via the --primary/--accent-brand vars, so it needs no .dark override). */
+  --gradient-accent: linear-gradient(90deg, var(--primary), var(--accent-brand));
+
+  --shadow-sm: 0 1px 2px hsl(214 30% 50% / 0.06);
+  --shadow-md: 0 1px 3px hsl(214 30% 50% / 0.08), 0 4px 12px hsl(214 30% 40% / 0.06);
+  --shadow-lg: 0 2px 8px hsl(214 30% 50% / 0.1), 0 12px 28px hsl(214 30% 40% / 0.1);
+  --shadow-card: var(--shadow-md);
+
+  --radius: 0.5rem;
+
+  /* ---- Paper token group (printable sheet — theme-independent) ---- */
+  --paper-bg: #ffffff;
+  --paper-fg: #111827;
+  --paper-muted: #6b7280;
+  --paper-muted-fg: #374151;
+  --paper-border: #d1d5db;
+  --paper-border-strong: #9ca3af;
+  --paper-surface: #f9fafb;
+  --paper-surface-hover: #f3f4f6;
+  --paper-focus: #2563eb;
+  --paper-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+
+  --paper-success-bg: #f0fdf4;
+  --paper-success-chip-bg: #dcfce7;
+  --paper-success-border: #86efac;
+  --paper-success-fg: #166534;
+
+  --paper-destructive: #dc2626;
+  --paper-destructive-hover: #b91c1c;
+  --paper-destructive-border: #fca5a5;
+  --paper-destructive-border-hover: #f87171;
+  --paper-destructive-bg-hover: #fef2f2;
+}
+
+/* ---- Dark theme overrides (original palette, preserved exactly) ---- */
+.dark {
+  --background: hsl(222 22% 9%);
+  --foreground: hsl(210 22% 96%);
+  --card: hsl(222 20% 14%);
+  --card-foreground: hsl(210 22% 96%);
+  --popover: hsl(222 20% 14%);
+  --popover-foreground: hsl(210 22% 96%);
+
+  --primary: hsl(18 80% 58%);
+  --primary-foreground: hsl(222 28% 8%);
+
+  --accent-brand: hsl(32 72% 52%);
+  --accent-brand-foreground: hsl(222 28% 8%);
+
+  --secondary: hsl(222 18% 20%);
+  --secondary-foreground: hsl(210 18% 90%);
+
+  --muted: hsl(222 16% 22%);
+  --muted-foreground: hsl(215 14% 72%);
+
+  --accent: hsl(222 16% 24%);
+  --accent-foreground: hsl(210 22% 96%);
+
+  --destructive: hsl(0 72% 58%);
+  --destructive-foreground: hsl(210 25% 98%);
+
+  --success: hsl(152 52% 48%);
+  --warning: hsl(38 92% 55%);
+  --info: hsl(199 85% 55%);
+  --info-foreground: hsl(222 28% 8%);
+
+  --border: hsl(222 14% 30%);
+  --input: hsl(222 18% 18%);
+  --ring: hsl(18 80% 58%);
+
+  --surface-sunken: hsl(222 20% 12%);
+  --media-bg: #0a0e14;
+
+  --gradient-header: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--primary) 12%, transparent) 0%,
+    color-mix(in srgb, var(--accent-brand) 10%, transparent) 100%
+  );
+  --gradient-surface: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--card) 100%, transparent) 0%,
+    color-mix(in srgb, var(--surface-sunken) 60%, transparent) 100%
+  );
+
+  --shadow-sm: 0 1px 2px hsl(222 40% 4% / 0.35);
+  --shadow-md: 0 1px 0 hsl(222 14% 38% / 0.35), 0 4px 12px hsl(222 40% 4% / 0.45);
+  --shadow-lg: 0 2px 8px hsl(222 40% 4% / 0.5), 0 16px 32px hsl(222 40% 2% / 0.55);
+  --shadow-card: var(--shadow-md);
+}
+
+/* Fonts + radii are emitted as real custom properties (used by var() in CSS). */
 @theme {
   --font-sans: "DM Sans", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  /* Surfaces */
-  --color-background: hsl(222 22% 9%);
-  --color-foreground: hsl(210 22% 96%);
-  --color-card: hsl(222 20% 14%);
-  --color-card-foreground: hsl(210 22% 96%);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
 
-  /* Brand / actions */
-  --color-primary: hsl(214 88% 58%);
-  --color-primary-foreground: hsl(222 28% 8%);
+/* Map Tailwind color utilities onto the semantic theme variables above. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
 
-  --color-secondary: hsl(222 18% 20%);
-  --color-secondary-foreground: hsl(210 18% 90%);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
 
-  --color-muted: hsl(222 16% 22%);
-  --color-muted-foreground: hsl(215 14% 72%);
+  --color-accent-brand: var(--accent-brand);
+  --color-accent-brand-foreground: var(--accent-brand-foreground);
 
-  --color-accent: hsl(222 16% 24%);
-  --color-accent-foreground: hsl(210 22% 96%);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
 
-  --color-destructive: hsl(0 72% 58%);
-  --color-destructive-foreground: hsl(210 25% 98%);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
 
-  --color-success: hsl(152 52% 48%);
-  --color-warning: hsl(38 92% 55%);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
 
-  --color-border: hsl(222 14% 30%);
-  --color-input: hsl(222 18% 18%);
-  --color-ring: hsl(214 88% 58%);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
 
-  --radius-lg: 0.5rem;
-  --radius-md: calc(0.5rem - 2px);
-  --radius-sm: calc(0.5rem - 4px);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 }
 
 @layer base {
@@ -51,37 +216,89 @@
     overflow-x: hidden;
   }
 
-  h1,
-  h2,
-  h3,
+  h1 {
+    @apply text-foreground font-bold tracking-tight text-balance;
+    letter-spacing: -0.025em;
+  }
+
+  h2 {
+    @apply text-foreground font-semibold tracking-tight text-balance;
+    letter-spacing: -0.02em;
+  }
+
+  h3 {
+    @apply text-foreground font-semibold tracking-tight text-balance;
+    letter-spacing: -0.015em;
+  }
+
   h4 {
-    @apply text-foreground;
+    @apply text-foreground font-medium tracking-tight text-balance;
+    letter-spacing: -0.01em;
   }
 
   /* Legacy App.css pages use .muted — align with design tokens */
   .muted,
   .subtitle {
-    color: var(--color-muted-foreground);
+    color: var(--muted-foreground);
+  }
+
+  /* Consistent, visible keyboard focus across native + custom controls */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 }
 
 @layer utilities {
   /* Tailwind maps text-muted to --color-muted (a surface). Use foreground for copy. */
   .text-muted {
-    color: var(--color-muted-foreground);
+    color: var(--muted-foreground);
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
   }
 }
 
 @layer components {
+  .page-accent-bar {
+    position: relative;
+  }
+
+  .page-accent-bar::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--gradient-accent);
+  }
+
+  .stat-tile {
+    @apply rounded-lg border border-border bg-card p-3 transition-shadow;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .stat-tile:hover {
+    box-shadow: var(--shadow-md);
+  }
+
+  .section-card {
+    @apply rounded-lg border border-border bg-card p-4;
+    box-shadow: var(--shadow-sm);
+    background: var(--gradient-surface);
+  }
+
   .source-card {
-    @apply overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-md transition-colors;
-    box-shadow:
-      0 1px 0 hsl(222 14% 38% / 0.35),
-      0 4px 12px hsl(222 40% 4% / 0.45);
+    @apply overflow-hidden rounded-lg border border-border bg-card text-card-foreground transition-colors;
+    box-shadow: var(--shadow-card);
   }
 
   .source-card:hover {
     @apply border-primary/50;
+    box-shadow: var(--shadow-md);
   }
 
   .source-card__body {
@@ -89,12 +306,14 @@
   }
 
   .drawer-panel {
-    @apply fixed inset-y-0 right-0 z-40 flex w-full max-w-xl flex-col border-l border-border bg-card text-card-foreground shadow-xl;
+    @apply fixed inset-y-0 right-0 z-40 flex w-full max-w-xl flex-col border-l border-border bg-card text-card-foreground;
     max-width: min(36rem, 100vw);
+    box-shadow: var(--shadow-lg);
   }
 
   .card {
     @apply rounded-lg border border-border bg-card text-card-foreground;
+    box-shadow: var(--shadow-sm);
   }
 
   .table-scroll {
@@ -102,6 +321,17 @@
     margin-right: -0.25rem;
     padding-left: 0.25rem;
     padding-right: 0.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

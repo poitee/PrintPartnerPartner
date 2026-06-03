@@ -1,18 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  BookOpen,
+  CheckSquare,
+  ClipboardCheck,
+  FolderGit2,
+  FolderOpen,
+  Hammer,
+  Scale,
+  Workflow,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
   engineBaseUrl,
   fetchHealth,
   fetchLegalDocument,
   fetchManifestRegistry,
   fetchWorkflowGuide,
-  openDataFolder,
-  openExportsFolder,
   type ManifestRegistryEntry,
 } from "../api/engine";
 import SupportCta from "../components/SupportCta";
 import PageHeader from "../components/layout/PageHeader";
-import { Button } from "../components/ui/button";
+import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import {
   Card,
   CardContent,
@@ -35,6 +44,8 @@ const LEGAL_TABS: { id: LegalTab; label: string }[] = [
   { id: "commercial", label: "Commercial" },
   { id: "third-party", label: "Third-party notices" },
 ];
+
+const WORKFLOW_STEP_ICONS: LucideIcon[] = [FolderGit2, Hammer, ClipboardCheck, CheckSquare];
 
 const WORKFLOW_STEPS = [
   {
@@ -172,38 +183,63 @@ export default function HelpPage() {
 
   return (
     <div className="space-y-4">
+      <RouteBreadcrumbs items={[{ label: "Help" }]} />
       <PageHeader
+        icon={BookOpen}
+        accent
         title="Help"
         description="Workflow guide, data folders, and license information."
         actions={<SupportCta />}
       />
 
-      <Card className="shadow-none">
-        <CardHeader>
-          <CardTitle className="text-base">Workflow</CardTitle>
-          <CardDescription>Sources → Build → Review</CardDescription>
+      <Card>
+        <CardHeader accent>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-brand/10 text-accent-brand">
+              <Workflow className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <CardTitle className="text-base">Workflow</CardTitle>
+              <CardDescription>Sources → Build → Review → Checkoff</CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {WORKFLOW_STEPS.map((step, index) => (
-              <li key={step.num}>
-                <Link
-                  to={stepPaths[index]}
-                  className="flex h-full flex-col rounded-lg border border-border bg-muted/20 p-3 transition-colors hover:border-primary/40 hover:bg-muted/40"
-                >
-                  <span className="text-xs font-medium text-primary">Step {step.num}</span>
-                  <span className="mt-1 font-medium">{step.label}</span>
-                  <span className="mt-1 text-xs text-muted-foreground">{step.description}</span>
-                </Link>
-              </li>
-            ))}
+            {WORKFLOW_STEPS.map((step, index) => {
+              const StepIcon = WORKFLOW_STEP_ICONS[index];
+              return (
+                <li key={step.num}>
+                  <Link
+                    to={stepPaths[index]}
+                    className="flex h-full flex-col rounded-lg border border-border bg-muted/20 p-3 transition-colors hover:border-primary/40 hover:bg-muted/40"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
+                        <StepIcon className="h-3.5 w-3.5" aria-hidden />
+                      </span>
+                      <span className="text-xs font-medium text-primary">Step {step.num}</span>
+                    </span>
+                    <span className="mt-2 font-medium">{step.label}</span>
+                    <span className="mt-1 text-xs text-muted-foreground">{step.description}</span>
+                  </Link>
+                </li>
+              );
+            })}
           </ol>
         </CardContent>
       </Card>
 
-      <Card className="shadow-none" id="creating-a-manifest">
-        <CardHeader>
-          <CardTitle className="text-base">Workflow guide</CardTitle>
+      <Card id="creating-a-manifest">
+        <CardHeader accent>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info">
+              <BookOpen className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <CardTitle className="text-base">Workflow guide</CardTitle>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {workflowError && <p className="text-sm text-destructive">{workflowError}</p>}
@@ -222,14 +258,21 @@ export default function HelpPage() {
         </CardContent>
       </Card>
 
-      <Card className="shadow-none">
-        <CardHeader>
-          <CardTitle className="text-base">Community manifest registry</CardTitle>
-          <CardDescription>
-            Approved manifests from the Print Partner repo. Link a slug on a source or use a
-            repo-root <code className="font-mono text-xs">print-partner.manifest.yaml</code> after
-            sync.
-          </CardDescription>
+      <Card>
+        <CardHeader accent>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <FolderGit2 className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <CardTitle className="text-base">Community manifest registry</CardTitle>
+              <CardDescription>
+                Approved manifests from the Print Partner repo. Link a slug on a source or use a
+                repo-root <code className="font-mono text-xs">print-partner.manifest.yaml</code> after
+                sync.
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {registryError && <p className="text-sm text-destructive">{registryError}</p>}
@@ -275,38 +318,33 @@ export default function HelpPage() {
         </CardContent>
       </Card>
 
-      <Card className="shadow-none">
-        <CardHeader>
-          <CardTitle className="text-base">Folders</CardTitle>
+      <Card>
+        <CardHeader accent>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-brand/10 text-accent-brand">
+              <FolderOpen className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <CardTitle className="text-base">Folders</CardTitle>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
             {dataDir ? (
               <>
-                Data directory: <code className="font-mono text-xs">{dataDir}</code>
+                Data directory (inside the server):{" "}
+                <code className="font-mono text-xs">{dataDir}</code>
               </>
             ) : (
               "Start the engine to see the data directory path."
             )}
           </p>
-          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <Button
-              type="button"
-              variant="secondary"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={() => void openDataFolder()}
-            >
-              Open data folder
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={() => void openExportsFolder()}
-            >
-              Open exports folder
-            </Button>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            With Docker, bind a host volume to this path (default compose volume:{" "}
+            <code className="font-mono">print-partner-data</code> → <code className="font-mono">/data</code>
+            ).
+          </p>
           {engineUrl && (
             <p className="text-xs text-muted-foreground">
               Engine API: <code className="font-mono">{engineUrl}</code> · OpenAPI:{" "}
@@ -316,9 +354,16 @@ export default function HelpPage() {
         </CardContent>
       </Card>
 
-      <Card className="shadow-none">
-        <CardHeader>
-          <CardTitle className="text-base">Legal</CardTitle>
+      <Card>
+        <CardHeader accent>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <Scale className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <CardTitle className="text-base">Legal</CardTitle>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <Tabs value={legalTab} onValueChange={(v) => setLegalTab(v as LegalTab)}>

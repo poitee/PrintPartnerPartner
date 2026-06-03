@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { Hammer, Layers } from "lucide-react";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
-import PlanManager from "../components/PlanManager";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import RoleFilamentPicker from "../components/RoleFilamentPicker";
 import SourceCategorySheet from "../components/sources/SourceCategorySheet";
@@ -34,7 +34,7 @@ import {
   type ProfileLayer,
   type SourceSummary,
 } from "../api/engine";
-import { buildRoute, reviewRoute, sourcesRoute } from "../lib/routes";
+import { buildRoute, buildsRoute, reviewRoute, sourcesRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
@@ -254,6 +254,8 @@ function BuildPageContent() {
     <div className="space-y-4">
       <RouteBreadcrumbs items={[{ label: "Build", to: buildRoute(selectedProfileId) }]} />
       <PageHeader
+        icon={Hammer}
+        accent
         title="Build"
         description="Attach sources, pick STL files, set role colors, then update the build."
         actions={
@@ -294,7 +296,13 @@ function BuildPageContent() {
         }
       />
 
-      <PlanManager hideSelector disabled={!health} collapsible defaultOpen />
+      <p className="text-sm text-muted-foreground">
+        <Button variant="ghost" className="h-auto px-0 text-sm text-primary" asChild>
+          <Link to={buildsRoute(selectedProfileId)}>Manage builds</Link>
+        </Button>
+        {" "}
+        — create, rename, duplicate, or delete plans.
+      </p>
 
       {kitImportSetup &&
         ((kitImportSetup.unmatched_sources?.length ?? 0) > 0 ||
@@ -338,7 +346,7 @@ function BuildPageContent() {
             <Card className="border-dashed">
               <CardHeader className="p-4">
                 <div className="flex flex-wrap items-start gap-2">
-                  <Badge variant="base">base</Badge>
+                  <Badge variant="base" icon={Layers}>base</Badge>
                   <div className="min-w-0 flex-1 space-y-1">
                     <CardTitle className="text-sm">Choose base source</CardTitle>
                     <CardDescription className="text-xs">

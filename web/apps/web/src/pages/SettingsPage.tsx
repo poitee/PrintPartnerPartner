@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  KeyRound,
+  RefreshCw,
+  Settings,
+  SunMoon,
+} from "lucide-react";
+import {
   createCustomFilament,
   deleteCustomFilament,
   fetchCustomFilaments,
   fetchGitHubPatSettings,
   fetchSourceUpdateCheckSettings,
-  openDataFolder,
   saveGitHubPat,
   saveSourceUpdateCheckInterval,
   startCheckSourceUpdates,
@@ -18,6 +23,7 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { StlNamingSettingsCard } from "../components/settings/StlNamingEditor";
 import IntegrationsSettingsCard from "../components/settings/IntegrationsSettingsCard";
 import AboutUpdatesCard from "../components/settings/AboutUpdatesCard";
+import ThemePreferenceControl from "../components/ThemePreferenceControl";
 import SourceCategoryManager from "../components/sources/SourceCategoryManager";
 import { Button } from "../components/ui/button";
 import {
@@ -177,18 +183,13 @@ export default function SettingsPage() {
     <div className="space-y-4">
       <RouteBreadcrumbs items={[{ label: "Settings" }]} />
       <PageHeader
+        icon={Settings}
+        accent
         title="Settings"
         description="Custom filaments, integrations, STL naming, source categories, and optional GitHub token."
         actions={
           <PageHeaderActions>
-            <Button
-              variant="secondary"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={() => void openDataFolder()}
-            >
-              Open data folder
-            </Button>
-            <SupportCta size="sm" className="col-span-2 min-h-10 w-full sm:col-span-1 sm:w-auto" />
+            <SupportCta size="sm" className="min-h-10 w-full sm:w-auto" />
           </PageHeaderActions>
         }
       />
@@ -203,13 +204,40 @@ export default function SettingsPage() {
         refreshing={updateCheckRefreshing}
       />
 
-      <Card className="shadow-none">
-        <CardHeader>
-          <CardTitle className="text-base">Source update checks</CardTitle>
-          <CardDescription>
-            Compare synced Git repos to their remotes without pulling. Badges appear on
-            Sources when updates are available.
-          </CardDescription>
+      <Card>
+        <CardHeader accent>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-brand/10 text-accent-brand">
+              <SunMoon className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <CardTitle className="text-base">Appearance</CardTitle>
+              <CardDescription>
+                Choose light, dark, or match your system preference. Printable checkoff and review
+                sheets stay light for print fidelity.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <ThemePreferenceControl />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader accent>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info">
+              <RefreshCw className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <CardTitle className="text-base">Source update checks</CardTitle>
+              <CardDescription>
+                Compare synced Git repos to their remotes without pulling. Badges appear on
+                Sources when updates are available.
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <label className="block text-sm">
@@ -250,13 +278,20 @@ export default function SettingsPage() {
 
       <IntegrationsSettingsCard engineReady={Boolean(health)} />
 
-      <Card className="shadow-none">
-        <CardHeader>
-          <CardTitle className="text-base">GitHub personal access token</CardTitle>
-          <CardDescription>
-            Optional. Improves GitHub API rate limits when syncing private repos. Token is stored
-            locally in the engine database.
-          </CardDescription>
+      <Card>
+        <CardHeader accent>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-brand/10 text-accent-brand">
+              <KeyRound className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <CardTitle className="text-base">GitHub personal access token</CardTitle>
+              <CardDescription>
+                Optional. Improves GitHub API rate limits when syncing private repos. Token is stored
+                locally in the engine database.
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
           {githubPat?.configured && githubPat.masked && (

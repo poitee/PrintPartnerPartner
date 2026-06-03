@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRoute,
+  buildsRoute,
   checkoffRoute,
   isBuildPath,
+  isBuildsPath,
   isCheckoffPath,
   isKitStudioPath,
   isPlanWorkflowPath,
@@ -35,8 +37,9 @@ describe("planStudioRoute", () => {
 });
 
 describe("workflow routes", () => {
-  it("build, review, and plate include profile when provided", () => {
+  it("build, builds, review, and plate include profile when provided", () => {
     expect(buildRoute(5)).toBe("/build?profile=5");
+    expect(buildsRoute(5)).toBe("/builds?profile=5");
     expect(planRoute(5)).toBe("/build?profile=5");
     expect(reviewRoute(5)).toBe("/review?profile=5");
     expect(plateRoute(5)).toBe("/review?profile=5");
@@ -53,6 +56,7 @@ describe("path matchers", () => {
   it("detects build paths", () => {
     expect(isBuildPath("/build")).toBe(true);
     expect(isBuildPath("/plan")).toBe(true);
+    expect(isBuildsPath("/builds")).toBe(true);
     expect(isReviewPath("/review")).toBe(true);
     expect(isReviewPath("/checkoff")).toBe(false);
     expect(isCheckoffPath("/checkoff")).toBe(true);
@@ -60,6 +64,7 @@ describe("path matchers", () => {
 
   it("detects plan workflow paths", () => {
     expect(isPlanWorkflowPath("/build")).toBe(true);
+    expect(isPlanWorkflowPath("/builds")).toBe(true);
     expect(isPlanWorkflowPath("/plan")).toBe(true);
     expect(isPlanWorkflowPath("/review")).toBe(true);
     expect(isPlanWorkflowPath("/checkoff")).toBe(true);

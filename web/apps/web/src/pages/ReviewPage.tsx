@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import {
+  AlertTriangle,
+  Box,
+  ClipboardCheck,
+  Hash,
+  Layers,
+  Palette,
+  RefreshCw,
+  XCircle,
+} from "lucide-react";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
@@ -83,6 +93,8 @@ export default function ReviewPage() {
         ]}
       />
       <PageHeader
+        icon={ClipboardCheck}
+        accent
         title="Review"
         description="Validate parts, edit quantities, and export before shop-floor checkoff."
         actions={
@@ -140,42 +152,60 @@ export default function ReviewPage() {
       ) : review ? (
         <>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              ["Included parts", String(review.totals.included_parts)],
-              ["Print units", String(review.totals.total_print_units)],
+            {(
               [
-                "By role",
-                Object.entries(review.totals.by_role)
-                  .map(([k, v]) => `${k}: ${v}`)
-                  .join(", ") || "—",
-              ],
-              [
-                "Filaments",
-                Object.entries(review.totals.by_filament)
-                  .map(([k, v]) => `${k}: ${v}`)
-                  .join(", ") || "—",
-              ],
-            ].map(([label, value]) => (
-              <div key={label} className="rounded-lg border border-border bg-card p-3">
-                <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="text-lg font-semibold">{value}</p>
+                { label: "Included parts", value: String(review.totals.included_parts), icon: Box },
+                { label: "Print units", value: String(review.totals.total_print_units), icon: Hash },
+                {
+                  label: "By role",
+                  value:
+                    Object.entries(review.totals.by_role)
+                      .map(([k, v]) => `${k}: ${v}`)
+                      .join(", ") || "—",
+                  icon: Layers,
+                },
+                {
+                  label: "Filaments",
+                  value:
+                    Object.entries(review.totals.by_filament)
+                      .map(([k, v]) => `${k}: ${v}`)
+                      .join(", ") || "—",
+                  icon: Palette,
+                },
+              ] as const
+            ).map(({ label, value, icon: StatIcon }) => (
+              <div key={label} className="stat-tile">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-md bg-accent-brand/10 text-accent-brand">
+                    <StatIcon className="h-3.5 w-3.5" aria-hidden />
+                  </span>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {label}
+                  </p>
+                </div>
+                <p className="text-lg font-semibold tabular">{value}</p>
               </div>
             ))}
           </div>
 
-          <section className="rounded-lg border border-border bg-card p-4">
+          <section className="section-card">
             <h3 className="mb-2 text-sm font-semibold">Sources</h3>
             <ul className="space-y-2 text-sm">
               {review.layers.map((layer) => (
                 <li key={layer.id} className="flex flex-wrap items-center gap-2">
-                  <Badge variant={layer.layer_type === "base" ? "base" : "addon"}>
+                  <Badge
+                    variant={layer.layer_type === "base" ? "base" : "addon"}
+                    icon={layer.layer_type === "base" ? Layers : Box}
+                  >
                     {layer.layer_type}
                   </Badge>
                   <span>{layer.project_name ?? "—"}</span>
                   {layer.synced ? (
-                    <Badge variant="muted">synced</Badge>
+                    <Badge variant="success" icon={RefreshCw}>
+                      synced
+                    </Badge>
                   ) : (
-                    <Badge variant="muted" className="border-amber-500/50 text-amber-600">
+                    <Badge variant="warning" icon={AlertTriangle}>
                       not synced
                     </Badge>
                   )}
@@ -185,38 +215,44 @@ export default function ReviewPage() {
           </section>
 
           {(blockers.length > 0 || warnings.length > 0) && (
-            <section className="rounded-lg border border-border bg-card p-4 space-y-3">
+            <section className="section-card space-y-3">
               <h3 className="text-sm font-semibold">Issues</h3>
               {blockers.map((issue, i) => (
                 <div
                   key={`b-${i}`}
-                  className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
+                  className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
                 >
-                  <p>{issue.message}</p>
-                  {issue.link_hint && hintRoute(issue.link_hint, selectedProfileId) && (
-                    <Link
-                      to={hintRoute(issue.link_hint, selectedProfileId)!}
-                      className="mt-1 inline-block text-xs text-primary underline"
-                    >
-                      {issue.link_hint === "sources" ? "Go to Sources" : "Go to Build"}
-                    </Link>
-                  )}
+                  <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden />
+                  <div>
+                    <p>{issue.message}</p>
+                    {issue.link_hint && hintRoute(issue.link_hint, selectedProfileId) && (
+                      <Link
+                        to={hintRoute(issue.link_hint, selectedProfileId)!}
+                        className="mt-1 inline-block text-xs text-primary underline"
+                      >
+                        {issue.link_hint === "sources" ? "Go to Sources" : "Go to Build"}
+                      </Link>
+                    )}
+                  </div>
                 </div>
               ))}
               {warnings.map((issue, i) => (
                 <div
                   key={`w-${i}`}
-                  className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
+                  className="flex gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm"
                 >
-                  <p>{issue.message}</p>
-                  {issue.link_hint && hintRoute(issue.link_hint, selectedProfileId) && (
-                    <Link
-                      to={hintRoute(issue.link_hint, selectedProfileId)!}
-                      className="mt-1 inline-block text-xs text-primary underline"
-                    >
-                      {issue.link_hint === "sources" ? "Go to Sources" : "Go to Build"}
-                    </Link>
-                  )}
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+                  <div>
+                    <p>{issue.message}</p>
+                    {issue.link_hint && hintRoute(issue.link_hint, selectedProfileId) && (
+                      <Link
+                        to={hintRoute(issue.link_hint, selectedProfileId)!}
+                        className="mt-1 inline-block text-xs text-primary underline"
+                      >
+                        {issue.link_hint === "sources" ? "Go to Sources" : "Go to Build"}
+                      </Link>
+                    )}
+                  </div>
                 </div>
               ))}
             </section>

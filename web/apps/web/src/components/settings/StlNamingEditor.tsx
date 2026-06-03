@@ -11,6 +11,7 @@ import {
   type StlNamingRole,
   type StlNamingRoleId,
 } from "../../api/engine";
+import { DataTable } from "../DataTable";
 import { Button } from "../ui/button";
 import {
   Card,
@@ -151,7 +152,7 @@ function StlNamingEditorBody({
           markers.
         </p>
         <div className="overflow-x-auto rounded-md border border-border">
-          <table className="data-table w-full text-sm">
+          <DataTable className="w-full text-sm">
             <thead>
               <tr>
                 <th className="w-28">Role</th>
@@ -175,7 +176,7 @@ function StlNamingEditorBody({
                 </tr>
               ))}
             </tbody>
-          </table>
+          </DataTable>
         </div>
       </div>
 
