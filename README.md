@@ -26,13 +26,14 @@
 </p>
 
 <p align="center">
-  <code>Sources</code> → <code>Build</code> → <code>Review</code> → <code>Checkoff</code>
+  <code>Sources</code> → <code>Builds</code> → <code>Build</code> → <code>Review</code> → <code>Checkoff</code>
 </p>
 
 <p align="center">
   <sub>
     Ships as a single Docker container — <strong>Fastify</strong> API + <strong>React</strong> SPA on one port.
-    Data stays in a volume you control. Multi-tenant <strong>SaaS</strong> mode (Postgres + S3 + OAuth) is available for hosted deployments.
+    Warm UI with <strong>light</strong>, <strong>dark</strong>, or <strong>system</strong> theme. Data stays in a volume you control.
+    Multi-tenant <strong>SaaS</strong> mode (Postgres + S3 + OAuth) is available for hosted deployments.
   </sub>
 </p>
 
@@ -43,7 +44,8 @@
 | Step | What you are doing |
 |------|--------------------|
 | **Sources** | Add GitHub repos, local folders, or zips; assign categories; search STLs across every synced repo; see **update available** badges; sync and set import rules. |
-| **Build** | Manage plans (create, rename, duplicate, delete); pick **role filament colors** (primary/accent); attach sources; choose files and quantities; **Update build**; read repo docs inline; pick kit/manifest options; export STLs or share a plan bundle. |
+| **Builds** | Create, rename, duplicate, and delete **plans**; the header dropdown switches which plan Build, Review, and Checkoff use. |
+| **Build** | Pick **role filament colors** (primary/accent); attach sources to the active plan; choose files and quantities; **Update build**; read repo docs inline; pick kit/manifest options; export STLs or share a plan bundle. |
 | **Review** | Confirm a validation summary grouped by role and filament, browse the full included-parts list with 3D STL previews, and **Export STLs** by role and folder. |
 | **Checkoff** | Track per-unit print progress (saved per plan), filter missing/done, print the checklist, and **Export missing STLs** for the next batch. |
 
@@ -53,27 +55,35 @@ Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Sp
 
 ## Screenshots
 
+Light-theme captures from the warm UI. The app also supports **dark** and **system** theme via the sidebar.
+
 ### Sources
 
-![Sources — the source library with categories, sync state, update-available badges, and a global STL search box across every synced repo.](docs/screenshots/sources.png)
+![Sources — the source library with categories, sync status chips, update-available badges, and a global STL search box across every synced repo.](docs/screenshots/light/sources.png)
 
 The source library: add GitHub repos, local folders, or zips and group them into **categories**. Each source shows its sync state and an **update-available** badge when the upstream repo has moved. A global search box finds STLs by filename or path across every synced repo, and per-source **import rules** control how files are picked up.
 
+### Builds
+
+![Builds — create, rename, duplicate, and delete plans; the header dropdown switches the active plan for Build, Review, and Checkoff.](docs/screenshots/light/builds.png)
+
+Manage **build plans** in one place: create, rename, duplicate, and delete. The header **plan dropdown** picks which plan **Build**, **Review**, and **Checkoff** use — no need to reconfigure each step separately.
+
 ### Build
 
-![Build — role filament colors at the top (primary/accent), attached source cards with an inline Docs viewer, and per-source file pickers feeding Update build.](docs/screenshots/build.png)
+![Build — role filament colors at the top (primary/accent), attached source cards with an inline Docs viewer, and per-source file pickers feeding Update build.](docs/screenshots/light/build.png)
 
-Pick **role filament colors** (primary/accent) at the top, attach sources, then choose files and quantities. **Update build** recomputes the plan. The inline **Docs viewer** renders a repo's README and Markdown without leaving the app, and kit/manifest options apply curated presets. From here you can **export STLs** or **share a plan bundle**.
+Pick **role filament colors** (primary/accent) at the top, attach sources to the active plan, then choose files and quantities. **Update build** recomputes the plan. The inline **Docs viewer** renders a repo's README and Markdown without leaving the app, and kit/manifest options apply curated presets. From here you can **export STLs** or **share a plan bundle**.
 
 ### Review
 
-![Review — a validation summary grouped by role and filament, with the full included-parts list and 3D STL previews, ready for Export STLs.](docs/screenshots/review.png)
+![Review — a validation summary grouped by role and filament, with the full included-parts list and 3D STL previews, ready for Export STLs.](docs/screenshots/light/review.png)
 
 A **validation summary** grouped by role and filament surfaces any issues before you print. The full included-parts list shows **3D STL previews** and can be sorted by repo or filename. **Export STLs** writes parts organized by role and folder.
 
 ### Checkoff
 
-![Checkoff — per-unit print progress with on-scroll 3D thumbnails laid out like a printable checklist, plus Print, Export checklist, and Export missing STLs.](docs/screenshots/checkoff.png)
+![Checkoff — per-unit print progress with on-scroll 3D thumbnails laid out like a printable checklist, plus Print, Export checklist, and Export missing STLs.](docs/screenshots/light/checkoff.png)
 
 Mark **per-unit print progress** (saved per plan) and filter to what is missing or done. On-scroll **3D thumbnails** are laid out like a printable checklist. Use **Print** for a paper checklist, **Export checklist HTML**, or **Export missing STLs** (zip) to hand the outstanding units straight to the next print batch.
 
@@ -90,6 +100,14 @@ docker compose up --build
 ```
 
 Open [http://localhost:8080](http://localhost:8080). Data persists in the `print-partner-data` volume, mounted at `/data` inside the container (SQLite database, synced repos, exports, and thumbnails).
+
+**New to Docker?** See the step-by-step guide in [`docs/INSTALL.md`](docs/INSTALL.md). Quick checklist:
+
+1. Install [Docker Desktop](https://docs.docker.com/get-docker/) (or Docker Engine + Compose on Linux) and verify `docker compose version`.
+2. Clone this repo and `cd` into it.
+3. Run `docker compose up --build` (first build may take several minutes).
+4. Open [http://localhost:8080](http://localhost:8080).
+5. Add a **Source** on the Sources page, then create a plan under **Builds**.
 
 ### Environment variables (self-host)
 
@@ -205,6 +223,7 @@ Print Partner is inspired by [Annex Engineering](https://github.com/Annex-Engine
 ## Links
 
 - [Project site (GitHub Pages)](https://poitee.github.io/PrintPartnerPartner/) — landing page with workflow screenshots
+- [`docs/INSTALL.md`](docs/INSTALL.md) — beginner Docker install and first run
 - [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, and desktop-data migration
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
