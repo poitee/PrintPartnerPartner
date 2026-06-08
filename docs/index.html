@@ -10,7 +10,8 @@
       --surface: #1a2332;
       --text: #e8eef4;
       --muted: #8b9cb3;
-      --accent: #3d9ae8;
+      --primary: hsl(16 72% 45%);
+      --accent: hsl(28 68% 42%);
       --border: #2a3848;
     }
     * { box-sizing: border-box; }
@@ -22,7 +23,7 @@
       line-height: 1.6;
     }
     .wrap {
-      max-width: 720px;
+      max-width: 960px;
       margin: 0 auto;
       padding: 2.5rem 1.5rem 4rem;
     }
@@ -49,8 +50,9 @@
     }
     p { margin: 0 0 0.75rem; }
     p:last-child { margin-bottom: 0; }
-    a { color: var(--accent); }
-    ul { margin: 0; padding-left: 1.25rem; }
+    a { color: var(--primary); }
+    a:hover { color: var(--accent); }
+    ul, ol { margin: 0; padding-left: 1.25rem; }
     li { margin-bottom: 0.35rem; }
     .screenshot {
       border: 1px dashed var(--border);
@@ -67,8 +69,8 @@
       font-size: 0.95rem;
     }
     .pipeline-step {
-      background: rgba(61, 154, 232, 0.12);
-      border: 1px solid rgba(61, 154, 232, 0.35);
+      background: hsl(16 72% 45% / 0.12);
+      border: 1px solid hsl(16 72% 45% / 0.35);
       border-radius: 6px;
       padding: 0.45rem 0.75rem;
       font-weight: 600;
@@ -86,6 +88,7 @@
       font-size: 0.85rem;
     }
     figure { margin: 1.25rem 0 0; }
+    figure picture,
     figure img {
       width: 100%;
       height: auto;
@@ -99,8 +102,8 @@
       font-size: 0.85rem;
     }
     code.kbd {
-      background: rgba(61, 154, 232, 0.12);
-      border: 1px solid rgba(61, 154, 232, 0.35);
+      background: hsl(16 72% 45% / 0.12);
+      border: 1px solid hsl(16 72% 45% / 0.35);
       border-radius: 4px;
       padding: 0.1rem 0.35rem;
       font-size: 0.85em;
@@ -108,14 +111,21 @@
     .cta {
       display: inline-block;
       margin-top: 0.5rem;
+      margin-right: 0.5rem;
       padding: 0.6rem 1.2rem;
-      background: var(--accent);
+      background: var(--primary);
       color: #fff;
       text-decoration: none;
       border-radius: 6px;
       font-weight: 600;
     }
-    .cta:hover { filter: brightness(1.08); }
+    .cta:hover { filter: brightness(1.08); color: #fff; }
+    .cta-secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .cta-secondary:hover { border-color: var(--primary); color: var(--primary); }
     footer {
       margin-top: 2rem;
       font-size: 0.85rem;
@@ -139,13 +149,21 @@
       display: block;
       height: 28px;
     }
+    pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      overflow-x: auto;
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <img class="hero-logo" src="logo.png" alt="Print Partner logo" width="96" height="96">
     <h1 style="text-align:center;">Print Partner</h1>
-    <p class="tagline" style="text-align:center;">Self-hostable web workflow for layered STL kits — Sources through Checkoff.</p>
+    <p class="tagline" style="text-align:center;">Self-hostable web workflow for layered STL kits — Sources through Checkoff, with light, dark, or system theme.</p>
     <div class="hero-badges">
       <a class="kofi-badge" href="https://ko-fi.com/poitee">
         <img src="https://img.shields.io/badge/Ko--fi-Buy_me_a_coffee-ff5e5b?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Buy me a coffee on Ko-fi">
@@ -156,10 +174,10 @@
       <h2>What it is</h2>
       <p>
         Print Partner runs in your browser and helps you sync GitHub or local repos,
-        merge base and add-on layers, assign role filament colors, export STLs by
-        role and folder, and track what you have already printed. Deploy with
-        <strong>Docker</strong> on one port — data stays in a local volume or
-        directory you control. No cloud account required for self-host.
+        manage build plans, merge base and add-on layers, assign role filament colors,
+        export STLs by role and folder, and track what you have already printed. Deploy with
+        <strong>Docker</strong> on one port — data stays in a local volume you control.
+        No cloud account required for self-host.
       </p>
     </section>
 
@@ -167,13 +185,16 @@
       <h2>Workflow</h2>
       <ul>
         <li><strong>Sources</strong> — add repos or local folders; categories; import rules; update badges; search STLs across repos.</li>
+        <li><strong>Builds</strong> — create, rename, duplicate, and delete plans; header dropdown switches the active plan.</li>
         <li><strong>Build</strong> — set role filament colors, attach sources to a plan, pick files, set quantities, read repo docs inline, update build.</li>
-        <li><strong>Review</strong> — confirm totals by role and filament and fix sync issues before export.</li>
+        <li><strong>Review</strong> — confirm totals by role and filament, browse 3D previews, and export STLs.</li>
         <li><strong>Checkoff</strong> — mark printed units; export an HTML checklist or the missing STLs to a rebuilt <code>stl-missing/</code> folder.</li>
       </ul>
       <div class="screenshot">
         <div class="pipeline" aria-label="Print Partner workflow">
           <span class="pipeline-step">Sources</span>
+          <span class="pipeline-arrow" aria-hidden="true">→</span>
+          <span class="pipeline-step">Builds</span>
           <span class="pipeline-arrow" aria-hidden="true">→</span>
           <span class="pipeline-step">Build</span>
           <span class="pipeline-arrow" aria-hidden="true">→</span>
@@ -182,7 +203,7 @@
           <span class="pipeline-step">Checkoff</span>
         </div>
         <p class="pipeline-caption">
-          Sync repos → compose build → validate &amp; export → track prints
+          Sync repos → manage plans → compose build → validate &amp; export → track prints
         </p>
       </div>
       <p>
@@ -195,32 +216,62 @@
 
     <section>
       <h2>Screenshots</h2>
+      <p>Screenshots follow your system light/dark preference where supported.</p>
       <figure>
-        <img src="screenshots/sources.png" alt="Sources — source library with categories, sync state, update-available badges, and global STL search.">
-        <figcaption><strong>Sources</strong> — the source library with categories, sync state, update-available badges, and global STL search.</figcaption>
+        <picture>
+          <source srcset="screenshots/dark/sources.png" media="(prefers-color-scheme: dark)">
+          <img src="screenshots/light/sources.png" alt="Sources — source library with categories, sync status chips, update-available badges, and global STL search." loading="lazy">
+        </picture>
+        <figcaption><strong>Sources</strong> — the source library with categories, sync status, update-available badges, and global STL search.</figcaption>
       </figure>
       <figure>
-        <img src="screenshots/build.png" alt="Build — role filament colors, attached source cards with an inline Docs viewer, and per-source file pickers.">
+        <picture>
+          <source srcset="screenshots/dark/builds.png" media="(prefers-color-scheme: dark)">
+          <img src="screenshots/light/builds.png" alt="Builds — create, rename, duplicate, and delete plans; header dropdown switches the active plan." loading="lazy">
+        </picture>
+        <figcaption><strong>Builds</strong> — create, rename, duplicate, and delete plans; the header dropdown switches Build, Review, and Checkoff.</figcaption>
+      </figure>
+      <figure>
+        <picture>
+          <source srcset="screenshots/dark/build.png" media="(prefers-color-scheme: dark)">
+          <img src="screenshots/light/build.png" alt="Build — role filament colors, attached source cards with an inline Docs viewer, and per-source file pickers." loading="lazy">
+        </picture>
         <figcaption><strong>Build</strong> — role filament colors, attached sources with an inline Docs viewer, and file pickers feeding Update build.</figcaption>
       </figure>
       <figure>
-        <img src="screenshots/review.png" alt="Review — validation summary by role and filament with the full parts list and 3D STL previews.">
+        <picture>
+          <source srcset="screenshots/dark/review.png" media="(prefers-color-scheme: dark)">
+          <img src="screenshots/light/review.png" alt="Review — validation summary by role and filament with the full parts list and 3D STL previews." loading="lazy">
+        </picture>
         <figcaption><strong>Review</strong> — validation summary by role and filament with the full parts list and 3D STL previews.</figcaption>
       </figure>
       <figure>
-        <img src="screenshots/checkoff.png" alt="Checkoff — per-unit print progress with on-scroll 3D thumbnails laid out like a printable checklist.">
+        <picture>
+          <source srcset="screenshots/dark/checkoff.png" media="(prefers-color-scheme: dark)">
+          <img src="screenshots/light/checkoff.png" alt="Checkoff — per-unit print progress with on-scroll 3D thumbnails laid out like a printable checklist." loading="lazy">
+        </picture>
         <figcaption><strong>Checkoff</strong> — per-unit print progress with on-scroll 3D thumbnails laid out like a printable checklist.</figcaption>
       </figure>
     </section>
 
     <section>
       <h2>Get started</h2>
-      <p>Self-host with Docker Compose:</p>
-      <pre style="background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem 1rem; overflow-x: auto; font-size: 0.9rem;"><code>git clone https://github.com/poitee/PrintPartnerPartner.git
+      <p>Self-host with Docker — one command, no Node.js install required:</p>
+      <ol>
+        <li>Install <a href="https://docs.docker.com/get-docker/">Docker Desktop</a> (Mac/Windows) or Docker Engine + Compose (Linux).</li>
+        <li>Clone the repo and open a terminal in the project folder.</li>
+        <li>Run <code class="kbd">docker compose up --build</code> (first build takes a few minutes).</li>
+        <li>Open <a href="http://localhost:8080">http://localhost:8080</a> and add a source under <strong>Sources</strong>.</li>
+      </ol>
+      <pre><code>git clone https://github.com/poitee/PrintPartnerPartner.git
 cd PrintPartnerPartner
 docker compose up --build</code></pre>
-      <p>Then open <a href="http://localhost:8080">http://localhost:8080</a>.</p>
+      <p>
+        New to Docker? The full beginner guide covers data volumes, updates, and troubleshooting:
+        <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/INSTALL.md">docs/INSTALL.md</a>.
+      </p>
       <a class="cta" href="https://github.com/poitee/PrintPartnerPartner">View on GitHub</a>
+      <a class="cta cta-secondary" href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/INSTALL.md">Install guide</a>
     </section>
 
     <section>

@@ -1,5 +1,7 @@
 # Deploying Print Partner Web
 
+**First time with Docker?** See the beginner install guide: [docs/INSTALL.md](../docs/INSTALL.md).
+
 ## Self-host (default)
 
 ### Docker Compose
