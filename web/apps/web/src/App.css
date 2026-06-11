@@ -889,7 +889,12 @@ select:not([class*="rounded-md"]) {
   margin: 0.25rem 0 0;
 }
 
+.preview3d-stage {
+  position: relative;
+}
+
 .preview3d-canvas {
+  position: relative;
   width: 100%;
   min-height: 220px;
   border-radius: 6px;
@@ -900,6 +905,53 @@ select:not([class*="rounded-md"]) {
 .preview3d-canvas canvas {
   display: block;
   width: 100% !important;
+}
+
+.preview3d-measure-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid hsl(0 0% 100% / 0.25);
+  background: hsl(222 25% 10% / 0.65);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background 120ms ease;
+}
+
+.preview3d-measure-btn:hover {
+  background: hsl(222 25% 10% / 0.85);
+}
+
+.preview3d-measure-btn[aria-pressed="true"] {
+  background: var(--primary);
+  border-color: transparent;
+}
+
+.preview3d-dim-label {
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: hsl(222 25% 10% / 0.78);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.preview3d-dims-caption {
+  margin: 0.4rem 0 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .bench-mode-toggle {
@@ -1190,6 +1242,39 @@ select:not([class*="rounded-md"]) {
   opacity: 0.5;
 }
 
+/* Thumbnail wrapped in a button that opens the expanded 3D preview dialog.
+   Reset so the printed sheet looks identical to the bare thumbnail. */
+.sheet-thumb-btn {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 4px;
+  cursor: zoom-in;
+}
+
+.sheet-thumb-expand {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.55);
+  color: #fff;
+  pointer-events: none;
+}
+
+.sheet-thumb-expand svg {
+  width: 0.7rem;
+  height: 0.7rem;
+}
+
 .sheet-part-meta {
   display: flex;
   flex-direction: column;
@@ -1255,6 +1340,14 @@ select:not([class*="rounded-md"]) {
   color: var(--paper-muted);
   font-variant-numeric: tabular-nums;
   margin-left: 0.25rem;
+}
+
+.sheet-printed-label {
+  display: none;
+}
+
+.sheet-notes-line {
+  display: none;
 }
 
 .sheet-printed-done {
@@ -1538,6 +1631,13 @@ select:not([class*="rounded-md"]) {
     max-width: none;
     padding: 0;
     border-radius: 0;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .checkoff-sheet * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .sheet-repo {
@@ -1545,6 +1645,143 @@ select:not([class*="rounded-md"]) {
   }
 
   .sheet-folder {
+    break-inside: auto;
+  }
+
+  .sheet-table thead {
+    display: table-header-group;
+  }
+
+  .sheet-table tr {
     break-inside: avoid;
+  }
+
+  .checkoff-sheet.checkoff-sheet-print-continuous .sheet-repo,
+  .checkoff-sheet.checkoff-sheet-print-continuous .sheet-folder,
+  .checkoff-sheet.checkoff-sheet-print-continuous .sheet-table tr {
+    break-inside: auto;
+  }
+
+  .sheet-table th.sheet-cell-qty,
+  .sheet-table td.sheet-cell-qty {
+    display: none !important;
+  }
+
+  /* Dense horizontal row: thumb left, meta beside, tally + notes on the right */
+  .checkoff-sheet .sheet-table td {
+    padding: 0.08cm 0.3cm;
+    vertical-align: middle;
+  }
+
+  .sheet-table .sheet-cell-part {
+    width: 44%;
+    vertical-align: top;
+    padding-top: 0.12cm;
+    padding-bottom: 0.12cm;
+    padding-right: 0.35cm;
+  }
+
+  .checkoff-sheet .sheet-part {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.32cm;
+  }
+
+  .checkoff-sheet .sheet-thumb-btn,
+  .checkoff-sheet .sheet-thumb {
+    width: 3.25cm !important;
+    height: 3.25cm !important;
+    min-width: 3.25cm;
+    min-height: 3.25cm;
+  }
+
+  .checkoff-sheet .sheet-part-meta {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+    padding-top: 0.04cm;
+  }
+
+  .checkoff-sheet .sheet-filename {
+    font-size: 0.92rem;
+    line-height: 1.25;
+  }
+
+  .checkoff-sheet .sheet-part-tags {
+    font-size: 0.65rem;
+    line-height: 1.3;
+    flex-wrap: wrap;
+  }
+
+  .sheet-table .sheet-cell-printed {
+    width: 20%;
+    min-width: 0;
+    vertical-align: middle;
+    padding-left: 0.2cm;
+    padding-right: 0.2cm;
+  }
+
+  .sheet-table .sheet-cell-notes {
+    width: 36%;
+    vertical-align: middle;
+    padding-left: 0.25cm;
+  }
+
+  .sheet-printed-screen {
+    display: none !important;
+  }
+
+  .sheet-printed-label {
+    display: inline !important;
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--paper-fg);
+  }
+
+  /* Compact pen-friendly tally boxes — inline beside count */
+  .sheet-units {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.1cm;
+    max-width: none;
+  }
+
+  .sheet-printed-count {
+    flex: 0 0 auto;
+    margin-left: 0.14cm;
+    margin-top: 0;
+    white-space: nowrap;
+  }
+
+  .sheet-unit {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    border: 1pt solid var(--paper-fg);
+    border-radius: 0;
+    padding: 0;
+    min-width: 11pt;
+    min-height: 11pt;
+    width: 11pt;
+    height: 11pt;
+    cursor: default;
+  }
+
+  .sheet-unit input {
+    display: none !important;
+  }
+
+  .sheet-unit span {
+    display: none;
+  }
+
+  .sheet-notes-line {
+    display: block;
+    min-height: 1.1rem;
+    border-bottom: 1px solid var(--paper-border-strong);
   }
 }

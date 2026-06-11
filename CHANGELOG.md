@@ -8,8 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Published Docker images** — releases now push multi-arch (`linux/amd64` + `linux/arm64`) images to `ghcr.io/poitee/print-partner` with `latest` and version tags, so `docker compose pull && docker compose up -d` works without building from source.
+- **Release workflow** — pushing a `vX.Y.Z` tag builds and publishes the image (with the version baked into `PP_VERSION`) and creates a GitHub Release with auto-generated notes (`.github/workflows/release.yml`).
+- **Container healthcheck** — the app service in `docker-compose.yml` and `docker-compose.saas.yml` now polls `GET /health` via Node's built-in `fetch`.
 - **Build plan management** — create, rename, duplicate, and delete plans from the Build tab (restores `PlanManager` wiring lost during the web migration).
 - **Branding** — project logo (`docs/logo.png`) on the README and GitHub Pages landing page; Ko-fi support badge near the top of both.
+
+### Changed
+
+- **Version alignment** — `PP_VERSION` default is now `3.0.0-web` and `web/package.json` is `3.0.0`, matching the latest CHANGELOG release so the in-app update checker compares correctly against GitHub releases.
 
 ## [3.0.0-web] - 2026-05-31
 

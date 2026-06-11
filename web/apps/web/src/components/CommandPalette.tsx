@@ -249,7 +249,6 @@ export default function CommandPalette() {
                 }
                 completeExportDownload("Missing-parts STL", snap.result, {
                   pathField: "root_path",
-                  isDirectory: true,
                 });
               },
             );

@@ -1,17 +1,10 @@
 import { toast } from "sonner";
-import { downloadExport, openPathInShell } from "../api/engine";
-import { parentDirectory } from "./exportPaths";
-
-export type ExportCompleteOptions = {
-  /** When true, path is a directory; primary action opens that folder. */
-  isDirectory?: boolean;
-};
+import { downloadExport } from "../api/engine";
 
 export type ExportJobResult = Record<string, unknown> | null | undefined;
 
 type CompleteExportOptions = {
   pathField?: "path" | "root_path" | "primary_path";
-  isDirectory?: boolean;
   suggestedFilename?: string;
 };
 
@@ -20,7 +13,7 @@ function pathFromResult(result: ExportJobResult, field: string): string | undefi
   return typeof v === "string" ? v : undefined;
 }
 
-/** Prefer browser download via download_url; fall back to desktop open-in-shell. */
+/** Prefer browser download via download_url; fall back to a toast with the server path. */
 export function completeExportDownload(
   title: string,
   result: ExportJobResult,
@@ -41,7 +34,7 @@ export function completeExportDownload(
     pathFromResult(result, "path");
 
   if (typeof filePath === "string") {
-    notifyExportComplete(title, filePath, { isDirectory: options?.isDirectory });
+    toast.success(title, { description: filePath, duration: 12_000 });
     return;
   }
 
@@ -65,37 +58,4 @@ export function completeMultiFileExportDownload(title: string, result: ExportJob
     }
   }
   completeExportDownload(title, result, { pathField: "primary_path" });
-}
-
-/** Toast with open-file / open-folder actions after an export completes (Tauri desktop). */
-export function notifyExportComplete(
-  title: string,
-  filePath: string,
-  options?: ExportCompleteOptions,
-): void {
-  if (options?.isDirectory) {
-    toast.success(title, {
-      description: filePath,
-      duration: 12_000,
-      action: {
-        label: "Open folder",
-        onClick: () => void openPathInShell(filePath),
-      },
-    });
-    return;
-  }
-
-  const folder = parentDirectory(filePath);
-  toast.success(title, {
-    description: filePath,
-    duration: 12_000,
-    action: {
-      label: "Open file",
-      onClick: () => void openPathInShell(filePath),
-    },
-    cancel: {
-      label: "Open folder",
-      onClick: () => void openPathInShell(folder),
-    },
-  });
 }

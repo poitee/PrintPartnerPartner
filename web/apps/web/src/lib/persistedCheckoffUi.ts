@@ -5,11 +5,14 @@ export type CheckoffFilterMode = "all" | "missing" | "done";
 export type PersistedCheckoffUi = {
   filter: CheckoffFilterMode;
   compactMode: boolean;
+  /** When true, print uses continuous layout (fewer forced page breaks). */
+  continuousPrintLayout: boolean;
 };
 
 const DEFAULT: PersistedCheckoffUi = {
   filter: "all",
   compactMode: false,
+  continuousPrintLayout: false,
 };
 
 function isFilter(value: unknown): value is CheckoffFilterMode {
@@ -26,6 +29,10 @@ export function parsePersistedCheckoffUi(raw: string | null): PersistedCheckoffU
         typeof parsed.compactMode === "boolean"
           ? parsed.compactMode
           : DEFAULT.compactMode,
+      continuousPrintLayout:
+        typeof parsed.continuousPrintLayout === "boolean"
+          ? parsed.continuousPrintLayout
+          : DEFAULT.continuousPrintLayout,
     };
   } catch {
     return { ...DEFAULT };

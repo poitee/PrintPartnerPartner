@@ -38,6 +38,21 @@ export default function ReportIssueDialog({
 
   if (!open) return null;
 
+  // Only open server-provided issue links that point at GitHub (open-redirect guard).
+  const openGithubUrl = (url: string): boolean => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return false;
+    }
+    if (parsed.protocol !== "https:" || parsed.hostname !== "github.com") {
+      return false;
+    }
+    window.open(parsed.toString(), "_blank", "noopener,noreferrer");
+    return true;
+  };
+
   const onSubmit = async () => {
     if (profileId == null) return;
     setBusy(true);
@@ -51,10 +66,13 @@ export default function ReportIssueDialog({
       });
       if (response.created && response.issue_url) {
         setResult(`Issue created: ${response.issue_url}`);
-        window.open(response.issue_url, "_blank", "noopener,noreferrer");
+        openGithubUrl(response.issue_url);
       } else if (response.prefilled_url) {
-        window.open(response.prefilled_url, "_blank", "noopener,noreferrer");
-        setResult("Opened GitHub with a prefilled issue form.");
+        if (openGithubUrl(response.prefilled_url)) {
+          setResult("Opened GitHub with a prefilled issue form.");
+        } else {
+          setError("Received an unexpected issue link; not opening it.");
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

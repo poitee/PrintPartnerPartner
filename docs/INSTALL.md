@@ -60,17 +60,17 @@ cd PrintPartnerPartner
 
 ## First run
 
-From the repository root:
+From the repository root, pull the pre-built image and start it in the background:
 
 ```bash
-docker compose up --build
+docker compose pull && docker compose up -d
 ```
 
-- The **first build** can take several minutes — Docker downloads a base image and compiles the app.
-- The terminal stays attached and shows server logs; that is normal.
-- When you see the server listening on port 8080, open **[http://localhost:8080](http://localhost:8080)** in your browser.
+- Docker downloads the published image from `ghcr.io/poitee/print-partner` — no compiling needed.
+- Once the container is up, open **[http://localhost:8080](http://localhost:8080)** in your browser.
+- Watch logs with `docker compose logs -f`.
 
-To run in the background later, use `docker compose up --build -d` (detached mode).
+**Prefer to build from source?** Run `docker compose up --build` instead. The first build can take several minutes, and the terminal stays attached showing server logs — that is normal.
 
 ---
 
@@ -121,10 +121,10 @@ For backups, copy the volume contents while the container is stopped, or use you
 
 ```bash
 git pull
-docker compose up --build
+docker compose pull && docker compose up -d
 ```
 
-Or, if you use pre-built images: `docker compose pull && docker compose up --build`.
+Or, if you build from source: `git pull && docker compose up --build -d`.
 
 ### Change the port
 
@@ -160,7 +160,7 @@ The default Compose file publishes port 8080 on all interfaces. Check your host 
 
 ### Build fails or container exits immediately
 
-Read the log output from `docker compose up --build`. Ensure you have enough disk space and a working internet connection for the first build.
+Read the log output from `docker compose logs` (or `docker compose up --build` when building from source). Ensure you have enough disk space and a working internet connection for the first pull or build.
 
 ---
 
@@ -178,7 +178,7 @@ Read the log output from `docker compose up --build`. Ensure you have enough dis
 
 1. Install Docker and verify `docker compose version`.
 2. Clone or download this repository.
-3. Run `docker compose up --build` from the repo root.
+3. Run `docker compose pull && docker compose up -d` from the repo root (or `docker compose up --build` to build from source).
 4. Open [http://localhost:8080](http://localhost:8080).
 5. Add a **Source**, create a **Build** plan, and walk through the pipeline.
 
