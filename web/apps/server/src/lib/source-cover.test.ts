@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   coverCacheIsFresh,
+  downloadRemoteImage,
   ensureSourceCover,
   extractOgImageUrl,
   findRepoCoverPath,
@@ -11,6 +12,11 @@ import {
   githubRepoSlug,
   resolveCoverCandidates,
 } from "./source-cover.js";
+
+// Keep tests hermetic: the SSRF guard resolves hostnames before fetching.
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "140.82.112.3", family: 4 }]),
+}));
 
 describe("source cover resolution", () => {
   it("parses GitHub repo slugs", () => {
@@ -90,5 +96,17 @@ describe("source cover resolution", () => {
 
     vi.unstubAllGlobals();
     rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("refuses to download covers from private or metadata addresses", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(await downloadRemoteImage("http://127.0.0.1:8080/cover.png")).toBeNull();
+    expect(await downloadRemoteImage("http://169.254.169.254/latest/meta-data/")).toBeNull();
+    expect(await downloadRemoteImage("http://192.168.1.10/cover.png")).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
   });
 });

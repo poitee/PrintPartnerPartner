@@ -9,10 +9,22 @@
 From the repository root:
 
 ```bash
-docker compose up --build
+docker compose pull && docker compose up -d
 ```
 
-Open [http://localhost:8080](http://localhost:8080). Data persists in the `print-partner-data` volume (`/data` in the container).
+Open [http://localhost:8080](http://localhost:8080). Data persists in the `print-partner-data` volume (`/data` in the container). To build from source instead of pulling, use `docker compose up --build`.
+
+### Published images
+
+Release images are published to GitHub Container Registry:
+
+| Image | Tags | Platforms |
+|-------|------|-----------|
+| `ghcr.io/poitee/print-partner` | `latest`, `X.Y.Z` (one per release, e.g. `3.0.0`) | `linux/amd64`, `linux/arm64` |
+
+Each image bakes the release version into `PP_VERSION` (e.g. `3.0.0-web`), which `GET /health` reports and the in-app update checker compares against GitHub releases. The compose files keep a `build:` section as a fallback, so `docker compose up --build` always works without the registry.
+
+The app service has a healthcheck that polls `GET /health` every 30s using Node's built-in `fetch` (the `node:22-bookworm-slim` runtime image ships no curl/wget). `docker ps` shows the container as `healthy` once the server responds.
 
 ### Environment variables (self-host)
 
@@ -24,7 +36,7 @@ Open [http://localhost:8080](http://localhost:8080). Data persists in the `print
 | `STATIC_DIR` | unset | When set, serve built SPA from this directory |
 | `DEPLOY_MODE` | `self-host` | `self-host` or `saas` |
 | `CORS_ORIGIN` / `ALLOWED_ORIGINS` | `true` | CORS allowed origin(s); comma-separated list for multiple |
-| `PP_VERSION` | `0.1.0-web` | Health payload version |
+| `PP_VERSION` | `3.0.0-web` (baked into release images) | Health payload version |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload limit (512 MiB) |
 | `PRINT_PARTNER_API_KEY` | unset | When set (self-host), requires Bearer or `X-Print-Partner-Api-Key` on `/api/v1/*` |
@@ -42,10 +54,21 @@ When update checks are enabled (default), the server compares `PP_VERSION` to th
 Self-host Docker upgrade:
 
 ```bash
-docker compose pull && docker compose up --build
+docker compose pull && docker compose up -d
 ```
 
 Disable checks entirely with `PRINT_PARTNER_UPDATE_CHECK=0`. Offline or failed lookups never show an error banner.
+
+### Releasing (maintainers)
+
+Tag a release and push it; CI does the rest:
+
+```bash
+git tag v3.1.0
+git push origin v3.1.0
+```
+
+The `release.yml` workflow builds the multi-arch image (`linux/amd64` + `linux/arm64`), pushes `ghcr.io/poitee/print-partner:latest` and `:3.1.0` with `PP_VERSION=3.1.0-web` baked in, and creates a GitHub Release with auto-generated notes. Before tagging, move the `[Unreleased]` CHANGELOG entries under the new version and bump `web/package.json` plus the `PP_VERSION` defaults in `web/apps/server/src/config.ts` and the `Dockerfile`.
 
 ### Local development
 
@@ -116,7 +139,7 @@ npx tsx scripts/import-sqlite.ts \
 - **Exports:** job endpoints write files under `exports/` in the data dir and return `download_url` (e.g. `/exports/Plan/checklist.html`). The UI triggers a browser download via `GET /exports/*` with `Content-Disposition: attachment`.
 - **Kit bundle import (browser):** upload `.print-partner-kit.zip` with `POST /imports/kit-bundle` (multipart field `file`). Command palette **Import shared build…** uses this path.
 - **Kit bundle import (server path):** `POST /jobs/import-kit-bundle` or `POST /admin/import-kit-bundle` with `{ "path": "…" }` only works when the file already exists on the engine host (Tauri desktop or admin scripts) — not for remote web users.
-- **Source ZIP import (browser):** `POST /sources/:id/upload-zip` (multipart). Tauri desktop may use `POST /sources/:id/import-archive` with a local filesystem path instead.
+- **Source ZIP import:** `POST /sources/:id/upload-zip` (multipart upload only).
 
 ### Smoke test
 

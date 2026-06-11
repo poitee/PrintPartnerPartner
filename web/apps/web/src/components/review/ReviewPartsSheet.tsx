@@ -21,7 +21,8 @@ import {
 } from "../../lib/persistedReviewPartsUi";
 import { useProfileSelection } from "../../context/ProfileContext";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import PartThumb from "../parts/PartThumb";
+import PartPreviewDialog from "../parts/PartPreviewDialog";
+import PartThumbExpandButton from "../parts/PartThumbExpandButton";
 import PartSpoolPicker from "../PartSpoolPicker";
 import SpoolRemainingBadge from "../SpoolRemainingBadge";
 import ReviewSheetMobileCard from "./ReviewSheetMobileCard";
@@ -106,6 +107,7 @@ function ReviewSheetRow({
   onRemove,
   onRestore,
   onSpoolChange,
+  onPreview,
 }: {
   part: ReviewPart;
   busy: boolean;
@@ -118,12 +120,13 @@ function ReviewSheetRow({
   onRemove: (part: ReviewPart) => void;
   onRestore: (part: ReviewPart) => void;
   onSpoolChange: (partId: number, spoolman_spool_id: string | null) => void;
+  onPreview: (part: ReviewPart) => void;
 }) {
   return (
     <tr className={cn("sheet-row", !part.included && "opacity-70")}>
       <td className="sheet-cell-part">
         <div className="sheet-part">
-          <PartThumb partId={part.id} tintHex={part.filament_hex} compact={compact} />
+          <PartThumbExpandButton part={part} compact={compact} onExpand={onPreview} />
           <div className="sheet-part-meta">
             <span className="sheet-filename" title={part.relative_path || part.filename}>
               {part.filename}
@@ -201,6 +204,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
   const persisted = useMemo(() => loadPersistedReviewPartsUi(), []);
   const [ui, setUi] = useState<PersistedReviewPartsUi>(persisted);
   const [removeTarget, setRemoveTarget] = useState<ReviewPart | null>(null);
+  const [previewPart, setPreviewPart] = useState<ReviewPart | null>(null);
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
 
   useEffect(() => {
@@ -466,6 +470,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                           onRemove={() => onRemove(part)}
                           onRestore={() => onRestore(part)}
                           onSpoolChange={onSpoolChange}
+                          onPreview={setPreviewPart}
                         />
                       ))}
                     </div>
@@ -501,6 +506,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                             onRemove={onRemove}
                             onRestore={onRestore}
                             onSpoolChange={onSpoolChange}
+                            onPreview={setPreviewPart}
                           />
                         ))}
                       </tbody>
@@ -533,6 +539,8 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
           </div>
         </DialogContent>
       </Dialog>
+
+      <PartPreviewDialog part={previewPart} onClose={() => setPreviewPart(null)} />
     </section>
   );
 }

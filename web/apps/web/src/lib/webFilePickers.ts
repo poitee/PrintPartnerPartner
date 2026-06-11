@@ -1,4 +1,4 @@
-/** Browser file-picker fallbacks when Tauri invoke is unavailable. */
+/** Browser file pickers and save dialogs. */
 
 function pickFileObject(accept: string): Promise<File | null> {
   return new Promise((resolve) => {

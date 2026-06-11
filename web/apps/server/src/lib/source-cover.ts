@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { readReadmeText } from "./repo-readme.js";
+import { safeOutboundFetch } from "./outbound-url.js";
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"]);
 const IMG_MD_RE = /!\[[^\]]*\]\(([^)]+)\)/g;
@@ -216,9 +217,9 @@ function copyLocalImage(
 
 export async function downloadRemoteImage(url: string): Promise<Buffer | null> {
   try {
-    const response = await fetch(url, {
+    // SSRF guard: cover URLs are user-influenced; redirects are validated per hop.
+    const response = await safeOutboundFetch(url, {
       headers: { "User-Agent": USER_AGENT },
-      redirect: "follow",
       signal: AbortSignal.timeout(20_000),
     });
     if (!response.ok) return null;
@@ -281,9 +282,8 @@ export async function ensureSourceCover(
   for (const { resolvedFrom, target } of resolveCoverCandidates(project)) {
     if (resolvedFrom === "page_refetch") {
       try {
-        const response = await fetch(target, {
+        const response = await safeOutboundFetch(target, {
           headers: { "User-Agent": USER_AGENT },
-          redirect: "follow",
           signal: AbortSignal.timeout(15_000),
         });
         if (!response.ok) continue;

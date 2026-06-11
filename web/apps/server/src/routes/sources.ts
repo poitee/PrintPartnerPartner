@@ -1,5 +1,5 @@
-import { createReadStream, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { createReadStream, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import {
   buildStlTreePayload,
@@ -175,35 +175,12 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
       chunks.push(Buffer.from(chunk));
     }
     const buffer = Buffer.concat(chunks);
-    const extractDir = writeUploadedZip(buffer, deps.sourcesDir, id);
-    const updated = deps.repo.updateSource(id, {
-      localPath: extractDir,
-      source_kind: "archive",
-      last_synced_at: new Date().toISOString(),
-      last_commit_sha: null,
-    });
-    void prefetchSourceCover(deps, id);
-    return { ...updated, imported_files: buffer.length };
-  });
-
-  /** Tauri desktop: import a ZIP from a local filesystem path (same machine as the engine). */
-  app.post("/sources/:id/import-archive", async (request, reply) => {
-    const id = Number((request.params as { id: string }).id);
-    const row = deps.repo.getProjectRow(id);
-    if (!row) return reply.status(404).send({ detail: "Source not found" });
-    const body = request.body as { path?: string };
-    const userPath = String(body.path ?? "").trim();
-    if (!userPath) return reply.status(400).send({ detail: "path is required" });
-    const abs = resolve(userPath);
+    let extractDir: string;
     try {
-      if (!statSync(abs).isFile()) {
-        return reply.status(400).send({ detail: "File not found" });
-      }
-    } catch {
-      return reply.status(400).send({ detail: "File not found" });
+      extractDir = writeUploadedZip(buffer, deps.sourcesDir, id);
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }
-    const buffer = readFileSync(abs);
-    const extractDir = writeUploadedZip(buffer, deps.sourcesDir, id);
     const updated = deps.repo.updateSource(id, {
       localPath: extractDir,
       source_kind: "archive",
@@ -258,21 +235,11 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
   }));
 
   app.post("/sources/import-repos-txt", async (request, reply) => {
-    const body = request.body as { text?: string; path?: string };
-    let text = (body.text ?? "").trim();
-    if (body.path?.trim()) {
-      const filePath = resolve(body.path.trim());
-      try {
-        if (!statSync(filePath).isFile()) {
-          return reply.status(400).send({ detail: "File not found" });
-        }
-        text = readFileSync(filePath, "utf8");
-      } catch {
-        return reply.status(400).send({ detail: "File not found" });
-      }
-    }
-    if (!text.trim()) {
-      return reply.status(400).send({ detail: "Provide text or a valid path" });
+    // Server-side file paths are no longer accepted here; the SPA uploads text.
+    const body = request.body as { text?: string };
+    const text = (body.text ?? "").trim();
+    if (!text) {
+      return reply.status(400).send({ detail: "text is required" });
     }
     if (!parseReposTxtText(text).length) {
       return reply.status(400).send({ detail: "No valid repository lines found" });

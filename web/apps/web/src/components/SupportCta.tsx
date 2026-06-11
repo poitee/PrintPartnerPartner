@@ -19,7 +19,7 @@ export default function SupportCta({
       variant={variant}
       size={size}
       className={className}
-      onClick={() => void openKofi()}
+      onClick={() => openKofi()}
     >
       <Coffee className="h-4 w-4" />
       {KOFI_BUTTON_LABEL}

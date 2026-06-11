@@ -1,6 +1,6 @@
 import { Check } from "lucide-react";
 import type { ReviewPart } from "../../api/engine";
-import PartThumb from "../parts/PartThumb";
+import PartThumbExpandButton from "../parts/PartThumbExpandButton";
 import SpoolRemainingBadge from "../SpoolRemainingBadge";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
@@ -9,10 +9,11 @@ type Props = {
   part: ReviewPart;
   busy: boolean;
   onToggleUnit: (part: ReviewPart, unitIndex: number) => void;
+  onPreview: (part: ReviewPart) => void;
 };
 
 /** Touch-first checkoff row for narrow viewports (shop floor / phone). */
-export default function CheckoffMobilePartCard({ part, busy, onToggleUnit }: Props) {
+export default function CheckoffMobilePartCard({ part, busy, onToggleUnit, onPreview }: Props) {
   const done =
     part.printed_count >= part.quantity_effective && part.quantity_effective > 0;
   const nextIdx = part.print_units.findIndex((u) => !u);
@@ -26,7 +27,7 @@ export default function CheckoffMobilePartCard({ part, busy, onToggleUnit }: Pro
       className={cn("checkoff-mobile-card", done && "checkoff-mobile-card-done")}
     >
       <div className="checkoff-mobile-card-head">
-        <PartThumb partId={part.id} tintHex={part.filament_hex} sizePx={72} />
+        <PartThumbExpandButton part={part} sizePx={72} onExpand={onPreview} />
         <div className="checkoff-mobile-card-meta">
           <h4 className="checkoff-mobile-filename" title={part.relative_path || part.filename}>
             {part.filename}

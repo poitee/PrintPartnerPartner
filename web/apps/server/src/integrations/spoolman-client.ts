@@ -1,5 +1,6 @@
 import type { IntegrationConfig } from "@print-partner/contracts";
 import type { CatalogColor } from "../services/filament-catalog.js";
+import { assertSafeOutboundUrl } from "../lib/outbound-url.js";
 
 const REQUEST_TIMEOUT_MS = 8000;
 const SPOOLMAN_FILAMENT_ID_RE = /^spoolman:([^:]+):filament:(\d+)$/;
@@ -208,6 +209,8 @@ async function spoolmanFetch(
   path: string,
 ): Promise<Response> {
   const url = `${apiRoot(baseUrl)}${path.startsWith("/") ? path : `/${path}`}`;
+  // Self-host users point Spoolman at LAN/private IPs; only metadata endpoints stay blocked.
+  await assertSafeOutboundUrl(url, { allowPrivate: true });
   return fetch(url, {
     headers: authHeaders(config),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ClipboardCheck, CheckSquare, Printer } from "lucide-react";
 import { toast } from "sonner";
@@ -7,7 +7,8 @@ import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import EmptyState from "../components/layout/EmptyState";
 import CheckoffMobilePartCard from "../components/checkoff/CheckoffMobilePartCard";
-import PartThumb from "../components/parts/PartThumb";
+import PartPreviewDialog from "../components/parts/PartPreviewDialog";
+import PartThumbExpandButton from "../components/parts/PartThumbExpandButton";
 import SpoolRemainingBadge from "../components/SpoolRemainingBadge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
@@ -28,24 +29,34 @@ import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { cn } from "../lib/utils";
+import { waitForSheetThumbnails } from "../lib/waitForSheetThumbnails";
 
 function CheckoffSheetRow({
   part,
   busy,
   compact,
+  eagerThumbs,
   onToggleUnit,
+  onPreview,
 }: {
   part: ReviewPart;
   busy: boolean;
   compact: boolean;
+  eagerThumbs?: boolean;
   onToggleUnit: (part: ReviewPart, unitIndex: number) => void;
+  onPreview: (part: ReviewPart) => void;
 }) {
   const done = part.printed_count >= part.quantity_effective && part.quantity_effective > 0;
   return (
     <tr className={cn("sheet-row", done && "sheet-row-done")}>
       <td className="sheet-cell-part">
         <div className="sheet-part">
-          <PartThumb partId={part.id} tintHex={part.filament_hex} compact={compact} />
+          <PartThumbExpandButton
+            part={part}
+            compact={compact}
+            eager={eagerThumbs}
+            onExpand={onPreview}
+          />
           <div className="sheet-part-meta">
             <span className="sheet-filename" title={part.relative_path || part.filename}>
               {part.filename}
@@ -80,11 +91,18 @@ function CheckoffSheetRow({
             </label>
           ))}
           <span className={cn("sheet-printed-count", done && "sheet-printed-done")}>
-            {part.printed_count}/{part.quantity_effective}
+            <span className="sheet-printed-screen">
+              {part.printed_count}/{part.quantity_effective}
+            </span>
+            <span className="sheet-printed-label" aria-hidden>
+              {part.printed_count} of {part.quantity_effective}
+            </span>
           </span>
         </div>
       </td>
-      <td className="sheet-cell-notes" aria-hidden />
+      <td className="sheet-cell-notes">
+        <span className="sheet-notes-line" aria-hidden />
+      </td>
     </tr>
   );
 }
@@ -110,6 +128,33 @@ export default function CheckoffPage() {
   const [filter, setFilter] = useState<CheckoffFilterMode>(persistedUi.filter);
   const [search, setSearch] = useState("");
   const [compactMode, setCompactMode] = useState(persistedUi.compactMode);
+  const [continuousPrintLayout, setContinuousPrintLayout] = useState(
+    persistedUi.continuousPrintLayout,
+  );
+  const [previewPart, setPreviewPart] = useState<ReviewPart | null>(null);
+  const [printPrep, setPrintPrep] = useState(false);
+  const sheetRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const onBeforePrint = () => setPrintPrep(true);
+    const onAfterPrint = () => setPrintPrep(false);
+    window.addEventListener("beforeprint", onBeforePrint);
+    window.addEventListener("afterprint", onAfterPrint);
+    return () => {
+      window.removeEventListener("beforeprint", onBeforePrint);
+      window.removeEventListener("afterprint", onAfterPrint);
+    };
+  }, []);
+
+  const onPrint = useCallback(async () => {
+    setPrintPrep(true);
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+    const sheet = sheetRef.current;
+    if (sheet) await waitForSheetThumbnails(sheet);
+    window.print();
+  }, []);
 
   useEffect(() => {
     if (!health?.ok || selectedProfileId == null) return;
@@ -119,8 +164,8 @@ export default function CheckoffPage() {
   }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
 
   useEffect(() => {
-    savePersistedCheckoffUi({ filter, compactMode });
-  }, [filter, compactMode]);
+    savePersistedCheckoffUi({ filter, compactMode, continuousPrintLayout });
+  }, [filter, compactMode, continuousPrintLayout]);
 
   const planName =
     review?.plan_name ??
@@ -189,7 +234,6 @@ export default function CheckoffPage() {
         }
         completeExportDownload("Missing-parts STL", snap.result, {
           pathField: "root_path",
-          isDirectory: true,
         });
         if (selectedProfileId != null) void reload(selectedProfileId);
       },
@@ -259,7 +303,7 @@ export default function CheckoffPage() {
               <Button
                 variant="ghost"
                 className="min-h-10 w-full sm:w-auto"
-                onClick={() => window.print()}
+                onClick={() => void onPrint()}
                 disabled={selectedProfileId == null || includedParts.length === 0}
               >
                 <Printer className="mr-1 h-4 w-4" />
@@ -318,14 +362,24 @@ export default function CheckoffPage() {
             ))}
           </div>
           {!isMobileLayout && (
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={compactMode}
-                onChange={(e) => setCompactMode(e.target.checked)}
-              />
-              Compact rows
-            </label>
+            <>
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={compactMode}
+                  onChange={(e) => setCompactMode(e.target.checked)}
+                />
+                Compact rows
+              </label>
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={continuousPrintLayout}
+                  onChange={(e) => setContinuousPrintLayout(e.target.checked)}
+                />
+                Continuous layout when printing
+              </label>
+            </>
           )}
         </div>
 
@@ -356,10 +410,12 @@ export default function CheckoffPage() {
         renderEmpty()
       ) : (
         <article
+          ref={sheetRef}
           className={cn(
             "checkoff-sheet",
             compactMode && !isMobileLayout && "compact",
             isMobileLayout && "checkoff-sheet-mobile",
+            printPrep && continuousPrintLayout && "checkoff-sheet-print-continuous",
           )}
         >
           <header className="sheet-header">
@@ -386,6 +442,7 @@ export default function CheckoffPage() {
                           part={part}
                           busy={busyPartId === part.id || toggleBusy}
                           onToggleUnit={onToggleUnit}
+                          onPreview={setPreviewPart}
                         />
                       ))}
                     </div>
@@ -412,7 +469,9 @@ export default function CheckoffPage() {
                             part={part}
                             busy={busyPartId === part.id || toggleBusy}
                             compact={isMobileLayout || compactMode}
+                            eagerThumbs={printPrep}
                             onToggleUnit={onToggleUnit}
+                            onPreview={setPreviewPart}
                           />
                         ))}
                       </tbody>
@@ -432,6 +491,8 @@ export default function CheckoffPage() {
           </Button>
         </div>
       )}
+
+      <PartPreviewDialog part={previewPart} onClose={() => setPreviewPart(null)} />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import type { ReviewPart, RoleFilamentRow, SpoolmanSpoolRow } from "../../api/engine";
-import PartThumb from "../parts/PartThumb";
+import PartThumbExpandButton from "../parts/PartThumbExpandButton";
 import PartSpoolPicker from "../PartSpoolPicker";
 import SpoolRemainingBadge from "../SpoolRemainingBadge";
 import { Button } from "../ui/button";
@@ -16,6 +16,7 @@ type Props = {
   onRemove: () => void;
   onRestore: () => void;
   onSpoolChange?: (partId: number, spoolman_spool_id: string | null) => void;
+  onPreview: (part: ReviewPart) => void;
 };
 
 function MobileQtyStepper({
@@ -66,11 +67,12 @@ export default function ReviewSheetMobileCard({
   onRemove,
   onRestore,
   onSpoolChange,
+  onPreview,
 }: Props) {
   return (
     <article className={cn("checkoff-mobile-card", !part.included && "opacity-80")}>
       <div className="checkoff-mobile-card-head">
-        <PartThumb partId={part.id} tintHex={part.filament_hex} sizePx={72} />
+        <PartThumbExpandButton part={part} sizePx={72} onExpand={onPreview} />
         <div className="checkoff-mobile-card-meta">
           <h4 className="checkoff-mobile-filename" title={part.relative_path || part.filename}>
             {part.filename}

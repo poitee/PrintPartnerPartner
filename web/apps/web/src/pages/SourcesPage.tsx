@@ -38,6 +38,7 @@ import { kindLabel, type SourceKind } from "../components/sources/sourceLabels";
 import { UNCategorized_FILTER } from "../components/sources/sourceLabels";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Skeleton } from "../components/ui/skeleton";
 import { useImportSharedBuild } from "../hooks/useImportSharedBuild";
 import {
   Card,
@@ -134,11 +135,12 @@ function UpdateStatusBadge({ status }: { status?: SourceSummary["update_status"]
 
 export default function SourcesPage() {
   const location = useLocation();
-  const { health } = useEngineHealth();
+  const { health, error: healthError } = useEngineHealth();
   const { busy, runJob } = useJobRunner("sync");
   const { busy: updateBusy, runJob: runUpdateJob } = useJobRunner("source-updates");
   const persistedUi = useMemo(() => loadPersistedSourcesUi(), []);
   const [sources, setSources] = useState<SourceSummary[]>([]);
+  const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -211,6 +213,8 @@ export default function SourcesPage() {
       setCategories(cats);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSourcesLoaded(true);
     }
   }, [health]);
 
@@ -227,6 +231,9 @@ export default function SourcesPage() {
   );
 
   const hasSyncedSources = sources.some((s) => Boolean(s.local_path));
+
+  // Skeletons until the first fetch resolves; bail out if the engine is offline.
+  const sourcesLoading = !sourcesLoaded && !healthError;
 
   const openDetail = (
     source: SourceSummary,
@@ -782,7 +789,41 @@ export default function SourcesPage() {
         </DialogContent>
       </Dialog>
 
-      {sources.length === 0 ? (
+      {sourcesLoading ? (
+        viewMode === "grid" ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className="overflow-hidden rounded-lg border border-border bg-card">
+                <Skeleton className="aspect-[2/1] w-full rounded-none" />
+                <div className="space-y-3 p-4">
+                  <Skeleton className="h-5 w-2/3" />
+                  <div className="flex gap-1">
+                    <Skeleton className="h-5 w-20" />
+                    <Skeleton className="h-5 w-24" />
+                  </div>
+                  <Skeleton className="h-8 w-full" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3"
+              >
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-32" />
+                </div>
+                <Skeleton className="h-5 w-20" />
+                <Skeleton className="h-8 w-16" />
+              </div>
+            ))}
+          </div>
+        )
+      ) : sources.length === 0 ? (
         <EmptyState
           icon={FolderGit2}
           title="No sources yet"

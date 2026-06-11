@@ -726,14 +726,6 @@ export async function startImportScan(projectId: number): Promise<string> {
   return body.job_id;
 }
 
-export async function startImportKitBundle(path: string): Promise<string> {
-  const body = await engineFetch<{ job_id: string }>("/jobs/import-kit-bundle", {
-    method: "POST",
-    body: JSON.stringify({ path }),
-  });
-  return body.job_id;
-}
-
 /** Upload a shared kit bundle from the user's computer (web / Docker). */
 export async function uploadKitBundle(
   file: File,
@@ -759,33 +751,14 @@ export async function uploadKitBundle(
   return res.json() as Promise<KitImportJobResult>;
 }
 
-export type KitBundlePick =
-  | { kind: "path"; path: string }
-  | { kind: "file"; file: File };
-
-/** Pick a kit bundle: filesystem path on Tauri desktop, File in the browser. */
-export async function pickKitBundle(): Promise<KitBundlePick | null> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const path = await invoke<string | null>("pick_kit_bundle_file");
-    return path ? { kind: "path", path } : null;
-  } catch {
-    const file = await pickKitBundleFileWeb();
-    return file ? { kind: "file", file } : null;
-  }
+/** Pick a kit bundle file in the browser. */
+export async function pickKitBundle(): Promise<File | null> {
+  return pickKitBundleFileWeb();
 }
 
-/** Import a shared kit bundle from a desktop path or browser file upload. */
-export async function importKitBundle(picked: KitBundlePick): Promise<KitImportJobResult> {
-  if (picked.kind === "file") {
-    return uploadKitBundle(picked.file);
-  }
-  const jobId = await startImportKitBundle(picked.path);
-  const snap = await waitForJobDone(jobId);
-  if (snap.status === "error") {
-    throw new Error(snap.message || "Import failed");
-  }
-  return (snap.result ?? {}) as KitImportJobResult;
+/** Import a shared kit bundle via browser file upload. */
+export async function importKitBundle(file: File): Promise<KitImportJobResult> {
+  return uploadKitBundle(file);
 }
 
 export async function startExportKitBundle(
@@ -845,37 +818,14 @@ export async function deletePrinter(printerId: string): Promise<void> {
 }
 
 export async function pickLocalDirectory(): Promise<string | null> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<string | null>("pick_directory");
-  } catch {
-    return pickLocalDirectoryWeb();
-  }
-}
-
-export async function pickKitBundlePath(): Promise<string | null> {
-  const picked = await pickKitBundle();
-  return picked?.kind === "path" ? picked.path : null;
-}
-
-export async function pickKitBundleFile(): Promise<File | null> {
-  const picked = await pickKitBundle();
-  return picked?.kind === "file" ? picked.file : null;
+  return pickLocalDirectoryWeb();
 }
 
 export async function saveTextFile(
   defaultName: string,
   contents: string,
 ): Promise<string | null> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<string | null>("save_text_file", {
-      defaultName,
-      contents,
-    });
-  } catch {
-    return saveTextFileWeb(defaultName, contents);
-  }
+  return saveTextFileWeb(defaultName, contents);
 }
 
 export async function fetchProfileLayers(
@@ -916,10 +866,6 @@ export async function patchPart(
   });
 }
 
-export async function openRepoFolder(localPath: string): Promise<boolean> {
-  return openPathInShell(localPath);
-}
-
 /**
  * Trigger a browser download for a server-produced export. `downloadUrl` is the
  * `download_url` returned by export jobs (e.g. "/exports/<key>"); the server
@@ -937,36 +883,6 @@ export function downloadExport(downloadUrl: string, suggestedName?: string): voi
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-}
-
-export async function openPathInShell(path: string): Promise<boolean> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("open_path_in_shell", { path });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function openDataFolder(): Promise<void> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const path = await invoke<string>("get_data_dir");
-    await invoke("open_path_in_shell", { path });
-  } catch {
-    /* web: no local data folder to open */
-  }
-}
-
-export async function openExportsFolder(): Promise<void> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const path = await invoke<string>("get_exports_dir");
-    await invoke("open_path_in_shell", { path });
-  } catch {
-    /* web: no local exports folder to open */
-  }
 }
 
 export async function fetchLegalDocument(
@@ -1481,7 +1397,6 @@ export async function waitForJobDone(jobId: string): Promise<JobSnapshot> {
 
 export async function importReposTxt(body: {
   text?: string;
-  path?: string;
 }): Promise<ImportReposTxtResult> {
   return engineFetch<ImportReposTxtResult>("/sources/import-repos-txt", {
     method: "POST",
@@ -1934,28 +1849,8 @@ export function connectJobWebSocket(
 export async function ensureEngineRunning(): Promise<void> {
   try {
     await fetchHealth();
-    return;
   } catch {
-    /* spawn via Tauri when available */
-  }
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("spawn_engine");
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 300));
-      try {
-        await fetchHealth();
-        return;
-      } catch {
-        /* retry */
-      }
-    }
-    throw new Error("Engine did not become ready");
-  } catch (e) {
-    if (e instanceof Error && e.message.includes("@tauri-apps")) {
-      throw new Error("API server is not reachable. Start the server with `npm run dev` from web/.");
-    }
-    throw e instanceof Error ? e : new Error(String(e));
+    throw new Error("API server is not reachable. Start the server with `npm run dev` from web/.");
   }
 }
 
@@ -1970,31 +1865,25 @@ export function formatSyncTime(iso: string | null): string {
 
 export async function importSourceArchive(
   sourceId: number,
-  archive: string | File,
+  archive: File,
 ): Promise<SourceSummary & { imported_files?: number }> {
-  if (archive instanceof File) {
-    const form = new FormData();
-    form.append("file", archive);
-    const res = await fetch(resolveEngineUrl(`/sources/${sourceId}/upload-zip`), {
-      method: "POST",
-      body: form,
-    });
-    if (!res.ok) {
-      let detail = `Upload failed: ${res.status}`;
-      try {
-        const body = (await res.json()) as { detail?: string };
-        if (body.detail) detail = body.detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(detail);
-    }
-    return res.json() as Promise<SourceSummary & { imported_files?: number }>;
-  }
-  return engineFetch(`/sources/${sourceId}/import-archive`, {
+  const form = new FormData();
+  form.append("file", archive);
+  const res = await fetch(resolveEngineUrl(`/sources/${sourceId}/upload-zip`), {
     method: "POST",
-    body: JSON.stringify({ path: archive }),
+    body: form,
   });
+  if (!res.ok) {
+    let detail = `Upload failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<SourceSummary & { imported_files?: number }>;
 }
 
 export async function fetchSourceDocs(
@@ -2016,13 +1905,8 @@ export async function fetchSourceDocMarkdown(
   return body.markdown;
 }
 
-export async function pickZipArchive(): Promise<string | File | null> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<string | null>("pick_zip_file");
-  } catch {
-    return pickZipArchiveFileWeb();
-  }
+export async function pickZipArchive(): Promise<File | null> {
+  return pickZipArchiveFileWeb();
 }
 
 export function shortSha(sha: string | null): string {

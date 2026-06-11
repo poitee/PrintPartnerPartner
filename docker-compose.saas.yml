@@ -50,6 +50,13 @@ services:
       CORS_ORIGIN: "true"
     volumes:
       - print-partner-data:/data
+    healthcheck:
+      # node:22-bookworm-slim has no curl/wget; use node's built-in fetch.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy

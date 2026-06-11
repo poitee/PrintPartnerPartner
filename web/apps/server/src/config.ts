@@ -103,7 +103,7 @@ export function loadConfig(): ServerConfig {
     host,
     port,
     dataDir,
-    version: process.env.PP_VERSION ?? "0.1.0-web",
+    version: process.env.PP_VERSION ?? "3.0.0-web",
     corsOrigin: parseCorsOrigin(process.env.ALLOWED_ORIGINS ?? process.env.CORS_ORIGIN),
     staticDir: process.env.STATIC_DIR ?? null,
     databaseUrl: process.env.DATABASE_URL ?? null,

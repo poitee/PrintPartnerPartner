@@ -11,6 +11,7 @@ import {
   Settings,
 } from "lucide-react";
 import CommandPalette from "../components/CommandPalette";
+import ErrorBoundary from "../components/ErrorBoundary";
 import JobTray from "../components/JobTray";
 import SupportCta from "../components/SupportCta";
 import { Toaster } from "../components/ui/sonner";
@@ -132,43 +133,10 @@ function NavItem({
   );
 }
 
-function EngineStatusPill({
-  health,
-  error,
-}: {
-  health: ReturnType<typeof useEngineHealth>["health"];
-  error: ReturnType<typeof useEngineHealth>["error"];
-}) {
-  const online = Boolean(health);
-  const offline = Boolean(error);
-  const label = online ? "Engine online" : offline ? "Engine offline" : "Connecting…";
-
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium",
-        online && "border-success/30 bg-success/10 text-success",
-        offline && "border-destructive/30 bg-destructive/10 text-destructive",
-        !online && !offline && "border-warning/30 bg-warning/10 text-warning",
-      )}
-    >
-      <span
-        className={cn(
-          "inline-flex h-1.5 w-1.5 shrink-0 rounded-full",
-          online && "bg-success shadow-[0_0_6px_color-mix(in_srgb,var(--success)_60%,transparent)]",
-          offline && "bg-destructive",
-          !online && !offline && "animate-pulse bg-warning",
-        )}
-      />
-      {label}
-    </span>
-  );
-}
-
 export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { health, error } = useEngineHealth();
+  const { health } = useEngineHealth();
   const { updateCheck } = useAppUpdateCheck(Boolean(health));
   const [bannerDismissed, setBannerDismissed] = useState(false);
 
@@ -289,10 +257,9 @@ export default function AppLayout() {
           style={{ background: "var(--gradient-header)" }}
         >
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-            <EngineStatusPill health={health} error={error} />
             {showPlanInHeader && activePlanName && (
               <span className="hidden truncate text-muted-foreground md:inline">
-                · <span className="font-medium text-foreground">{activePlanName}</span>
+                <span className="font-medium text-foreground">{activePlanName}</span>
               </span>
             )}
           </div>
@@ -315,7 +282,7 @@ export default function AppLayout() {
               <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuItem
                   className="sm:hidden"
-                  onClick={() => void openKofi()}
+                  onClick={() => openKofi()}
                 >
                   Support on Ko-fi
                 </DropdownMenuItem>
@@ -354,7 +321,9 @@ export default function AppLayout() {
         </nav>
 
         <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 pb-20 sm:p-5 sm:pb-16 lg:pb-14 print:overflow-visible print:p-0">
-          <Outlet />
+          <ErrorBoundary key={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
 
         {updateCheck && (

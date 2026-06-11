@@ -8,7 +8,6 @@ import {
   fetchSourceNaming,
   fetchStlNaming,
   mergeStlNamingProfiles,
-  openRepoFolder,
   saveImportRules,
   saveSourceNaming,
   type SourceSummary,
@@ -250,17 +249,6 @@ export default function SourceDetailSheet({
             <TabsTrigger value="docs">Docs</TabsTrigger>
             <TabsTrigger value="rules">Import files</TabsTrigger>
             <TabsTrigger value="naming">Naming</TabsTrigger>
-            {source.local_path && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="ml-2"
-                onClick={() => void openRepoFolder(source.local_path!)}
-              >
-                Open folder
-              </Button>
-            )}
           </TabsList>
 
           <TabsContent value="docs" className="mt-0 min-h-0 flex-1 overflow-hidden px-4 pb-4">

@@ -11,8 +11,11 @@ COPY web/ ./
 RUN npm run build
 
 FROM node:22-bookworm-slim AS runtime
+# Baked in by the release workflow (vX.Y.Z tag -> X.Y.Z-web); reported by GET /health.
+ARG PP_VERSION=3.0.0-web
 WORKDIR /app/web
 ENV NODE_ENV=production
+ENV PP_VERSION=${PP_VERSION}
 ENV HOST=0.0.0.0
 ENV PORT=8080
 ENV PRINT_PARTNER_DATA_DIR=/data

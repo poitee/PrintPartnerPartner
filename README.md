@@ -93,19 +93,25 @@ Mark **per-unit print progress** (saved per plan) and filter to what is missing 
 
 **Requirements:** Docker with Compose v2.
 
-From the repository root:
+From the repository root, pull the pre-built image from GitHub Container Registry and start it:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Open [http://localhost:8080](http://localhost:8080). Data persists in the `print-partner-data` volume, mounted at `/data` inside the container (SQLite database, synced repos, exports, and thumbnails).
+
+Images are published to **`ghcr.io/poitee/print-partner`** (`latest` plus a tag per release, e.g. `3.0.0`). To build from source instead:
 
 ```bash
 docker compose up --build
 ```
 
-Open [http://localhost:8080](http://localhost:8080). Data persists in the `print-partner-data` volume, mounted at `/data` inside the container (SQLite database, synced repos, exports, and thumbnails).
-
 **New to Docker?** See the step-by-step guide in [`docs/INSTALL.md`](docs/INSTALL.md). Quick checklist:
 
 1. Install [Docker Desktop](https://docs.docker.com/get-docker/) (or Docker Engine + Compose on Linux) and verify `docker compose version`.
 2. Clone this repo and `cd` into it.
-3. Run `docker compose up --build` (first build may take several minutes).
+3. Run `docker compose pull && docker compose up -d` (or `docker compose up --build` to build from source).
 4. Open [http://localhost:8080](http://localhost:8080).
 5. Add a **Source** on the Sources page, then create a plan under **Builds**.
 
@@ -123,12 +129,12 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `CORS_ORIGIN` / `ALLOWED_ORIGINS` | `true` | Allowed CORS origin(s); comma-separated list for multiple (`ALLOWED_ORIGINS` takes precedence) |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload / request body limit (512 MiB) |
-| `PP_VERSION` | `0.1.0-web` | Version reported by `GET /health` |
+| `PP_VERSION` | `3.0.0-web` (baked into release images) | Version reported by `GET /health` |
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped: compare against this version instead of GitHub |
 
-The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker: `docker compose pull && docker compose up --build`.
+The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker upgrade: `docker compose pull && docker compose up -d`.
 
 See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables and desktop-data migration.
 
