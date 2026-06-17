@@ -337,6 +337,7 @@ export class InProcessJobRunner {
       parts_imported: result.parts_imported,
       layers_imported: result.layers_imported,
       warnings: result.warnings,
+      unmatched_sources: result.unmatched_sources,
     };
   }
 

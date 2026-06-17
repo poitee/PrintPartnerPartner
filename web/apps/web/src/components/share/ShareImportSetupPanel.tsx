@@ -9,6 +9,7 @@ export type UnmatchedSource = {
   source_kind: string;
   role: string;
   import_rules: string[];
+  manifest_community_slug?: string | null;
 };
 
 type Props = {
@@ -45,6 +46,11 @@ export default function ShareImportSetupPanel({
                 {s.import_rules.length > 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     Suggested import: {s.import_rules.join(", ")}
+                  </p>
+                )}
+                {s.manifest_community_slug && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Community manifest: {s.manifest_community_slug}
                   </p>
                 )}
               </li>

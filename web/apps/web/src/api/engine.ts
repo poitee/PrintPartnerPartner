@@ -1552,6 +1552,7 @@ export type KitBundleUnmatchedSource = {
   source_kind?: string;
   role?: string;
   import_rules?: string[];
+  manifest_community_slug?: string | null;
 };
 
 export type KitImportJobResult = {
