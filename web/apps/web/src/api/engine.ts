@@ -886,7 +886,7 @@ export function downloadExport(downloadUrl: string, suggestedName?: string): voi
 }
 
 export async function fetchLegalDocument(
-  name: "summary" | "license" | "attribution" | "commercial" | "third-party",
+  name: "summary" | "license" | "attribution" | "third-party",
 ): Promise<string> {
   return engineFetchText(`/legal/${name}`);
 }

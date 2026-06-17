@@ -217,11 +217,10 @@ If Print Partner saves you time on a kit build, tips on **[Ko-fi](https://ko-fi.
 
 ## License & attribution
 
-Print Partner is licensed under the **[Print Partner Non-Commercial Software License](LICENSE)**. Plain-language summary: [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md).
+Print Partner is licensed under the **[Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)](LICENSE)**. Plain-language summary: [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md).
 
-Print Partner is inspired by [Annex Engineering](https://github.com/Annex-Engineering) workflow conventions, used with permission — see [ATTRIBUTION.md](ATTRIBUTION.md).
+Print Partner builds on work shared by the **3D Printing Community** and by **[ThunderKeys' STL Manifest Generator](https://github.com/thunderkeys/stl-manifest-generator)** — see [ATTRIBUTION.md](ATTRIBUTION.md).
 
-- **[COMMERCIAL.md](COMMERCIAL.md)** — commercial print farms may use the app internally; contact for commercializing the **software**
 - **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)** — bundled dependency notices
 
 ---
