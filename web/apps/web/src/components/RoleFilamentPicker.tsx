@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   fetchFilamentCatalog,
   fetchRoleFilaments,
   fetchSpoolmanSpools,
+  regeneratePlanThumbnails,
   saveRoleFilament,
   DEFAULT_STL_NAMING_PROFILE,
   type FilamentCatalog,
@@ -10,6 +12,13 @@ import {
   type SpoolmanSpoolRow,
   type StlNamingRoleId,
 } from "../api/engine";
+import {
+  applyColorPreset,
+  downloadColorPreset,
+  parseColorPreset,
+  pickColorPresetFile,
+} from "../lib/colorPresets";
+import { bumpThumbnailCache } from "../lib/thumbnailCache";
 import {
   buildSpoolmanSpoolId,
   parseSpoolmanFilamentId,
@@ -47,6 +56,7 @@ export default function RoleFilamentPicker({
   const [spools, setSpools] = useState<SpoolmanSpoolRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingRole, setSavingRole] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<"import" | "regenerate" | null>(null);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -139,6 +149,57 @@ export default function RoleFilamentPicker({
       setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
       setSavingRole(null);
+    }
+  };
+
+  const onSaveColors = () => {
+    if (rows.length === 0) {
+      setLoadError("No colors to save yet — assign role colors first.");
+      return;
+    }
+    downloadColorPreset(rows);
+    toast.success("Saved colors to print-partner-colors.json");
+  };
+
+  const onImportColors = async () => {
+    setLoadError(null);
+    const file = await pickColorPresetFile();
+    if (!file) return;
+    setBusyAction("import");
+    try {
+      const preset = await parseColorPreset(file);
+      const applied = await applyColorPreset(profileId, preset);
+      await load();
+      bumpThumbnailCache();
+      onUpdated?.();
+      toast.success(`Imported colors for ${applied} role${applied === 1 ? "" : "s"}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setLoadError(msg);
+      toast.error(msg);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const onRegenerateThumbnails = async () => {
+    setLoadError(null);
+    setBusyAction("regenerate");
+    try {
+      const { cleared } = await regeneratePlanThumbnails(profileId);
+      bumpThumbnailCache();
+      onUpdated?.();
+      toast.success(
+        cleared > 0
+          ? `Regenerating thumbnails (${cleared} cleared)`
+          : "Thumbnails refreshed",
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setLoadError(msg);
+      toast.error(msg);
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -242,9 +303,36 @@ export default function RoleFilamentPicker({
           );
         })}
       </ul>
-      <Button variant="ghost" size="sm" disabled={disabled} onClick={() => void load()}>
-        Refresh roles
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="ghost" size="sm" disabled={disabled} onClick={() => void load()}>
+          Refresh roles
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={disabled || rows.length === 0}
+          onClick={onSaveColors}
+        >
+          Save colors
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={disabled || busyAction !== null}
+          onClick={() => void onImportColors()}
+        >
+          {busyAction === "import" ? "Importing…" : "Import colors"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={disabled || busyAction !== null}
+          onClick={() => void onRegenerateThumbnails()}
+          title="Clear cached thumbnails so colors regenerate"
+        >
+          {busyAction === "regenerate" ? "Regenerating…" : "Regenerate thumbnails"}
+        </Button>
+      </div>
     </div>
   );
 }

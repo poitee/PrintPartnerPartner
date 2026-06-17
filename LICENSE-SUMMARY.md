@@ -61,7 +61,7 @@ You need a **separate commercial agreement** (see [COMMERCIAL.md](COMMERCIAL.md)
 - Offer it as a hosted or managed service customers pay for
 - Commercialize the **software** (sell, host for a fee, or bundle Print Partner as your product) — internal use by a print business is **not** this
 
-**[Ko-fi tips](https://ko-fi.com/poitee)** are voluntary support. They **do not** grant commercial license rights.
+**[GitHub Sponsors](https://github.com/sponsors/poitee)** is voluntary support. It **does not** grant commercial license rights.
 
 ---
 
