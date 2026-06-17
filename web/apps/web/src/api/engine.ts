@@ -886,7 +886,7 @@ export function downloadExport(downloadUrl: string, suggestedName?: string): voi
 }
 
 export async function fetchLegalDocument(
-  name: "summary" | "license" | "attribution" | "commercial" | "third-party",
+  name: "summary" | "license" | "attribution" | "third-party",
 ): Promise<string> {
   return engineFetchText(`/legal/${name}`);
 }
@@ -1580,6 +1580,7 @@ export type KitBundleUnmatchedSource = {
   source_kind?: string;
   role?: string;
   import_rules?: string[];
+  manifest_community_slug?: string | null;
 };
 
 export type KitImportJobResult = {
