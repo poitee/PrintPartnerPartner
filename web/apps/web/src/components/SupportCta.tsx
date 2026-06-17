@@ -1,6 +1,6 @@
-import { Coffee } from "lucide-react";
+import { Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { KOFI_BUTTON_LABEL, openKofi } from "@/lib/supportLinks";
+import { SPONSOR_BUTTON_LABEL, openSponsor } from "@/lib/supportLinks";
 
 type Props = {
   variant?: "default" | "secondary" | "ghost";
@@ -19,10 +19,10 @@ export default function SupportCta({
       variant={variant}
       size={size}
       className={className}
-      onClick={() => openKofi()}
+      onClick={() => openSponsor()}
     >
-      <Coffee className="h-4 w-4" />
-      {KOFI_BUTTON_LABEL}
+      <Heart className="h-4 w-4" />
+      {SPONSOR_BUTTON_LABEL}
     </Button>
   );
 }

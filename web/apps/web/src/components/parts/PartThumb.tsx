@@ -1,6 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { partThumbnailUrl } from "../../api/engine";
 import { generatePartThumbnail } from "../../lib/stlThumbnail";
+import {
+  getThumbnailCacheVersion,
+  subscribeThumbnailCache,
+} from "../../lib/thumbnailCache";
 
 const DEFAULT_THUMB_PX = 96;
 
@@ -27,6 +31,11 @@ export default function PartThumb({
   const ref = useRef<HTMLDivElement>(null);
   const [src, setSrc] = useState<string | null>(null);
   const [visible, setVisible] = useState(eager);
+  const cacheVersion = useSyncExternalStore(
+    subscribeThumbnailCache,
+    getThumbnailCacheVersion,
+    getThumbnailCacheVersion,
+  );
 
   useEffect(() => {
     if (eager) setVisible(true);
@@ -68,7 +77,7 @@ export default function PartThumb({
       });
     };
 
-    void partThumbnailUrl(partId).then((serverUrl) => {
+    void partThumbnailUrl(partId, { hex: tintHex, cacheVersion }).then((serverUrl) => {
       if (cancelled) return;
       // Probe off-DOM so the 1x1 placeholder never flashes in the UI.
       probe = new Image();
@@ -95,7 +104,7 @@ export default function PartThumb({
       }
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [visible, partId, tintHex]);
+  }, [visible, partId, tintHex, cacheVersion]);
 
   const px = compact ? 56 : sizePx;
   return (
