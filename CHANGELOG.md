@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **License** — relicensed under [Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](LICENSE), replacing the previous custom non-commercial license. Attribution now credits the 3D Printing Community and [ThunderKeys' STL Manifest Generator](https://github.com/thunderkeys/stl-manifest-generator) (see [ATTRIBUTION.md](ATTRIBUTION.md)); the separate commercial-licensing document was removed.
 - **Version alignment** — `PP_VERSION` default is now `3.0.0-web` and `web/package.json` is `3.0.0`, matching the latest CHANGELOG release so the in-app update checker compares correctly against GitHub releases.
 
 ## [3.0.0-web] - 2026-05-31

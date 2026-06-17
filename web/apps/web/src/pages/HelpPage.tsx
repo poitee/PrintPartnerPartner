@@ -35,13 +35,12 @@ import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { buildRoute, checkoffRoute, reviewRoute, sourcesRoute } from "../lib/routes";
 
-type LegalTab = "summary" | "license" | "attribution" | "commercial" | "third-party";
+type LegalTab = "summary" | "license" | "attribution" | "third-party";
 
 const LEGAL_TABS: { id: LegalTab; label: string }[] = [
   { id: "summary", label: "License overview" },
   { id: "license", label: "Full license" },
   { id: "attribution", label: "Attribution" },
-  { id: "commercial", label: "Commercial" },
   { id: "third-party", label: "Third-party notices" },
 ];
 
