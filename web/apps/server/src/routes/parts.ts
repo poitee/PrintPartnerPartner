@@ -1,4 +1,4 @@
-import { createReadStream, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppRepository } from "../db/repository.js";
@@ -107,6 +107,37 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/parts/:id/thumbnail", async (request, reply) => sendPartImage(deps, request, reply, false));
   app.get("/parts/:id/preview", async (request, reply) => sendPartImage(deps, request, reply, true));
+
+  // Clear cached thumbnail/preview PNGs for every part in a plan so the next
+  // render regenerates them from the current filament colors. Used by the
+  // "Regenerate thumbnails" action when colors look stale.
+  app.post("/plans/:id/regenerate-thumbnails", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    if (!deps.repo.getProfile(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
+    let cleared = 0;
+    for (const part of deps.repo.getProfilePartRows(id)) {
+      const stl = resolvePartStl(deps.repo, part);
+      if (!stl) continue;
+      const hex = resolvePartFilamentHex(part);
+      const role = part.role || "primary";
+      const paths = [
+        globalThumbnailPath(deps.thumbsDir, stl, role, hex),
+        globalPreviewPath(deps.thumbsDir, stl, role, hex),
+      ];
+      for (const path of paths) {
+        if (!cachedPngIfExists(path)) continue;
+        try {
+          unlinkSync(path);
+          cleared += 1;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    return { cleared };
+  });
 
   app.post("/parts/:id/thumbnail", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);

@@ -28,17 +28,7 @@ terms.
 
 Under the following terms:
 
-- **Attribution** — You must give appropriate credit (to Print Partner, the 3D
-  Printing Community, and ThunderKeys' STL Manifest Generator — see
-  [ATTRIBUTION.md](ATTRIBUTION.md)), provide a link to the license, and
-  indicate if changes were made. You may do so in any reasonable manner, but
-  not in any way that suggests the licensor endorses you or your use.
-- **NonCommercial** — You may **not** use Print Partner for commercial
-  purposes. "Commercial" here means primarily intended for or directed toward
-  commercial advantage or monetary compensation.
-- **No additional restrictions** — You may not apply legal terms or
-  technological measures that legally restrict others from doing anything the
-  license permits.
+
 
 ---
 
