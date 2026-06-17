@@ -50,3 +50,11 @@ Exact env var names and defaults are in `web/apps/server/src/config.ts`; the ful
 - Always run the `snyk_code_scan` tool for new first-party code generated in a Snyk-supported language.
 - If security issues are found in newly introduced or modified code or dependencies, fix them using the Snyk results context, then rescan.
 - Repeat until no new issues are found.
+
+## Cursor Cloud specific instructions
+
+- Dependencies are installed automatically by the startup update script (`npm ci` in `web/`); no manual install is normally needed. All Node commands run from `web/`.
+- For end-to-end work, run the default **self-host** mode — it uses embedded SQLite + local disk and needs **no external services** (no Postgres/MinIO/Docker). Just `npm run dev` from `web/`.
+- `npm run dev` serves the SPA at `http://127.0.0.1:5173` and the Fastify API at `http://127.0.0.1:18765`. Verify the API with `GET /health` (returns `{ ok: true, deploy_mode: "self-host", db: { connected: true } }`). The SPA talks to the API on :18765, so both must be up.
+- `npm run lint` prints `react-hooks/exhaustive-deps` warnings but exits 0 — warnings are expected, not failures.
+- Tests use isolated temp data dirs; some server tests intentionally log a Spoolman `HTTP 503` error line while still passing — that log is expected.
