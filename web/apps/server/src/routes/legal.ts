@@ -9,7 +9,6 @@ const FILES: Record<string, string> = {
   summary: "LICENSE-SUMMARY.md",
   license: "LICENSE",
   attribution: "ATTRIBUTION.md",
-  commercial: "COMMERCIAL.md",
   "third-party": "THIRD_PARTY_NOTICES.md",
 };
 
