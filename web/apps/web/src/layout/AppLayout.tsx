@@ -29,7 +29,7 @@ import UpdateAvailableBanner, {
   dismissUpdateBanner,
   isUpdateBannerDismissed,
 } from "../components/UpdateAvailableBanner";
-import { openKofi } from "../lib/supportLinks";
+import { openSponsor } from "../lib/supportLinks";
 import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
 import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import {
@@ -282,9 +282,9 @@ export default function AppLayout() {
               <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuItem
                   className="sm:hidden"
-                  onClick={() => openKofi()}
+                  onClick={() => openSponsor()}
                 >
-                  Support on Ko-fi
+                  Sponsor on GitHub
                 </DropdownMenuItem>
                 <DropdownMenuSeparator className="sm:hidden" />
                 {secondaryNav.map((item) => (

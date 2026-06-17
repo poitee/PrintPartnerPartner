@@ -240,6 +240,11 @@ export class AppRepository {
     );
   }
 
+  /** All raw part rows for a profile (used e.g. for thumbnail regeneration). */
+  getProfilePartRows(profileId: number): PartDbRow[] {
+    return this.listPartRows(profileId);
+  }
+
   getProjectRow(id: number): ProjectRow | null {
     return (
       this.db
