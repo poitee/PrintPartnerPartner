@@ -42,8 +42,8 @@ export default function ShareBuildExportDialog({ open, onOpenChange, profileId }
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
           Config only — no STL files. Exports a portable .print-partner-kit.zip with
-          source refs, import rules, included parts, quantities, and filament
-          assignments. Recipients need their own synced copies of the repos.
+          kit manifest selections, source refs, import rules, included parts, quantities,
+          and filament assignments. Recipients need their own synced copies of the repos.
         </p>
         <label className="flex items-center gap-2 text-sm">
           <input

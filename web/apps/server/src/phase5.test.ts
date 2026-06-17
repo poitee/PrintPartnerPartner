@@ -70,6 +70,88 @@ describe("Phase 5", () => {
 
     const importedManifest = loadKitManifest(repo, imported.profile_id);
     expect(importedManifest.selections.toolhead).toBe("stealthburner");
+    const sources = data.sources as Array<Record<string, unknown>>;
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.import_rules).toEqual(["p/"]);
+    expect(data.kit_manifest).toBeTruthy();
+    const layerProject = (data.layers as Array<Record<string, unknown>>)[0]
+      ?.project as Record<string, unknown>;
+    expect(layerProject?.import_rules).toEqual(["p/"]);
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("kit bundle export includes manifest and source metadata for re-import", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-kit-meta-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+    const source = repo.createSource({ name: "Voron", url: "https://github.com/a/voron" });
+    repo.updateSource(source.id, {
+      manifest_community_slug: "ldo-2.4-sb-tap",
+      role: "frame",
+    });
+    const repoPath = join(dir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "STLs"), { recursive: true });
+    writeFileSync(join(repoPath, "STLs", "part.stl"), "stl");
+    repo.updateSource(source.id, { local_path: repoPath });
+    repo.updateImportRules(source.id, ["STLs/"]);
+    const plan = repo.createProfile("SharePlan", source.id);
+    saveKitManifest(repo, plan.id, {
+      selections: { toolhead: "stealthburner", probe: "tap" },
+      choice_tree: [{ id: "toolhead", label: "Toolhead" }],
+    });
+    repo.recomputeProfile(plan.id);
+
+    const data = loadKitBundleBytes(exportKitBundle(repo, plan.id, join(dir, "exports"), false));
+    expect(data.sources).toBeTruthy();
+    const exportedSource = (data.sources as Array<Record<string, unknown>>)[0];
+    expect(exportedSource?.manifest_community_slug).toBe("ldo-2.4-sb-tap");
+    expect(exportedSource?.import_rules).toEqual(["STLs/"]);
+    const kitManifest = data.kit_manifest as Record<string, unknown>;
+    expect((kitManifest.selections as Record<string, string>).toolhead).toBe("stealthburner");
+    expect(kitManifest.choice_tree).toHaveLength(1);
+
+    const imported = repo.importKitBundle(data, "Recipient");
+    expect(imported.unmatched_sources).toHaveLength(0);
+    expect(repo.getSource(source.id)?.manifest_community_slug).toBe("ldo-2.4-sb-tap");
+    expect(loadKitManifest(repo, imported.profile_id).selections.probe).toBe("tap");
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("kit bundle import derives unmatched sources from layer refs when sources omitted", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-kit-layer-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+    const data = {
+      format: KIT_FORMAT,
+      version: 3,
+      profile: { name: "Shared", order_number: null },
+      layers: [
+        {
+          layer_order: 0,
+          layer_type: "base",
+          project: {
+            name: "Missing Repo",
+            url: "https://github.com/a/missing",
+            branch: "main",
+            source_kind: "github",
+            import_rules: ["parts/"],
+            manifest_community_slug: "example-manifest",
+          },
+        },
+      ],
+      parts: [],
+      kit_manifest: { selections: { head: "sb" }, include: [], exclude: [] },
+    };
+    const imported = repo.importKitBundle(data, "Imported");
+    expect(imported.unmatched_sources).toHaveLength(1);
+    expect(imported.unmatched_sources[0]?.url).toBe("https://github.com/a/missing");
+    expect(imported.unmatched_sources[0]?.import_rules).toEqual(["parts/"]);
+    expect(imported.unmatched_sources[0]?.manifest_community_slug).toBe("example-manifest");
+    expect(loadKitManifest(repo, imported.profile_id).selections.head).toBe("sb");
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
