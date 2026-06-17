@@ -18,8 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Sponsorship** — replaced Ko-fi links with [GitHub Sponsors](https://github.com/sponsors/poitee) across the app, README, and landing page; added `.github/FUNDING.yml`.
-- **Thumbnail color refresh** — part thumbnail URLs now include the filament color as a cache-busting hint, so changing a role color updates previews without a hard refresh.
+
 - **Version alignment** — `PP_VERSION` default is now `3.0.0-web` and `web/package.json` is `3.0.0`, matching the latest CHANGELOG release so the in-app update checker compares correctly against GitHub releases.
 
 ## [3.0.0-web] - 2026-05-31

@@ -27,6 +27,15 @@ import {
 import { inArray } from "drizzle-orm";
 import { applyManifestToProfile } from "../services/manifest-apply.js";
 import { loadKitManifest, saveKitManifest, type KitManifestRecord } from "../services/kit-manifest-store.js";
+import {
+  collectKitBundleSourceRefs,
+  kitLayerProjectExportRecord,
+  kitMatchedSourcePatch,
+  kitSourceRefFromProject,
+  kitSourceRefToExportRecord,
+  kitUnmatchedSourceFromRef,
+  type KitBundleUnmatchedSource,
+} from "../services/kit-bundle-share.js";
 import { resolvePartStl } from "../services/part-paths.js";
 import { normalizePartRole } from "../services/role-filament.js";
 import { getColorById, resolvePartFilamentHex } from "../services/filament-catalog.js";
@@ -314,6 +323,7 @@ export class AppRepository {
       role: string;
       local_path: string;
       metadata: Record<string, unknown>;
+      manifest_community_slug: string | null;
       last_synced_at: string | null;
       last_commit_sha: string | null;
       localPath: string;
@@ -336,6 +346,9 @@ export class AppRepository {
     if (patch.metadata != null) {
       const base = parseProjectMetadata(row.metadataJson) ?? {};
       updates.metadataJson = JSON.stringify({ ...base, ...patch.metadata });
+    }
+    if (patch.manifest_community_slug !== undefined) {
+      updates.manifestCommunitySlug = patch.manifest_community_slug;
     }
 
     this.db.update(this.schema.projects).set(updates).where(eq(this.schema.projects.id, id)).run();
@@ -1343,14 +1356,7 @@ export class AppRepository {
       return {
         layer_order: layer.layer_order,
         layer_type: layer.layer_type,
-        project: proj
-          ? {
-              name: proj.name,
-              url: proj.url,
-              branch: proj.branch ?? "main",
-              source_type: proj.sourceType ?? "git",
-            }
-          : null,
+        project: proj ? kitLayerProjectExportRecord(kitSourceRefFromProject(proj)) : null,
       };
     });
 
@@ -1388,15 +1394,7 @@ export class AppRepository {
       seen.add(layer.project_id);
       const proj = this.getProjectRow(layer.project_id);
       if (!proj) continue;
-      const rules = importRulesForProject(proj.importedPaths);
-      sourcesOut.push({
-        name: proj.name,
-        url: proj.url,
-        branch: proj.branch ?? "main",
-        source_kind: proj.sourceKind ?? "github",
-        category: resolveSourceCategory(proj.metadataJson, proj.role),
-        import_rules: rules ?? [],
-      });
+      sourcesOut.push(kitSourceRefToExportRecord(kitSourceRefFromProject(proj)));
     }
 
     const kitManifest = loadKitManifest(this, profileId);
@@ -1411,7 +1409,7 @@ export class AppRepository {
         layers: layersOut,
         parts: partsOut,
         kit_manifest: kitManifest,
-        ...(sourcesOut.length ? { sources: sourcesOut } : {}),
+        sources: sourcesOut,
       },
     };
   }
@@ -1425,14 +1423,7 @@ export class AppRepository {
     parts_imported: number;
     layers_imported: number;
     warnings: string[];
-    unmatched_sources: Array<{
-      name: string;
-      url: string;
-      branch: string;
-      source_kind: string;
-      role: string;
-      import_rules: string[];
-    }>;
+    unmatched_sources: KitBundleUnmatchedSource[];
   } {
     const profileData = (data.profile as Record<string, unknown>) ?? {};
     const desired = (newName || profileData.name || "Imported kit").toString().trim() || "Imported kit";
@@ -1462,14 +1453,7 @@ export class AppRepository {
     if (!profile) throw new Error("Failed to create profile");
 
     const warnings: string[] = [];
-    const unmatched_sources: Array<{
-      name: string;
-      url: string;
-      branch: string;
-      source_kind: string;
-      role: string;
-      import_rules: string[];
-    }> = [];
+    const unmatched_sources: KitBundleUnmatchedSource[] = [];
     let layersImported = 0;
 
     const allProjects = this.db
@@ -1491,33 +1475,22 @@ export class AppRepository {
       return null;
     };
 
-    const rulesFromSourceEntry = (entry: Record<string, unknown>): string[] => {
-      const raw = entry.import_rules;
-      if (!Array.isArray(raw)) return [];
-      return raw.map((r) => String(r)).filter(Boolean);
-    };
-
-    for (const sourceEntry of (data.sources as Array<Record<string, unknown>>) ?? []) {
-      const ref = {
-        name: sourceEntry.name,
-        url: sourceEntry.url,
-      };
-      const projectId = resolveProjectId(ref);
-      const importRules = rulesFromSourceEntry(sourceEntry);
+    for (const sourceRef of collectKitBundleSourceRefs(data)) {
+      const projectId = resolveProjectId({
+        name: sourceRef.name,
+        url: sourceRef.url,
+      });
       if (projectId != null) {
-        if (importRules.length > 0) {
-          this.updateImportRules(projectId, importRules);
+        if (sourceRef.import_rules.length > 0) {
+          this.updateImportRules(projectId, sourceRef.import_rules);
+        }
+        const patch = kitMatchedSourcePatch(sourceRef);
+        if (Object.keys(patch).length > 0) {
+          this.updateSource(projectId, patch);
         }
         continue;
       }
-      unmatched_sources.push({
-        name: String(sourceEntry.name ?? ""),
-        url: String(sourceEntry.url ?? ""),
-        branch: String(sourceEntry.branch ?? "main"),
-        source_kind: String(sourceEntry.source_kind ?? "github"),
-        role: String(sourceEntry.category ?? sourceEntry.role ?? "unassigned"),
-        import_rules: importRules,
-      });
+      unmatched_sources.push(kitUnmatchedSourceFromRef(sourceRef));
     }
 
     const kitManifestRaw = data.kit_manifest;

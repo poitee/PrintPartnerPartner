@@ -4,7 +4,7 @@ Print Partner includes open-source software and optional external tools. This fi
 
 ## Inspiration
 
-Print Partner’s workflow is inspired by [Annex Engineering](https://github.com/Annex-Engineering) (used with permission). See [ATTRIBUTION.md](ATTRIBUTION.md). Print Partner application source by Chad Lynch is licensed under the [Print Partner Non-Commercial Software License](LICENSE).
+Print Partner’s workflow builds on work shared by the 3D Printing Community and by [ThunderKeys' STL Manifest Generator](https://github.com/thunderkeys/stl-manifest-generator). See [ATTRIBUTION.md](ATTRIBUTION.md). Print Partner itself is licensed under the [Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)](LICENSE).
 
 ## Python packages (direct dependencies)
 
@@ -48,4 +48,4 @@ Built-in printer presets use common printer model names for bed-size hints only.
 
 ## Print Partner license
 
-Application source code by Chad Lynch is licensed under the **Print Partner Non-Commercial Software License**. See [LICENSE](LICENSE) (legal text), [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md) (explanation), [ATTRIBUTION.md](ATTRIBUTION.md) (Annex inspiration credit), and [COMMERCIAL.md](COMMERCIAL.md) (commercial use).
+Print Partner is licensed under the **Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)**. See [LICENSE](LICENSE) (legal text), [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md) (explanation), and [ATTRIBUTION.md](ATTRIBUTION.md) (community and ThunderKeys credit).
