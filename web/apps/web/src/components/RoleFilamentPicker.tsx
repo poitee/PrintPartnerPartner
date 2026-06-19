@@ -99,7 +99,9 @@ export default function RoleFilamentPicker({
       });
       setRows(result.roles);
       if (result.updated === 0) {
-        setLoadError("No included parts matched that role — run Update build first.");
+        toast.message(
+          `Saved ${ROLE_LABELS[role as StlNamingRoleId] ?? role} color — applies when parts with that role are included.`,
+        );
       }
       onUpdated?.();
     } catch (e) {
@@ -142,7 +144,7 @@ export default function RoleFilamentPicker({
       });
       setRows(result.roles);
       if (result.updated === 0) {
-        setLoadError("No included parts matched that role — run Update build first.");
+        toast.message(`Saved ${ROLE_LABELS[role as StlNamingRoleId] ?? role} custom color.`);
       }
       onUpdated?.();
     } catch (e) {
@@ -221,7 +223,7 @@ export default function RoleFilamentPicker({
   if (rows.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No included parts yet — update build first to assign colors by role.
+        Loading role colors…
       </p>
     );
   }
