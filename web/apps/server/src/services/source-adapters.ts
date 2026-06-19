@@ -10,7 +10,8 @@ export type SourceMetadataStub = {
 export function fetchPrintablesMetadata(url: string): SourceMetadataStub {
   return {
     supported: false,
-    message: "Printables import is not supported in the web app yet. Add a GitHub or local folder source instead.",
+    message:
+      "Printables is not fetched automatically in the web app. Create a Printables source with the model URL, then upload the ZIP archive you downloaded from the site.",
     url,
     title: null,
   };

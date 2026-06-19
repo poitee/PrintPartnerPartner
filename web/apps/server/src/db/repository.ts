@@ -44,7 +44,7 @@ import { formatSpoolSummaryBadge } from "../integrations/spoolman-client.js";
 import { REMOTE_CHECKED_AT_KEY, REMOTE_UPDATE_STATUS_KEY } from "../services/source-update-check.js";
 import type { PartRow, ProfileSummary, SourceSummary } from "@print-partner/contracts";
 import { and, asc, count, eq, sql } from "drizzle-orm";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { DrizzleDb } from "./client.js";
 import { asSyncDb, type AppDrizzleDb } from "./sync-db-bridge.js";
 import { getRequestTenantId } from "../middleware/tenant-context.js";
@@ -277,9 +277,16 @@ export class AppRepository {
       .get();
     if (existing) throw new Error(`Source already exists: ${name}`);
 
-    const localPath =
-      input.local_path ??
-      (sourceKind === "local" ? join(this.reposDir, "pending") : null);
+    const reposRoot = resolve(this.reposDir);
+    let trustedLocalPath: string | null = null;
+    if (input.local_path) {
+      const candidate = resolve(input.local_path);
+      if (candidate.startsWith(reposRoot + sep) || candidate === reposRoot) {
+        trustedLocalPath = candidate;
+      }
+    }
+
+    const localPath = trustedLocalPath;
 
     const inserted = this.db
       .insert(this.schema.projects)
@@ -300,7 +307,7 @@ export class AppRepository {
     if (!inserted) throw new Error("Failed to create source");
 
     const repoPath = join(this.reposDir, String(inserted.id));
-    if (!inserted.localPath || inserted.localPath.includes("pending")) {
+    if (!inserted.localPath) {
       this.db
         .update(this.schema.projects)
         .set({ localPath: repoPath })

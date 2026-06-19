@@ -10,7 +10,9 @@ import {
   formatSyncTime,
   importReposTxt,
   importSourceArchive,
+  importSourceFiles,
   pickLocalDirectory,
+  pickLocalFiles,
   pickZipArchive,
   shortSha,
   startCheckSourceUpdates,
@@ -80,7 +82,8 @@ type WizardForm = {
   branch: string;
   source_kind: SourceKind;
   category: string;
-  local_path: string;
+  pendingFiles: File[];
+  pendingZip: File | null;
 };
 
 const emptyForm = (categories: string[]): WizardForm => ({
@@ -89,7 +92,8 @@ const emptyForm = (categories: string[]): WizardForm => ({
   branch: "main",
   source_kind: "github",
   category: categories[0] ?? "",
-  local_path: "",
+  pendingFiles: [],
+  pendingZip: null,
 });
 
 function matchesFilters(
@@ -289,10 +293,48 @@ export default function SourcesPage() {
       branch: s.branch || "main",
       source_kind: (s.source_kind as SourceKind) || "github",
       category: s.category ?? "",
-      local_path: s.local_path || "",
+      pendingFiles: [],
+      pendingZip: null,
     });
     setEditId(s.id);
     setWizardOpen(true);
+  };
+
+  const uploadPendingContent = async (
+    sourceId: number,
+    kind: SourceKind,
+    pendingFiles: File[],
+    pendingZip: File | null,
+  ) => {
+    if (kind === "local") {
+      if (pendingFiles.length === 0) {
+        throw new Error("Select STL files or a folder to upload.");
+      }
+      const result = await importSourceFiles(sourceId, pendingFiles);
+      toast.success(
+        `Uploaded ${result.imported_files ?? pendingFiles.length} file(s)` +
+          (result.stl_count != null ? ` (${result.stl_count} STL)` : ""),
+      );
+      return;
+    }
+
+    const needsZip =
+      kind === "archive" || kind === "printables" || kind === "makerworld";
+    if (!needsZip) return;
+
+    const zip = pendingZip ?? (await pickZipArchive());
+    if (!zip) {
+      throw new Error(
+        kind === "archive"
+          ? "A ZIP archive is required for this source."
+          : "Upload the model archive you downloaded from the site.",
+      );
+    }
+    const result = await importSourceArchive(sourceId, zip);
+    toast.success(
+      `Uploaded archive` +
+        (result.stl_count != null ? ` (${result.stl_count} STL files)` : ""),
+    );
   };
 
   const saveSource = async () => {
@@ -300,28 +342,28 @@ export default function SourcesPage() {
     try {
       const category = form.category.trim() || null;
       if (editId == null) {
+        if (
+          (form.source_kind === "printables" || form.source_kind === "makerworld") &&
+          !form.url.trim()
+        ) {
+          throw new Error("Enter the model page URL from Printables or MakerWorld.");
+        }
         const created = await createSource({
           name: form.name.trim(),
           url: form.url.trim(),
           branch: form.branch.trim() || "main",
           source_kind: form.source_kind,
           category,
-          local_path: form.local_path || undefined,
         });
+        await uploadPendingContent(
+          created.id,
+          form.source_kind,
+          form.pendingFiles,
+          form.pendingZip,
+        );
         setWizardOpen(false);
         await refresh();
         if (created.source_kind === "github") syncSources([created.id]);
-        if (
-          (created.source_kind === "printables" ||
-            created.source_kind === "makerworld") &&
-          created.id
-        ) {
-          const zipPath = await pickZipArchive();
-          if (zipPath) {
-            await importSourceArchive(created.id, zipPath);
-            await refresh();
-          }
-        }
       } else {
         await updateSource(editId, {
           name: form.name.trim(),
@@ -329,8 +371,15 @@ export default function SourcesPage() {
           branch: form.branch.trim(),
           source_kind: form.source_kind,
           category,
-          local_path: form.local_path || undefined,
         });
+        if (form.pendingFiles.length > 0 || form.pendingZip) {
+          await uploadPendingContent(
+            editId,
+            form.source_kind,
+            form.pendingFiles,
+            form.pendingZip,
+          );
+        }
         setWizardOpen(false);
         await refresh();
       }
@@ -439,6 +488,34 @@ export default function SourcesPage() {
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => openDetail(s, "docs")}>Open</DropdownMenuItem>
               <DropdownMenuItem onClick={() => openEditWizard(s)}>Edit</DropdownMenuItem>
+              {(s.source_kind === "local" ||
+                s.source_kind === "archive" ||
+                s.source_kind === "printables" ||
+                s.source_kind === "makerworld") && (
+                <DropdownMenuItem
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        if (s.source_kind === "local") {
+                          const files = await pickLocalFiles();
+                          if (!files.length) return;
+                          await importSourceFiles(s.id, files);
+                        } else {
+                          const zip = await pickZipArchive();
+                          if (!zip) return;
+                          await importSourceArchive(s.id, zip);
+                        }
+                        await refresh();
+                        toast.success("Upload complete");
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : String(e));
+                      }
+                    })();
+                  }}
+                >
+                  Upload files…
+                </DropdownMenuItem>
+              )}
               {s.source_kind === "github" && (
                 <DropdownMenuItem onClick={() => syncSources([s.id])} disabled={busy}>
                   Sync
@@ -501,6 +578,34 @@ export default function SourcesPage() {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onClick={() => openEditWizard(s)}>Edit</DropdownMenuItem>
+          {(s.source_kind === "local" ||
+            s.source_kind === "archive" ||
+            s.source_kind === "printables" ||
+            s.source_kind === "makerworld") && (
+            <DropdownMenuItem
+              onClick={() => {
+                void (async () => {
+                  try {
+                    if (s.source_kind === "local") {
+                      const files = await pickLocalFiles();
+                      if (!files.length) return;
+                      await importSourceFiles(s.id, files);
+                    } else {
+                      const zip = await pickZipArchive();
+                      if (!zip) return;
+                      await importSourceArchive(s.id, zip);
+                    }
+                    await refresh();
+                    toast.success("Upload complete");
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : String(e));
+                  }
+                })();
+              }}
+            >
+              Upload files…
+            </DropdownMenuItem>
+          )}
           {s.source_kind === "github" && (
             <DropdownMenuItem onClick={() => syncSources([s.id])} disabled={busy}>
               Sync
@@ -737,29 +842,83 @@ export default function SourcesPage() {
               </Select>
             </div>
             {form.source_kind === "local" ? (
-              <div className="flex items-end gap-2 md:col-span-2">
-                <div className="min-w-0 flex-1 space-y-1">
-                  <Label>Folder</Label>
-                  <Input readOnly value={form.local_path} placeholder="Pick a folder…" />
+              <div className="space-y-2 md:col-span-2">
+                <Label>STL files</Label>
+                <p className="text-xs text-muted-foreground">
+                  Files upload to the server when you save. Pick a folder or select multiple
+                  STL files from your computer.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={async () => {
+                      const files = await pickLocalDirectory();
+                      if (files.length > 0) {
+                        setForm((f) => ({ ...f, pendingFiles: files, pendingZip: null }));
+                      }
+                    }}
+                  >
+                    Browse folder…
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={async () => {
+                      const files = await pickLocalFiles();
+                      if (files.length > 0) {
+                        setForm((f) => ({
+                          ...f,
+                          pendingFiles: [...f.pendingFiles, ...files],
+                          pendingZip: null,
+                        }));
+                      }
+                    }}
+                  >
+                    Add STL files…
+                  </Button>
+                  {form.pendingFiles.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setForm((f) => ({ ...f, pendingFiles: [] }))}
+                    >
+                      Clear
+                    </Button>
+                  )}
                 </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={async () => {
-                    const path = await pickLocalDirectory();
-                    if (path) {
-                      setForm((f) => ({
-                        ...f,
-                        local_path: path,
-                        url: f.url || `file://${path}`,
-                      }));
-                    }
-                  }}
-                >
-                  Browse
-                </Button>
+                {form.pendingFiles.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {form.pendingFiles.length} file
+                    {form.pendingFiles.length === 1 ? "" : "s"} selected
+                  </p>
+                )}
               </div>
-            ) : form.source_kind !== "archive" ? (
+            ) : form.source_kind === "archive" ? (
+              <div className="space-y-2 md:col-span-2">
+                <Label>ZIP archive</Label>
+                <p className="text-xs text-muted-foreground">
+                  Upload a ZIP containing STL files when you save.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={async () => {
+                      const zip = await pickZipArchive();
+                      if (zip) setForm((f) => ({ ...f, pendingZip: zip, pendingFiles: [] }));
+                    }}
+                  >
+                    {form.pendingZip ? "Change ZIP…" : "Choose ZIP…"}
+                  </Button>
+                  {form.pendingZip && (
+                    <span className="truncate text-xs text-muted-foreground">
+                      {form.pendingZip.name}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : (
               <>
                 <div className="space-y-1 md:col-span-2">
                   <Label htmlFor="source-url">URL</Label>
@@ -767,9 +926,42 @@ export default function SourcesPage() {
                     id="source-url"
                     value={form.url}
                     onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-                    placeholder="https://github.com/org/repo.git"
+                    placeholder={
+                      form.source_kind === "printables"
+                        ? "https://www.printables.com/model/…"
+                        : form.source_kind === "makerworld"
+                          ? "https://makerworld.com/en/models/…"
+                          : "https://github.com/org/repo.git"
+                    }
                   />
                 </div>
+                {(form.source_kind === "printables" ||
+                  form.source_kind === "makerworld") && (
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>Model archive (ZIP)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Download the model archive from the site, then attach it here. The web app
+                      uploads the ZIP to your server — it does not fetch from Printables directly.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={async () => {
+                          const zip = await pickZipArchive();
+                          if (zip) setForm((f) => ({ ...f, pendingZip: zip, pendingFiles: [] }));
+                        }}
+                      >
+                        {form.pendingZip ? "Change ZIP…" : "Choose ZIP…"}
+                      </Button>
+                      {form.pendingZip && (
+                        <span className="truncate text-xs text-muted-foreground">
+                          {form.pendingZip.name}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
                 {form.source_kind === "github" && (
                   <GitHubBranchField
                     url={form.url}
@@ -778,9 +970,12 @@ export default function SourcesPage() {
                   />
                 )}
               </>
-            ) : null}
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-2">
+            {loadError && wizardOpen && (
+              <p className="mr-auto text-sm text-destructive self-center">{loadError}</p>
+            )}
             <Button variant="ghost" onClick={() => setWizardOpen(false)}>
               Cancel
             </Button>
