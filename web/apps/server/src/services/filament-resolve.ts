@@ -242,6 +242,7 @@ export async function preloadSpoolmanForColorIds(
 export async function enrichRoleFilamentRows<
   T extends {
     filament_color_id: string | null;
+    filament_custom_hex?: string | null;
     filament_display: string;
     filament_hex: string | null;
   },
@@ -251,12 +252,18 @@ export async function enrichRoleFilamentRows<
     rows.map((r) => r.filament_color_id),
   );
   for (const row of rows) {
-    const resolved = ctx.resolve(row.filament_color_id);
-    if (resolved) {
-      row.filament_display = resolved.combo_label;
-      row.filament_hex = resolved.hex;
-    } else if (row.filament_color_id && !row.filament_display) {
-      row.filament_display = row.filament_color_id;
+    if (row.filament_color_id) {
+      const resolved = ctx.resolve(row.filament_color_id);
+      if (resolved) {
+        row.filament_display = resolved.combo_label;
+        row.filament_hex = resolved.hex;
+        continue;
+      }
+      if (!row.filament_display) row.filament_display = row.filament_color_id;
+    }
+    if (row.filament_custom_hex) {
+      row.filament_hex = row.filament_custom_hex;
+      if (!row.filament_display) row.filament_display = "Custom color";
     }
   }
 }
