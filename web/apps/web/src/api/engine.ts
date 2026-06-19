@@ -10,6 +10,7 @@ import type {
 import {
   pickKitBundleFileWeb,
   pickLocalDirectoryWeb,
+  pickLocalFilesWeb,
   pickZipArchiveFileWeb,
   saveTextFileWeb,
 } from "@/lib/webFilePickers";
@@ -817,8 +818,12 @@ export async function deletePrinter(printerId: string): Promise<void> {
   await engineFetch(`/printers/${printerId}`, { method: "DELETE" });
 }
 
-export async function pickLocalDirectory(): Promise<string | null> {
+export async function pickLocalDirectory(): Promise<File[]> {
   return pickLocalDirectoryWeb();
+}
+
+export async function pickLocalFiles(): Promise<File[]> {
+  return pickLocalFilesWeb();
 }
 
 export async function saveTextFile(
@@ -1895,7 +1900,13 @@ export function formatSyncTime(iso: string | null): string {
 export async function importSourceArchive(
   sourceId: number,
   archive: File,
-): Promise<SourceSummary & { imported_files?: number }> {
+): Promise<
+  SourceSummary & {
+    imported_files?: number;
+    stl_count?: number;
+    suggested_import_rules?: string[];
+  }
+> {
   const form = new FormData();
   form.append("file", archive);
   const res = await fetch(resolveEngineUrl(`/sources/${sourceId}/upload-zip`), {
@@ -1912,7 +1923,57 @@ export async function importSourceArchive(
     }
     throw new Error(detail);
   }
-  return res.json() as Promise<SourceSummary & { imported_files?: number }>;
+  return res.json() as Promise<
+    SourceSummary & {
+      imported_files?: number;
+      stl_count?: number;
+      suggested_import_rules?: string[];
+    }
+  >;
+}
+
+export async function importSourceFiles(
+  sourceId: number,
+  files: File[],
+): Promise<
+  SourceSummary & {
+    imported_files?: number;
+    stl_count?: number;
+    suggested_import_rules?: string[];
+  }
+> {
+  if (!files.length) throw new Error("Select at least one file to upload");
+  const form = new FormData();
+  const relativePaths = files.map(
+    (file) =>
+      (file as File & { webkitRelativePath?: string }).webkitRelativePath ||
+      file.name,
+  );
+  form.append("relative_paths", JSON.stringify(relativePaths));
+  for (const file of files) {
+    form.append("files", file);
+  }
+  const res = await fetch(resolveEngineUrl(`/sources/${sourceId}/upload-files`), {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    let detail = `Upload failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<
+    SourceSummary & {
+      imported_files?: number;
+      stl_count?: number;
+      suggested_import_rules?: string[];
+    }
+  >;
 }
 
 export async function fetchSourceDocs(

@@ -1,5 +1,5 @@
 import AdmZip from "adm-zip";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 
 export const MAX_ZIP_ENTRIES = 10_000;
@@ -64,6 +64,81 @@ export function extractZipBuffer(buffer: Buffer, destDir: string, limits?: Extra
   return extractEntries(new AdmZip(buffer), destDir, limits);
 }
 
+function sanitizeRelativeEntryPath(relativePath: string): string {
+  const entryName = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!entryName || entryName === "." || entryName.split("/").includes("..")) {
+    throw new Error(`File path escapes extraction directory: ${relativePath}`);
+  }
+  return entryName;
+}
+
+function resolveSafeTarget(base: string, relativePath: string): string {
+  const entryName = sanitizeRelativeEntryPath(relativePath);
+  const target = resolve(base, entryName);
+  if (!target.startsWith(base + sep)) {
+    throw new Error(`File path escapes extraction directory: ${relativePath}`);
+  }
+  return target;
+}
+
+export function discoverImportRules(extractDir: string): string[] {
+  let entries;
+  try {
+    entries = readdirSync(extractDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const dirs = entries.filter((e) => e.isDirectory());
+  const stls = entries.filter(
+    (e) => e.isFile() && e.name.toLowerCase().endsWith(".stl"),
+  );
+  if (dirs.length === 1 && stls.length === 0) {
+    return [`${dirs[0]!.name}/`];
+  }
+  const rules: string[] = [];
+  for (const dir of dirs) rules.push(`${dir.name}/`);
+  for (const stl of stls) rules.push(stl.name);
+  return rules;
+}
+
+export type UploadedFilesResult = {
+  extractDir: string;
+  fileCount: number;
+  stlCount: number;
+  suggestedImportRules: string[];
+};
+
+export function writeUploadedFiles(
+  files: Array<{ relativePath: string; buffer: Buffer }>,
+  sourcesDir: string,
+  sourceId: number,
+): UploadedFilesResult {
+  if (!files.length) throw new Error("At least one file is required");
+  const dir = join(sourcesDir, String(sourceId));
+  mkdirSync(dir, { recursive: true });
+  const extractDir = join(dir, "files");
+  try {
+    rmSync(extractDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+  mkdirSync(extractDir, { recursive: true });
+  const base = resolve(extractDir);
+  let stlCount = 0;
+  for (const file of files) {
+    const target = resolveSafeTarget(base, file.relativePath);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, file.buffer);
+    if (file.relativePath.toLowerCase().endsWith(".stl")) stlCount += 1;
+  }
+  return {
+    extractDir,
+    fileCount: files.length,
+    stlCount,
+    suggestedImportRules: discoverImportRules(extractDir),
+  };
+}
+
 export function writeUploadedZip(buffer: Buffer, sourcesDir: string, sourceId: number): string {
   const dir = join(sourcesDir, String(sourceId));
   mkdirSync(dir, { recursive: true });
@@ -77,4 +152,26 @@ export function writeUploadedZip(buffer: Buffer, sourcesDir: string, sourceId: n
   }
   extractZipBuffer(buffer, extractDir);
   return extractDir;
+}
+
+export function finalizeUploadedSource(
+  extractDir: string,
+): { suggestedImportRules: string[]; stlCount: number } {
+  let stlCount = 0;
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.toLowerCase().endsWith(".stl")) stlCount += 1;
+    }
+  };
+  try {
+    walk(extractDir);
+  } catch {
+    /* ignore */
+  }
+  return {
+    suggestedImportRules: discoverImportRules(extractDir),
+    stlCount,
+  };
 }
