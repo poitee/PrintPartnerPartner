@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import AdmZip from "adm-zip";
-import { extractZipBuffer } from "./archive-import.js";
+import { extractZipBuffer, writeUploadedFiles, discoverImportRules } from "./archive-import.js";
 
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), "pp-archive-"));
@@ -93,6 +93,43 @@ describe("archive extraction hardening", () => {
         maxUncompressedBytes: 1024,
       }),
     ).toThrow(/uncompressed size exceeds limit/);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("uploads multiple files with relative paths", () => {
+    const root = tempRoot();
+    const result = writeUploadedFiles(
+      [
+        { relativePath: "parts/a.stl", buffer: Buffer.from("solid a") },
+        { relativePath: "parts/b.stl", buffer: Buffer.from("solid b") },
+      ],
+      root,
+      42,
+    );
+    expect(result.fileCount).toBe(2);
+    expect(result.stlCount).toBe(2);
+    expect(existsSync(join(result.extractDir, "parts/a.stl"))).toBe(true);
+    expect(result.suggestedImportRules).toEqual(["parts/"]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("rejects path traversal in uploaded file names", () => {
+    const root = tempRoot();
+    expect(() =>
+      writeUploadedFiles(
+        [{ relativePath: "../evil.stl", buffer: Buffer.from("solid") }],
+        root,
+        1,
+      ),
+    ).toThrow(/escapes extraction directory/);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("discovers import rules for a single top-level folder", () => {
+    const root = tempRoot();
+    const kit = join(root, "kit");
+    mkdirSync(join(kit, "STLs"), { recursive: true });
+    expect(discoverImportRules(kit)).toEqual(["STLs/"]);
     rmSync(root, { recursive: true, force: true });
   });
 });

@@ -31,6 +31,37 @@ function multipartZip(buffer: Buffer, filename = "archive.zip") {
   };
 }
 
+function multipartFiles(
+  files: Array<{ name: string; content: Buffer }>,
+  field = "files",
+) {
+  const boundary = "----pp-test-boundary";
+  const parts: Buffer[] = [];
+  parts.push(
+    Buffer.from(
+      `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="relative_paths"\r\n\r\n` +
+        `${JSON.stringify(files.map((f) => f.name))}\r\n`,
+    ),
+  );
+  for (const file of files) {
+    parts.push(
+      Buffer.from(
+        `--${boundary}\r\n` +
+          `Content-Disposition: form-data; name="${field}"; filename="${file.name}"\r\n` +
+          `Content-Type: application/octet-stream\r\n\r\n`,
+      ),
+    );
+    parts.push(file.content);
+    parts.push(Buffer.from("\r\n"));
+  }
+  parts.push(Buffer.from(`--${boundary}--\r\n`));
+  return {
+    payload: Buffer.concat(parts),
+    headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+  };
+}
+
 describe("path traversal hardening", () => {
   afterEach(() => {
     delete process.env.PRINT_PARTNER_DATA_DIR;
@@ -111,6 +142,77 @@ describe("path traversal hardening", () => {
     expect(res.statusCode).toBe(400);
     expect((res.json() as { detail: string }).detail).toMatch(/escapes extraction directory/);
     expect(existsSync(join(dir, "evil.txt"))).toBe(false);
+
+    await app.close();
+    ports.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("POST /sources accepts printables with URL and uploads model zip", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-printables-"));
+    const { app, ports } = await makeApp(dir);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/sources",
+      payload: {
+        name: "Benchy",
+        url: "https://www.printables.com/model/123-bench",
+        source_kind: "printables",
+      },
+    });
+    expect(created.statusCode).toBe(200);
+    const sourceId = (created.json() as { id: number }).id;
+
+    const zip = new AdmZip();
+    zip.addFile("benchy.stl", Buffer.from("solid benchy"));
+    const { payload, headers } = multipartZip(zip.toBuffer());
+
+    const upload = await app.inject({
+      method: "POST",
+      url: `/sources/${sourceId}/upload-zip`,
+      payload,
+      headers,
+    });
+    expect(upload.statusCode).toBe(200);
+    const body = upload.json() as { source_kind: string; stl_count?: number };
+    expect(body.source_kind).toBe("printables");
+    expect(body.stl_count).toBe(1);
+
+    await app.close();
+    ports.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("POST /sources/:id/upload-files accepts multiple STL uploads", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-upload-files-"));
+    const { app, ports } = await makeApp(dir);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/sources",
+      payload: { name: "Local", source_kind: "local" },
+    });
+    const sourceId = (created.json() as { id: number }).id;
+
+    const { payload, headers } = multipartFiles([
+      { name: "parts/a.stl", content: Buffer.from("solid a") },
+      { name: "parts/b.stl", content: Buffer.from("solid b") },
+    ]);
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/sources/${sourceId}/upload-files`,
+      payload,
+      headers,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(existsSync(join(dir, "sources", String(sourceId), "files", "parts", "a.stl"))).toBe(
+      true,
+    );
+    const body = res.json() as { stl_count?: number; suggested_import_rules?: string[] };
+    expect(body.stl_count).toBe(2);
+    expect(body.suggested_import_rules).toEqual(["parts/"]);
 
     await app.close();
     ports.db.close();
