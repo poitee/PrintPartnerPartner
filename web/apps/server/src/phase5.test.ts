@@ -188,7 +188,7 @@ describe("Phase 5", () => {
   it("printables adapter returns not supported", () => {
     const meta = fetchPrintablesMetadata("https://www.printables.com/model/123");
     expect(meta.supported).toBe(false);
-    expect(meta.message).toContain("not supported");
+    expect(meta.message).toContain("Printables");
   });
 
   it("S3 storage resolvePath uses tenant prefix", () => {

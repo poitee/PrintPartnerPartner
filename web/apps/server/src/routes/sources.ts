@@ -10,7 +10,7 @@ import {
 import type { AppRepository } from "../db/repository.js";
 import { resolveCaseInsensitiveRepoPath } from "../services/part-paths.js";
 import { listGithubBranches, syncGithubSource } from "../services/github-sync.js";
-import { writeUploadedZip } from "../services/archive-import.js";
+import { writeUploadedZip, writeUploadedFiles, finalizeUploadedSource } from "../services/archive-import.js";
 import {
   cachedPngIfExists,
   globalPreviewPath,
@@ -85,11 +85,13 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
     try {
       const body = request.body as Record<string, unknown>;
       const sourceKind = body.source_kind != null ? String(body.source_kind) : undefined;
-      const url = body.url != null ? String(body.url) : undefined;
       if (sourceKind === "printables" || sourceKind === "makerworld") {
-        const { resolveRemoteSourceMetadata } = await import("../services/source-adapters.js");
-        const stub = resolveRemoteSourceMetadata(sourceKind, url ?? "");
-        return reply.status(501).send(stub);
+        const modelUrl = body.url != null ? String(body.url).trim() : "";
+        if (!modelUrl) {
+          return reply.status(400).send({
+            detail: `A ${sourceKind} model URL is required. Download the archive from the site and upload it after creating the source.`,
+          });
+        }
       }
       return deps.repo.createSource({
         name: String(body.name ?? ""),
@@ -181,14 +183,103 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }
+    const { suggestedImportRules, stlCount } = finalizeUploadedSource(extractDir);
+    const existingRules = deps.repo.getProjectRow(id)?.importedPaths;
+    const hasRules =
+      existingRules != null &&
+      existingRules.trim() !== "" &&
+      existingRules.trim() !== "[]";
+    if (!hasRules && suggestedImportRules.length > 0) {
+      deps.repo.updateImportRules(id, suggestedImportRules);
+    }
     const updated = deps.repo.updateSource(id, {
       localPath: extractDir,
-      source_kind: "archive",
+      source_kind: row.sourceKind === "archive" ? "archive" : row.sourceKind ?? "archive",
       last_synced_at: new Date().toISOString(),
       last_commit_sha: null,
     });
     void prefetchSourceCover(deps, id);
-    return { ...updated, imported_files: buffer.length };
+    return {
+      ...updated,
+      imported_files: buffer.length,
+      stl_count: stlCount,
+      suggested_import_rules: suggestedImportRules,
+    };
+  });
+
+  app.post("/sources/:id/upload-files", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    const row = deps.repo.getProjectRow(id);
+    if (!row) return reply.status(404).send({ detail: "Source not found" });
+
+    const uploads: Array<{ relativePath: string; buffer: Buffer }> = [];
+    let relativePaths: string[] = [];
+    for await (const part of request.parts()) {
+      if (part.type === "field" && part.fieldname === "relative_paths") {
+        const value = await part.value;
+        try {
+          const parsed = JSON.parse(String(value)) as unknown;
+          if (Array.isArray(parsed)) {
+            relativePaths = parsed.map((entry) => String(entry)).filter(Boolean);
+          }
+        } catch {
+          relativePaths = [];
+        }
+        continue;
+      }
+      if (part.type !== "file" || part.fieldname !== "files") continue;
+      const chunks: Buffer[] = [];
+      for await (const chunk of part.file) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const buffer = Buffer.concat(chunks);
+      uploads.push({
+        relativePath: (part.filename || "").replace(/\\/g, "/"),
+        buffer,
+      });
+    }
+    for (let i = 0; i < uploads.length; i += 1) {
+      const fromClient = relativePaths[i]?.trim();
+      const fromFilename = uploads[i]!.relativePath.trim();
+      uploads[i]!.relativePath =
+        fromClient ||
+        fromFilename ||
+        `upload-${i + 1}.stl`;
+    }
+    if (!uploads.length) {
+      return reply.status(400).send({ detail: "At least one file is required" });
+    }
+
+    let result;
+    try {
+      result = writeUploadedFiles(uploads, deps.sourcesDir, id);
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+    }
+
+    const existingRules = deps.repo.getProjectRow(id)?.importedPaths;
+    const hasRules =
+      existingRules != null &&
+      existingRules.trim() !== "" &&
+      existingRules.trim() !== "[]";
+    if (!hasRules && result.suggestedImportRules.length > 0) {
+      deps.repo.updateImportRules(id, result.suggestedImportRules);
+    }
+
+    const updated = deps.repo.updateSource(id, {
+      localPath: result.extractDir,
+      source_kind: row.sourceKind === "local" ? "local" : row.sourceKind ?? "local",
+      source_type: "local",
+      last_synced_at: new Date().toISOString(),
+      last_commit_sha: null,
+    });
+    void prefetchSourceCover(deps, id);
+    return {
+      ...updated,
+      imported_files: result.fileCount,
+      stl_count: result.stlCount,
+      suggested_import_rules: result.suggestedImportRules,
+    };
   });
 
   app.get("/sources/:id/has-manifest", async () => ({
