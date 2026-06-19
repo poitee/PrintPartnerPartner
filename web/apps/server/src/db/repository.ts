@@ -38,6 +38,13 @@ import {
 } from "../services/kit-bundle-share.js";
 import { resolvePartStl } from "../services/part-paths.js";
 import { normalizePartRole } from "../services/role-filament.js";
+import {
+  canonicalRoleOrder,
+  loadRoleFilamentDefaults,
+  roleFilamentSettingKey,
+  saveRoleFilamentDefault,
+  type RoleFilamentDefault,
+} from "../services/role-filament-store.js";
 import { getColorById, resolvePartFilamentHex } from "../services/filament-catalog.js";
 import type { FilamentResolveContext } from "../services/filament-resolve.js";
 import { formatSpoolSummaryBadge } from "../integrations/spoolman-client.js";
@@ -584,6 +591,11 @@ export class AppRepository {
       }
     }
 
+    const roleFilaments = this.getSetting(roleFilamentSettingKey(id));
+    if (roleFilaments) {
+      this.setSetting(roleFilamentSettingKey(newProfile.id), roleFilaments);
+    }
+
     return {
       ...this.getProfile(newProfile.id)!,
       layers: this.getProfileLayers(newProfile.id),
@@ -834,6 +846,8 @@ export class AppRepository {
         const qty =
           mp.quantityOverride != null ? mp.quantityOverride : mp.quantityAuto;
         if (prior) {
+          const roleDefault =
+            loadRoleFilamentDefaults(this, profileId)[normalizePartRole(mp.role)];
           this.db
             .update(this.schema.parts)
             .set({
@@ -848,13 +862,15 @@ export class AppRepository {
               notes: mp.notes,
               geometrySame: mp.geometrySame,
               role: mp.role,
-              filamentColorId: prior.filamentColorId,
-              filamentCustomHex: prior.filamentCustomHex,
-              spoolmanSpoolId: prior.spoolmanSpoolId,
+              filamentColorId: prior.filamentColorId ?? roleDefault?.filament_color_id ?? null,
+              filamentCustomHex: prior.filamentCustomHex ?? roleDefault?.filament_custom_hex ?? null,
+              spoolmanSpoolId: prior.spoolmanSpoolId ?? roleDefault?.spoolman_spool_id ?? null,
             })
             .where(eq(this.schema.parts.id, prior.id))
             .run();
         } else {
+          const role = normalizePartRole(mp.role);
+          const roleDefault = loadRoleFilamentDefaults(this, profileId)[role];
           this.db
             .insert(this.schema.parts)
             .values({
@@ -872,6 +888,9 @@ export class AppRepository {
               included: mp.included,
               notes: mp.notes,
               geometrySame: mp.geometrySame,
+              filamentColorId: roleDefault?.filament_color_id ?? null,
+              filamentCustomHex: roleDefault?.filament_custom_hex ?? null,
+              spoolmanSpoolId: roleDefault?.spoolman_spool_id ?? null,
             })
             .run();
         }
@@ -1245,7 +1264,8 @@ export class AppRepository {
 
   getRoleFilaments(profileId: number) {
     const partRows = this.listPartRows(profileId);
-    const order = DEFAULT_NAMING_PROFILE.export_role_order as string[];
+    const savedDefaults = loadRoleFilamentDefaults(this, profileId);
+    const order = canonicalRoleOrder();
     const buckets = new Map<
       string,
       {
@@ -1257,31 +1277,49 @@ export class AppRepository {
         filament_display: string;
         filament_hex: string | null;
         colorCounts: Map<string, number>;
+        customHexCounts: Map<string, number>;
         spoolCounts: Map<string, number>;
       }
     >();
 
-    for (const part of partRows) {
-      if (!part.included) continue;
-      const role = normalizePartRole(part.role);
+    const ensureBucket = (role: string) => {
       let row = buckets.get(role);
       if (!row) {
+        const saved = savedDefaults[role];
         row = {
           role,
           part_count: 0,
-          filament_color_id: null,
-          filament_custom_hex: null,
-          spoolman_spool_id: null,
+          filament_color_id: saved?.filament_color_id ?? null,
+          filament_custom_hex: saved?.filament_custom_hex ?? null,
+          spoolman_spool_id: saved?.spoolman_spool_id ?? null,
           filament_display: "",
           filament_hex: null,
           colorCounts: new Map(),
+          customHexCounts: new Map(),
           spoolCounts: new Map(),
         };
         buckets.set(role, row);
       }
+      return row;
+    };
+
+    for (const role of order) ensureBucket(role);
+
+    for (const part of partRows) {
+      if (!part.included) continue;
+      const row = ensureBucket(normalizePartRole(part.role));
       row.part_count += 1;
       if (part.filamentColorId) {
-        row.colorCounts.set(part.filamentColorId, (row.colorCounts.get(part.filamentColorId) ?? 0) + 1);
+        row.colorCounts.set(
+          part.filamentColorId,
+          (row.colorCounts.get(part.filamentColorId) ?? 0) + 1,
+        );
+      }
+      if (part.filamentCustomHex) {
+        row.customHexCounts.set(
+          part.filamentCustomHex,
+          (row.customHexCounts.get(part.filamentCustomHex) ?? 0) + 1,
+        );
       }
       if (part.spoolmanSpoolId) {
         row.spoolCounts.set(
@@ -1295,6 +1333,11 @@ export class AppRepository {
       if (hex && !row.filament_hex) row.filament_hex = hex;
     }
 
+    const majority = (counts: Map<string, number>): string | null => {
+      if (!counts.size) return null;
+      return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+    };
+
     const roleSort = (role: string) => {
       const idx = order.indexOf(role);
       return idx >= 0 ? idx : order.length;
@@ -1303,22 +1346,29 @@ export class AppRepository {
     return [...buckets.values()]
       .sort((a, b) => roleSort(a.role) - roleSort(b.role) || a.role.localeCompare(b.role))
       .map((row) => {
-        let colorId: string | null = null;
-        if (row.colorCounts.size) {
-          colorId = [...row.colorCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-        }
-        let spoolId: string | null = null;
-        if (row.spoolCounts.size) {
-          spoolId = [...row.spoolCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-        }
+        const colorId = majority(row.colorCounts);
+        const customHex = majority(row.customHexCounts);
+        const spoolId = majority(row.spoolCounts);
+        const saved = savedDefaults[row.role];
+        const filament_color_id =
+          colorId ?? (row.part_count === 0 ? saved?.filament_color_id ?? null : row.filament_color_id);
+        const filament_custom_hex =
+          colorId != null
+            ? null
+            : customHex ?? (row.part_count === 0 ? saved?.filament_custom_hex ?? null : row.filament_custom_hex);
+        const spoolman_spool_id =
+          spoolId ?? (row.part_count === 0 ? saved?.spoolman_spool_id ?? null : row.spoolman_spool_id);
         return {
           role: row.role,
           part_count: row.part_count,
-          filament_color_id: colorId,
-          spoolman_spool_id: spoolId,
-          filament_custom_hex: row.filament_custom_hex,
+          filament_color_id,
+          spoolman_spool_id,
+          filament_custom_hex,
           filament_display: row.filament_display,
-          filament_hex: row.filament_hex ?? (colorId ? getColorById(colorId)?.hex ?? null : null),
+          filament_hex:
+            filament_custom_hex ??
+            row.filament_hex ??
+            (filament_color_id ? getColorById(filament_color_id)?.hex ?? null : null),
         };
       });
   }
@@ -1330,10 +1380,22 @@ export class AppRepository {
     customHex?: string | null,
     spoolRef?: string | null,
   ): number {
+    const targetRole = normalizePartRole(role);
+    const defaultPatch: Partial<RoleFilamentDefault> = {
+      filament_color_id: colorId,
+      filament_custom_hex: customHex ?? null,
+    };
+    if (spoolRef !== undefined) {
+      defaultPatch.spoolman_spool_id = spoolRef;
+    } else if (colorId != null) {
+      defaultPatch.spoolman_spool_id = null;
+    }
+    saveRoleFilamentDefault(this, profileId, targetRole, defaultPatch);
+
     const partRows = this.listPartRows(profileId);
     let updated = 0;
     for (const part of partRows) {
-      if (!part.included || normalizePartRole(part.role) !== role) continue;
+      if (!part.included || normalizePartRole(part.role) !== targetRole) continue;
       const nextSpool =
         spoolRef !== undefined
           ? spoolRef
