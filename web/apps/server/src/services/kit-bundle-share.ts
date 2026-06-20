@@ -22,6 +22,8 @@ export type KitBundleSourceRef = {
   category: string;
   import_rules: string[];
   manifest_community_slug: string | null;
+  /** Layer slot this source filled in the shared plan, when known (base/addon). */
+  layer_type?: string;
 };
 
 export type KitBundleUnmatchedSource = {
@@ -32,6 +34,8 @@ export type KitBundleUnmatchedSource = {
   role: string;
   import_rules: string[];
   manifest_community_slug?: string | null;
+  /** Which layer slot to re-attach this source to on import (base/addon). */
+  layer_type: string;
 };
 
 function rulesFromRaw(raw: unknown): string[] {
@@ -66,6 +70,10 @@ function mergeSourceRefs(
     import_rules: importRules,
     manifest_community_slug:
       existing.manifest_community_slug ?? incoming.manifest_community_slug,
+    layer_type:
+      existing.layer_type === "base" || incoming.layer_type === "base"
+        ? "base"
+        : existing.layer_type ?? incoming.layer_type,
   };
 }
 
@@ -133,9 +141,10 @@ export function collectKitBundleSourceRefs(
 ): KitBundleSourceRef[] {
   const byKey = new Map<string, KitBundleSourceRef>();
 
-  const add = (raw: Record<string, unknown>) => {
+  const add = (raw: Record<string, unknown>, layerType?: string) => {
     const ref = kitSourceRefFromRecord(raw);
     if (!ref) return;
+    if (layerType) ref.layer_type = layerType;
     const key = sourceRefKey(ref);
     if (!key) return;
     const existing = byKey.get(key);
@@ -148,7 +157,9 @@ export function collectKitBundleSourceRefs(
 
   for (const layer of (data.layers as Array<Record<string, unknown>>) ?? []) {
     const project = layer.project;
-    if (project && typeof project === "object") add(project as Record<string, unknown>);
+    if (project && typeof project === "object") {
+      add(project as Record<string, unknown>, String(layer.layer_type ?? "addon"));
+    }
   }
 
   return [...byKey.values()];
@@ -162,6 +173,7 @@ export function kitUnmatchedSourceFromRef(ref: KitBundleSourceRef): KitBundleUnm
     source_kind: ref.source_kind,
     role: ref.category !== "unassigned" ? ref.category : ref.role,
     import_rules: ref.import_rules,
+    layer_type: ref.layer_type ?? "addon",
     ...(ref.manifest_community_slug
       ? { manifest_community_slug: ref.manifest_community_slug }
       : {}),

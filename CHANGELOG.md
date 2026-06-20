@@ -15,11 +15,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Branding** — project logo (`docs/logo.png`) on the README and GitHub Pages landing page; GitHub Sponsors support badge near the top of both.
 - **Regenerate thumbnails** — a button in the Build tab's "Role filament colors" section clears cached part thumbnails/previews (`POST /plans/:id/regenerate-thumbnails`) so updated colors re-render.
 - **Save & import colors** — export the current role filament colors to a `print-partner-colors.json` file and import it into any plan from the Build tab.
+- **Share build re-adds sources** — importing a shared `.print-partner-kit.zip` now offers one-click "Add & sync" for each referenced repo (using the URL/branch/source kind carried in the bundle), recreating the source, applying its import rules, attaching it to the correct layer (base/add-on), and starting a sync.
 
 ### Changed
 
 
 - **Version alignment** — `PP_VERSION` default is now `3.0.0-web` and `web/package.json` is `3.0.0`, matching the latest CHANGELOG release so the in-app update checker compares correctly against GitHub releases.
+
+### Fixed
+
+- **Kit-import setup panel** — the "Share import setup" panel now reliably appears after importing a shared build; the `?profile=` URL sync no longer drops the navigation state, and the import result is also handed off via a sessionStorage stash as a fallback.
 
 ## [3.0.0-web] - 2026-05-31
 
