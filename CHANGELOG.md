@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Branding** — project logo (`docs/logo.png`) on the README and GitHub Pages landing page; GitHub Sponsors support badge near the top of both.
 - **Regenerate thumbnails** — a button in the Build tab's "Role filament colors" section clears cached part thumbnails/previews (`POST /plans/:id/regenerate-thumbnails`) so updated colors re-render.
 - **Save & import colors** — export the current role filament colors to a `print-partner-colors.json` file and import it into any plan from the Build tab.
+- **Share build re-adds sources** — importing a shared `.print-partner-kit.zip` now offers one-click "Add & sync" for each referenced repo (using the URL/branch/source kind carried in the bundle), recreating the source, applying its import rules, attaching it to the correct layer (base/add-on), and starting a sync.
 
 ### Changed
 

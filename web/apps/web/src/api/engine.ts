@@ -1586,6 +1586,8 @@ export type KitBundleUnmatchedSource = {
   role?: string;
   import_rules?: string[];
   manifest_community_slug?: string | null;
+  /** Which layer slot this source filled in the shared plan (base/addon). */
+  layer_type?: string;
 };
 
 export type KitImportJobResult = {
