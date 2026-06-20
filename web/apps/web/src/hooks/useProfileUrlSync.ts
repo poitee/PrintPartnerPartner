@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useProfileSelection } from "../context/ProfileContext";
 import {
@@ -11,6 +11,11 @@ import {
 export function useProfileUrlSync() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { profiles, selectedProfileId, setSelectedProfileId } = useProfileSelection();
+
+  // Latest params, read inside the state -> URL effect without making it a dep
+  // (which would fight the URL -> state sync).
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
 
   // URL -> state when the query or plan list changes (not when selection changes).
   useEffect(() => {
@@ -27,11 +32,13 @@ export function useProfileUrlSync() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see profileUrlSync tests
   }, [searchParams, profiles, setSelectedProfileId]);
 
-  // State -> URL; functional update avoids searchParams dependency loops.
+  // State -> URL. Only navigate when the param actually changes; calling
+  // setSearchParams on a no-op still replaces history and drops location.state
+  // (e.g. the kit-import payload passed to the Build page).
   useEffect(() => {
-    setSearchParams(
-      (prev) => searchParamsWithProfile(prev, selectedProfileId) ?? prev,
-      { replace: true },
-    );
+    const next = searchParamsWithProfile(searchParamsRef.current, selectedProfileId);
+    if (next) {
+      setSearchParams(next, { replace: true });
+    }
   }, [selectedProfileId, setSearchParams]);
 }
