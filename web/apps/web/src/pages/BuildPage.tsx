@@ -312,6 +312,9 @@ function BuildPageContent() {
             warnings={kitImportSetup.warnings ?? []}
             profileId={kitImportSetup.profile_id}
             onDismiss={() => setKitImportSetup(null)}
+            onSourcesChanged={() => {
+              if (selectedProfileId != null) void loadProfileData(selectedProfileId);
+            }}
           />
         )}
 
