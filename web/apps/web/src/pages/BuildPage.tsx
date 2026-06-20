@@ -36,6 +36,7 @@ import {
 } from "../api/engine";
 import { buildRoute, buildsRoute, reviewRoute, sourcesRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
+import { takeKitImportResult } from "../lib/kitImportStash";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
@@ -76,8 +77,15 @@ function BuildPageContent() {
     if (state?.kitImport) {
       setKitImportSetup(state.kitImport);
       window.history.replaceState({}, document.title);
+      return;
     }
-  }, [location.state]);
+    // Fall back to the sessionStorage stash in case location.state was dropped
+    // by an intervening navigation (e.g. ?profile= URL sync).
+    if (selectedProfileId != null) {
+      const stashed = takeKitImportResult(selectedProfileId);
+      if (stashed) setKitImportSetup(stashed);
+    }
+  }, [location.state, selectedProfileId]);
 
   const loadProfileData = useCallback(async (profileId: number) => {
     setLoadError(null);
