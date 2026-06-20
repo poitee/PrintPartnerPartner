@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Version alignment** — `PP_VERSION` default is now `3.0.0-web` and `web/package.json` is `3.0.0`, matching the latest CHANGELOG release so the in-app update checker compares correctly against GitHub releases.
 
+### Fixed
+
+- **Kit-import setup panel** — the "Share import setup" panel now reliably appears after importing a shared build; the `?profile=` URL sync no longer drops the navigation state, and the import result is also handed off via a sessionStorage stash as a fallback.
+
 ## [3.0.0-web] - 2026-05-31
 
 Print Partner is now a **single web platform**. The **Sources → Build → Review → Checkoff** workflow moves to a TypeScript monorepo under `web/`: a Vite + React single-page app (`web/apps/web`) and a Fastify API (`web/apps/server`) served together on one port, with shared `contracts` and `domain` packages.
