@@ -46,9 +46,11 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.post("/plans/:id/duplicate", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    const body = request.body as { name?: string };
+    const body = request.body as { name?: string; clear_checkoff?: boolean };
     try {
-      return deps.repo.duplicateProfile(id, String(body.name ?? ""));
+      return deps.repo.duplicateProfile(id, String(body.name ?? ""), {
+        clearCheckoff: Boolean(body.clear_checkoff),
+      });
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }
