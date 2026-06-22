@@ -502,10 +502,11 @@ export async function deleteProfile(profileId: number): Promise<void> {
 export async function duplicateProfile(
   profileId: number,
   name: string,
+  options?: { clearCheckoff?: boolean },
 ): Promise<ProfileSummary & { layers?: ProfileLayer[] }> {
   return engineFetch(`/plans/${profileId}/duplicate`, {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, clear_checkoff: options?.clearCheckoff ?? false }),
   });
 }
 
