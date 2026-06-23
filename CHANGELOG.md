@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Regenerate thumbnails** — a button in the Build tab's "Role filament colors" section clears cached part thumbnails/previews (`POST /plans/:id/regenerate-thumbnails`) so updated colors re-render.
 - **Save & import colors** — export the current role filament colors to a `print-partner-colors.json` file and import it into any plan from the Build tab.
 - **Share build re-adds sources** — importing a shared `.print-partner-kit.zip` now offers one-click "Add & sync" for each referenced repo (using the URL/branch/source kind carried in the bundle), recreating the source, applying its import rules, attaching it to the correct layer (base/add-on), and starting a sync.
+- **Clear checkoff on duplicate** — the Duplicate plan dialog has a "Clear checkoff progress" toggle so a copied plan can start with nothing marked printed (`POST /plans/:id/duplicate` accepts `clear_checkoff`).
 
 ### Changed
 
