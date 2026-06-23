@@ -437,9 +437,10 @@ function BuildPageContent() {
         </section>
 
         <section className="rounded-lg border border-border bg-card p-4">
-          <h3 className="mb-1 text-sm font-semibold">Role filament colors</h3>
+          <h3 className="mb-1 text-sm font-semibold">Colors by part type</h3>
           <p className="mb-3 text-xs text-muted-foreground">
-            Catalog or custom color per STL role — applies to all included parts with that role.
+            Click a part type (Primary, Accent, …) to pick a catalog or custom color. It applies to
+            every included part with that role.
           </p>
           {selectedProfileId == null ? (
             <p className="text-sm text-muted-foreground">Select a build plan in the header first.</p>
