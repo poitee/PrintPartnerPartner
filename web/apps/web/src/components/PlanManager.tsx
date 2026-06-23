@@ -18,6 +18,7 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import { Switch } from "./ui/switch";
 import { useProfileSelection } from "../context/ProfileContext";
 
 type PlanManagerProps = {
@@ -58,6 +59,7 @@ export default function PlanManager({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [duplicateName, setDuplicateName] = useState("");
+  const [duplicateClearCheckoff, setDuplicateClearCheckoff] = useState(false);
   const [switchPrompt, setSwitchPrompt] = useState<SwitchPrompt | null>(null);
 
   const selected = profiles.find((p) => p.id === selectedProfileId);
@@ -129,6 +131,7 @@ export default function PlanManager({
     if (selectedProfileId == null) return;
     const base = selected?.name ?? "Plan";
     setDuplicateName(`${base} (copy)`);
+    setDuplicateClearCheckoff(false);
     setDuplicateOpen(true);
   };
 
@@ -136,9 +139,10 @@ export default function PlanManager({
     if (selectedProfileId == null) return;
     const name = duplicateName.trim();
     if (!name) return;
+    const clearCheckoff = duplicateClearCheckoff;
     setDuplicateOpen(false);
     void run(async () => {
-      const copy = await duplicateProfile(selectedProfileId, name);
+      const copy = await duplicateProfile(selectedProfileId, name, { clearCheckoff });
       offerSwitchOrActivate(copy.id, name, "duplicated");
     });
   };
@@ -366,6 +370,21 @@ export default function PlanManager({
               disabled={busy}
             />
           </div>
+          <label className="flex items-start justify-between gap-3 rounded-md border border-border p-3">
+            <span className="space-y-0.5">
+              <span className="block text-sm font-medium">Clear checkoff progress</span>
+              <span className="block text-xs text-muted-foreground">
+                Start the copy with nothing marked printed. Off keeps the original&apos;s
+                per-unit checkoff.
+              </span>
+            </span>
+            <Switch
+              checked={duplicateClearCheckoff}
+              onCheckedChange={setDuplicateClearCheckoff}
+              disabled={busy}
+              aria-label="Clear checkoff progress in the duplicated plan"
+            />
+          </label>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" disabled={busy} onClick={() => setDuplicateOpen(false)}>
               Cancel
