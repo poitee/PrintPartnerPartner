@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 
+- **Color editor redesign** — the Build tab's "Colors by part type" section now uses a click-to-open color picker per role: a custom-color (hex) field plus a searchable filament catalog shown as product-thumbnail + name rows. Selected catalog colors show their product photo on the role swatch.
 - **Version alignment** — `PP_VERSION` default is now `3.0.0-web` and `web/package.json` is `3.0.0`, matching the latest CHANGELOG release so the in-app update checker compares correctly against GitHub releases.
 
 ### Fixed

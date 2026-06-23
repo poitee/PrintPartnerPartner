@@ -27,10 +27,11 @@ import {
   parseSpoolmanSpoolId,
 } from "../lib/spoolmanIds";
 import { isSpoolmanIntegrationConfigured } from "../hooks/useSpoolmanEnabled";
-import { catalogColorGroups } from "./FilamentSwatch";
+import { allCatalogColors, catalogColorGroups } from "./FilamentSwatch";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { cn } from "../lib/utils";
 import { filterFilamentSpools, formatSpoolOptionLabel } from "../lib/spoolPickerUtils";
 
 const ROLE_LABELS = Object.fromEntries(
@@ -38,6 +39,8 @@ const ROLE_LABELS = Object.fromEntries(
 ) as Record<StlNamingRoleId, string>;
 
 const DEFAULT_HEX = "#c41230";
+const CHECKER_BG =
+  "repeating-conic-gradient(rgba(120,120,120,0.25) 0% 25%, transparent 0% 50%)";
 
 type ColorGroup = { label: string; colors: CatalogColor[] };
 
@@ -62,10 +65,52 @@ function normalizeHex(hex: string): string | null {
   return null;
 }
 
+/**
+ * Color preview. Catalog colors carry a product photo (`imageUrl`) that shows
+ * the true filament color far better than the bundled average hex, so prefer
+ * the image and fall back to the hex block (custom colors have a real hex).
+ */
+function ColorThumb({
+  hex,
+  imageUrl,
+  className,
+}: {
+  hex?: string | null;
+  imageUrl?: string | null;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "relative inline-block shrink-0 overflow-hidden rounded-md border border-border bg-background",
+        className,
+      )}
+      style={{
+        backgroundColor: hex ?? undefined,
+        backgroundImage: hex ? undefined : CHECKER_BG,
+        backgroundSize: hex ? undefined : "10px 10px",
+      }}
+    >
+      {imageUrl && (
+        <img
+          src={imageUrl}
+          alt=""
+          loading="lazy"
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(e) => {
+            e.currentTarget.style.display = "none";
+          }}
+        />
+      )}
+    </span>
+  );
+}
+
 type RoleColorRowProps = {
   row: RoleFilamentRow;
   label: string;
   busy: boolean;
+  swatchImageUrl: string | null;
   colorGroups: ColorGroup[];
   spoolmanConfigured: boolean;
   roleSpools: SpoolmanSpoolRow[];
@@ -79,6 +124,7 @@ function RoleColorRow({
   row,
   label,
   busy,
+  swatchImageUrl,
   colorGroups,
   spoolmanConfigured,
   roleSpools,
@@ -96,8 +142,9 @@ function RoleColorRow({
     setHexDraft(row.filament_hex?.slice(0, 7) ?? DEFAULT_HEX);
   }, [row.filament_hex]);
 
-  const swatchHex = row.filament_hex ?? null;
   const hasColor = Boolean(row.filament_color_id || row.filament_custom_hex);
+  // Custom colors show their real hex; catalog colors show their product image.
+  const rowThumbHex = swatchImageUrl ? null : row.filament_hex ?? null;
 
   const filteredGroups = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -128,16 +175,7 @@ function RoleColorRow({
             className="flex flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
             aria-label={`Change ${label} color`}
           >
-            <span
-              className="h-8 w-8 shrink-0 rounded-md border border-border shadow-sm"
-              style={{
-                backgroundColor: swatchHex ?? "transparent",
-                backgroundImage: swatchHex
-                  ? undefined
-                  : "repeating-conic-gradient(var(--muted, #e5e7eb) 0% 25%, transparent 0% 50%)",
-                backgroundSize: swatchHex ? undefined : "10px 10px",
-              }}
-            />
+            <ColorThumb hex={rowThumbHex} imageUrl={swatchImageUrl} className="h-9 w-9" />
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-2">
                 <span className="text-sm font-medium">{label}</span>
@@ -146,7 +184,7 @@ function RoleColorRow({
                 </span>
               </span>
               <span className="block truncate text-xs text-muted-foreground">
-                {row.filament_display || (hasColor ? swatchHex : "No color set")}
+                {row.filament_display || (hasColor ? row.filament_hex : "No color set")}
               </span>
             </span>
             <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -211,19 +249,19 @@ function RoleColorRow({
                 <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search catalog colors…"
+                  placeholder="Search filament catalog…"
                   className="h-9 pl-8"
-                  aria-label="Search catalog colors"
+                  aria-label="Search filament catalog"
                 />
               </div>
-              <div className="max-h-52 space-y-3 overflow-y-auto pr-1">
+              <div className="max-h-56 space-y-3 overflow-y-auto pr-1">
                 {filteredGroups.length === 0 && (
-                  <p className="text-xs text-muted-foreground">No colors match “{query}”.</p>
+                  <p className="py-2 text-xs text-muted-foreground">No colors match “{query}”.</p>
                 )}
                 {filteredGroups.map((group) => (
                   <div key={group.label}>
                     <p className="mb-1 text-xs font-medium text-muted-foreground">{group.label}</p>
-                    <div className="grid grid-cols-7 gap-1.5">
+                    <div className="space-y-0.5">
                       {group.colors.map((c) => {
                         const active = row.filament_color_id === c.id;
                         return (
@@ -231,19 +269,24 @@ function RoleColorRow({
                             key={c.id}
                             type="button"
                             title={c.combo_label || c.display_name}
-                            aria-label={c.combo_label || c.display_name}
                             onClick={() => {
                               void onPickCatalog(c.id);
                               setOpen(false);
                             }}
-                            className={`relative flex h-7 w-7 items-center justify-center rounded-md border shadow-sm transition-transform hover:scale-110 ${
-                              active ? "border-foreground ring-2 ring-ring" : "border-border"
-                            }`}
-                            style={{ backgroundColor: c.hex }}
-                          >
-                            {active && (
-                              <Check className="h-3.5 w-3.5 text-white mix-blend-difference" aria-hidden />
+                            className={cn(
+                              "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-accent",
+                              active && "bg-accent",
                             )}
+                          >
+                            <ColorThumb
+                              hex={c.hex}
+                              imageUrl={c.swatch_url}
+                              className="h-7 w-7"
+                            />
+                            <span className="min-w-0 flex-1 truncate text-xs">
+                              {c.combo_label || c.display_name}
+                            </span>
+                            {active && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden />}
                           </button>
                         );
                       })}
@@ -321,6 +364,11 @@ export default function RoleFilamentPicker({
   }, [load, refreshKey]);
 
   const colorGroups = useMemo(() => catalogColorGroups(catalog), [catalog]);
+  const colorById = useMemo(() => {
+    const map = new Map<string, CatalogColor>();
+    for (const c of allCatalogColors(catalog)) map.set(c.id, c);
+    return map;
+  }, [catalog]);
 
   const onPickCatalog = async (role: string, colorId: string) => {
     setSavingRole(role);
@@ -480,12 +528,16 @@ export default function RoleFilamentPicker({
             ? filterFilamentSpools(spools, filamentParsed.filamentId)
             : [];
           const selectedSpoolId = parseSpoolmanSpoolId(row.spoolman_spool_id ?? "")?.spoolId;
+          const swatchImageUrl = row.filament_color_id
+            ? colorById.get(row.filament_color_id)?.swatch_url ?? null
+            : null;
           return (
             <RoleColorRow
               key={row.role}
               row={row}
               label={label}
               busy={savingRole === row.role || Boolean(disabled)}
+              swatchImageUrl={swatchImageUrl}
               colorGroups={colorGroups}
               spoolmanConfigured={spoolmanConfigured}
               roleSpools={roleSpools}
