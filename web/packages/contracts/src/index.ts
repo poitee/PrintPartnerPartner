@@ -17,7 +17,6 @@ export const JOB_KINDS = [
   "export-stl-pack",
   "export-checklist-html",
   "export-kit-bundle",
-  "import-kit-bundle",
   "export-3mf",
   "pack-preview",
 ] as const;

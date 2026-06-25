@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Ruler } from "lucide-react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -191,8 +191,15 @@ export default function Preview3D({
   const [showDims, setShowDims] = useState(false);
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
 
-  const target = previewTarget(partId, sourceId, relativePath, preferSource);
+  const target = useMemo(
+    () => previewTarget(partId, sourceId, relativePath, preferSource),
+    [partId, sourceId, relativePath, preferSource],
+  );
   const resolvedColor = meshColor || DEFAULT_COLOR;
+  const targetKind = target?.kind ?? null;
+  const targetPartId = target?.kind === "part" ? target.partId : null;
+  const targetSourceId = target?.kind === "source" ? target.sourceId : null;
+  const targetRelativePath = target?.kind === "source" ? target.relativePath : null;
 
   useEffect(() => {
     const material = materialRef.current;
@@ -411,12 +418,7 @@ export default function Preview3D({
       resizeObserver?.disconnect();
       cleanupThree();
     };
-  }, [
-    target?.kind,
-    target?.kind === "part" ? target.partId : null,
-    target?.kind === "source" ? target.sourceId : null,
-    target?.kind === "source" ? target.relativePath : null,
-  ]);
+  }, [target, targetKind, targetPartId, targetSourceId, targetRelativePath, resolvedColor]);
 
   useEffect(() => {
     if (target == null || mode !== "png") return;
@@ -442,7 +444,7 @@ export default function Preview3D({
     return () => {
       cancelled = true;
     };
-  }, [resolvedColor, mode, target?.kind, target?.kind === "part" ? target.partId : null, target?.kind === "source" ? target.sourceId : null, target?.kind === "source" ? target.relativePath : null]);
+  }, [resolvedColor, mode, target, targetKind, targetPartId, targetSourceId, targetRelativePath]);
 
   if (target == null) {
     return (

@@ -185,7 +185,6 @@ export default function SourcesPage() {
       categoryFilter,
       syncFilter,
       platformFilter,
-      search,
     });
   }, [viewMode, categoryFilter, syncFilter, platformFilter]);
 

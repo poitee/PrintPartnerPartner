@@ -96,7 +96,7 @@ function buildProfile(data: StlNamingProfileDict): NamingProfile {
   try {
     quantityRe = new RegExp(quantityRegex, "i");
   } catch (e) {
-    throw new Error(`quantity.regex is invalid: ${e}`);
+    throw new Error(`quantity.regex is invalid: ${e}`, { cause: e });
   }
   const groups = quantityRegex.match(/\((?!\?:)/g);
   if (!groups || groups.length !== 1) {

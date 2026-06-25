@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { matchKeyMatches, mergeOptionGroups, type ManifestOptionGroup } from "./manifest-apply.js";
 
 type PathHintRule = {

@@ -1,7 +1,6 @@
-import { createReadStream, existsSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { safePathUnderRoot } from "../lib/secure-path.js";
+import { openExportFileStream } from "../lib/secure-path.js";
 
 type RouteDeps = { dataDir: string };
 
@@ -12,16 +11,11 @@ export async function registerExportRoutes(app: FastifyInstance, deps: RouteDeps
     if (!key || key.includes("..")) {
       return reply.status(400).send({ detail: "Invalid export path" });
     }
-    const exportsRoot = join(deps.dataDir, "exports");
-    const full = safePathUnderRoot(exportsRoot, key);
-    if (!full || !existsSync(full)) {
+    const stream = openExportFileStream(deps.dataDir, key);
+    if (!stream) {
       return reply.status(404).send({ detail: "Export file not found" });
     }
-    const st = statSync(full);
-    if (st.isDirectory()) {
-      return reply.status(400).send({ detail: "Path is a directory" });
-    }
-    const name = basename(full);
+    const name = basename(key);
     const isZip = name.endsWith(".zip");
     const isHtml = name.endsWith(".html");
     const type = isZip
@@ -32,6 +26,6 @@ export async function registerExportRoutes(app: FastifyInstance, deps: RouteDeps
     return reply
       .header("Content-Type", type)
       .header("Content-Disposition", `attachment; filename="${name}"`)
-      .send(createReadStream(full));
+      .send(stream);
   });
 }

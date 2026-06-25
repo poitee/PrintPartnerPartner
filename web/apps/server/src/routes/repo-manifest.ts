@@ -22,7 +22,7 @@ export async function registerRepoManifestRoutes(
     const id = Number((request.params as { id: string }).id);
     const row = requireLocalPath(deps.repo, id);
     const path = join(row.localPath!, MANIFEST_FILE);
-    let yaml = "";
+    let yaml: string;
     let exists = false;
     try {
       yaml = readFileSync(path, "utf8");

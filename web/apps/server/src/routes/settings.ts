@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { ServerConfig } from "../config.js";
+import type { AppRepository } from "../db/repository.js";
 import { checkAppUpdate, resetAppUpdateCheckCache } from "../services/app-update-check.js";
 import {
   DEFAULT_NAMING_PROFILE,
@@ -10,7 +11,7 @@ import {
   resolveNamingProfile,
   parseProjectMetadata,
 } from "@print-partner/domain";
-import type { AppRepository } from "../db/repository.js";
+import { trimmedString } from "../lib/secure-path.js";
 import { loadFilamentCatalog } from "../services/filament-catalog.js";
 import {
   addCustomFilament,
@@ -132,8 +133,8 @@ export async function registerStubRoutes(app: FastifyInstance, deps: RouteDeps):
   }));
 
   app.put("/settings/spoolman-default", async (request, reply) => {
-    const body = request.body as { integration_id?: string | null };
-    const raw = body.integration_id?.trim() ?? "";
+    const body = request.body as { integration_id?: unknown };
+    const raw = trimmedString(body.integration_id);
     if (!raw) {
       deps.repo.setSetting("default_spoolman_integration_id", "");
       return { integration_id: null };
@@ -157,9 +158,9 @@ export async function registerStubRoutes(app: FastifyInstance, deps: RouteDeps):
       swatch_url: "",
     }));
 
-    const query = request.query as { spoolman_integration_id?: string };
+    const query = request.query as { spoolman_integration_id?: unknown };
     const defaultId = deps.repo.getSetting("default_spoolman_integration_id") || null;
-    const integrationId = query.spoolman_integration_id?.trim() || defaultId || "";
+    const integrationId = trimmedString(query.spoolman_integration_id) || defaultId || "";
     let spoolman_colors: ReturnType<typeof spoolmanFilamentToCatalogColor>[] = [];
     let spoolman_status: "ok" | "empty" | "error" | "disabled" | "not_found" | undefined;
     let spoolman_error: string | null = null;

@@ -13,12 +13,13 @@ function normalizeMeshHex(hex: string | null | undefined): string {
 }
 
 export function thumbnailCacheDigest(stlPath: string, role: string, meshHex?: string | null): string {
-  let mtime = 0;
-  try {
-    mtime = statSync(stlPath).mtimeMs;
-  } catch {
-    mtime = 0;
-  }
+  const mtime = (() => {
+    try {
+      return statSync(stlPath).mtimeMs;
+    } catch {
+      return 0;
+    }
+  })();
   const colorKey = normalizeMeshHex(meshHex);
   const payload = `${resolve(stlPath)}|${mtime}|${role}|${colorKey}|${THUMB_CACHE_VERSION}`;
   return createHash("sha256").update(payload).digest("hex").slice(0, 16);
@@ -34,12 +35,13 @@ export function globalThumbnailPath(
 }
 
 export function previewCacheDigest(stlPath: string, role: string, meshHex?: string | null): string {
-  let mtime = 0;
-  try {
-    mtime = statSync(stlPath).mtimeMs;
-  } catch {
-    mtime = 0;
-  }
+  const mtime = (() => {
+    try {
+      return statSync(stlPath).mtimeMs;
+    } catch {
+      return 0;
+    }
+  })();
   const colorKey = normalizeMeshHex(meshHex);
   const payload = `${resolve(stlPath)}|${mtime}|${role}|${colorKey}|${PREVIEW_CACHE_VERSION}`;
   return createHash("sha256").update(payload).digest("hex").slice(0, 16);

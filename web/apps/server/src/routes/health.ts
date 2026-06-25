@@ -17,7 +17,7 @@ export async function registerHealthRoutes(
       await ports.db.ping();
       dbOk = true;
     } catch {
-      dbOk = false;
+      /* dbOk stays false */
     }
 
     const saasDb = ports.db as Partial<SaasDbStore>;

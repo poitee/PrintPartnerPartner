@@ -1713,11 +1713,24 @@ export async function saveRoleFilament(
     filament_color_id?: string | null;
     filament_custom_hex?: string | null;
     spoolman_spool_id?: string | null;
+    /** When true (default), clear cached thumbnails for parts in this role after apply. */
+    refresh_thumbnails?: boolean;
   },
-): Promise<{ updated: number; roles: RoleFilamentRow[] }> {
+): Promise<{ updated: number; thumbnails_cleared: number; roles: RoleFilamentRow[] }> {
   return engineFetch(`/plans/${profileId}/role-filament`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+/** Re-apply every saved role color to matching parts and refresh thumbnails/checkoff data. */
+export async function applyRoleColorsToParts(
+  profileId: number,
+  options?: { refresh_thumbnails?: boolean },
+): Promise<{ updated: number; thumbnails_cleared: number; roles: RoleFilamentRow[] }> {
+  return engineFetch(`/plans/${profileId}/apply-role-colors`, {
+    method: "POST",
+    body: JSON.stringify(options ?? {}),
   });
 }
 

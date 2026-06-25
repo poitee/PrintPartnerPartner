@@ -6,6 +6,7 @@ import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import RoleFilamentPicker from "../components/RoleFilamentPicker";
+import KitManifestOptions from "../components/KitManifestOptions";
 import SourceCategorySheet from "../components/sources/SourceCategorySheet";
 import SourceFilePickerCard from "../components/SourceFilePickerCard";
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
@@ -33,8 +34,9 @@ import {
   startRecompute,
   type ProfileLayer,
   type SourceSummary,
+  DEFAULT_STL_NAMING_PROFILE,
 } from "../api/engine";
-import { buildRoute, buildsRoute, reviewRoute, sourcesRoute } from "../lib/routes";
+import { buildRoute, buildsRoute, reviewRoute, settingsRoute, sourcesRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
 import { takeKitImportResult } from "../lib/kitImportStash";
 import { useProfileSelection } from "../context/ProfileContext";
@@ -408,6 +410,16 @@ function BuildPageContent() {
                   ? () => void onRemoveLayer(row.layer)
                   : undefined
               }
+              expandedExtra={
+                row.layerType === "base" && selectedProfileId != null ? (
+                  <KitManifestOptions
+                    profileId={selectedProfileId}
+                    baseSourceName={row.sourceName}
+                    disabled={!health || busy}
+                    compact
+                  />
+                ) : undefined
+              }
             />
           ))}
 
@@ -437,10 +449,25 @@ function BuildPageContent() {
         </section>
 
         <section className="rounded-lg border border-border bg-card p-4">
-          <h3 className="mb-1 text-sm font-semibold">Colors by part type</h3>
+          <h3 className="mb-1 text-sm font-semibold">Part roles</h3>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Roles come from STL filenames and folder rules (e.g.{" "}
+            {DEFAULT_STL_NAMING_PROFILE.roles
+              .filter((r) => r.markers.length > 0)
+              .map((r) => `${r.markers.join(", ")} → ${r.label}`)
+              .join("; ")}
+            ).{" "}
+            <Button variant="link" className="h-auto p-0 text-xs" asChild>
+              <Link to={`${settingsRoute()}#stl-naming`}>Customize roles in Settings</Link>
+            </Button>
+          </p>
+
+          <h3 className="mb-1 mt-4 text-sm font-semibold">Colors by role</h3>
           <p className="mb-3 text-xs text-muted-foreground">
-            Click a part type (Primary, Accent, …) to pick a catalog or custom color. It applies to
-            every included part with that role.
+            Pick a filament color for each role — it applies to every included part with that role.
+            Review and Checkoff update automatically; use{" "}
+            <strong className="font-medium text-foreground">Apply all role colors</strong> after
+            importing a preset or if previews look stale.
           </p>
           {selectedProfileId == null ? (
             <p className="text-sm text-muted-foreground">Select a build plan in the header first.</p>

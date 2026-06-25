@@ -17,10 +17,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.3"
   },
   "devDependencies": {
-    "typescript": "^5.8.0",
-    "vitest": "^3.2.4"
+    "@types/node": "^26.0.1",
+    "typescript": "^6.0.3",
+    "vite": "6.4.3",
+    "vitest": "^4.1.9"
   }
 }
