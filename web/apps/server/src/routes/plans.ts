@@ -5,8 +5,10 @@ import { applyManifestToProfile } from "../services/manifest-apply.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
 import { buildPlanManifestBuilder } from "../services/plan-manifest-builder.js";
 import { preloadSpoolmanForColorIds, enrichRoleFilamentRows } from "../services/filament-resolve.js";
+import { clearPlanThumbnailCache } from "../services/plan-thumbnails.js";
+import { canonicalRoleOrder, loadRoleFilamentDefaults } from "../services/role-filament-store.js";
 
-type RouteDeps = { repo: AppRepository; dataDir: string };
+type RouteDeps = { repo: AppRepository; dataDir: string; thumbsDir: string };
 
 export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.get("/plans", async () => ({ profiles: deps.repo.listProfiles() }));
@@ -190,6 +192,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       filament_color_id?: string | null;
       filament_custom_hex?: string | null;
       spoolman_spool_id?: string | null;
+      refresh_thumbnails?: boolean;
     };
     const role = String(body.role ?? "").trim();
     if (!role) return reply.status(400).send({ detail: "role is required" });
@@ -202,9 +205,41 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       body.filament_custom_hex ?? null,
       spoolRef,
     );
+    const refreshThumbnails = body.refresh_thumbnails !== false;
+    const thumbnails_cleared =
+      refreshThumbnails && updated > 0
+        ? clearPlanThumbnailCache(deps.repo, deps.thumbsDir, id, { role })
+        : 0;
     const roles = deps.repo.getRoleFilaments(id);
     await enrichRoleFilamentRows(roles, { repo: deps.repo, dataDir: deps.dataDir });
-    return { updated, roles };
+    return { updated, thumbnails_cleared, roles };
+  });
+
+  /** Re-apply every saved role color to matching included parts and refresh thumbnails. */
+  app.post("/plans/:id/apply-role-colors", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    const body = (request.body ?? {}) as { refresh_thumbnails?: boolean };
+    const refreshThumbnails = body.refresh_thumbnails !== false;
+    const savedDefaults = loadRoleFilamentDefaults(deps.repo, id);
+    let updated = 0;
+    for (const role of canonicalRoleOrder()) {
+      const saved = savedDefaults[role];
+      if (!saved?.filament_color_id && !saved?.filament_custom_hex) continue;
+      updated += deps.repo.bulkSetRoleFilament(
+        id,
+        role,
+        saved.filament_color_id ?? null,
+        saved.filament_custom_hex ?? null,
+        saved.spoolman_spool_id ?? undefined,
+      );
+    }
+    const thumbnails_cleared = refreshThumbnails
+      ? clearPlanThumbnailCache(deps.repo, deps.thumbsDir, id)
+      : 0;
+    const roles = deps.repo.getRoleFilaments(id);
+    await enrichRoleFilamentRows(roles, { repo: deps.repo, dataDir: deps.dataDir });
+    return { updated, thumbnails_cleared, roles };
   });
 
   app.get("/plans/:id/checkoff", async (request, reply) => {

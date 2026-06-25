@@ -49,7 +49,7 @@ export default function CommandPalette() {
   const navigate = useNavigate();
   const location = useLocation();
   const { health } = useEngineHealth();
-  const { selectedProfileId, setSelectedProfileId, reloadProfiles } = useProfileSelection();
+  const { selectedProfileId } = useProfileSelection();
   const flushBuildSaves = useFlushBuildPageSaves();
   const importSharedBuild = useImportSharedBuild();
   const recomputeJob = useJobRunner("recompute");
@@ -321,8 +321,6 @@ export default function CommandPalette() {
     onSources,
     flushBuildSaves,
     importSharedBuild,
-    setSelectedProfileId,
-    reloadProfiles,
   ]);
 
   const groups = ["Navigate", "Workflow", "Actions"] as const;

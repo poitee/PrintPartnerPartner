@@ -223,13 +223,20 @@ describe("path traversal hardening", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-removed-routes-"));
     const { app, ports } = await makeApp(dir);
 
-    // Path-based archive import was only used by the retired desktop client.
+    // Path-based archive import was removed with the retired desktop client.
     const archive = await app.inject({
       method: "POST",
       url: "/sources/1/import-archive",
       payload: { path: "/etc/hosts" },
     });
     expect(archive.statusCode).toBe(404);
+
+    const kitJob = await app.inject({
+      method: "POST",
+      url: "/jobs/import-kit-bundle",
+      payload: { bundle_b64: "e30=" },
+    });
+    expect(kitJob.statusCode).toBe(404);
 
     // repos.txt import no longer reads server-side files; text is required.
     const repos = await app.inject({

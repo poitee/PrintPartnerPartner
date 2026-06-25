@@ -65,7 +65,8 @@ export function loadPersistedSourcesUi(): PersistedSourcesUi {
   return parsePersistedSourcesUi(localStorage.getItem(SOURCES_UI_STORAGE_KEY));
 }
 
-export function savePersistedSourcesUi(state: PersistedSourcesUi): void {
+export function savePersistedSourcesUi(patch: Partial<PersistedSourcesUi>): void {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(SOURCES_UI_STORAGE_KEY, serializePersistedSourcesUi(state));
+  const merged = { ...loadPersistedSourcesUi(), ...patch };
+  localStorage.setItem(SOURCES_UI_STORAGE_KEY, serializePersistedSourcesUi(merged));
 }

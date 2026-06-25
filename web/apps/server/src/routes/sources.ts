@@ -1,22 +1,19 @@
-import { createReadStream, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import {
   buildStlTreePayload,
   DEFAULT_STL_SEARCH_LIMIT,
-  safeRepoPath,
   searchSourceStls,
 } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
-import { resolveCaseInsensitiveRepoPath } from "../services/part-paths.js";
+import {
+  createReadStreamUnderRoot,
+  openRepoStlMeshStream,
+  openStlThumbStream,
+} from "../lib/secure-path.js";
 import { listGithubBranches, syncGithubSource } from "../services/github-sync.js";
 import { writeUploadedZip, writeUploadedFiles, finalizeUploadedSource } from "../services/archive-import.js";
-import {
-  cachedPngIfExists,
-  globalPreviewPath,
-  globalThumbnailPath,
-  PLACEHOLDER_PNG,
-} from "../lib/thumbnails.js";
+import { PLACEHOLDER_PNG } from "../lib/thumbnails.js";
 import { importReposTxt, parseReposTxtText } from "../services/repos-txt.js";
 import {
   coverMediaType,
@@ -291,16 +288,12 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
     const id = Number((request.params as { id: string }).id);
     const row = deps.repo.getProjectRow(id);
     if (!row) return reply.status(404).send({ detail: "Source not found" });
-    const cached = await ensureSourceCover(deps.coversDir, toCoverProject(row));
-    if (!cached) return reply.status(404).send({ detail: "No cover image for source" });
-    try {
-      if (!statSync(cached).isFile()) {
-        return reply.status(404).send({ detail: "No cover image for source" });
-      }
-    } catch {
-      return reply.status(404).send({ detail: "No cover image for source" });
-    }
-    return reply.header("Content-Type", coverMediaType(cached)).send(createReadStream(cached));
+    const coverRel = `source_${id}.img`;
+    const ready = await ensureSourceCover(deps.coversDir, toCoverProject(row));
+    if (!ready) return reply.status(404).send({ detail: "No cover image for source" });
+    const stream = createReadStreamUnderRoot(deps.coversDir, coverRel);
+    if (!stream) return reply.status(404).send({ detail: "No cover image for source" });
+    return reply.header("Content-Type", coverMediaType(coverRel)).send(stream);
   });
 
   app.get("/sources/stl-search", async (request) => {
@@ -362,60 +355,48 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
     }
     const action = segments.pop()!;
     const relativePath = decodeURIComponent(segments.join("/"));
+    if (
+      !relativePath ||
+      relativePath.includes("..") ||
+      relativePath.includes("\0") ||
+      !relativePath.toLowerCase().endsWith(".stl")
+    ) {
+      return reply.status(400).send({ detail: "Invalid STL path" });
+    }
     if (action !== "mesh" && action !== "preview") {
       return reply.status(404).send({ detail: "Unknown STL action" });
     }
     const row = deps.repo.getProjectRow(id);
     if (!row?.localPath) return reply.status(404).send({ detail: "Source not found" });
-    const stl = safeRepoPath(row.localPath, relativePath);
-    if (!stl) {
-      const insensitive = resolveCaseInsensitiveRepoPath(row.localPath, relativePath);
-      if (!insensitive) return reply.status(404).send({ detail: "STL not found" });
-      return serveSourceStl(deps, reply, insensitive, action);
-    }
-    try {
-      if (!statSync(stl).isFile()) {
-        const insensitive = resolveCaseInsensitiveRepoPath(row.localPath, relativePath);
-        if (!insensitive) return reply.status(404).send({ detail: "STL not found" });
-        return serveSourceStl(deps, reply, insensitive, action);
-      }
-    } catch {
-      const insensitive = resolveCaseInsensitiveRepoPath(row.localPath, relativePath);
-      if (!insensitive) return reply.status(404).send({ detail: "STL not found" });
-      return serveSourceStl(deps, reply, insensitive, action);
-    }
-    return serveSourceStl(deps, reply, stl, action);
+    return serveSourceStl(deps, reply, row.localPath, relativePath, action);
   });
 }
 
 function serveSourceStl(
   deps: RouteDeps,
   reply: import("fastify").FastifyReply,
-  stl: string,
+  repoRoot: string,
+  relativePath: string,
   action: string,
 ) {
   if (action === "mesh") {
-    try {
-      if (statSync(stl).size > MESH_MAX_BYTES) {
-        return reply.status(413).send({
-          detail: `STL exceeds ${MESH_MAX_BYTES / (1024 * 1024)}MB mesh limit`,
-        });
-      }
-    } catch {
+    const stream = openRepoStlMeshStream(repoRoot, relativePath, MESH_MAX_BYTES);
+    if (!stream) {
       return reply.status(404).send({ detail: "STL not readable" });
     }
+    const name = basename(relativePath);
     return reply
       .header("Content-Type", "model/stl")
-      .header("Content-Disposition", `inline; filename="${basename(stl)}"`)
-      .send(createReadStream(stl));
+      .header("Content-Disposition", `inline; filename="${name}"`)
+      .send(stream);
   }
-  const cached = cachedPngIfExists(globalPreviewPath(deps.thumbsDir, stl, "primary", null));
-  if (cached) {
-    return reply.header("Content-Type", "image/png").send(createReadStream(cached));
+  const preview = openStlThumbStream(deps.thumbsDir, repoRoot, relativePath, "preview");
+  if (preview) {
+    return reply.header("Content-Type", "image/png").send(preview);
   }
-  const thumb = cachedPngIfExists(globalThumbnailPath(deps.thumbsDir, stl, "primary", null));
+  const thumb = openStlThumbStream(deps.thumbsDir, repoRoot, relativePath, "thumb");
   if (thumb) {
-    return reply.header("Content-Type", "image/png").send(createReadStream(thumb));
+    return reply.header("Content-Type", "image/png").send(thumb);
   }
   return reply.header("Content-Type", "image/png").send(PLACEHOLDER_PNG);
 }

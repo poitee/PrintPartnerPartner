@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Check, ChevronDown, Download, RefreshCw, Search, Upload } from "lucide-react";
 import {
+  applyRoleColorsToParts,
   fetchFilamentCatalog,
   fetchRoleFilaments,
   fetchSpoolmanSpools,
@@ -331,7 +332,31 @@ export default function RoleFilamentPicker({
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingRole, setSavingRole] = useState<string | null>(null);
-  const [busyAction, setBusyAction] = useState<"import" | "regenerate" | null>(null);
+  const [busyAction, setBusyAction] = useState<"import" | "regenerate" | "apply" | null>(null);
+
+  const afterColorChange = useCallback(
+    (
+      result: { updated: number; thumbnails_cleared: number; roles: RoleFilamentRow[] },
+      role: string,
+    ) => {
+      setRows(result.roles);
+      bumpThumbnailCache();
+      onUpdated?.();
+      const label = ROLE_LABELS[role as StlNamingRoleId] ?? role;
+      if (result.updated > 0) {
+        toast.success(
+          `Applied ${label} to ${result.updated} part${result.updated === 1 ? "" : "s"}${
+            result.thumbnails_cleared > 0 ? " — previews refreshing" : ""
+          }`,
+        );
+      } else {
+        toast.message(
+          `Saved ${label} color — applies when parts with that role are included.`,
+        );
+      }
+    },
+    [onUpdated],
+  );
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -379,14 +404,7 @@ export default function RoleFilamentPicker({
         filament_custom_hex: null,
         spoolman_spool_id: null,
       });
-      setRows(result.roles);
-      bumpThumbnailCache();
-      if (result.updated === 0) {
-        toast.message(
-          `Saved ${ROLE_LABELS[role as StlNamingRoleId] ?? role} color — applies when parts with that role are included.`,
-        );
-      }
-      onUpdated?.();
+      afterColorChange(result, role);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -425,12 +443,7 @@ export default function RoleFilamentPicker({
         filament_custom_hex: hex || null,
         spoolman_spool_id: null,
       });
-      setRows(result.roles);
-      bumpThumbnailCache();
-      if (result.updated === 0) {
-        toast.message(`Saved ${ROLE_LABELS[role as StlNamingRoleId] ?? role} custom color.`);
-      }
-      onUpdated?.();
+      afterColorChange(result, role);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -455,10 +468,43 @@ export default function RoleFilamentPicker({
     try {
       const preset = await parseColorPreset(file);
       const applied = await applyColorPreset(profileId, preset);
-      await load();
+      const result = await applyRoleColorsToParts(profileId);
+      setRows(result.roles);
       bumpThumbnailCache();
       onUpdated?.();
-      toast.success(`Imported colors for ${applied} role${applied === 1 ? "" : "s"}`);
+      toast.success(
+        `Imported ${applied} role color${applied === 1 ? "" : "s"}${
+          result.updated > 0
+            ? ` — applied to ${result.updated} part${result.updated === 1 ? "" : "s"}`
+            : ""
+        }`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setLoadError(msg);
+      toast.error(msg);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const onApplyAllRoleColors = async () => {
+    setLoadError(null);
+    setBusyAction("apply");
+    try {
+      const result = await applyRoleColorsToParts(profileId);
+      setRows(result.roles);
+      bumpThumbnailCache();
+      onUpdated?.();
+      if (result.updated === 0) {
+        toast.message("Set role colors above first, then run Update build to include parts.");
+      } else {
+        toast.success(
+          `Applied role colors to ${result.updated} part${result.updated === 1 ? "" : "s"}${
+            result.thumbnails_cleared > 0 ? " — previews refreshing" : ""
+          }`,
+        );
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setLoadError(msg);
@@ -552,8 +598,17 @@ export default function RoleFilamentPicker({
 
       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
         <span className="mr-auto text-xs text-muted-foreground">
-          Click a role to change its color.
+          Pick a color per role — it applies to every included part with that role.
         </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={disabled || busyAction !== null}
+          onClick={() => void onApplyAllRoleColors()}
+          title="Re-apply saved role colors to all matching parts and refresh previews"
+        >
+          {busyAction === "apply" ? "Applying…" : "Apply all role colors"}
+        </Button>
         <Button variant="outline" size="sm" disabled={disabled} onClick={onSaveColors}>
           <Download className="h-4 w-4" aria-hidden />
           Save colors
