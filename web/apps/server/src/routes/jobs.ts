@@ -4,7 +4,7 @@ import type { JobSnapshot } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import { exportDownloadKey } from "../lib/secure-path.js";
 import { syncProjectById } from "./sources.js";
-import { exportProfileStlPack } from "../services/export-stl-pack.js";
+import { exportProfileStlPack, type StlPackGroupBy } from "../services/export-stl-pack.js";
 import { zipDirectoryToFile } from "../services/zip-dir.js";
 import { exportProfileHtml } from "../services/export-html.js";
 import { exportKitBundle } from "../services/export-kit.js";
@@ -216,12 +216,14 @@ export class InProcessJobRunner {
   private async runExportStlPack(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const profileId = Number(payload.profile_id);
     const missingOnly = Boolean(payload.missing_only);
+    const groupBy: StlPackGroupBy = payload.group_by === "color" ? "color" : "color_dir";
     const { name, parts, completedByMatchKey } = this.repo.buildMergePartsForProfile(profileId);
     const naming = this.repo.getGlobalNaming();
     const { rootPath, fileCounts, warnings } = exportProfileStlPack(name, parts, this.deps.exportsDir, {
       missingOnly,
       completedByMatchKey: missingOnly ? completedByMatchKey : undefined,
       roleOrder: naming.export_role_order,
+      groupBy,
     });
     const fileTotal = Object.values(fileCounts).reduce((a, b) => a + b, 0);
 
@@ -367,10 +369,15 @@ export async function registerJobRoutes(
   });
 
   app.post("/jobs/export-stl-pack", limited, async (request) => {
-    const body = request.body as { profile_id?: number; missing_only?: boolean };
+    const body = request.body as {
+      profile_id?: number;
+      missing_only?: boolean;
+      group_by?: string;
+    };
     const job_id = await jobs.start("export-stl-pack", {
       profile_id: body.profile_id,
       missing_only: body.missing_only ?? false,
+      group_by: body.group_by === "color" ? "color" : "color_dir",
     });
     return { job_id };
   });

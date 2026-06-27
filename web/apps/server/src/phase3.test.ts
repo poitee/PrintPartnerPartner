@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getDb, SqliteDatabase } from "./db/client.js";
@@ -149,6 +149,81 @@ describe("Phase 3 APIs", () => {
     );
     expect(rootPath).toContain("stl");
     expect(fileCounts.primary).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("exportProfileStlPack groups by color + directory by default", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-pack-dir-"));
+    mkdirSync(join(dir, "alpha"), { recursive: true });
+    mkdirSync(join(dir, "beta"), { recursive: true });
+    const stlA = join(dir, "alpha", "part.stl");
+    const stlB = join(dir, "beta", "part.stl");
+    writeFileSync(stlA, "solidA");
+    writeFileSync(stlB, "solidB");
+    const part = (relativePath: string, absolutePath: string) => ({
+      matchKey: relativePath,
+      relativePath,
+      filename: "part.stl",
+      sourceLayer: "base:R",
+      status: "base",
+      role: "primary",
+      quantityAuto: 1,
+      quantityOverride: null,
+      partSlug: "part",
+      included: true,
+      notes: "",
+      geometrySame: null,
+      absolutePath,
+    });
+    const { rootPath, fileCounts } = exportProfileStlPack(
+      "Test",
+      [part("alpha/part.stl", stlA), part("beta/part.stl", stlB)],
+      join(dir, "exports"),
+    );
+    expect(fileCounts.primary).toBe(2);
+    expect(existsSync(join(rootPath, "primary", "alpha", "part_01.stl"))).toBe(true);
+    expect(existsSync(join(rootPath, "primary", "beta", "part_01.stl"))).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("exportProfileStlPack flattens by color and de-dupes collisions", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-pack-flat-"));
+    mkdirSync(join(dir, "alpha"), { recursive: true });
+    mkdirSync(join(dir, "beta"), { recursive: true });
+    const stlA = join(dir, "alpha", "part.stl");
+    const stlB = join(dir, "beta", "part.stl");
+    writeFileSync(stlA, "solidA");
+    writeFileSync(stlB, "solidB");
+    const part = (relativePath: string, absolutePath: string) => ({
+      matchKey: relativePath,
+      relativePath,
+      filename: "part.stl",
+      sourceLayer: "base:R",
+      status: "base",
+      role: "primary",
+      quantityAuto: 1,
+      quantityOverride: null,
+      partSlug: "part",
+      included: true,
+      notes: "",
+      geometrySame: null,
+      absolutePath,
+    });
+    const { rootPath, fileCounts } = exportProfileStlPack(
+      "Test",
+      [part("alpha/part.stl", stlA), part("beta/part.stl", stlB)],
+      join(dir, "exports"),
+      { groupBy: "color" },
+    );
+    expect(fileCounts.primary).toBe(2);
+    const roleDir = join(rootPath, "primary");
+    const files = readdirSync(roleDir);
+    expect(files).toHaveLength(2);
+    expect(files).toContain("part_01.stl");
+    // Second same-named file is de-duped with a directory prefix.
+    expect(files.some((f) => f !== "part_01.stl" && f.endsWith("part_01.stl"))).toBe(true);
+    // No nested directory folders were created in flat mode.
+    expect(existsSync(join(roleDir, "alpha"))).toBe(false);
     rmSync(dir, { recursive: true, force: true });
   });
 });

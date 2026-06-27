@@ -374,9 +374,17 @@ export type Export3mfOptions = {
   enabled_printer_ids?: string[];
 };
 
+/**
+ * STL pack folder grouping:
+ * - `color_dir` (default): `role/<directory>/file.stl` — keep source directories.
+ * - `color`: `role/file.stl` — flatten all directories into one folder per color.
+ */
+export type StlPackGroupBy = "color" | "color_dir";
+
 export type ExportStlPackOptions = {
   profile_id: number;
   missing_only?: boolean;
+  group_by?: StlPackGroupBy;
 };
 
 export async function engineBaseUrl(): Promise<string> {
@@ -1661,13 +1669,14 @@ export async function startPackPreview(options: PackPreviewOptions): Promise<str
 
 export async function startExportStlPack(
   profileId: number,
-  options?: Pick<ExportStlPackOptions, "missing_only">,
+  options?: Pick<ExportStlPackOptions, "missing_only" | "group_by">,
 ): Promise<string> {
   const body = await engineFetch<{ job_id: string }>("/jobs/export-stl-pack", {
     method: "POST",
     body: JSON.stringify({
       profile_id: profileId,
       missing_only: options?.missing_only ?? false,
+      group_by: options?.group_by ?? "color_dir",
     }),
   });
   return body.job_id;
