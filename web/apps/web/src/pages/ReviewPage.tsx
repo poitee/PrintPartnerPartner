@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   Box,
+  ChevronDown,
   ClipboardCheck,
   Hash,
   Layers,
@@ -18,8 +19,16 @@ import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
 import ReviewPartsSheet from "../components/review/ReviewPartsSheet";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
 import { Card, CardContent } from "../components/ui/card";
-import { startExportStlPack } from "../api/engine";
+import { startExportStlPack, type StlPackGroupBy } from "../api/engine";
 import { buildRoute, checkoffRoute, sourcesRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
 import { useProfileSelection } from "../context/ProfileContext";
@@ -70,10 +79,10 @@ export default function ReviewPage() {
   );
   const hasBlockers = review?.has_blockers ?? blockers.length > 0;
 
-  const onExportStls = () => {
+  const onExportStls = (groupBy: StlPackGroupBy) => {
     if (selectedProfileId == null) return;
     void exportStlJob.runJob(
-      () => startExportStlPack(selectedProfileId),
+      () => startExportStlPack(selectedProfileId, { group_by: groupBy }),
       (snap) => {
         if (snap.status === "error") {
           toast.error(snap.message || "STL export failed");
@@ -99,15 +108,39 @@ export default function ReviewPage() {
         description="Validate parts, edit quantities, and export before shop-floor checkoff."
         actions={
           <PageHeaderActions>
-            <Button
-              className="min-h-10 w-full sm:w-auto"
-              onClick={onExportStls}
-              disabled={
-                selectedProfileId == null || hasBlockers || exportStlJob.busy || !health
-              }
-            >
-              {exportStlJob.busy ? "Exporting…" : "Export STLs"}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  className="min-h-10 w-full sm:w-auto"
+                  disabled={
+                    selectedProfileId == null || hasBlockers || exportStlJob.busy || !health
+                  }
+                >
+                  {exportStlJob.busy ? "Exporting…" : "Export STLs"}
+                  <ChevronDown className="ml-1 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel>Group exported files by</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => onExportStls("color_dir")}>
+                  <div className="flex flex-col">
+                    <span>Color + directory</span>
+                    <span className="text-xs text-muted-foreground">
+                      Keep source folders (e.g. Primary/partsDir/file.stl)
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onExportStls("color")}>
+                  <div className="flex flex-col">
+                    <span>Color only</span>
+                    <span className="text-xs text-muted-foreground">
+                      Flatten all directories (e.g. Primary/file.stl)
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="secondary"
               className="min-h-10 w-full sm:w-auto"

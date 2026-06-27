@@ -17,6 +17,15 @@ import type { KitImportJobResult } from "../api/engine";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import { ChevronDown } from "lucide-react";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -34,6 +43,7 @@ import {
   startRecompute,
   type ProfileLayer,
   type SourceSummary,
+  type StlPackGroupBy,
   DEFAULT_STL_NAMING_PROFILE,
 } from "../api/engine";
 import { buildRoute, buildsRoute, reviewRoute, settingsRoute, sourcesRoute } from "../lib/routes";
@@ -200,10 +210,10 @@ function BuildPageContent() {
     );
   };
 
-  const onExportStls = () => {
+  const onExportStls = (groupBy: StlPackGroupBy) => {
     if (selectedProfileId == null) return;
     void exportStlJob.runJob(
-      () => startExportStlPack(selectedProfileId),
+      () => startExportStlPack(selectedProfileId, { group_by: groupBy }),
       (snap) => {
         if (snap.status === "error") {
           toast.error(snap.message || "STL export failed");
@@ -277,14 +287,38 @@ function BuildPageContent() {
             >
               {busy ? "Updating…" : "Update build"}
             </Button>
-            <Button
-              variant="secondary"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={onExportStls}
-              disabled={selectedProfileId == null || exportStlJob.busy || !health}
-            >
-              {exportStlJob.busy ? "Exporting…" : "Export STLs"}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="secondary"
+                  className="min-h-10 w-full sm:w-auto"
+                  disabled={selectedProfileId == null || exportStlJob.busy || !health}
+                >
+                  {exportStlJob.busy ? "Exporting…" : "Export STLs"}
+                  <ChevronDown className="ml-1 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel>Group exported files by</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => onExportStls("color_dir")}>
+                  <div className="flex flex-col">
+                    <span>Color + directory</span>
+                    <span className="text-xs text-muted-foreground">
+                      Keep source folders (e.g. Primary/partsDir/file.stl)
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onExportStls("color")}>
+                  <div className="flex flex-col">
+                    <span>Color only</span>
+                    <span className="text-xs text-muted-foreground">
+                      Flatten all directories (e.g. Primary/file.stl)
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="secondary"
               className="min-h-10 w-full sm:w-auto"
