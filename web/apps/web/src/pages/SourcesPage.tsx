@@ -23,7 +23,7 @@ import {
   type SourceSummary,
   type StlSearchHit,
 } from "../api/engine";
-import GitHubBranchField from "../components/GitHubBranchField";
+import GitHubRefField, { type GithubRefType } from "../components/GitHubRefField";
 import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -79,7 +79,9 @@ import { toastJobResult } from "../lib/jobToasts";
 type WizardForm = {
   name: string;
   url: string;
+  refType: GithubRefType;
   branch: string;
+  tag: string;
   source_kind: SourceKind;
   category: string;
   pendingFiles: File[];
@@ -89,7 +91,9 @@ type WizardForm = {
 const emptyForm = (categories: string[]): WizardForm => ({
   name: "",
   url: "",
+  refType: "branch",
   branch: "main",
+  tag: "",
   source_kind: "github",
   category: categories[0] ?? "",
   pendingFiles: [],
@@ -290,7 +294,9 @@ export default function SourcesPage() {
     setForm({
       name: s.name,
       url: s.url,
+      refType: s.tag ? "tag" : "branch",
       branch: s.branch || "main",
+      tag: s.tag ?? "",
       source_kind: (s.source_kind as SourceKind) || "github",
       category: s.category ?? "",
       pendingFiles: [],
@@ -341,6 +347,13 @@ export default function SourcesPage() {
     setLoadError(null);
     try {
       const category = form.category.trim() || null;
+      if (form.source_kind === "github" && form.refType === "tag" && !form.tag.trim()) {
+        throw new Error("Enter a tag or switch back to Branch.");
+      }
+      const refFields =
+        form.source_kind === "github" && form.refType === "tag"
+          ? { branch: form.branch.trim() || "main", tag: form.tag.trim() }
+          : { branch: form.branch.trim() || "main", tag: null };
       if (editId == null) {
         if (
           (form.source_kind === "printables" || form.source_kind === "makerworld") &&
@@ -351,7 +364,7 @@ export default function SourcesPage() {
         const created = await createSource({
           name: form.name.trim(),
           url: form.url.trim(),
-          branch: form.branch.trim() || "main",
+          ...refFields,
           source_kind: form.source_kind,
           category,
         });
@@ -368,7 +381,7 @@ export default function SourcesPage() {
         await updateSource(editId, {
           name: form.name.trim(),
           url: form.url.trim(),
-          branch: form.branch.trim(),
+          ...refFields,
           source_kind: form.source_kind,
           category,
         });
@@ -963,10 +976,14 @@ export default function SourcesPage() {
                   </div>
                 )}
                 {form.source_kind === "github" && (
-                  <GitHubBranchField
+                  <GitHubRefField
                     url={form.url}
+                    refType={form.refType}
                     branch={form.branch}
+                    tag={form.tag}
+                    onRefTypeChange={(refType) => setForm((f) => ({ ...f, refType }))}
                     onBranchChange={(branch) => setForm((f) => ({ ...f, branch }))}
+                    onTagChange={(tag) => setForm((f) => ({ ...f, tag }))}
                   />
                 )}
               </>

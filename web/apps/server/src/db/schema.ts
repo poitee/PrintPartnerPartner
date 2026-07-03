@@ -16,6 +16,7 @@ export const projects = sqliteTable(
     url: text("url").notNull(),
     sourceType: text("source_type").notNull().default("git"),
     branch: text("branch").notNull().default("main"),
+    tag: text("tag"),
     localPath: text("local_path"),
     lastSyncedAt: text("last_synced_at"),
     lastCommitSha: text("last_commit_sha"),
@@ -105,7 +106,7 @@ export const appSettings = sqliteTable(
 );
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 2;
+export const currentSchemaVersion = 3;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -115,6 +116,7 @@ export const schemaMigrations: string[] = [
     url TEXT NOT NULL,
     source_type TEXT NOT NULL DEFAULT 'git',
     branch TEXT NOT NULL DEFAULT 'main',
+    tag TEXT,
     local_path TEXT,
     last_synced_at TEXT,
     last_commit_sha TEXT,
