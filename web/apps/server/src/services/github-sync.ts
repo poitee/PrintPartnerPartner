@@ -58,6 +58,25 @@ export async function listGithubBranches(
   };
 }
 
+export async function listGithubTags(
+  url: string,
+  token?: string | null,
+): Promise<{ owner: string; repo: string; tags: string[] }> {
+  const ref = parseGithubUrl(url);
+  if (!ref) throw new Error("Invalid GitHub repository URL");
+  const octokit = new Octokit(token ? { auth: token } : {});
+  const tags = await octokit.paginate(octokit.repos.listTags, {
+    owner: ref.owner,
+    repo: ref.repo,
+    per_page: 100,
+  });
+  return {
+    owner: ref.owner,
+    repo: ref.repo,
+    tags: tags.map((t) => t.name),
+  };
+}
+
 export type SyncResult = {
   commitSha: string | null;
   stlPaths: string[];
@@ -90,19 +109,21 @@ export async function syncGithubSource(
   branch: string,
   repoDir: string,
   token?: string | null,
-  options?: { download?: boolean; maxDownloads?: number },
+  options?: { download?: boolean; maxDownloads?: number; tag?: string | null },
 ): Promise<SyncResult> {
   const ref = parseGithubUrl(url);
   if (!ref) throw new Error("Invalid GitHub repository URL");
   const octokit = new Octokit(token ? { auth: token } : {});
 
-  const branchName = branch || ref.branch;
-  const branchMeta = await octokit.repos.getBranch({
+  const tagName = options?.tag?.trim() || null;
+  const refName = tagName || branch || ref.branch;
+  // getCommit resolves any ref (branch, tag, or SHA), unlike getBranch which only accepts branches.
+  const commitMeta = await octokit.repos.getCommit({
     owner: ref.owner,
     repo: ref.repo,
-    branch: branchName,
+    ref: refName,
   });
-  const commitSha = branchMeta.data.commit.sha;
+  const commitSha = commitMeta.data.sha;
 
   const tree = await octokit.git.getTree({
     owner: ref.owner,
@@ -126,7 +147,7 @@ export async function syncGithubSource(
     for (const path of stlPaths.slice(0, maxDownloads)) {
       const dest = safeRepoFilePath(repoDir, path);
       if (!dest) continue;
-      const ok = await downloadStlRaw(ref.owner, ref.repo, branchName, path, dest, token);
+      const ok = await downloadStlRaw(ref.owner, ref.repo, refName, path, dest, token);
       if (ok) downloaded++;
     }
   }

@@ -100,6 +100,7 @@ function sourceSummary(row: ProjectRow): SourceSummary {
     role: row.role ?? "unassigned",
     category: resolveSourceCategory(row.metadataJson, row.role),
     branch: row.branch ?? "main",
+    tag: row.tag ?? null,
     local_path: row.localPath,
     last_synced_at: row.lastSyncedAt,
     last_commit_sha: row.lastCommitSha,
@@ -266,6 +267,7 @@ export class AppRepository {
     name: string;
     url?: string;
     branch?: string;
+    tag?: string | null;
     source_kind?: string;
     source_type?: string;
     role?: string;
@@ -302,6 +304,7 @@ export class AppRepository {
         name,
         url: input.url ?? "",
         branch: input.branch ?? "main",
+        tag: input.tag?.trim() || null,
         sourceKind,
         sourceType,
         role: input.role ?? "unassigned",
@@ -332,6 +335,7 @@ export class AppRepository {
       name: string;
       url: string;
       branch: string;
+      tag: string | null;
       source_kind: string;
       source_type: string;
       role: string;
@@ -350,6 +354,7 @@ export class AppRepository {
     if (patch.name != null) updates.name = patch.name.trim();
     if (patch.url != null) updates.url = patch.url;
     if (patch.branch != null) updates.branch = patch.branch;
+    if (patch.tag !== undefined) updates.tag = patch.tag?.trim() || null;
     if (patch.source_kind != null) updates.sourceKind = patch.source_kind;
     if (patch.source_type != null) updates.sourceType = patch.source_type;
     if (patch.role != null) updates.role = patch.role;

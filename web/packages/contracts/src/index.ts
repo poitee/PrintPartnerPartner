@@ -137,6 +137,7 @@ export type SourceSummary = {
   role: string;
   category: string | null;
   branch: string;
+  tag: string | null;
   local_path: string | null;
   last_synced_at: string | null;
   last_commit_sha: string | null;

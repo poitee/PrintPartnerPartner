@@ -13,17 +13,19 @@ export async function remoteUpdateStatusOctokit(
   branch: string,
   lastSha: string | null,
   token?: string | null,
+  tag?: string | null,
 ): Promise<RemoteUpdateStatus> {
   const ref = parseGithubUrl(url);
   if (!ref) return "unknown";
   try {
     const octokit = new Octokit(token ? { auth: token } : {});
-    const { data } = await octokit.repos.getBranch({
+    const refName = tag?.trim() || branch || ref.branch;
+    const { data } = await octokit.repos.getCommit({
       owner: ref.owner,
       repo: ref.repo,
-      branch: branch || ref.branch,
+      ref: refName,
     });
-    const remoteSha = data.commit.sha;
+    const remoteSha = data.sha;
     const compare = (lastSha ?? "").trim();
     if (!compare) return "unknown";
     return remoteSha === compare ? "up_to_date" : "updates_available";
@@ -67,6 +69,7 @@ export async function checkAllSourceUpdates(repo: AppRepository): Promise<{
       row.branch ?? "main",
       row.lastCommitSha,
       token,
+      row.tag,
     );
     const now = new Date().toISOString();
     const base = parseProjectMetadata(row.metadataJson) ?? {};

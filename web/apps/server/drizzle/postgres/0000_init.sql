@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS projects (
   url TEXT NOT NULL,
   source_type TEXT NOT NULL DEFAULT 'git',
   branch TEXT NOT NULL DEFAULT 'main',
+  tag TEXT,
   local_path TEXT,
   last_synced_at TEXT,
   last_commit_sha TEXT,
