@@ -67,6 +67,7 @@ export async function registerRepoManifestRoutes(
         name: row.name,
         url: row.url,
         branch: row.branch,
+        tag: row.tag,
         local_path: row.localPath,
       },
       path: MANIFEST_FILE,

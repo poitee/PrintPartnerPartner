@@ -451,12 +451,11 @@ export type GithubBranchesResponse = {
 };
 
 export async function fetchGithubBranches(url: string): Promise<GithubBranchesResponse> {
-  const base = await engineBaseUrl();
   const trimmed = url.trim();
   if (!trimmed) {
     throw new Error("GitHub repository URL is required");
   }
-  const endpoint = new URL("/sources/github-branches", base);
+  const endpoint = new URL(resolveEngineUrl("/sources/github-branches"));
   endpoint.searchParams.set("url", trimmed);
   const res = await fetch(endpoint.toString());
   if (!res.ok) {
@@ -472,6 +471,35 @@ export async function fetchGithubBranches(url: string): Promise<GithubBranchesRe
     throw new Error(detail);
   }
   return res.json() as Promise<GithubBranchesResponse>;
+}
+
+export type GithubTagsResponse = {
+  owner: string;
+  repo: string;
+  tags: string[];
+};
+
+export async function fetchGithubTags(url: string): Promise<GithubTagsResponse> {
+  const trimmed = url.trim();
+  if (!trimmed) {
+    throw new Error("GitHub repository URL is required");
+  }
+  const endpoint = new URL(resolveEngineUrl("/sources/github-tags"));
+  endpoint.searchParams.set("url", trimmed);
+  const res = await fetch(endpoint.toString());
+  if (!res.ok) {
+    let detail = `Could not list tags (${res.status})`;
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === "string" && body.detail.trim()) {
+        detail = body.detail;
+      }
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<GithubTagsResponse>;
 }
 
 export async function fetchSourceHasManifest(
@@ -585,6 +613,7 @@ export async function createSource(body: {
   name: string;
   url?: string;
   branch?: string;
+  tag?: string | null;
   source_kind: string;
   role?: string;
   category?: string | null;
@@ -608,6 +637,7 @@ export async function updateSource(
     name: string;
     url: string;
     branch: string;
+    tag: string | null;
     source_kind: string;
     role: string;
     category: string | null;
