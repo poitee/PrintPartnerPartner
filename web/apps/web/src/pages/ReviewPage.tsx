@@ -65,8 +65,8 @@ export default function ReviewPage() {
 
   const loadError = workspaceError;
   const planName =
-    review?.plan_name ??
     profiles.find((p) => p.id === selectedProfileId)?.name ??
+    review?.plan_name ??
     "Review";
 
   const blockers = useMemo(
