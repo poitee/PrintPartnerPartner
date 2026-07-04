@@ -10,6 +10,15 @@ import {
 
 const ROLE_ORDER = ["primary", "accent", "clear", "opaque"] as const;
 
+/**
+ * How exported STL files are organised into folders.
+ * - `color_dir` (default): `role/<original directory>/file.stl` — preserves the
+ *   source directory structure within each color/role folder.
+ * - `color`: `role/file.stl` — flattens every source directory into a single
+ *   folder per color/role (filename collisions are de-duplicated).
+ */
+export type StlPackGroupBy = "color" | "color_dir";
+
 function safeFolderName(folderKey: string): string {
   if (folderKey === "(root)") return "_root";
   const safe = folderKey.replace(/\//g, "_").replace(/[^\w\-.]+/g, "_");
@@ -40,9 +49,11 @@ export function exportProfileStlPack(
     missingOnly?: boolean;
     completedByMatchKey?: Record<string, boolean[]>;
     roleOrder?: string[];
+    groupBy?: StlPackGroupBy;
   } = {},
 ): { rootPath: string; fileCounts: Record<string, number>; warnings: string[] } {
   const order = options.roleOrder ?? [...ROLE_ORDER];
+  const groupBy: StlPackGroupBy = options.groupBy ?? "color_dir";
   const exportType = options.missingOnly ? "stl-missing" : "stl";
   const outputRoot = prepareFreshExportDir(exportsDir, profileName, exportType);
 
@@ -83,7 +94,27 @@ export function exportProfileStlPack(
   for (const role of order) {
     const folders = byRoleFolder.get(role);
     if (!folders) continue;
-    for (const [folder, entries] of [...folders.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const sortedFolders = [...folders.entries()].sort(([a], [b]) => a.localeCompare(b));
+
+    if (groupBy === "color") {
+      // Flatten every source directory into a single folder per color/role.
+      // A shared name set across folders lets entryName() de-duplicate
+      // collisions (it prefixes the source directory on the second hit).
+      const roleDir = join(outputRoot, role);
+      mkdirSync(roleDir, { recursive: true });
+      const usedNames = new Set<string>();
+      for (const [, entries] of sortedFolders) {
+        for (const [part, unit] of entries) {
+          if (!part.absolutePath) continue;
+          const entry = entryName(part, unit, usedNames);
+          copyFileSync(part.absolutePath, join(roleDir, entry));
+          fileCounts[role] = (fileCounts[role] ?? 0) + 1;
+        }
+      }
+      continue;
+    }
+
+    for (const [folder, entries] of sortedFolders) {
       const folderDir = join(outputRoot, role, safeFolderName(folder));
       mkdirSync(folderDir, { recursive: true });
       const usedNames = new Set<string>();

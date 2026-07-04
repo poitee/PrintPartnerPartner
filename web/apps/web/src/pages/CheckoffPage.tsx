@@ -168,8 +168,8 @@ export default function CheckoffPage() {
   }, [filter, compactMode, continuousPrintLayout]);
 
   const planName =
-    review?.plan_name ??
     profiles.find((p) => p.id === selectedProfileId)?.name ??
+    review?.plan_name ??
     "Checkoff";
 
   const includedParts = useMemo(() => {

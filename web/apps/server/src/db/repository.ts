@@ -493,7 +493,11 @@ export class AppRepository {
     return profile;
   }
 
-  duplicateProfile(id: number, newName: string): ProfileSummary & { layers: ReturnType<AppRepository["getProfileLayers"]> } {
+  duplicateProfile(
+    id: number,
+    newName: string,
+    options?: { clearCheckoff?: boolean },
+  ): ProfileSummary & { layers: ReturnType<AppRepository["getProfileLayers"]> } {
     const trimmed = newName.trim();
     if (!trimmed) throw new Error("Profile name is required");
     const dup = this.db
@@ -577,22 +581,25 @@ export class AppRepository {
       if (inserted) oldToNew.set(old.id, inserted.id);
     }
 
-    for (const [oldId, newId] of oldToNew) {
-      const progress = this.db
-        .select()
-        .from(this.schema.printProgress)
-        .where(eq(this.schema.printProgress.partId, oldId))
-        .all();
-      for (const row of progress) {
-        this.db
-          .insert(this.schema.printProgress)
-          .values({
-            tenantId: this.tenantId,
-            partId: newId,
-            unitIndex: row.unitIndex,
-            completed: row.completed,
-          })
-          .run();
+    // Copy per-unit checkoff progress unless the caller asked for a clean copy.
+    if (!options?.clearCheckoff) {
+      for (const [oldId, newId] of oldToNew) {
+        const progress = this.db
+          .select()
+          .from(this.schema.printProgress)
+          .where(eq(this.schema.printProgress.partId, oldId))
+          .all();
+        for (const row of progress) {
+          this.db
+            .insert(this.schema.printProgress)
+            .values({
+              tenantId: this.tenantId,
+              partId: newId,
+              unitIndex: row.unitIndex,
+              completed: row.completed,
+            })
+            .run();
+        }
       }
     }
 

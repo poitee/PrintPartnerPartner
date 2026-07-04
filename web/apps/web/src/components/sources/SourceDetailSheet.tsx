@@ -145,7 +145,7 @@ export default function SourceDetailSheet({
         await loadNaming(source.id);
       }
     })();
-  }, [open, source?.id, initialTab, highlightPath, loadNaming]);
+  }, [open, source, initialTab, highlightPath, loadNaming]);
 
   const loadDoc = async (path: string) => {
     if (!source) return;

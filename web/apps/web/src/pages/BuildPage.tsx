@@ -6,6 +6,7 @@ import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import RoleFilamentPicker from "../components/RoleFilamentPicker";
+import KitManifestOptions from "../components/KitManifestOptions";
 import SourceCategorySheet from "../components/sources/SourceCategorySheet";
 import SourceFilePickerCard from "../components/SourceFilePickerCard";
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
@@ -15,6 +16,15 @@ import ShareImportSetupPanel, {
 import type { KitImportJobResult } from "../api/engine";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import { ChevronDown } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -33,9 +43,12 @@ import {
   startRecompute,
   type ProfileLayer,
   type SourceSummary,
+  type StlPackGroupBy,
+  DEFAULT_STL_NAMING_PROFILE,
 } from "../api/engine";
-import { buildRoute, buildsRoute, reviewRoute, sourcesRoute } from "../lib/routes";
+import { buildRoute, buildsRoute, reviewRoute, settingsRoute, sourcesRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
+import { takeKitImportResult } from "../lib/kitImportStash";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
@@ -76,8 +89,15 @@ function BuildPageContent() {
     if (state?.kitImport) {
       setKitImportSetup(state.kitImport);
       window.history.replaceState({}, document.title);
+      return;
     }
-  }, [location.state]);
+    // Fall back to the sessionStorage stash in case location.state was dropped
+    // by an intervening navigation (e.g. ?profile= URL sync).
+    if (selectedProfileId != null) {
+      const stashed = takeKitImportResult(selectedProfileId);
+      if (stashed) setKitImportSetup(stashed);
+    }
+  }, [location.state, selectedProfileId]);
 
   const loadProfileData = useCallback(async (profileId: number) => {
     setLoadError(null);
@@ -190,10 +210,10 @@ function BuildPageContent() {
     );
   };
 
-  const onExportStls = () => {
+  const onExportStls = (groupBy: StlPackGroupBy) => {
     if (selectedProfileId == null) return;
     void exportStlJob.runJob(
-      () => startExportStlPack(selectedProfileId),
+      () => startExportStlPack(selectedProfileId, { group_by: groupBy }),
       (snap) => {
         if (snap.status === "error") {
           toast.error(snap.message || "STL export failed");
@@ -267,14 +287,38 @@ function BuildPageContent() {
             >
               {busy ? "Updating…" : "Update build"}
             </Button>
-            <Button
-              variant="secondary"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={onExportStls}
-              disabled={selectedProfileId == null || exportStlJob.busy || !health}
-            >
-              {exportStlJob.busy ? "Exporting…" : "Export STLs"}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="secondary"
+                  className="min-h-10 w-full sm:w-auto"
+                  disabled={selectedProfileId == null || exportStlJob.busy || !health}
+                >
+                  {exportStlJob.busy ? "Exporting…" : "Export STLs"}
+                  <ChevronDown className="ml-1 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel>Group exported files by</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => onExportStls("color_dir")}>
+                  <div className="flex flex-col">
+                    <span>Color + directory</span>
+                    <span className="text-xs text-muted-foreground">
+                      Keep source folders (e.g. Primary/partsDir/file.stl)
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onExportStls("color")}>
+                  <div className="flex flex-col">
+                    <span>Color only</span>
+                    <span className="text-xs text-muted-foreground">
+                      Flatten all directories (e.g. Primary/file.stl)
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               variant="secondary"
               className="min-h-10 w-full sm:w-auto"
@@ -312,6 +356,9 @@ function BuildPageContent() {
             warnings={kitImportSetup.warnings ?? []}
             profileId={kitImportSetup.profile_id}
             onDismiss={() => setKitImportSetup(null)}
+            onSourcesChanged={() => {
+              if (selectedProfileId != null) void loadProfileData(selectedProfileId);
+            }}
           />
         )}
 
@@ -397,6 +444,16 @@ function BuildPageContent() {
                   ? () => void onRemoveLayer(row.layer)
                   : undefined
               }
+              expandedExtra={
+                row.layerType === "base" && selectedProfileId != null ? (
+                  <KitManifestOptions
+                    profileId={selectedProfileId}
+                    baseSourceName={row.sourceName}
+                    disabled={!health || busy}
+                    compact
+                  />
+                ) : undefined
+              }
             />
           ))}
 
@@ -426,9 +483,25 @@ function BuildPageContent() {
         </section>
 
         <section className="rounded-lg border border-border bg-card p-4">
-          <h3 className="mb-1 text-sm font-semibold">Role filament colors</h3>
+          <h3 className="mb-1 text-sm font-semibold">Part roles</h3>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Roles come from STL filenames and folder rules (e.g.{" "}
+            {DEFAULT_STL_NAMING_PROFILE.roles
+              .filter((r) => r.markers.length > 0)
+              .map((r) => `${r.markers.join(", ")} → ${r.label}`)
+              .join("; ")}
+            ).{" "}
+            <Button variant="link" className="h-auto p-0 text-xs" asChild>
+              <Link to={`${settingsRoute()}#stl-naming`}>Customize roles in Settings</Link>
+            </Button>
+          </p>
+
+          <h3 className="mb-1 mt-4 text-sm font-semibold">Colors by role</h3>
           <p className="mb-3 text-xs text-muted-foreground">
-            Catalog or custom color per STL role — applies to all included parts with that role.
+            Pick a filament color for each role — it applies to every included part with that role.
+            Review and Checkoff update automatically; use{" "}
+            <strong className="font-medium text-foreground">Apply all role colors</strong> after
+            importing a preset or if previews look stale.
           </p>
           {selectedProfileId == null ? (
             <p className="text-sm text-muted-foreground">Select a build plan in the header first.</p>

@@ -173,7 +173,7 @@ Open [http://localhost:8080](http://localhost:8080).
 
 ## SaaS mode
 
-Set `DEPLOY_MODE=saas` to enable multi-tenant hosting: Postgres for app data (when `DATABASE_URL` is set), S3-compatible blob storage (when `S3_BUCKET` is set), and GitHub OAuth. A ready-to-run stack with Postgres 16 and MinIO is provided:
+Set `DEPLOY_MODE=saas` to enable multi-tenant hosting: Postgres for app data (when `DATABASE_URL` is set), S3-compatible blob storage (when `S3_BUCKET` is set), and GitHub OAuth. A ready-to-run stack with Postgres 16 and RustFS (S3-compatible) is provided:
 
 ```bash
 docker compose -f docker-compose.saas.yml up --build
@@ -198,7 +198,7 @@ The application lives in the `web/` TypeScript monorepo; the `Dockerfile` and Co
 .
 ├── Dockerfile                 # self-host image (API + SPA, single port)
 ├── docker-compose.yml         # self-host (SQLite, port 8080)
-├── docker-compose.saas.yml    # SaaS (Postgres + MinIO/S3 + OAuth)
+├── docker-compose.saas.yml    # SaaS (Postgres + RustFS/S3 + OAuth)
 └── web/
     ├── apps/web               # React SPA
     ├── apps/server            # Fastify API

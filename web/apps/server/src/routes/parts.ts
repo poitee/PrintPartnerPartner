@@ -1,9 +1,10 @@
-import { createReadStream, mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { createReadStream, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppRepository } from "../db/repository.js";
 import { resolvePartStl } from "../services/part-paths.js";
 import { resolvePartFilamentHex } from "../services/filament-catalog.js";
+import { clearPlanThumbnailCache } from "../services/plan-thumbnails.js";
 import {
   cachedPngIfExists,
   globalPreviewPath,
@@ -116,26 +117,7 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
     if (!deps.repo.getProfile(id)) {
       return reply.status(404).send({ detail: "Profile not found" });
     }
-    let cleared = 0;
-    for (const part of deps.repo.getProfilePartRows(id)) {
-      const stl = resolvePartStl(deps.repo, part);
-      if (!stl) continue;
-      const hex = resolvePartFilamentHex(part);
-      const role = part.role || "primary";
-      const paths = [
-        globalThumbnailPath(deps.thumbsDir, stl, role, hex),
-        globalPreviewPath(deps.thumbsDir, stl, role, hex),
-      ];
-      for (const path of paths) {
-        if (!cachedPngIfExists(path)) continue;
-        try {
-          unlinkSync(path);
-          cleared += 1;
-        } catch {
-          /* ignore */
-        }
-      }
-    }
+    const cleared = clearPlanThumbnailCache(deps.repo, deps.thumbsDir, id);
     return { cleared };
   });
 

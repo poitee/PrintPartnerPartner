@@ -92,7 +92,9 @@ SaaS mode uses **Postgres for app data** when `DATABASE_URL` is set (tenant-scop
 docker compose -f docker-compose.saas.yml up --build
 ```
 
-Includes Postgres 16, MinIO (S3-compatible), and the app with `SAAS_ALLOW_ANONYMOUS=1` for easy dev.
+Includes Postgres 16, [RustFS](https://rustfs.com) (S3-compatible), and the app with `SAAS_ALLOW_ANONYMOUS=1` for easy dev. The compose file creates the `print-partner` bucket on first start.
+
+**Migrating from MinIO:** remove the old `pp-minio` volume (`docker volume rm <project>_pp-minio`) — RustFS uses a different on-disk format. Blob data in the old volume is not portable; re-upload or re-sync sources after switching.
 
 ### SaaS environment variables
 
@@ -103,9 +105,9 @@ Includes Postgres 16, MinIO (S3-compatible), and the app with `SAAS_ALLOW_ANONYM
 | `DATABASE_URL` | **Yes (prod)** | Postgres connection string — migrations on startup; app data in Postgres |
 | `S3_BUCKET` | Optional | Tenant-prefixed S3 blobs |
 | `S3_REGION` / `AWS_REGION` | With S3 | AWS region |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | With S3 | Credentials (MinIO: root user/pass) |
-| `S3_ENDPOINT` | MinIO/dev | Custom S3 endpoint URL |
-| `S3_FORCE_PATH_STYLE` | MinIO | Set `1` for path-style MinIO URLs |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | With S3 | S3 credentials (RustFS dev stack: `rustfsadmin` / `rustfsadmin`) |
+| `S3_ENDPOINT` | S3-compatible dev | Custom S3 endpoint URL (e.g. `http://rustfs:9000`) |
+| `S3_FORCE_PATH_STYLE` | S3-compatible dev | Set `1` for path-style URLs (RustFS, MinIO, Garage, etc.) |
 | `SESSION_SECRET` | OAuth / prod | Required in production when auth enabled |
 | `ALLOWED_ORIGINS` | Prod | Comma-separated CORS origins (alias: `CORS_ORIGIN`) |
 | `SAAS_BASIC_AUTH` | Optional | `user:password` for HTTP Basic dev auth |
@@ -138,16 +140,16 @@ npx tsx scripts/import-sqlite.ts \
 
 - **Exports:** job endpoints write files under `exports/` in the data dir and return `download_url` (e.g. `/exports/Plan/checklist.html`). The UI triggers a browser download via `GET /exports/*` with `Content-Disposition: attachment`.
 - **Kit bundle import (browser):** upload `.print-partner-kit.zip` with `POST /imports/kit-bundle` (multipart field `file`). Command palette **Import shared build…** uses this path.
-- **Kit bundle import (server path):** `POST /jobs/import-kit-bundle` or `POST /admin/import-kit-bundle` with `{ "path": "…" }` only works when the file already exists on the engine host (Tauri desktop or admin scripts) — not for remote web users.
+- **Kit bundle import (server host):** `POST /admin/import-kit-bundle` with `{ "path": "…" }` when the `.print-partner-kit` file already exists under the data directory (admin scripts on the same machine as the engine).
 - **Source ZIP import:** `POST /sources/:id/upload-zip` (multipart upload only).
 
 ### Smoke test
 
 See [scripts/SMOKE_CHECKLIST.md](./scripts/SMOKE_CHECKLIST.md).
 
-## Known intentional gaps vs desktop
+## Known gaps
 
 - No PyVista/VTK mesh preview server-side (client thumbnails only)
 - Printables/MakerWorld source create returns `501`
 - Community manifest “report issue” uses export-draft stub body
-- Bambu metadata in 3MF is minimal (plate JSON + slice_info stub; desktop also lacks full slicer state)
+- Bambu metadata in 3MF is minimal (plate JSON + slice_info stub)

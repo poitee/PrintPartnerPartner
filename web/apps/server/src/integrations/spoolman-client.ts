@@ -262,7 +262,7 @@ export async function listSpoolmanFilaments(
     res = await spoolmanFetch(baseUrl, config, "/filament");
   } catch (e) {
     const detail = e instanceof Error ? e.message : String(e);
-    throw new Error(`Spoolman filaments request failed: ${detail}`);
+    throw new Error(`Spoolman filaments request failed: ${detail}`, { cause: e });
   }
   if (!res.ok) {
     throw new Error(`Spoolman filaments request failed: HTTP ${res.status}`);
