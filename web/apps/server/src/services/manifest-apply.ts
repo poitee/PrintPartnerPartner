@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { safeRepoPath } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
 import type { PartDbRow } from "../db/repository.js";

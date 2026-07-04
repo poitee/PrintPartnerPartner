@@ -374,9 +374,17 @@ export type Export3mfOptions = {
   enabled_printer_ids?: string[];
 };
 
+/**
+ * STL pack folder grouping:
+ * - `color_dir` (default): `role/<directory>/file.stl` — keep source directories.
+ * - `color`: `role/file.stl` — flatten all directories into one folder per color.
+ */
+export type StlPackGroupBy = "color" | "color_dir";
+
 export type ExportStlPackOptions = {
   profile_id: number;
   missing_only?: boolean;
+  group_by?: StlPackGroupBy;
 };
 
 export async function engineBaseUrl(): Promise<string> {
@@ -530,10 +538,11 @@ export async function deleteProfile(profileId: number): Promise<void> {
 export async function duplicateProfile(
   profileId: number,
   name: string,
+  options?: { clearCheckoff?: boolean },
 ): Promise<ProfileSummary & { layers?: ProfileLayer[] }> {
   return engineFetch(`/plans/${profileId}/duplicate`, {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, clear_checkoff: options?.clearCheckoff ?? false }),
   });
 }
 
@@ -1616,6 +1625,8 @@ export type KitBundleUnmatchedSource = {
   role?: string;
   import_rules?: string[];
   manifest_community_slug?: string | null;
+  /** Which layer slot this source filled in the shared plan (base/addon). */
+  layer_type?: string;
 };
 
 export type KitImportJobResult = {
@@ -1688,13 +1699,14 @@ export async function startPackPreview(options: PackPreviewOptions): Promise<str
 
 export async function startExportStlPack(
   profileId: number,
-  options?: Pick<ExportStlPackOptions, "missing_only">,
+  options?: Pick<ExportStlPackOptions, "missing_only" | "group_by">,
 ): Promise<string> {
   const body = await engineFetch<{ job_id: string }>("/jobs/export-stl-pack", {
     method: "POST",
     body: JSON.stringify({
       profile_id: profileId,
       missing_only: options?.missing_only ?? false,
+      group_by: options?.group_by ?? "color_dir",
     }),
   });
   return body.job_id;
@@ -1740,11 +1752,24 @@ export async function saveRoleFilament(
     filament_color_id?: string | null;
     filament_custom_hex?: string | null;
     spoolman_spool_id?: string | null;
+    /** When true (default), clear cached thumbnails for parts in this role after apply. */
+    refresh_thumbnails?: boolean;
   },
-): Promise<{ updated: number; roles: RoleFilamentRow[] }> {
+): Promise<{ updated: number; thumbnails_cleared: number; roles: RoleFilamentRow[] }> {
   return engineFetch(`/plans/${profileId}/role-filament`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+/** Re-apply every saved role color to matching parts and refresh thumbnails/checkoff data. */
+export async function applyRoleColorsToParts(
+  profileId: number,
+  options?: { refresh_thumbnails?: boolean },
+): Promise<{ updated: number; thumbnails_cleared: number; roles: RoleFilamentRow[] }> {
+  return engineFetch(`/plans/${profileId}/apply-role-colors`, {
+    method: "POST",
+    body: JSON.stringify(options ?? {}),
   });
 }
 

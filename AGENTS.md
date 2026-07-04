@@ -29,7 +29,7 @@ From the repository root:
 
 ```bash
 docker compose up --build        # self-host: SQLite, app on http://localhost:8080
-docker compose -f docker-compose.saas.yml up --build   # SaaS: Postgres + MinIO/S3 + OAuth
+docker compose -f docker-compose.saas.yml up --build   # SaaS: Postgres + RustFS/S3 + OAuth
 ```
 
 Health check: `GET /health` returns `{ ok: true, deploy_mode: "self-host" | "saas", ... }`.
@@ -41,7 +41,7 @@ The single container builds the SPA and runs the API with `STATIC_DIR` pointing 
 `DEPLOY_MODE` selects the runtime adapter:
 
 - **self-host** (default) — SQLite + local-disk storage.
-- **saas** — Postgres (when `DATABASE_URL` is set) + S3-compatible blobs (when `S3_BUCKET` is set) + GitHub OAuth.
+- **saas** — Postgres (when `DATABASE_URL` is set) + S3-compatible blobs (when `S3_BUCKET` is set; local dev uses RustFS) + GitHub OAuth.
 
 Exact env var names and defaults are in `web/apps/server/src/config.ts`; the full reference is in `web/DEPLOY.md`.
 
@@ -54,7 +54,7 @@ Exact env var names and defaults are in `web/apps/server/src/config.ts`; the ful
 ## Cursor Cloud specific instructions
 
 - Dependencies are installed automatically by the startup update script (`npm ci` in `web/`); no manual install is normally needed. All Node commands run from `web/`.
-- For end-to-end work, run the default **self-host** mode — it uses embedded SQLite + local disk and needs **no external services** (no Postgres/MinIO/Docker). Just `npm run dev` from `web/`.
+- For end-to-end work, run the default **self-host** mode — it uses embedded SQLite + local disk and needs **no external services** (no Postgres/RustFS/Docker). Just `npm run dev` from `web/`.
 - `npm run dev` serves the SPA at `http://127.0.0.1:5173` and the Fastify API at `http://127.0.0.1:18765`. Verify the API with `GET /health` (returns `{ ok: true, deploy_mode: "self-host", db: { connected: true } }`). The SPA talks to the API on :18765, so both must be up.
 - `npm run lint` prints `react-hooks/exhaustive-deps` warnings but exits 0 — warnings are expected, not failures.
 - Tests use isolated temp data dirs; some server tests intentionally log a Spoolman `HTTP 503` error line while still passing — that log is expected.

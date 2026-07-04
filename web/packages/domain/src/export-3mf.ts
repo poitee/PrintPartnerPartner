@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { zipSync, strToU8 } from "fflate";
 import type { PartCopy } from "./checkoff-missing.js";
@@ -10,6 +10,7 @@ import { resolveLayoutToPlates } from "./plate-plan.js";
 import type { KitPlateLayout } from "./plate-plan.js";
 import { translateMesh } from "./stl-mesh.js";
 import { profileExportDir, safePlanSlug } from "./export-paths.js";
+import { readFileBufferUnderRoot, readFileUnderRoot } from "./secure-path.js";
 
 const INVALID_XML_CHARS = /[^\w\s.\-()+]/g;
 const PLATE_GAP_MM = 20;
@@ -343,10 +344,10 @@ export function exportProfile3mf(
   let primary = paths[0] ?? join(outputDir, `${safeProfile}.3mf`);
   if (layoutMode === "zip" && paths.length) {
     const zipEntries: Record<string, Uint8Array> = {
-      "print_plan.json": strToU8(readFileSync(manifestPath, "utf8")),
+      "print_plan.json": strToU8(readFileUnderRoot(outputDir, manifestPath)),
     };
     for (const p of paths) {
-      zipEntries[basename(p)] = readFileSync(p);
+      zipEntries[basename(p)] = readFileBufferUnderRoot(outputDir, p);
     }
     const zipPath = join(outputDir, `${safeProfile}_plates.zip`);
     writeFileSync(zipPath, zipSync(zipEntries));

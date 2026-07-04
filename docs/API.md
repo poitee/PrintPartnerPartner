@@ -46,8 +46,17 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
    curl -X POST http://localhost:8080/api/v1/jobs/export-stl-pack \
      -H "Authorization: Bearer $PRINT_PARTNER_API_KEY" \
      -H "Content-Type: application/json" \
-     -d '{"profile_id": 1}'
+     -d '{"profile_id": 1, "group_by": "color_dir"}'
    ```
+
+   Optional body fields:
+
+   - `missing_only` (boolean, default `false`) — only export units not yet
+     marked printed in checkoff.
+   - `group_by` (string, default `"color_dir"`) — controls export folder layout:
+     - `"color_dir"` — `role/<source directory>/file.stl` (keeps directories).
+     - `"color"` — `role/file.stl` (flattens all directories into one folder per
+       color/role; same-named files are de-duplicated with a directory prefix).
 
    Response: `{ "job_id": "…" }`
 

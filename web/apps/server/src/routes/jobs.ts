@@ -2,12 +2,12 @@ import { basename, dirname, join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { JobSnapshot } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
-import { exportDownloadKey, safeDataDirPath } from "../lib/secure-path.js";
+import { exportDownloadKey } from "../lib/secure-path.js";
 import { syncProjectById } from "./sources.js";
-import { exportProfileStlPack } from "../services/export-stl-pack.js";
+import { exportProfileStlPack, type StlPackGroupBy } from "../services/export-stl-pack.js";
 import { zipDirectoryToFile } from "../services/zip-dir.js";
 import { exportProfileHtml } from "../services/export-html.js";
-import { exportKitBundle, loadKitBundleBytes, parseKitBundleBuffer } from "../services/export-kit.js";
+import { exportKitBundle } from "../services/export-kit.js";
 import { checkAllSourceUpdates } from "../services/source-update-check.js";
 import { runExport3mfJob } from "../services/export-3mf-job.js";
 import { runPackPreviewJob } from "../services/plate-workspace.js";
@@ -169,8 +169,6 @@ export class InProcessJobRunner {
         result = await this.runExportChecklistHtml(payload);
       } else if (kind === "export-kit-bundle") {
         result = await this.runExportKitBundle(payload);
-      } else if (kind === "import-kit-bundle") {
-        result = await this.runImportKitBundle(payload);
       } else if (kind === "export-3mf") {
         result = await this.runExport3mf(payload);
       } else if (kind === "pack-preview") {
@@ -218,12 +216,14 @@ export class InProcessJobRunner {
   private async runExportStlPack(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const profileId = Number(payload.profile_id);
     const missingOnly = Boolean(payload.missing_only);
+    const groupBy: StlPackGroupBy = payload.group_by === "color" ? "color" : "color_dir";
     const { name, parts, completedByMatchKey } = this.repo.buildMergePartsForProfile(profileId);
     const naming = this.repo.getGlobalNaming();
     const { rootPath, fileCounts, warnings } = exportProfileStlPack(name, parts, this.deps.exportsDir, {
       missingOnly,
       completedByMatchKey: missingOnly ? completedByMatchKey : undefined,
       roleOrder: naming.export_role_order,
+      groupBy,
     });
     const fileTotal = Object.values(fileCounts).reduce((a, b) => a + b, 0);
 
@@ -318,29 +318,6 @@ export class InProcessJobRunner {
     });
   }
 
-  private async runImportKitBundle(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    let data: Record<string, unknown>;
-    if (payload.bundle_b64) {
-      const buf = Buffer.from(String(payload.bundle_b64), "base64");
-      data = parseKitBundleBuffer(buf);
-    } else {
-      const path = String(payload.path ?? "");
-      if (!path) throw new Error("path is required");
-      const safe = safeDataDirPath(this.deps.dataDir, path);
-      if (!safe) throw new Error("Kit path must be under the Print Partner data directory");
-      data = loadKitBundleBytes(safe);
-    }
-    const result = this.repo.importKitBundle(data, (payload.new_name as string) ?? null);
-    return {
-      profile_id: result.profile_id,
-      profile_name: result.profile_name,
-      parts_imported: result.parts_imported,
-      layers_imported: result.layers_imported,
-      warnings: result.warnings,
-      unmatched_sources: result.unmatched_sources,
-    };
-  }
-
   async get(jobId: string): Promise<JobSnapshot | null> {
     return this.jobs.get(jobId) ?? null;
   }
@@ -392,10 +369,15 @@ export async function registerJobRoutes(
   });
 
   app.post("/jobs/export-stl-pack", limited, async (request) => {
-    const body = request.body as { profile_id?: number; missing_only?: boolean };
+    const body = request.body as {
+      profile_id?: number;
+      missing_only?: boolean;
+      group_by?: string;
+    };
     const job_id = await jobs.start("export-stl-pack", {
       profile_id: body.profile_id,
       missing_only: body.missing_only ?? false,
+      group_by: body.group_by === "color" ? "color" : "color_dir",
     });
     return { job_id };
   });
@@ -413,15 +395,6 @@ export async function registerJobRoutes(
     const job_id = await jobs.start("export-kit-bundle", {
       profile_id: body.profile_id,
       include_print_progress: body.include_print_progress ?? false,
-    });
-    return { job_id };
-  });
-
-  app.post("/jobs/import-kit-bundle", limited, async (request) => {
-    const body = request.body as { path?: string; new_name?: string };
-    const job_id = await jobs.start("import-kit-bundle", {
-      path: body.path,
-      new_name: body.new_name,
     });
     return { job_id };
   });

@@ -8,6 +8,7 @@ import {
   objectDisplayName,
   sanitize3mfObjectName,
 } from "./export-3mf.js";
+import { profileExportDir } from "./export-paths.js";
 import type { PrinterMachine } from "./filament-assigner.js";
 import type { MergePartExport } from "./filament-assigner.js";
 
@@ -70,8 +71,11 @@ describe("export 3mf", () => {
       layout_mode: "per_plate",
     });
     expect(result.object_count).toBeGreaterThan(0);
-    expect(existsSync(result.primary_path)).toBe(true);
-    const zip = readFileSync(result.primary_path);
+    const outputDir = profileExportDir(exportsDir, "Kit", "3mf");
+    const expectedPath = join(outputDir, "Kit_Test_plate_01.3mf");
+    expect(result.primary_path).toBe(expectedPath);
+    expect(existsSync(expectedPath)).toBe(true);
+    const zip = readFileSync(expectedPath);
     const files = unzipSync(zip);
     const model = files["3D/3dmodel.model"];
     expect(model).toBeDefined();

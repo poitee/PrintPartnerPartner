@@ -114,6 +114,7 @@ export async function applyColorPreset(profileId: number, preset: ColorPreset): 
       filament_color_id: role.filament_color_id ?? null,
       filament_custom_hex: role.filament_color_id ? null : role.filament_custom_hex ?? null,
       spoolman_spool_id: role.spoolman_spool_id ?? null,
+      refresh_thumbnails: false,
     });
     applied += 1;
   }

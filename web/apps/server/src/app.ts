@@ -116,15 +116,14 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
         if (config.deployMode === "saas" && config.authRequired && !request.sessionUser) {
           return reply.status(401).send({ detail: "Authentication required" });
         }
-        const body = request.body as { path?: string; new_name?: string };
-        const path = String(body.path ?? "");
+        const body = request.body as { path?: unknown; new_name?: unknown };
+        const { readBufferUnderDataDir, trimmedString } = await import("./lib/secure-path.js");
+        const path = trimmedString(body.path);
         if (!path) return reply.status(400).send({ detail: "path is required" });
-        const { loadKitBundleBytes } = await import("./services/export-kit.js");
-        const { safeDataDirPath } = await import("./lib/secure-path.js");
-        const safe = safeDataDirPath(config.dataDir, path);
-        if (!safe) return reply.status(400).send({ detail: "Invalid path" });
-        const data = loadKitBundleBytes(safe);
-        return repository.importKitBundle(data, body.new_name ?? null);
+        const { parseKitBundleBuffer } = await import("./services/export-kit.js");
+        const buf = readBufferUnderDataDir(config.dataDir, path);
+        const data = parseKitBundleBuffer(buf, path);
+        return repository.importKitBundle(data, trimmedString(body.new_name) || null);
       },
     );
 
