@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ClipboardCheck, CheckSquare, Printer } from "lucide-react";
+import { ClipboardCheck, CheckSquare, ChevronDown, Printer } from "lucide-react";
 import { toast } from "sonner";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -12,7 +12,20 @@ import PartThumbExpandButton from "../components/parts/PartThumbExpandButton";
 import SpoolRemainingBadge from "../components/SpoolRemainingBadge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
-import { startExportChecklistHtml, startExportStlPack, type ReviewPart } from "../api/engine";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import {
+  startExportChecklistHtml,
+  startExportStlPack,
+  type ReviewPart,
+  type StlPackGroupBy,
+} from "../api/engine";
 import { buildRoute, reviewRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
 import { groupCheckoffParts } from "../lib/checkoffGroups";
@@ -223,10 +236,14 @@ export default function CheckoffPage() {
     );
   };
 
-  const onExportMissing = () => {
+  const onExportMissing = (groupBy: StlPackGroupBy) => {
     if (selectedProfileId == null) return;
     void runJob(
-      () => startExportStlPack(selectedProfileId, { missing_only: true }),
+      () =>
+        startExportStlPack(selectedProfileId, {
+          missing_only: true,
+          group_by: groupBy,
+        }),
       (snap) => {
         if (snap.status === "error") {
           toast.error(snap.message || "Missing-STL export failed");
@@ -317,13 +334,37 @@ export default function CheckoffPage() {
               >
                 Export checklist
               </Button>
-              <Button
-                className="col-span-2 min-h-10 w-full sm:col-span-1 sm:w-auto"
-                onClick={onExportMissing}
-                disabled={selectedProfileId == null || exportBusy || missingCount === 0}
-              >
-                Export missing STLs
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    className="col-span-2 min-h-10 w-full sm:col-span-1 sm:w-auto"
+                    disabled={selectedProfileId == null || exportBusy || missingCount === 0}
+                  >
+                    {exportBusy ? "Exporting…" : "Export missing STLs"}
+                    <ChevronDown className="ml-1 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuLabel>Group exported files by</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => onExportMissing("color_dir")}>
+                    <div className="flex flex-col">
+                      <span>Color + directory</span>
+                      <span className="text-xs text-muted-foreground">
+                        Keep source folders (e.g. Primary/partsDir/file.stl)
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onExportMissing("color")}>
+                    <div className="flex flex-col">
+                      <span>Color only</span>
+                      <span className="text-xs text-muted-foreground">
+                        Flatten all directories (e.g. Primary/file.stl)
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </PageHeaderActions>
           }
         />
@@ -331,7 +372,8 @@ export default function CheckoffPage() {
         <p className="hidden text-sm text-muted-foreground md:block">
           <strong className="font-medium text-foreground">Export checklist</strong> downloads a
           printable HTML; <strong className="font-medium text-foreground">Export missing STLs</strong>{" "}
-          downloads a ZIP of every still-unprinted unit, organized by role and folder.
+          downloads a ZIP of every still-unprinted unit, grouped by color and optionally source
+          folder.
         </p>
 
         <div className="checkoff-sticky no-print section-card flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">

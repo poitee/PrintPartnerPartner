@@ -11,6 +11,7 @@ import {
   openRepoStlMeshStream,
   openStlThumbStream,
 } from "../lib/secure-path.js";
+import { listGithubBranches, listGithubTags, syncGithubSource } from "../services/github-sync.js";
 import { writeUploadedZip, writeUploadedFiles, finalizeUploadedSource } from "../services/archive-import.js";
 import { PLACEHOLDER_PNG } from "../lib/thumbnails.js";
 import { importReposTxt, parseReposTxtText } from "../services/repos-txt.js";

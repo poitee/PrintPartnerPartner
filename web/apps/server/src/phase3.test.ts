@@ -122,6 +122,53 @@ describe("Phase 3 APIs", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("export STL pack job via HTTP with group_by color", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-exp-color-"));
+    process.env.PRINT_PARTNER_DATA_DIR = dir;
+    const config = loadConfig();
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const repo = ports.repository;
+    const source = repo.createSource({ name: "R", url: "https://github.com/a/b" });
+    const repoPath = join(dir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "alpha"), { recursive: true });
+    mkdirSync(join(repoPath, "beta"), { recursive: true });
+    writeFileSync(join(repoPath, "alpha", "part.stl"), "stl");
+    writeFileSync(join(repoPath, "beta", "part.stl"), "stl");
+    repo.updateSource(source.id, { local_path: repoPath });
+    repo.updateImportRules(source.id, ["alpha/", "beta/"]);
+    const plan = repo.createProfile("ExportFlat", source.id);
+    await repo.recomputeProfile(plan.id);
+
+    const app = await buildApp(config, ports);
+    const res = await app.inject({
+      method: "POST",
+      url: "/jobs/export-stl-pack",
+      payload: { profile_id: plan.id, group_by: "color" },
+    });
+    expect(res.statusCode).toBe(200);
+    const { job_id } = res.json() as { job_id: string };
+    await new Promise((r) => setTimeout(r, 300));
+    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
+    const job = jobRes.json() as {
+      status: string;
+      result?: { root_path?: string };
+    };
+    expect(job.status).toBe("done");
+    const rootPath = job.result?.root_path;
+    expect(rootPath).toBeTruthy();
+    const roleDir = join(rootPath!, "primary");
+    expect(existsSync(roleDir)).toBe(true);
+    expect(existsSync(join(roleDir, "alpha"))).toBe(false);
+    expect(existsSync(join(roleDir, "beta"))).toBe(false);
+    const files = readdirSync(roleDir);
+    expect(files.some((f) => f.endsWith(".stl"))).toBe(true);
+
+    await app.close();
+    await ports.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("exportProfileStlPack copies files", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-pack-"));
     const stl = join(dir, "part.stl");

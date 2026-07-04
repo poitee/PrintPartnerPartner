@@ -6,6 +6,7 @@ import {
   startExportStlPack,
   startRecompute,
   startSync,
+  type StlPackGroupBy,
 } from "../api/engine";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useFlushBuildPageSaves } from "../hooks/useFlushBuildPageSaves";
@@ -212,50 +213,70 @@ export default function CommandPalette() {
             setOpen(false);
           },
         },
-        {
-          id: "export-stl",
-          label: "Export STLs",
-          hint: `Plan #${selectedProfileId}`,
-          group: "Actions",
-          disabled: stlExportJob.busy,
-          run: () => {
-            void stlExportJob.runJob(
-              () => startExportStlPack(selectedProfileId),
-              (snap) => {
-                if (snap.status === "error") {
-                  toast.error(snap.message || "STL export failed");
-                  return;
+        ...(["color_dir", "color"] as const).flatMap((groupBy: StlPackGroupBy) => {
+          const groupHint =
+            groupBy === "color" ? "color only" : "color + directory";
+          return [
+            {
+              id: `export-stl-${groupBy}`,
+              label: `Export STLs (${groupHint})`,
+              hint: `Plan #${selectedProfileId}`,
+              group: "Actions" as const,
+              disabled: stlExportJob.busy,
+              run: () => {
+                void stlExportJob.runJob(
+                  () => startExportStlPack(selectedProfileId, { group_by: groupBy }),
+                  (snap) => {
+                    if (snap.status === "error") {
+                      toast.error(snap.message || "STL export failed");
+                      return;
+                    }
+                    completeExportDownload("STL export", snap.result, {
+                      pathField: "root_path",
+                    });
+                  },
+                );
+                if (!onBuild && !onReview && !onCheckoff) {
+                  navigate(reviewRoute(selectedProfileId));
                 }
-                completeExportDownload("STL export", snap.result, { pathField: "root_path" });
+                setOpen(false);
               },
-            );
-            if (!onBuild && !onReview && !onCheckoff) navigate(reviewRoute(selectedProfileId));
-            setOpen(false);
-          },
-        },
-        {
-          id: "export-missing-stl",
-          label: "Export missing STLs",
-          hint: onCheckoff ? "Checkoff" : onReview ? "Review" : `Plan #${selectedProfileId}`,
-          group: "Actions",
-          disabled: stlExportJob.busy,
-          run: () => {
-            void stlExportJob.runJob(
-              () => startExportStlPack(selectedProfileId, { missing_only: true }),
-              (snap) => {
-                if (snap.status === "error") {
-                  toast.error(snap.message || "Export failed");
-                  return;
+            },
+            {
+              id: `export-missing-stl-${groupBy}`,
+              label: `Export missing STLs (${groupHint})`,
+              hint: onCheckoff
+                ? "Checkoff"
+                : onReview
+                  ? "Review"
+                  : `Plan #${selectedProfileId}`,
+              group: "Actions" as const,
+              disabled: stlExportJob.busy,
+              run: () => {
+                void stlExportJob.runJob(
+                  () =>
+                    startExportStlPack(selectedProfileId, {
+                      missing_only: true,
+                      group_by: groupBy,
+                    }),
+                  (snap) => {
+                    if (snap.status === "error") {
+                      toast.error(snap.message || "Export failed");
+                      return;
+                    }
+                    completeExportDownload("Missing-parts STL", snap.result, {
+                      pathField: "root_path",
+                    });
+                  },
+                );
+                if (!onReview && !onCheckoff) {
+                  navigate(checkoffRoute(selectedProfileId));
                 }
-                completeExportDownload("Missing-parts STL", snap.result, {
-                  pathField: "root_path",
-                });
+                setOpen(false);
               },
-            );
-            if (!onReview && !onCheckoff) navigate(checkoffRoute(selectedProfileId));
-            setOpen(false);
-          },
-        },
+            },
+          ];
+        }),
         {
           id: "recompute",
           label: "Recompute plan",

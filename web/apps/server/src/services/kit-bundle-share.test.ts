@@ -3,6 +3,7 @@ import {
   collectKitBundleSourceRefs,
   kitSourceRefFromRecord,
   kitSourceRefToExportRecord,
+  kitUnmatchedSourceFromRef,
 } from "./kit-bundle-share.js";
 
 describe("kit-bundle-share", () => {
@@ -70,5 +71,50 @@ describe("kit-bundle-share", () => {
       })!,
     );
     expect(exported.manifest_community_slug).toBe("ldo-2.4-sb-tap");
+  });
+
+  it("preserves tag through export and unmatched-source records", () => {
+    const ref = kitSourceRefFromRecord({
+      name: "Pinned",
+      url: "https://github.com/a/pinned",
+      branch: "main",
+      tag: "v1.2.3",
+      import_rules: ["STLs/"],
+    })!;
+    expect(ref.tag).toBe("v1.2.3");
+
+    const exported = kitSourceRefToExportRecord(ref);
+    expect(exported.tag).toBe("v1.2.3");
+
+    const unmatched = kitUnmatchedSourceFromRef(ref);
+    expect(unmatched.tag).toBe("v1.2.3");
+    expect(unmatched.branch).toBe("main");
+
+    const roundTrip = kitSourceRefFromRecord(exported)!;
+    expect(roundTrip.tag).toBe("v1.2.3");
+  });
+
+  it("merges tag when one source entry has it", () => {
+    const refs = collectKitBundleSourceRefs({
+      sources: [
+        {
+          url: "https://github.com/a/voron",
+          name: "Voron",
+          branch: "main",
+          tag: "v2.4.3",
+        },
+      ],
+      layers: [
+        {
+          project: {
+            url: "https://github.com/a/voron",
+            name: "Voron",
+            branch: "main",
+          },
+        },
+      ],
+    });
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.tag).toBe("v2.4.3");
   });
 });

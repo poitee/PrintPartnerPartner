@@ -15,6 +15,8 @@ export type UnmatchedSource = {
   name: string;
   url: string;
   branch: string;
+  /** Git tag pin when the shared source was tag-pinned (not branch tip). */
+  tag?: string | null;
   source_kind: string;
   role: string;
   import_rules: string[];
@@ -58,10 +60,12 @@ export default function ShareImportSetupPanel({
     const key = sourceKey(s);
     setStates((prev) => ({ ...prev, [key]: "adding" }));
     try {
+      const tag = s.tag?.trim() || null;
       const created = await createSource({
         name: s.name || s.url,
         url: s.url,
         branch: s.branch || "main",
+        tag,
         source_kind: s.source_kind || "github",
         category: s.role && s.role !== "unassigned" ? s.role : null,
       });
@@ -124,7 +128,11 @@ export default function ShareImportSetupPanel({
                       )}
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         {s.layer_type === "base" ? "Base" : "Add-on"}
-                        {s.branch ? ` · ${s.branch}` : ""}
+                        {s.tag?.trim()
+                          ? ` · tag ${s.tag.trim()}`
+                          : s.branch
+                            ? ` · ${s.branch}`
+                            : ""}
                         {s.source_kind ? ` · ${s.source_kind}` : ""}
                       </p>
                       {s.import_rules.length > 0 && (
