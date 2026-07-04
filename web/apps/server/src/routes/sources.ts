@@ -11,7 +11,6 @@ import {
   openRepoStlMeshStream,
   openStlThumbStream,
 } from "../lib/secure-path.js";
-import { listGithubBranches, syncGithubSource } from "../services/github-sync.js";
 import { writeUploadedZip, writeUploadedFiles, finalizeUploadedSource } from "../services/archive-import.js";
 import { PLACEHOLDER_PNG } from "../lib/thumbnails.js";
 import { importReposTxt, parseReposTxtText } from "../services/repos-txt.js";
@@ -71,6 +70,19 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
     }
   });
 
+  app.get("/sources/github-tags", async (request, reply) => {
+    const url = (request.query as { url?: string }).url ?? "";
+    if (!url.trim()) {
+      return reply.status(400).send({ detail: "url query parameter is required" });
+    }
+    try {
+      const token = deps.repo.getSetting(GITHUB_PAT_KEY);
+      return await listGithubTags(url, token);
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   app.get("/sources/:id", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const source = deps.repo.getSource(id);
@@ -94,6 +106,7 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
         name: String(body.name ?? ""),
         url: body.url != null ? String(body.url) : undefined,
         branch: body.branch != null ? String(body.branch) : undefined,
+        tag: body.tag != null ? String(body.tag) : undefined,
         source_kind: body.source_kind != null ? String(body.source_kind) : undefined,
         role: body.role != null ? String(body.role) : undefined,
         local_path: body.local_path != null ? String(body.local_path) : undefined,
@@ -115,6 +128,7 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
         name: body.name != null ? String(body.name) : undefined,
         url: body.url != null ? String(body.url) : undefined,
         branch: body.branch != null ? String(body.branch) : undefined,
+        tag: body.tag !== undefined ? (body.tag != null ? String(body.tag) : null) : undefined,
         source_kind: body.source_kind != null ? String(body.source_kind) : undefined,
         role: body.role != null ? String(body.role) : undefined,
         local_path: body.local_path != null ? String(body.local_path) : undefined,
@@ -416,6 +430,7 @@ export async function syncProjectById(
     const result = await syncGithubSource(row.url, row.branch ?? "main", localPath, token, {
       download: true,
       maxDownloads: 500,
+      tag: row.tag,
     });
     repo.updateSource(projectId, {
       localPath: localPath,

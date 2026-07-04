@@ -18,6 +18,7 @@ export const projects = pgTable(
     url: text("url").notNull(),
     sourceType: text("source_type").notNull().default("git"),
     branch: text("branch").notNull().default("main"),
+    tag: text("tag"),
     localPath: text("local_path"),
     lastSyncedAt: text("last_synced_at"),
     lastCommitSha: text("last_commit_sha"),
@@ -105,4 +106,4 @@ export const appSettings = pgTable(
 );
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 2;
+export const currentSchemaVersion = 3;

@@ -4,6 +4,7 @@ export type KitBundleProjectRow = {
   name: string;
   url: string;
   branch: string | null;
+  tag: string | null;
   sourceKind: string | null;
   sourceType: string | null;
   role: string | null;
@@ -16,6 +17,7 @@ export type KitBundleSourceRef = {
   name: string;
   url: string;
   branch: string;
+  tag: string | null;
   source_kind: string;
   source_type: string;
   role: string;
@@ -30,6 +32,7 @@ export type KitBundleUnmatchedSource = {
   name: string;
   url: string;
   branch: string;
+  tag: string | null;
   source_kind: string;
   role: string;
   import_rules: string[];
@@ -63,6 +66,7 @@ function mergeSourceRefs(
     name: existing.name || incoming.name,
     url: existing.url || incoming.url,
     branch: existing.branch || incoming.branch,
+    tag: existing.tag || incoming.tag,
     source_kind: existing.source_kind || incoming.source_kind,
     source_type: existing.source_type || incoming.source_type,
     role: existing.role !== "unassigned" ? existing.role : incoming.role,
@@ -84,6 +88,7 @@ export function kitSourceRefFromProject(proj: KitBundleProjectRow): KitBundleSou
     name: proj.name,
     url: proj.url,
     branch: proj.branch ?? "main",
+    tag: proj.tag ?? null,
     source_kind: proj.sourceKind ?? "github",
     source_type: proj.sourceType ?? "git",
     role: proj.role ?? "unassigned",
@@ -101,10 +106,13 @@ export function kitSourceRefFromRecord(raw: Record<string, unknown>): KitBundleS
   const slugRaw = raw.manifest_community_slug;
   const manifestSlug =
     typeof slugRaw === "string" && slugRaw.trim() ? slugRaw.trim() : null;
+  const tagRaw = raw.tag;
+  const tag = typeof tagRaw === "string" && tagRaw.trim() ? tagRaw.trim() : null;
   return {
     name,
     url,
     branch: String(raw.branch ?? "main").trim() || "main",
+    tag,
     source_kind: String(raw.source_kind ?? "github").trim() || "github",
     source_type: String(raw.source_type ?? "git").trim() || "git",
     role: String(raw.role ?? category).trim() || category,
@@ -125,6 +133,9 @@ export function kitSourceRefToExportRecord(ref: KitBundleSourceRef): Record<stri
     category: ref.category,
     import_rules: ref.import_rules,
   };
+  if (ref.tag) {
+    out.tag = ref.tag;
+  }
   if (ref.manifest_community_slug) {
     out.manifest_community_slug = ref.manifest_community_slug;
   }
@@ -170,6 +181,7 @@ export function kitUnmatchedSourceFromRef(ref: KitBundleSourceRef): KitBundleUnm
     name: ref.name,
     url: ref.url,
     branch: ref.branch,
+    tag: ref.tag,
     source_kind: ref.source_kind,
     role: ref.category !== "unassigned" ? ref.category : ref.role,
     import_rules: ref.import_rules,
@@ -184,17 +196,20 @@ export function kitMatchedSourcePatch(
   ref: KitBundleSourceRef,
 ): {
   branch?: string;
+  tag?: string | null;
   source_kind?: string;
   role?: string;
   manifest_community_slug?: string | null;
 } {
   const patch: {
     branch?: string;
+    tag?: string | null;
     source_kind?: string;
     role?: string;
     manifest_community_slug?: string | null;
   } = {};
   if (ref.branch) patch.branch = ref.branch;
+  if (ref.tag) patch.tag = ref.tag;
   if (ref.source_kind) patch.source_kind = ref.source_kind;
   const role = ref.category !== "unassigned" ? ref.category : ref.role;
   if (role && role !== "unassigned") patch.role = role;

@@ -47,6 +47,10 @@ export class SqliteDatabase {
     if (!partCols.some((c) => c.name === "spoolman_spool_id")) {
       this.sqlite.exec("ALTER TABLE parts ADD COLUMN spoolman_spool_id TEXT");
     }
+    const projectCols = this.sqlite.pragma("table_info(projects)") as { name: string }[];
+    if (!projectCols.some((c) => c.name === "tag")) {
+      this.sqlite.exec("ALTER TABLE projects ADD COLUMN tag TEXT");
+    }
     const row = this.sqlite
       .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
       .get("default", schemaVersionKey) as { value?: string } | undefined;
