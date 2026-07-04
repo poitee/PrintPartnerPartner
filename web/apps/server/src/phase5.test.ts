@@ -137,6 +137,7 @@ describe("Phase 5", () => {
             name: "Missing Repo",
             url: "https://github.com/a/missing",
             branch: "main",
+            tag: "v1.0.0",
             source_kind: "github",
             import_rules: ["parts/"],
             manifest_community_slug: "example-manifest",
@@ -149,6 +150,8 @@ describe("Phase 5", () => {
     const imported = repo.importKitBundle(data, "Imported");
     expect(imported.unmatched_sources).toHaveLength(1);
     expect(imported.unmatched_sources[0]?.url).toBe("https://github.com/a/missing");
+    expect(imported.unmatched_sources[0]?.branch).toBe("main");
+    expect(imported.unmatched_sources[0]?.tag).toBe("v1.0.0");
     expect(imported.unmatched_sources[0]?.import_rules).toEqual(["parts/"]);
     expect(imported.unmatched_sources[0]?.manifest_community_slug).toBe("example-manifest");
     expect(loadKitManifest(repo, imported.profile_id).selections.head).toBe("sb");

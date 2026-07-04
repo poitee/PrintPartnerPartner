@@ -1621,6 +1621,8 @@ export type KitBundleUnmatchedSource = {
   name: string;
   url?: string;
   branch?: string;
+  /** Git tag pin when the shared source was tag-pinned (not branch tip). */
+  tag?: string | null;
   source_kind?: string;
   role?: string;
   import_rules?: string[];
