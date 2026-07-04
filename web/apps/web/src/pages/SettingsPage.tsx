@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  CalendarClock,
   KeyRound,
   RefreshCw,
   Settings,
@@ -7,6 +8,7 @@ import {
 } from "lucide-react";
 import {
   createCustomFilament,
+  DATE_FORMAT_PRESETS,
   deleteCustomFilament,
   fetchCustomFilaments,
   fetchGitHubPatSettings,
@@ -15,8 +17,10 @@ import {
   saveSourceUpdateCheckInterval,
   startCheckSourceUpdates,
   type CustomFilament,
+  type DateFormatId,
   type GitHubPatSettings,
 } from "../api/engine";
+import { useDateFormat } from "../context/DateFormatContext";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
@@ -61,6 +65,7 @@ const UPDATE_INTERVAL_OPTIONS = [
 
 export default function SettingsPage() {
   const { health } = useEngineHealth();
+  const { format: dateFormat, setFormat: setDateFormat } = useDateFormat();
   const { updateCheck, refresh: refreshUpdateCheck } = useAppUpdateCheck(Boolean(health));
   const [updateCheckRefreshing, setUpdateCheckRefreshing] = useState(false);
   const { busy: updateBusy, message: updateMessage, runJob: runUpdateJob } =
@@ -267,6 +272,40 @@ export default function SettingsPage() {
           >
             {updateBusy ? "Checking…" : "Check now"}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader accent>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info">
+              <CalendarClock className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <CardTitle className="text-base">Date &amp; time format</CardTitle>
+              <CardDescription>
+                Controls how timestamps like "Last synced" and printed-checklist "Generated"
+                lines are displayed everywhere in the app.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted-foreground">Format</span>
+            <Select value={dateFormat} onValueChange={(v) => setDateFormat(v as DateFormatId)}>
+              <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DATE_FORMAT_PRESETS.map((opt) => (
+                  <SelectItem key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
         </CardContent>
       </Card>
 

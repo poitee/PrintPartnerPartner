@@ -7,6 +7,7 @@ import {
   isFullyPrinted,
   type MergePart,
 } from "@print-partner/domain";
+import { DATE_FORMAT_DEFAULT, formatTimestamp, type DateFormatId } from "@print-partner/contracts";
 
 function escapeHtml(s: string): string {
   return s
@@ -29,6 +30,7 @@ export function exportProfileHtml(
   profileId: number,
   completedByMatchKey: Record<string, boolean[]>,
   thumbsDir?: string,
+  dateFormat: DateFormatId = DATE_FORMAT_DEFAULT,
 ): { path: string; partCount: number; thumbCount: number } {
   const outPath = exportPathForChecklist(profileName, exportsDir);
   mkdirSync(dirname(outPath), { recursive: true });
@@ -45,7 +47,7 @@ export function exportProfileHtml(
     folders.get(folder)!.push(p);
   }
 
-  const generatedAt = new Date().toISOString();
+  const generatedAt = formatTimestamp(new Date().toISOString(), dateFormat);
   let thumbCount = 0;
   let body = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(profileName)} checklist</title>
 <style>body{font-family:system-ui,sans-serif;margin:1.5rem;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:.4rem .6rem;text-align:left;}

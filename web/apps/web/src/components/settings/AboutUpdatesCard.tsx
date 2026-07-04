@@ -1,5 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import type { AppUpdateCheckResponse } from "@print-partner/contracts";
+import { useDateFormat } from "../../context/DateFormatContext";
 import { Button } from "../ui/button";
 import {
   Card,
@@ -21,6 +22,7 @@ export default function AboutUpdatesCard({
   refreshing = false,
 }: AboutUpdatesCardProps) {
   const releaseUrl = updateCheck?.release_url ?? updateCheck?.release_notes_url;
+  const { formatDate } = useDateFormat();
 
   return (
     <Card id="about-updates" className="shadow-none">
@@ -93,7 +95,7 @@ export default function AboutUpdatesCard({
 
         {updateCheck?.checked_at && (
           <p className="text-xs text-muted-foreground">
-            Last checked {new Date(updateCheck.checked_at).toLocaleString()}
+            Last checked {formatDate(updateCheck.checked_at)}
           </p>
         )}
 
