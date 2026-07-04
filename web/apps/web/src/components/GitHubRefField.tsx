@@ -45,6 +45,7 @@ export default function GitHubRefField({
     }
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    setOptions(null);
     setLoading(true);
     setError(null);
 
