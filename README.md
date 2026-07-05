@@ -26,7 +26,13 @@
 </p>
 
 <p align="center">
-  <code>Sources</code> → <code>Builds</code> → <code>Build</code> → <code>Review</code> → <code>Checkoff</code>
+  <code>Sources</code> → <code>Build</code> → <code>Review</code> → <code>Checkoff</code>
+</p>
+
+<p align="center">
+  <sub>
+    Plan management — header <strong>Create build</strong>, <strong>Manage builds</strong> on Build, or the sidebar <strong>Builds</strong> page.
+  </sub>
 </p>
 
 <p align="center">
@@ -44,10 +50,13 @@
 | Step | What you are doing |
 |------|--------------------|
 | **Sources** | Add GitHub repos, local folders, or zips; assign categories; search STLs across every synced repo; see **update available** badges; sync and set import rules. |
-| **Builds** | Create, rename, duplicate, and delete **plans**; the header dropdown switches which plan Build, Review, and Checkoff use. |
-| **Build** | Pick **role filament colors** (primary/accent); attach sources to the active plan; choose files and quantities; **Update build**; read repo docs inline; pick kit/manifest options; export STLs or share a plan bundle. |
-| **Review** | Confirm a validation summary grouped by role and filament, browse the full included-parts list with 3D STL previews, and **Export STLs** by role and folder. |
+| **Build** | **Manage builds** (create/switch plans), attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), **Update build** when stale, kit/manifest options, inline repo **Docs**, export STLs or share a plan bundle. |
+| **Review** | Confirm a validation summary grouped by role and filament, browse the full included-parts list with 3D STL previews, edit quantities, and **Export STLs** by role and folder. |
 | **Checkoff** | Track per-unit print progress (saved per plan), filter missing/done, print the checklist, and **Export missing STLs** for the next batch. |
+
+**Managing builds** (not a pipeline step): use the header **Create build** button and plan picker, the collapsible **Manage builds** panel on Build, or the **Builds** page in the sidebar to create, rename, duplicate, and delete plans. The active plan is shared across Build, Review, and Checkoff.
+
+**Tips:** **⌘K / Ctrl+K** opens the command palette (sync, recompute, exports, navigation). Collapse the left sidebar to an icon rail; the first-run **Progress** widget hides after you complete Sources through Checkoff once. Open **Help** in the sidebar for the full workflow guide.
 
 Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Spoolman instance in Settings to pick filaments from your inventory on Build and see read-only spool remaining weights in Review / Checkoff.
 
@@ -55,7 +64,7 @@ Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Sp
 
 ## Screenshots
 
-Light-theme captures from the warm UI. The app also supports **dark** and **system** theme via the sidebar.
+Light-theme captures from the warm UI. The app also supports **dark** and **system** theme; the left sidebar can be collapsed to an icon rail. The [GitHub Pages site](https://poitee.github.io/PrintPartnerPartner/) swaps in dark screenshots when your system prefers dark mode.
 
 ### Sources
 
@@ -65,15 +74,15 @@ The source library: add GitHub repos, local folders, or zips and group them into
 
 ### Builds
 
-![Builds — create, rename, duplicate, and delete plans; the header dropdown switches the active plan for Build, Review, and Checkoff.](docs/screenshots/light/builds.png)
+![Builds — dedicated plan manager with active-build dropdown, create, rename, duplicate, and delete.](docs/screenshots/light/builds.png)
 
-Manage **build plans** in one place: create, rename, duplicate, and delete. The header **plan dropdown** picks which plan **Build**, **Review**, and **Checkoff** use — no need to reconfigure each step separately.
+The **Builds** page (sidebar) offers full plan CRUD with an **active build** dropdown. The same controls appear in the collapsible **Manage builds** panel on Build and in the header plan picker.
 
 ### Build
 
-![Build — role filament colors at the top (primary/accent), attached source cards with an inline Docs viewer, and per-source file pickers feeding Update build.](docs/screenshots/light/build.png)
+![Build — Manage builds panel, role filament colors, source file pickers with STL preview, and Update build.](docs/screenshots/light/build.png)
 
-Pick **role filament colors** (primary/accent) at the top, attach sources to the active plan, then choose files and quantities. **Update build** recomputes the plan. The inline **Docs viewer** renders a repo's README and Markdown without leaving the app, and kit/manifest options apply curated presets. From here you can **export STLs** or **share a plan bundle**.
+**Manage builds** at the top switches or creates plans. Set **role filament colors**, attach sources, pick STL files (with live 3D preview tinted by role), and click **Update build** when the stale banner appears. Kit/manifest options, inline **Docs**, **Export STLs**, and **Share build** are on this page.
 
 ### Review
 
@@ -113,7 +122,7 @@ docker compose up --build
 2. Clone this repo and `cd` into it.
 3. Run `docker compose pull && docker compose up -d` (or `docker compose up --build` to build from source).
 4. Open [http://localhost:8080](http://localhost:8080).
-5. Add a **Source** on the Sources page, then create a plan under **Builds**.
+5. Add a **Source** on the Sources page, then create a build with **Create build** in the header or **Manage builds** on Build (or open **Builds** in the sidebar).
 
 ### Environment variables (self-host)
 

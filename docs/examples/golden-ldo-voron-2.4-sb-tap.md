@@ -1,6 +1,6 @@
 # Golden example: Voron 2.4 / LDO 2.4 + Stealthburner + Tap
 
-Step-by-step setup using **Kit Studio → Build** (no YAML editing). Maintainer manifests still live per repo; this walkthrough is for end users.
+Step-by-step setup using **Build** (no YAML editing required for end users). Maintainer manifests still live per repo.
 
 ## Two presets
 
@@ -17,29 +17,27 @@ LDO is **not** layered on top of stock Voron-2 (avoids fork-duplication churn).
    - `Voron-2` and/or `LDOVoron2` (pick one as base)
    - `Voron-Stealthburner`, `Voron-Tap` (addons)
 2. **Sync** each GitHub source and set import rules.
-3. Author manifests per repo — **Kit Studio → Configure** (recommended) or copy examples from [cross-source Voron manifests](./cross-source-voron/ldo-2.4-golden-stack.md).
+3. Author manifests per repo — see [author-manifest-on-stack playbook](../playbooks/author-manifest-on-stack.md) or copy examples from [cross-source Voron manifests](./cross-source-voron/ldo-2.4-golden-stack.md).
 
-## Configure manifests (maintainers)
+## Create a build
 
-1. Open **Plan → Kit Studio → Configure**.
-2. Pick each **repo tab** (base + addons) and set folder/file rules in the tree inspector.
-3. Use **Link folder…** for shared categories (e.g. `toolhead` across Stealthburner repos).
-4. **Save manifest** per repo when done.
+1. **Create build** in the header (or **Manage builds** on Build).
+2. Name the plan (e.g. `Golden LDO 2.4 SB Tap`).
 
-## Configure the build (Kit Studio → Build)
+## Configure on Build
 
-1. Open **Plan** and create or select a profile.
-2. Open **Kit Studio → Build** tab.
-3. **Choose base** — pick synced `Voron-2` (stock) or `LDOVoron2` (LDO), or click a **stack preset** card.
-4. **Stack kits** — preset applies base + addon layers + default selections (`toolhead: stealthburner`, `probe: voron_tap`).
-5. Pick variants in each category; watch part counts and source badges.
-6. **Export STLs** or **Copy URL** when the build looks correct.
+1. Open **Build** for your plan.
+2. Attach sources — set **base** to synced `Voron-2` (stock) or `LDOVoron2` (LDO), add **Voron-Stealthburner** and **Voron-Tap** as add-ons. Or click a **stack preset** card on the base source’s kit manifest options.
+3. Pick variants in each category when preset cards appear; watch part counts in the manifest UI.
+4. Expand source cards and check STL folders/files to include.
+5. Set **role filament colors** (primary/accent/etc.).
+6. Click **Update build**.
 
-## Validate (Advanced tab)
+## Review and export
 
-1. Switch to **Advanced** on Plan.
-2. **Replacement map** — toolhead/probe rows show *Replaces stock …* when catalog defines `replaces_slot`.
-3. **Recompute** after upstream STL or import-rule changes.
+1. Open **Review** — confirm validation summary and 3D previews.
+2. **Export STLs** (by color or color + directory) or use **Share build** on Build for a plan bundle.
+3. Track printing on **Checkoff**.
 
 ## Maintainer checklist
 
@@ -48,7 +46,7 @@ LDO is **not** layered on top of stock Voron-2 (avoids fork-duplication churn).
 | Catalog | `stack_presets` + bases in `docs/kit-catalog.yaml` |
 | Sources | Role + addon category tags |
 | Manifests | Shared `toolhead` / `probe` ids; replacement globs |
-| Maintenance | **Sources → Kit maintenance** |
-| Golden plan | Re-open profile after upstream changes |
+| Maintenance | Re-sync sources after upstream changes |
+| Golden plan | Re-run **Update build** after upstream changes |
 
 See [author-manifest-on-stack playbook](../playbooks/author-manifest-on-stack.md) for maintainer steps.

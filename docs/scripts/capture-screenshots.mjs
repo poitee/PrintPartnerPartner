@@ -5,13 +5,13 @@
  * Usage:
  *   node docs/scripts/capture-screenshots.mjs --theme light
  *   node docs/scripts/capture-screenshots.mjs --theme dark
- *   node docs/scripts/capture-screenshots.mjs --url http://localhost:8080 --theme light --out docs/screenshots/light
+ *   node docs/scripts/capture-screenshots.mjs --url http://localhost:8080 --theme light --profile-id 1
  *
  * Prerequisites: app running (e.g. docker compose up --build), Playwright browsers installed once via:
  *   npx playwright install chromium
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -24,11 +24,13 @@ const { values } = parseArgs({
     url: { type: "string", default: "http://localhost:8080" },
     theme: { type: "string", default: "light" },
     out: { type: "string" },
+    "profile-id": { type: "string" },
   },
 });
 
 const theme = values.theme === "dark" ? "dark" : "light";
 const baseUrl = values.url.replace(/\/$/, "");
+const profileId = values["profile-id"]?.trim() || null;
 const outDir = resolve(
   values.out ?? join(repoRoot, "docs/screenshots", theme),
 );
@@ -53,6 +55,10 @@ const captures = [
         state: "visible",
         timeout: 60_000,
       });
+      await page.getByText("Active build", { exact: false }).first().waitFor({
+        state: "visible",
+        timeout: 15_000,
+      }).catch(() => {});
     },
   },
   {
@@ -63,12 +69,23 @@ const captures = [
         state: "visible",
         timeout: 60_000,
       });
+      const manageBuilds = page.locator("details").filter({ hasText: "Manage builds" }).first();
+      if (await manageBuilds.count()) {
+        const open = await manageBuilds.getAttribute("open");
+        if (!open) {
+          await manageBuilds.locator("summary").click();
+        }
+      }
+      await page.getByText("Manage builds").first().waitFor({
+        state: "visible",
+        timeout: 15_000,
+      });
     },
   },
   {
     label: "Review",
     file: "review.png",
-    waitMs: 2000,
+    waitMs: 2500,
     ready: async (page) => {
       await page.getByRole("heading", { name: "Review", level: 2 }).waitFor({
         state: "visible",
@@ -83,7 +100,7 @@ const captures = [
   {
     label: "Checkoff",
     file: "checkoff.png",
-    waitMs: 2000,
+    waitMs: 2500,
     ready: async (page) => {
       await page.getByRole("heading", { name: "Checkoff", level: 2 }).waitFor({
         state: "visible",
@@ -131,17 +148,26 @@ async function main() {
     deviceScaleFactor: 1,
   });
 
-  await context.addInitScript((selectedTheme) => {
-    localStorage.setItem("print-partner.theme", selectedTheme);
-  }, theme);
+  await context.addInitScript(
+    ({ selectedTheme, selectedProfileId }) => {
+      localStorage.setItem("print-partner.theme", selectedTheme);
+      localStorage.setItem("print-partner.sidebar.ui.v1", "0");
+      localStorage.setItem("print-partner.workflow.onboarding.v1", "1");
+      if (selectedProfileId) {
+        sessionStorage.setItem("pp-selected-profile-id", selectedProfileId);
+      }
+    },
+    { selectedTheme: theme, selectedProfileId: profileId },
+  );
 
   const page = await context.newPage();
 
   console.log(`Waiting for ${baseUrl}/health…`);
   await waitForApp(page);
 
-  console.log(`Loading ${baseUrl}/ (${theme} theme)…`);
-  await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+  const homeUrl = profileId ? `${baseUrl}/?profile=${encodeURIComponent(profileId)}` : `${baseUrl}/`;
+  console.log(`Loading ${homeUrl} (${theme} theme)…`);
+  await page.goto(homeUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => {});
 
   for (const shot of captures) {

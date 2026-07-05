@@ -185,16 +185,14 @@
       <h2>Workflow</h2>
       <ul>
         <li><strong>Sources</strong> — add repos or local folders; categories; import rules; update badges; search STLs across repos.</li>
-        <li><strong>Builds</strong> — create, rename, duplicate, and delete plans; header dropdown switches the active plan.</li>
-        <li><strong>Build</strong> — set role filament colors, attach sources to a plan, pick files, set quantities, read repo docs inline, update build.</li>
+        <li><strong>Build</strong> — manage builds, attach sources, pick files, set role colors, update build, read repo docs inline.</li>
         <li><strong>Review</strong> — confirm totals by role and filament, browse 3D previews, and export STLs.</li>
-        <li><strong>Checkoff</strong> — mark printed units; export an HTML checklist or the missing STLs to a rebuilt <code>stl-missing/</code> folder.</li>
+        <li><strong>Checkoff</strong> — mark printed units; export an HTML checklist or missing STLs.</li>
       </ul>
+      <p><strong>Managing builds</strong> — header <strong>Create build</strong> and plan picker, collapsible <strong>Manage builds</strong> on Build, or the sidebar <strong>Builds</strong> page (create, rename, duplicate, delete).</p>
       <div class="screenshot">
         <div class="pipeline" aria-label="Print Partner workflow">
           <span class="pipeline-step">Sources</span>
-          <span class="pipeline-arrow" aria-hidden="true">→</span>
-          <span class="pipeline-step">Builds</span>
           <span class="pipeline-arrow" aria-hidden="true">→</span>
           <span class="pipeline-step">Build</span>
           <span class="pipeline-arrow" aria-hidden="true">→</span>
@@ -203,7 +201,7 @@
           <span class="pipeline-step">Checkoff</span>
         </div>
         <p class="pipeline-caption">
-          Sync repos → manage plans → compose build → validate &amp; export → track prints
+          Sync repos → compose build → validate &amp; export → track prints
         </p>
       </div>
       <p>
@@ -227,16 +225,16 @@
       <figure>
         <picture>
           <source srcset="screenshots/dark/builds.png" media="(prefers-color-scheme: dark)">
-          <img src="screenshots/light/builds.png" alt="Builds — create, rename, duplicate, and delete plans; header dropdown switches the active plan." loading="lazy">
+          <img src="screenshots/light/builds.png" alt="Builds — dedicated plan manager with active-build dropdown, create, rename, duplicate, and delete." loading="lazy">
         </picture>
-        <figcaption><strong>Builds</strong> — create, rename, duplicate, and delete plans; the header dropdown switches Build, Review, and Checkoff.</figcaption>
+        <figcaption><strong>Builds</strong> — dedicated plan manager with active-build dropdown and full CRUD.</figcaption>
       </figure>
       <figure>
         <picture>
           <source srcset="screenshots/dark/build.png" media="(prefers-color-scheme: dark)">
-          <img src="screenshots/light/build.png" alt="Build — role filament colors, attached source cards with an inline Docs viewer, and per-source file pickers." loading="lazy">
+          <img src="screenshots/light/build.png" alt="Build — Manage builds panel, role filament colors, source file pickers with STL preview, and Update build." loading="lazy">
         </picture>
-        <figcaption><strong>Build</strong> — role filament colors, attached sources with an inline Docs viewer, and file pickers feeding Update build.</figcaption>
+        <figcaption><strong>Build</strong> — Manage builds, role colors, source file pickers with live STL preview, and Update build.</figcaption>
       </figure>
       <figure>
         <picture>
@@ -261,7 +259,7 @@
         <li>Install <a href="https://docs.docker.com/get-docker/">Docker Desktop</a> (Mac/Windows) or Docker Engine + Compose (Linux).</li>
         <li>Clone the repo and open a terminal in the project folder.</li>
         <li>Run <code class="kbd">docker compose up --build</code> (first build takes a few minutes).</li>
-        <li>Open <a href="http://localhost:8080">http://localhost:8080</a> and add a source under <strong>Sources</strong>.</li>
+        <li>Open <a href="http://localhost:8080">http://localhost:8080</a>, add a source under <strong>Sources</strong>, then create a build with <strong>Create build</strong> or <strong>Manage builds</strong> on Build.</li>
       </ol>
       <pre><code>git clone https://github.com/poitee/PrintPartnerPartner.git
 cd PrintPartnerPartner
