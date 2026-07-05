@@ -7,6 +7,7 @@ build/
 .cursor/
 .vscode/
 .idea/
+AGENTS.md
 *.db
 .env
 .env.*
