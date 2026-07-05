@@ -98,6 +98,8 @@ flowchart LR
 3. **Review** — validation summary by role/filament; full parts list with 3D previews; export STLs by role and folder.
 4. **Checkoff** — per-unit progress (saved per plan), printable checklist, and missing-STL export.
 
+Plan management (header **Create build**, **Manage builds** on Build, sidebar **Builds**) is separate from this pipeline; the active plan is shared across Build, Review, and Checkoff.
+
 ## Deploy modes at a glance
 
 | Mode | App DB | Files | Auth |

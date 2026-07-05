@@ -10,15 +10,15 @@ Export a **kit bundle** (`.print-partner-kit.zip`) after applying the `ldo_2.4_s
 
 ## Build the golden plan
 
-1. **Plan** → create or open a profile (e.g. `Golden LDO 2.4 SB Tap`).
-2. **Kit Studio → Build** → apply stack preset **LDO 2.4 + Stealthburner + Tap** (`ldo_2.4_sb_tap`).
+1. **Create build** (header or **Manage builds** on Build) — e.g. `Golden LDO 2.4 SB Tap`.
+2. On **Build**, apply stack preset **LDO 2.4 + Stealthburner + Tap** (`ldo_2.4_sb_tap`) via kit manifest options on the base source.
 3. Confirm layers: base `LDOVoron2`, addons `Voron-Stealthburner`, `Voron-Tap`.
 4. Confirm selections: `toolhead: stealthburner`, `probe: voron_tap`.
-5. **Recompute** (Plan toolbar) and resolve manifest warnings in **Advanced**.
+5. Pick STL files, set role colors, click **Update build**, and resolve any Review issues.
 
 ## Export QA bundle
 
-1. **Plan → Advanced** (or legacy kit export) → **Export kit bundle**.
+1. On **Build**, open **Share build…** and export the plan bundle.
 2. Or start job: `POST /jobs/export-kit-bundle` with `{ "profile_id": <id> }`.
 3. Save as `golden-ldo-2.4-sb-tap.print-partner-kit.zip` for CI or manual diff.
 

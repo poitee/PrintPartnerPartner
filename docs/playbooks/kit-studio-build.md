@@ -1,66 +1,71 @@
-# Kit Studio Build playbook
+# Build playbook — stack presets and variants
 
-End-user guide: choose a base repo, apply a stack preset, pick variants in **Build**.
+End-user guide: sync sources, create a build, apply a stack preset, and pick variants on **Build**.
 
 ## 1. Sync sources
 
-On **Sources**, import [repos.txt](../examples/repos.txt) or add repos manually. Sync each GitHub source and verify STLs appear in the import tree.
+On **Sources**, import [repos.txt](../examples/repos.txt) or add repos manually. Sync each GitHub source and verify STLs appear when you expand the import tree on Build.
 
-## 2. Create a plan profile
+## 2. Create a build
 
-**Plan →** create or select a profile (e.g. "My Voron 2.4 SB Tap").
+Create or select a plan:
+
+- Header **Create build** button or plan picker
+- **Manage builds** panel on **Build** (collapsible at the top)
+- **Builds** page in the sidebar
+
+Name it something recognizable (e.g. "My Voron 2.4 SB Tap").
 
 ## 3. Configure manifests (maintainers)
 
-Open **Kit Studio → Configure** to set folder/file rules per repo tab. Rules persist as path globs in each repo’s `print-partner.manifest.yaml`. See [author-manifest-on-stack.md](./author-manifest-on-stack.md).
+Author per-repo manifests so stack presets and variant picks work. See [author-manifest-on-stack.md](./author-manifest-on-stack.md). Rules persist as path globs in each repo’s `print-partner.manifest.yaml`.
 
-## 4. Open Kit Studio → Build
+## 4. Build page
 
-The **Build** tab opens by default when the profile has a base layer and manifest data.
+Open **Build** for your active plan.
 
-### Choose a base
+### Attach sources
 
-- If no base is set: pick a catalog base button or apply a **stack preset** (sets base + addons in one step).
-- With a base set: use **Change base** to switch (may require re-applying presets).
+- Use **Attach sources** (or set base/add-on layers) if no source is linked yet.
+- Base layer holds the main kit repo; add-on layers hold toolhead, probe, and other overlays.
 
-### Stack presets
+### Stack presets and kit manifest options
 
-Reference presets from `docs/kit-catalog.yaml`:
+On the **base** source card, **Kit manifest options** shows stack preset cards when the kit catalog is configured. Reference presets from `docs/kit-catalog.yaml`:
 
 | Preset | Base | Addons |
 |--------|------|--------|
 | Voron 2.4 (stock) + Stealthburner + Tap | Voron-2 | SB, Tap |
 | LDO 2.4 + Stealthburner + Tap | LDOVoron2 | SB, Tap |
 
-Click a preset card to apply layers and default variant selections.
+Click a preset to apply layers and default variant selections.
 
-### Pick variants
+### Pick STL files
 
-Each **choice** row shows:
+Expand each source card, check files or folders to include, and use the **STL preview** pane to verify geometry. Selections save automatically.
 
-- Rule badge (choose one / add any)
-- Active addon source name
-- Part count
-- *Replaces stock …* hint when the catalog defines `replaces_slot`
+### Role filament colors
 
-Pick variant cards; the plan recomputes automatically.
+Set a color per role (primary, accent, clear, opaque) in **Colors by role**. Previews on Build, Review, and Checkoff update when you change a color.
 
-After Build, set **filament colors and quantities** on **Plan → Parts** and track printing on **Checkoff** (shortcuts in Kit Studio header).
+### Update build
 
-## 5. Export or share
+Click **Update build** when the stale banner appears (or enable **auto-recompute stale builds** in Settings). This refreshes Review and Checkoff from your file picks.
 
-- **Export STLs** — included parts only
-- **Copy URL** — shareable plan link with kit overlay hash
-- **Publish** — community manifest bundle (maintainers)
-- **Plate** / **Checkoff** — header links for layout and shop-floor checklist
+## 5. Review, Checkoff, export
+
+- **Review** — validation summary, quantity edits, **Export STLs** (by color or color + directory).
+- **Checkoff** — per-unit progress, printable checklist, **Export missing STLs**.
+- **Share build** on Build — export a `.print-partner-kit` zip (plan config, not STLs).
 
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
 | Preset grayed / error | Sync missing repos on Sources |
-| Empty build choices | Recompute + Apply manifest; check Configure rules |
+| Empty variant choices | Run **Update build**; check manifest rules in repo YAML |
 | Wrong variants | Check per-repo manifests; shared choice ids must match |
-| Tree badges wrong | Save manifests; path globs must match repo layout |
+| Stale Review parts | Click **Update build** on Build |
+| Colors not in previews | Change role color again or use Advanced → Regenerate thumbnails |
 
 See [golden LDO 2.4 example](../examples/golden-ldo-voron-2.4-sb-tap.md).
