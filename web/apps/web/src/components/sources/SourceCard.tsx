@@ -1,9 +1,9 @@
 import { MoreHorizontal } from "lucide-react";
 import {
-  formatSyncTime,
   shortSha,
   type SourceSummary,
 } from "../../api/engine";
+import { useDateFormat } from "../../context/DateFormatContext";
 import SourceCardCover from "../SourceCardCover";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -37,6 +37,7 @@ export default function SourceCard({
   onSync,
   onDelete,
 }: Props) {
+  const { formatDate } = useDateFormat();
   const synced = Boolean(source.last_synced_at);
 
   return (
@@ -92,7 +93,7 @@ export default function SourceCard({
           ) : (
             <Badge variant="muted">Uncategorized</Badge>
           )}
-          <Badge variant="muted">{synced ? formatSyncTime(source.last_synced_at) : "Not synced"}</Badge>
+          <Badge variant="muted">{synced ? formatDate(source.last_synced_at) : "Not synced"}</Badge>
           {source.last_commit_sha && (
             <Badge variant="muted">{shortSha(source.last_commit_sha)}</Badge>
           )}

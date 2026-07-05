@@ -2,6 +2,82 @@
 
 export type DeployMode = "self-host" | "saas";
 
+/** Global preference controlling how timestamps (e.g. "Generated …", "Last synced …") are displayed. */
+export type DateFormatId =
+  | "mdy_12h"
+  | "dmy_12h"
+  | "mdy_short"
+  | "dmy_short"
+  | "ymd_24h"
+  | "iso";
+
+export const DATE_FORMAT_DEFAULT: DateFormatId = "mdy_12h";
+
+export const DATE_FORMAT_PRESETS: Array<{ id: DateFormatId; label: string; example: string }> = [
+  { id: "mdy_12h", label: "Jul 3, 2026, 9:01 PM", example: "Jul 3, 2026, 9:01 PM" },
+  { id: "dmy_12h", label: "3 Jul 2026, 9:01 PM", example: "3 Jul 2026, 9:01 PM" },
+  { id: "mdy_short", label: "07/03/2026, 9:01 PM", example: "07/03/2026, 9:01 PM" },
+  { id: "dmy_short", label: "03/07/2026, 21:01", example: "03/07/2026, 21:01" },
+  { id: "ymd_24h", label: "2026-07-03 21:01", example: "2026-07-03 21:01" },
+  { id: "iso", label: "2026-07-03T21:01:32.727Z (ISO)", example: "2026-07-03T21:01:32.727Z" },
+];
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** Formats an ISO timestamp per the given global date-format preference. Works in both browser and Node (Intl is available in both). */
+export function formatTimestamp(
+  iso: string | null | undefined,
+  formatId: DateFormatId = DATE_FORMAT_DEFAULT,
+): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  switch (formatId) {
+    case "iso":
+      return date.toISOString();
+    case "ymd_24h":
+      return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    case "mdy_short":
+      return new Intl.DateTimeFormat("en-US", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(date);
+    case "dmy_short":
+      return new Intl.DateTimeFormat("en-GB", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(date);
+    case "dmy_12h":
+      return new Intl.DateTimeFormat("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      }).format(date);
+    case "mdy_12h":
+    default:
+      return new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      }).format(date);
+  }
+}
+
 export type ApiError = {
   detail: string;
   title?: string;

@@ -7,7 +7,6 @@ import {
   deleteSource,
   fetchSourceCategories,
   fetchSources,
-  formatSyncTime,
   importReposTxt,
   importSourceArchive,
   importSourceFiles,
@@ -24,6 +23,7 @@ import {
   type StlSearchHit,
 } from "../api/engine";
 import GitHubRefField, { type GithubRefType } from "../components/GitHubRefField";
+import { useDateFormat } from "../context/DateFormatContext";
 import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -143,6 +143,7 @@ function UpdateStatusBadge({ status }: { status?: SourceSummary["update_status"]
 
 export default function SourcesPage() {
   const location = useLocation();
+  const { formatDate } = useDateFormat();
   const { health, error: healthError } = useEngineHealth();
   const { busy, runJob } = useJobRunner("sync");
   const { busy: updateBusy, runJob: runUpdateJob } = useJobRunner("source-updates");
@@ -544,7 +545,7 @@ export default function SourcesPage() {
           ) : (
             <Badge variant="muted">Uncategorized</Badge>
           )}
-          <Badge variant="muted">{formatSyncTime(s.last_synced_at)}</Badge>
+          <Badge variant="muted">{formatDate(s.last_synced_at) || "Never"}</Badge>
           {s.last_commit_sha && (
             <Badge variant="muted">{shortSha(s.last_commit_sha)}</Badge>
           )}
@@ -570,7 +571,7 @@ export default function SourcesPage() {
       <div className="min-w-0 flex-1">
         <p className="font-medium">{s.name}</p>
         <p className="text-xs text-muted-foreground">
-          {kindLabel(s.source_kind)} · {formatSyncTime(s.last_synced_at)}
+          {kindLabel(s.source_kind)} · {formatDate(s.last_synced_at) || "Never"}
         </p>
       </div>
       {s.category ? (

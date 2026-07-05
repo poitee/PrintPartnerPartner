@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "./ui/card";
 import { fetchStlTree, type SourceSummary } from "../api/engine";
+import { useDateFormat } from "../context/DateFormatContext";
 import { useImportRulesAutosave } from "../hooks/useImportRulesAutosave";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import {
@@ -35,13 +36,13 @@ type Props = {
   expandedExtra?: ReactNode;
 };
 
-function syncLabel(source: SourceSummary | null | undefined): string {
+function syncLabel(
+  source: SourceSummary | null | undefined,
+  formatDate: (iso: string | null | undefined) => string,
+): string {
   if (!source?.last_synced_at) return "Not synced";
-  try {
-    return `Synced ${new Date(source.last_synced_at).toLocaleString()}`;
-  } catch {
-    return "Synced";
-  }
+  const formatted = formatDate(source.last_synced_at);
+  return formatted ? `Synced ${formatted}` : "Synced";
 }
 
 export default function SourceFilePickerCard({
@@ -56,6 +57,7 @@ export default function SourceFilePickerCard({
   onRemove,
   expandedExtra,
 }: Props) {
+  const { formatDate } = useDateFormat();
   const expandedKey = `pp-build-source-${sourceId}-expanded`;
   const [expanded, setExpanded] = useState(() => {
     try {
@@ -210,7 +212,7 @@ export default function SourceFilePickerCard({
                 )}
               </div>
               <CardDescription className="text-xs">
-                {syncLabel(source)}
+                {syncLabel(source, formatDate)}
                 {selectionLabel && (
                   <span>
                     {" "}
