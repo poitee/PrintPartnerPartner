@@ -64,37 +64,57 @@ Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Sp
 
 ## Screenshots
 
-Light-theme captures from the warm UI. The app also supports **dark** and **system** theme; the left sidebar can be collapsed to an icon rail. The [GitHub Pages site](https://poitee.github.io/PrintPartnerPartner/) swaps in dark screenshots when your system prefers dark mode.
+Screenshots switch with your GitHub **light / dark** theme (or see both on the [project site](https://poitee.github.io/PrintPartnerPartner/)).
 
 ### Sources
 
-![Sources — the source library with categories, sync status chips, update-available badges, and a global STL search box across every synced repo.](docs/screenshots/light/sources.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/sources.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/sources.png">
+  <img src="docs/screenshots/light/sources.png" alt="Sources — source library with categories, sync status, update badges, and global STL search.">
+</picture>
 
-The source library: add GitHub repos, local folders, or zips and group them into **categories**. Each source shows its sync state and an **update-available** badge when the upstream repo has moved. A global search box finds STLs by filename or path across every synced repo, and per-source **import rules** control how files are picked up.
+Source library: categories, sync status, **update available** badges, global STL search, per-source import rules.
 
 ### Builds
 
-![Builds — dedicated plan manager with active-build dropdown, create, rename, duplicate, and delete.](docs/screenshots/light/builds.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/builds.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/builds.png">
+  <img src="docs/screenshots/light/builds.png" alt="Builds — plan manager with active-build dropdown, create, rename, duplicate, and delete.">
+</picture>
 
-The **Builds** page (sidebar) offers full plan CRUD with an **active build** dropdown. The same controls appear in the collapsible **Manage builds** panel on Build and in the header plan picker.
+Sidebar **Builds** page plus the same controls in **Manage builds** on Build and the header plan picker.
 
 ### Build
 
-![Build — Manage builds panel, role filament colors, source file pickers with STL preview, and Update build.](docs/screenshots/light/build.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/build.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/build.png">
+  <img src="docs/screenshots/light/build.png" alt="Build — Manage builds, role filament colors, STL pickers with live preview, and Update build.">
+</picture>
 
-**Manage builds** at the top switches or creates plans. Set **role filament colors**, attach sources, pick STL files (with live 3D preview tinted by role), and click **Update build** when the stale banner appears. Kit/manifest options, inline **Docs**, **Export STLs**, and **Share build** are on this page.
+**Manage builds**, role colors, attach sources, pick STLs (live 3D preview), **Update build** when stale, kit options, **Docs**, export and share.
 
 ### Review
 
-![Review — a validation summary grouped by role and filament, with the full included-parts list and 3D STL previews, ready for Export STLs.](docs/screenshots/light/review.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/review.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/review.png">
+  <img src="docs/screenshots/light/review.png" alt="Review — validation summary by role and filament with 3D STL previews and Export STLs.">
+</picture>
 
-A **validation summary** grouped by role and filament surfaces any issues before you print. The full included-parts list shows **3D STL previews** and can be sorted by repo or filename. **Export STLs** writes parts organized by role and folder.
+Validation summary by role and filament, full parts list with **3D previews**, quantity edits, **Export STLs**.
 
 ### Checkoff
 
-![Checkoff — per-unit print progress with on-scroll 3D thumbnails laid out like a printable checklist, plus Print, Export checklist, and Export missing STLs.](docs/screenshots/light/checkoff.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/checkoff.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/checkoff.png">
+  <img src="docs/screenshots/light/checkoff.png" alt="Checkoff — per-unit print progress with 3D thumbnails, Print, Export checklist, and Export missing STLs.">
+</picture>
 
-Mark **per-unit print progress** (saved per plan) and filter to what is missing or done. On-scroll **3D thumbnails** are laid out like a printable checklist. Use **Print** for a paper checklist, **Export checklist HTML**, or **Export missing STLs** (zip) to hand the outstanding units straight to the next print batch.
+Per-unit progress, on-scroll **3D thumbnails**, printable checklist, **Export missing STLs** for the next batch.
 
 ---
 

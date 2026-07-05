@@ -1,32 +1,63 @@
-# GitHub Pages (project site)
+# Print Partner documentation
 
-This folder hosts a minimal static landing page for the Print Partner web app (`index.html`). It describes the self-hostable web platform, shows the project logo (`logo.png`), and embeds workflow screenshots from [`screenshots/light/`](./screenshots/light/) and [`screenshots/dark/`](./screenshots/dark/) (via `<picture>` and `prefers-color-scheme`). No build step is required.
+Print Partner is a self-hostable web workflow for **layered STL kits** — a base repo plus add-ons, role filament colors, exports by folder, and shop-floor checkoff. This folder holds user guides, examples, and technical references.
 
-## Enable GitHub Pages
+**Pipeline:** **Sources** → **Build** → **Review** → **Checkoff**
 
-1. Open the repository on GitHub → **Settings** → **Pages**.
-2. Under **Build and deployment**, set **Source** to **GitHub Actions**.
-3. Push to `main` (or run the **pages** workflow manually); the workflow uploads `/docs` as the site artifact.
-4. After a minute or two, the site is available at  
-   `https://poitee.github.io/PrintPartnerPartner/`  
-   (exact URL is shown on the Pages settings screen).
+Plan management (create, rename, duplicate, delete) is separate from that pipeline — use the header **Create build** button, **Manage builds** on Build, or the **Builds** page in the sidebar.
 
-Branch deploy (`main` + `/docs`) also works if you prefer that over Actions.
+---
 
-## Local preview
+## Get started
 
-Open `docs/index.html` in a browser, or:
+| Doc | Audience |
+|-----|----------|
+| [Install with Docker](INSTALL.md) | First-time Docker users — install, first run, data volume, troubleshooting |
+| [Project site (landing page)](https://poitee.github.io/PrintPartnerPartner/) | Overview with workflow screenshots (light/dark) |
+| [README (repo home)](../README.md) | Full feature list, quick start, env vars, monorepo layout |
 
-```bash
-python3 -m http.server 8765 --directory docs
-```
+After the app is running, open **Help** in the sidebar for the in-app workflow guide.
 
-Then visit http://localhost:8765/
+---
 
-## Install guide
+## Workflow guides
 
-First-time Docker users: [`INSTALL.md`](INSTALL.md) — install, first run, data volume, troubleshooting.
+| Step | What you do |
+|------|-------------|
+| **Sources** | Register GitHub repos, local folders, or zips; categories; import rules; sync; global STL search; update-available badges |
+| **Build** | Manage builds, attach base/add-on sources, pick STL files, set role filament colors (live previews), **Update build** when stale, kit/manifest options, export or share plan |
+| **Review** | Validation summary by role and filament, 3D previews, quantity edits, **Export STLs** |
+| **Checkoff** | Per-unit print progress, printable checklist, **Export missing STLs** |
+
+**Tips:** **⌘K / Ctrl+K** command palette · collapsible sidebar · first-run **Progress** widget hides after one full pipeline pass
+
+### Playbooks
+
+- [Build playbook — stack presets and variants](playbooks/kit-studio-build.md)
+- [Author manifests on a stack](playbooks/author-manifest-on-stack.md)
+
+### Examples
+
+- [Golden LDO Voron 2.4 + SB Tap walkthrough](examples/golden-ldo-voron-2.4-sb-tap.md)
+- [Export paths from Review and Checkoff](examples/golden-ldo-voron-2.4-export.md)
+- [Cross-source Voron golden stack](examples/cross-source-voron/ldo-2.4-golden-stack.md)
+
+---
+
+## Technical reference
+
+| Doc | Contents |
+|-----|----------|
+| [Architecture](ARCHITECTURE.md) | Monorepo layout, deploy modes, job runner, client-side STL previews |
+| [HTTP API](API.md) | `/api/v1` discovery, auth, jobs, exports |
+| [Deploy reference](../web/DEPLOY.md) | Docker Compose, env vars, SaaS (Postgres + S3 + OAuth) |
+| [Spoolman integration](integrations/SPOOLMAN.md) | Filament inventory on Build; spool weights in Review / Checkoff |
+
+---
 
 ## Screenshots
 
-Workflow screenshots live in [`screenshots/light/`](screenshots/light/) and [`screenshots/dark/`](screenshots/dark/) and are referenced from the root [README](../README.md). See [`screenshots/README.md`](screenshots/README.md) for capture instructions, including the Playwright script in [`scripts/capture-screenshots.mjs`](scripts/capture-screenshots.mjs).
+Workflow screenshots used by the [README](../README.md) and [project site](index.html):
+
+- [Light theme](screenshots/light/)
+- [Dark theme](screenshots/dark/)
