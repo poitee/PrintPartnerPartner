@@ -1,6 +1,6 @@
 import { basename, dirname, join } from "node:path";
 import type { FastifyInstance } from "fastify";
-import type { JobSnapshot } from "@print-partner/contracts";
+import { DATE_FORMAT_DEFAULT, type DateFormatId, type JobSnapshot } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import { exportDownloadKey } from "../lib/secure-path.js";
 import { syncProjectById } from "./sources.js";
@@ -254,6 +254,7 @@ export class InProcessJobRunner {
     const { name, orderNumber, parts, completedByMatchKey } =
       this.repo.buildMergePartsForProfile(profileId);
     const thumbsDir = join(this.deps.dataDir, "thumbs");
+    const dateFormat = (this.repo.getSetting("date_format") as DateFormatId | null) ?? DATE_FORMAT_DEFAULT;
     const { path, partCount, thumbCount } = exportProfileHtml(
       name,
       orderNumber,
@@ -262,6 +263,7 @@ export class InProcessJobRunner {
       profileId,
       completedByMatchKey,
       thumbsDir,
+      dateFormat,
     );
     return {
       path,

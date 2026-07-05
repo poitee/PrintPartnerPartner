@@ -1,11 +1,15 @@
-import type {
-  AppUpdateCheckResponse,
-  HealthResponse,
-  JobEvent,
-  JobSnapshot,
-  PartRow,
-  ProfileSummary,
-  SourceSummary,
+import {
+  DATE_FORMAT_DEFAULT,
+  DATE_FORMAT_PRESETS,
+  formatTimestamp,
+  type AppUpdateCheckResponse,
+  type DateFormatId,
+  type HealthResponse,
+  type JobEvent,
+  type JobSnapshot,
+  type PartRow,
+  type ProfileSummary,
+  type SourceSummary,
 } from "@print-partner/contracts";
 import {
   pickKitBundleFileWeb,
@@ -16,6 +20,7 @@ import {
 } from "@/lib/webFilePickers";
 
 export type { AppUpdateCheckResponse, HealthResponse, JobEvent, JobSnapshot, PartRow, ProfileSummary, SourceSummary };
+export { DATE_FORMAT_DEFAULT, DATE_FORMAT_PRESETS, formatTimestamp, type DateFormatId };
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 const API_PREFIX = (import.meta.env.VITE_API_PREFIX ?? "").replace(/\/$/, "");
@@ -1666,6 +1671,17 @@ export async function saveSourceUpdateCheckInterval(
   });
 }
 
+export async function fetchDateFormatSetting(): Promise<{ format: DateFormatId }> {
+  return engineFetch<{ format: DateFormatId }>("/settings/date-format");
+}
+
+export async function saveDateFormatSetting(format: DateFormatId): Promise<{ format: DateFormatId }> {
+  return engineFetch<{ format: DateFormatId }>("/settings/date-format", {
+    method: "PUT",
+    body: JSON.stringify({ format }),
+  });
+}
+
 export async function startCheckSourceUpdates(): Promise<string> {
   const body = await engineFetch<{ job_id: string }>("/jobs/check-source-updates", {
     method: "POST",
@@ -1942,15 +1958,6 @@ export async function ensureEngineRunning(): Promise<void> {
     await fetchHealth();
   } catch {
     throw new Error("API server is not reachable. Start the server with `npm run dev` from web/.");
-  }
-}
-
-export function formatSyncTime(iso: string | null): string {
-  if (!iso) return "Never";
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
   }
 }
 

@@ -1,6 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type { ServerConfig } from "../config.js";
 import type { AppRepository } from "../db/repository.js";
+import {
+  DATE_FORMAT_DEFAULT,
+  DATE_FORMAT_PRESETS,
+  type DateFormatId,
+} from "@print-partner/contracts";
 import { checkAppUpdate, resetAppUpdateCheckCache } from "../services/app-update-check.js";
 import {
   DEFAULT_NAMING_PROFILE,
@@ -58,6 +63,20 @@ export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDe
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }
+  });
+
+  app.get("/settings/date-format", async () => ({
+    format: (deps.repo.getSetting("date_format") as DateFormatId | null) ?? DATE_FORMAT_DEFAULT,
+  }));
+
+  app.put("/settings/date-format", async (request, reply) => {
+    const body = request.body as { format?: string };
+    const format = body.format ?? "";
+    if (!DATE_FORMAT_PRESETS.some((p) => p.id === format)) {
+      return reply.status(400).send({ detail: "format must be one of the supported date formats" });
+    }
+    deps.repo.setSetting("date_format", format);
+    return { format: format as DateFormatId };
   });
 
   app.get("/settings/stl-naming", async () => ({
