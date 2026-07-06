@@ -172,6 +172,7 @@ export type HealthResponse = {
   ok: boolean;
   version: string;
   deploy_mode: DeployMode;
+  multi_user?: boolean;
   data_dir: string;
   port?: number;
   api_version?: string;
@@ -200,6 +201,8 @@ export type ProfileSummary = {
   name: string;
   order_number: string | null;
   part_count: number;
+  /** True when plan config changed since the last successful recompute. */
+  build_stale: boolean;
 };
 
 export type SourceSummary = {

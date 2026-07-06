@@ -84,6 +84,37 @@ describe("buildPlanReview", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("surfaces slug conflicts from overlapping import rules on one source", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-review-single-src-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+
+    const source = repo.createSource({ name: "SingleRepo", url: "https://github.com/a/one" });
+    const repoPath = join(dir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "alpha"), { recursive: true });
+    mkdirSync(join(repoPath, "beta"), { recursive: true });
+    writeFileSync(join(repoPath, "alpha", "widget.stl"), "solid");
+    writeFileSync(join(repoPath, "beta", "widget.stl"), "solid");
+    repo.updateSource(source.id, { local_path: repoPath });
+    repo.updateImportRules(source.id, ["alpha/", "beta/"]);
+
+    const plan = repo.createProfile("SingleSourcePlan", source.id);
+    repo.recomputeProfile(plan.id);
+    const parts = repo.listParts(plan.id).parts;
+    expect(parts).toHaveLength(2);
+    expect(parts.every((p) => p.filename === "widget.stl")).toBe(true);
+    expect(parts.every((p) => p.status === "conflict")).toBe(true);
+
+    const review = buildPlanReview(repo, plan.id);
+    const reviewParts = review.part_groups.flatMap((g) => g.parts);
+    expect(reviewParts).toHaveLength(2);
+    expect(review.issues.filter((i) => i.code === "merge_conflict")).toHaveLength(2);
+
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("includes print_units and progress fields on each part", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-review-units-"));
     const sqlite = new SqliteDatabase(dir);

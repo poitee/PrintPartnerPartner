@@ -44,10 +44,60 @@ export class PostgresDatabase {
     await this.pool.query("ALTER TABLE parts ADD COLUMN IF NOT EXISTS spoolman_spool_id TEXT");
     await this.pool.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS tag TEXT");
     await this.pool.query(
+      "ALTER TABLE build_profiles ADD COLUMN IF NOT EXISTS config_modified_at TEXT",
+    );
+    await this.pool.query(
+      "ALTER TABLE build_profiles ADD COLUMN IF NOT EXISTS last_recomputed_at TEXT",
+    );
+    await this.pool.query(
       `INSERT INTO app_settings (tenant_id, key, value) VALUES ($1, $2, $3)
        ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value`,
       ["default", schemaVersionKey, String(currentSchemaVersion)],
     );
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE,
+        display_name TEXT NOT NULL,
+        password_hash TEXT,
+        is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TEXT NOT NULL
+      )`);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS auth_identities (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL,
+        provider_user_id TEXT NOT NULL
+      )`);
+    await this.pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_auth_identity_provider
+      ON auth_identities (provider, provider_user_id)`);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL
+      )`);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS plan_shares (
+        id TEXT PRIMARY KEY,
+        token TEXT NOT NULL UNIQUE,
+        from_user_id TEXT NOT NULL REFERENCES users(id),
+        plan_id INTEGER NOT NULL,
+        plan_name TEXT NOT NULL,
+        recipient_email TEXT,
+        bundle_json TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL
+      )`);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`);
   }
 
   async ping(): Promise<boolean> {

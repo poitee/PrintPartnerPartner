@@ -12,6 +12,8 @@ import {
   RefreshCw,
   XCircle,
 } from "lucide-react";
+import StaleBuildBanner from "../components/StaleBuildBanner";
+import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
@@ -28,9 +30,10 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { Card, CardContent } from "../components/ui/card";
-import { startExportStlPack, type StlPackGroupBy } from "../api/engine";
+import { startExportStlPack, startRecompute, startSync, type StlPackGroupBy } from "../api/engine";
 import { buildRoute, checkoffRoute, sourcesRoute } from "../lib/routes";
-import { completeExportDownload } from "../lib/exportActions";
+import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
+import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
@@ -54,7 +57,39 @@ export default function ReviewPage() {
     loadedRevision,
   } = usePlanWorkspace();
   const exportStlJob = useJobRunner("stl-export");
+  const recomputeJob = useJobRunner("recompute");
+  const syncJob = useJobRunner("sync");
   const [shareOpen, setShareOpen] = useState(false);
+
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
+  const buildStale = selectedProfile?.build_stale ?? false;
+
+  const onUpdateBuild = () => {
+    if (selectedProfileId == null) return;
+    void recomputeJob.runJob(
+      () => startRecompute(selectedProfileId, { apply_manifest: true }),
+      (snap) => {
+        if (snap.status === "error") toast.error(snap.message || "Update failed");
+      },
+      { profileId: selectedProfileId },
+    );
+  };
+
+  const syncUnsyncedLayers = () => {
+    const unsynced = review?.layers.filter((l) => !l.synced && l.project_id != null) ?? [];
+    const ids = [...new Set(unsynced.map((l) => l.project_id!).filter(Boolean))];
+    if (ids.length === 0) return;
+    void syncJob.runJob(
+      () => startSync(ids),
+      (snap) => {
+        if (snap.status === "error") {
+          toast.error(snap.message || "Sync failed");
+          return;
+        }
+        if (selectedProfileId != null) void reload(selectedProfileId);
+      },
+    );
+  };
 
   useEffect(() => {
     if (!health?.ok || selectedProfileId == null) return;
@@ -77,6 +112,14 @@ export default function ReviewPage() {
     () => review?.issues.filter((i) => i.severity === "warning") ?? [],
     [review],
   );
+  const mergeConflicts = useMemo(
+    () => review?.issues.filter((i) => i.code === "merge_conflict") ?? [],
+    [review],
+  );
+  const mergeConflictGroups = useMemo(
+    () => groupMergeConflictsByFilename(mergeConflicts),
+    [mergeConflicts],
+  );
   const hasBlockers = review?.has_blockers ?? blockers.length > 0;
 
   const onExportStls = (groupBy: StlPackGroupBy) => {
@@ -84,11 +127,7 @@ export default function ReviewPage() {
     void exportStlJob.runJob(
       () => startExportStlPack(selectedProfileId, { group_by: groupBy }),
       (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "STL export failed");
-          return;
-        }
-        completeExportDownload("STL export", snap.result, { pathField: "root_path" });
+        handleStlPackExportJobDone("STL export", snap, { pathField: "root_path" });
       },
     );
   };
@@ -153,6 +192,12 @@ export default function ReviewPage() {
         }
       />
 
+      <StaleBuildBanner
+        stale={buildStale}
+        busy={recomputeJob.busy}
+        onUpdate={onUpdateBuild}
+      />
+
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
 
       {!health ? (
@@ -166,16 +211,11 @@ export default function ReviewPage() {
           </CardContent>
         </Card>
       ) : selectedProfileId == null ? (
-        <Card>
-          <CardContent className="space-y-3 pt-6">
-            <p className="text-sm text-muted-foreground">
-              Select a plan in the header to review sync status and parts before export.
-            </p>
-            <Button variant="secondary" size="sm" asChild>
-              <Link to={buildRoute(null)}>Go to Build</Link>
-            </Button>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={ClipboardCheck}
+          title="No plan selected"
+          description="Choose a plan in the header or create one to review parts and export STLs."
+        />
       ) : loading && !review ? (
         <Card>
           <CardContent className="pt-6">
@@ -247,9 +287,43 @@ export default function ReviewPage() {
             </ul>
           </section>
 
-          {(blockers.length > 0 || warnings.length > 0) && (
+          {(mergeConflicts.length > 0 || blockers.length > 0 || warnings.length > 0) && (
             <section className="section-card space-y-3">
               <h3 className="text-sm font-semibold">Issues</h3>
+              {mergeConflicts.length > 0 && (
+                <div
+                  className="flex gap-2 rounded-md border border-warning bg-warning/15 px-3 py-2.5 text-sm"
+                  role="alert"
+                >
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden />
+                  <div>
+                    <p className="font-medium">
+                      Duplicate parts detected ({mergeConflicts.length} conflict
+                      {mergeConflicts.length === 1 ? "" : "s"})
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      The same part slug appears more than once — often from overlapping import
+                      rules or duplicate addon layers.
+                    </p>
+                    <ul className="mt-2 space-y-1 text-xs">
+                      {mergeConflictGroups.map(([filename, count]) => (
+                        <li key={filename} className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-foreground">{filename}</span>
+                          <span className="text-muted-foreground">
+                            — {count} variant{count === 1 ? "" : "s"}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <Link
+                      to={buildRoute(selectedProfileId)}
+                      className="mt-2 inline-block text-xs text-primary underline"
+                    >
+                      Resolve in Build
+                    </Link>
+                  </div>
+                </div>
+              )}
               {blockers.map((issue, i) => (
                 <div
                   key={`b-${i}`}
@@ -259,17 +333,32 @@ export default function ReviewPage() {
                   <div>
                     <p>{issue.message}</p>
                     {issue.link_hint && hintRoute(issue.link_hint, selectedProfileId) && (
-                      <Link
-                        to={hintRoute(issue.link_hint, selectedProfileId)!}
-                        className="mt-1 inline-block text-xs text-primary underline"
-                      >
-                        {issue.link_hint === "sources" ? "Go to Sources" : "Go to Build"}
-                      </Link>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        <Link
+                          to={hintRoute(issue.link_hint, selectedProfileId)!}
+                          className="text-xs text-primary underline"
+                        >
+                          {issue.link_hint === "sources" ? "Go to Sources" : "Fix on Build"}
+                        </Link>
+                        {issue.link_hint === "sources" &&
+                          review?.layers.some((l) => !l.synced) && (
+                            <button
+                              type="button"
+                              className="text-xs text-primary underline"
+                              onClick={syncUnsyncedLayers}
+                              disabled={syncJob.busy}
+                            >
+                              {syncJob.busy ? "Syncing…" : "Sync sources"}
+                            </button>
+                          )}
+                      </div>
                     )}
                   </div>
                 </div>
               ))}
-              {warnings.map((issue, i) => (
+              {warnings
+                .filter((i) => i.code !== "merge_conflict")
+                .map((issue, i) => (
                 <div
                   key={`w-${i}`}
                   className="flex gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm"
@@ -278,12 +367,25 @@ export default function ReviewPage() {
                   <div>
                     <p>{issue.message}</p>
                     {issue.link_hint && hintRoute(issue.link_hint, selectedProfileId) && (
-                      <Link
-                        to={hintRoute(issue.link_hint, selectedProfileId)!}
-                        className="mt-1 inline-block text-xs text-primary underline"
-                      >
-                        {issue.link_hint === "sources" ? "Go to Sources" : "Go to Build"}
-                      </Link>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        <Link
+                          to={hintRoute(issue.link_hint, selectedProfileId)!}
+                          className="text-xs text-primary underline"
+                        >
+                          {issue.link_hint === "sources" ? "Go to Sources" : "Fix on Build"}
+                        </Link>
+                        {issue.link_hint === "sources" &&
+                          review?.layers.some((l) => !l.synced) && (
+                            <button
+                              type="button"
+                              className="text-xs text-primary underline"
+                              onClick={syncUnsyncedLayers}
+                              disabled={syncJob.busy}
+                            >
+                              {syncJob.busy ? "Syncing…" : "Sync sources"}
+                            </button>
+                          )}
+                      </div>
                     )}
                   </div>
                 </div>

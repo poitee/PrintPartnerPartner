@@ -1,0 +1,108 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  fetchPlanReview,
+  patchPart,
+  patchPartProgress,
+  type PlanReview,
+} from "../api/engine";
+import { mergeProgressIntoReview } from "../lib/reviewParts";
+import { queryKeys } from "./keys";
+import { invalidateProfiles } from "./profiles";
+
+export function usePlanReviewQuery(
+  profileId: number | null,
+  options?: { includeExcluded?: boolean; enabled?: boolean },
+) {
+  const includeExcluded = options?.includeExcluded ?? false;
+  return useQuery({
+    queryKey: queryKeys.planReview(profileId ?? 0, includeExcluded),
+    queryFn: () => fetchPlanReview(profileId!, { includeExcluded }),
+    enabled: (options?.enabled ?? true) && profileId != null && profileId > 0,
+  });
+}
+
+export function invalidatePlanReview(
+  qc: ReturnType<typeof useQueryClient>,
+  profileId: number,
+) {
+  return qc.invalidateQueries({
+    predicate: (q) =>
+      q.queryKey[0] === "planReview" && q.queryKey[1] === profileId,
+  });
+}
+
+export function usePatchPartMutation(profileId: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      partId,
+      body,
+    }: {
+      partId: number;
+      body: Parameters<typeof patchPart>[1];
+    }) => patchPart(partId, body),
+    onSuccess: () => {
+      if (profileId != null) {
+        void invalidatePlanReview(qc, profileId);
+        void invalidateProfiles(qc);
+      }
+    },
+  });
+}
+
+export function usePatchPartProgressMutation(profileId: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      partId,
+      unitIndex,
+      completed,
+    }: {
+      partId: number;
+      unitIndex: number;
+      completed: boolean;
+      optimisticReview?: PlanReview;
+    }) => patchPartProgress(partId, unitIndex, completed),
+    onMutate: async ({ partId, unitIndex, completed, optimisticReview }) => {
+      if (profileId == null || !optimisticReview) return undefined;
+      const key = queryKeys.planReview(profileId, false);
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<PlanReview>(key);
+      const part = optimisticReview.part_groups
+        .flatMap((g) => g.parts)
+        .find((p) => p.id === partId);
+      if (part) {
+        const optimisticUnits = [...part.print_units];
+        while (optimisticUnits.length < part.quantity_effective) optimisticUnits.push(false);
+        if (unitIndex < optimisticUnits.length) optimisticUnits[unitIndex] = completed;
+        const optimisticPrinted = optimisticUnits.filter(Boolean).length;
+        qc.setQueryData(
+          key,
+          mergeProgressIntoReview(optimisticReview, partId, {
+            printed_count: optimisticPrinted,
+            print_units: optimisticUnits,
+            missing: optimisticPrinted < part.quantity_effective,
+          }),
+        );
+      }
+      return { previous, key };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous && ctx.key) qc.setQueryData(ctx.key, ctx.previous);
+    },
+    onSuccess: (progress, { partId }, ctx) => {
+      if (profileId == null || !ctx?.key) return;
+      const current = qc.getQueryData<PlanReview>(ctx.key);
+      if (current) {
+        qc.setQueryData(
+          ctx.key,
+          mergeProgressIntoReview(current, partId, {
+            printed_count: progress.printed_count,
+            print_units: progress.print_units,
+            missing: progress.missing,
+          }),
+        );
+      }
+    },
+  });
+}

@@ -206,6 +206,10 @@ export class AppRepository {
   saveGlobalNaming(profile: StlNamingProfileDict): StlNamingProfileDict {
     const normalized = validateNamingProfile(profile);
     this.setSetting(STL_NAMING_DEFAULTS_KEY, JSON.stringify(normalized));
+    const profiles = this.listProfiles();
+    for (const p of profiles) {
+      this.markProfileConfigModified(p.id);
+    }
     return normalized;
   }
 
@@ -397,12 +401,73 @@ export class AppRepository {
       .orderBy(asc(this.schema.buildProfiles.name))
       .all();
 
-    return rows.map(({ profile, partCount }) => ({
+    return rows.map(({ profile, partCount }) =>
+      this.toProfileSummary(profile, Number(partCount ?? 0)),
+    );
+  }
+
+  private toProfileSummary(
+    profile: typeof this.schema.buildProfiles.$inferSelect,
+    partCount: number,
+  ): ProfileSummary {
+    return {
       id: profile.id,
       name: profile.name,
       order_number: profile.orderNumber,
-      part_count: Number(partCount ?? 0),
-    }));
+      part_count: partCount,
+      build_stale: this.isProfileStale(profile),
+    };
+  }
+
+  private isProfileStale(profile: {
+    configModifiedAt: string | null;
+    lastRecomputedAt: string | null;
+  }): boolean {
+    if (!profile.lastRecomputedAt) return true;
+    if (!profile.configModifiedAt) return false;
+    return profile.configModifiedAt > profile.lastRecomputedAt;
+  }
+
+  markProfileConfigModified(profileId: number): void {
+    const now = new Date().toISOString();
+    this.db
+      .update(this.schema.buildProfiles)
+      .set({ configModifiedAt: now })
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, profileId),
+        ),
+      )
+      .run();
+  }
+
+  markProfilesUsingProjectStale(projectId: number): void {
+    const layers = this.db
+      .select({ profileId: this.schema.profileLayers.profileId })
+      .from(this.schema.profileLayers)
+      .where(eq(this.schema.profileLayers.projectId, projectId))
+      .all();
+    const seen = new Set<number>();
+    for (const layer of layers) {
+      if (seen.has(layer.profileId)) continue;
+      seen.add(layer.profileId);
+      this.markProfileConfigModified(layer.profileId);
+    }
+  }
+
+  touchLastRecomputed(profileId: number): void {
+    const now = new Date().toISOString();
+    this.db
+      .update(this.schema.buildProfiles)
+      .set({ lastRecomputedAt: now })
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, profileId),
+        ),
+      )
+      .run();
   }
 
   getProfile(id: number): ProfileSummary | null {
@@ -417,12 +482,7 @@ export class AppRepository {
       .from(this.schema.parts)
       .where(eq(this.schema.parts.profileId, id))
       .get();
-    return {
-      id: profile.id,
-      name: profile.name,
-      order_number: profile.orderNumber,
-      part_count: Number(partCount?.c ?? 0),
-    };
+    return this.toProfileSummary(profile, Number(partCount?.c ?? 0));
   }
 
   createProfile(name: string, baseProjectId?: number): ProfileSummary & {
@@ -445,7 +505,11 @@ export class AppRepository {
 
     const profile = this.db
       .insert(this.schema.buildProfiles)
-      .values({ tenantId: this.tenantId, name: trimmed })
+      .values({
+        tenantId: this.tenantId,
+        name: trimmed,
+        configModifiedAt: new Date().toISOString(),
+      })
       .returning()
       .get();
     if (!profile) throw new Error("Failed to create profile");
@@ -630,6 +694,7 @@ export class AppRepository {
       .delete(this.schema.profileLayers)
       .where(eq(this.schema.profileLayers.id, layerId))
       .run();
+    this.markProfileConfigModified(layer.profileId);
   }
 
   replaceLayer(layerId: number, projectId: number): void {
@@ -651,6 +716,7 @@ export class AppRepository {
       .set({ projectId })
       .where(eq(this.schema.profileLayers.id, layerId))
       .run();
+    this.markProfileConfigModified(layer.profileId);
   }
 
   getProfileLayers(profileId: number) {
@@ -703,11 +769,25 @@ export class AppRepository {
         })
         .run();
     }
+    this.markProfileConfigModified(profileId);
   }
 
   addAddonLayer(profileId: number, projectId: number): void {
     const project = this.getProjectRow(projectId);
     if (!project) throw new Error("Project not found");
+    const duplicate = this.db
+      .select({ id: this.schema.profileLayers.id })
+      .from(this.schema.profileLayers)
+      .where(
+        and(
+          eq(this.schema.profileLayers.profileId, profileId),
+          eq(this.schema.profileLayers.projectId, projectId),
+        ),
+      )
+      .get();
+    if (duplicate) {
+      throw new Error(`Source "${project.name}" is already attached to this build`);
+    }
     const maxOrder = this.db
       .select({ m: sql<number>`coalesce(max(${this.schema.profileLayers.layerOrder}), -1)` })
       .from(this.schema.profileLayers)
@@ -723,6 +803,7 @@ export class AppRepository {
         projectId,
       })
       .run();
+    this.markProfileConfigModified(profileId);
   }
 
   listParts(profileId: number, limit = 10000, offset = 0): {
@@ -924,6 +1005,7 @@ export class AppRepository {
         out.manifest_applied = manifestResult.applied_rules;
         out.manifest_warnings = manifestResult.warnings;
       }
+      this.touchLastRecomputed(profileId);
       return out;
     } catch (e) {
       if (e instanceof MergeWouldWipeProfileError) {
@@ -963,6 +1045,7 @@ export class AppRepository {
     const serialized = serializeImportRules(rules);
     this.db.update(this.schema.projects).set({ importedPaths: serialized }).where(eq(this.schema.projects.id, id)).run();
     const normalized = importRulesForProject(serialized) ?? [];
+    this.markProfilesUsingProjectStale(id);
     return { rules: normalized };
   }
 
@@ -1425,6 +1508,7 @@ export class AppRepository {
         .run();
       updated += 1;
     }
+    this.markProfileConfigModified(profileId);
     return updated;
   }
 

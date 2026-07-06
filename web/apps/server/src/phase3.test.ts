@@ -8,7 +8,7 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { buildStlTreePayload, progressSummary } from "@print-partner/domain";
-import { exportProfileStlPack } from "./services/export-stl-pack.js";
+import { exportProfileStlPack, exportStlPackJobMessage, STL_EXPORT_MISSING_HINT } from "./services/export-stl-pack.js";
 import { buildPlanReview } from "./services/plan-review.js";
 
 describe("Phase 3 APIs", () => {
@@ -272,5 +272,45 @@ describe("Phase 3 APIs", () => {
     // No nested directory folders were created in flat mode.
     expect(existsSync(join(roleDir, "alpha"))).toBe(false);
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("exportProfileStlPack warns with sync hint when STL paths missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-pack-missing-"));
+    const { warnings } = exportProfileStlPack(
+      "Test",
+      [
+        {
+          matchKey: "missing.stl",
+          relativePath: "parts/missing.stl",
+          filename: "missing.stl",
+          sourceLayer: "base:R",
+          status: "base",
+          role: "primary",
+          quantityAuto: 1,
+          quantityOverride: null,
+          partSlug: "missing",
+          included: true,
+          notes: "",
+          geometrySame: null,
+          absolutePath: null,
+        },
+      ],
+      join(dir, "exports"),
+    );
+    expect(warnings[0]).toContain("Missing STL: parts/missing.stl");
+    expect(warnings[0]).toContain(STL_EXPORT_MISSING_HINT);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("exportStlPackJobMessage surfaces warnings-only completion", () => {
+    expect(
+      exportStlPackJobMessage({
+        file_total: 2,
+        warnings: ["Missing STL: a.stl (base:R). Sync Sources and fix Review blockers, then export again."],
+      }),
+    ).toBe("Exported 2 file(s) with 1 warning(s)");
+    expect(exportStlPackJobMessage({ file_total: 0, warnings: [] })).toContain(
+      STL_EXPORT_MISSING_HINT,
+    );
   });
 });

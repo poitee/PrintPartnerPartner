@@ -10,9 +10,11 @@ import {
   createCustomFilament,
   DATE_FORMAT_PRESETS,
   deleteCustomFilament,
+  fetchAutoRecomputeSettings,
   fetchCustomFilaments,
   fetchGitHubPatSettings,
   fetchSourceUpdateCheckSettings,
+  saveAutoRecomputeSettings,
   saveGitHubPat,
   saveSourceUpdateCheckInterval,
   startCheckSourceUpdates,
@@ -27,6 +29,7 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { StlNamingSettingsCard } from "../components/settings/StlNamingEditor";
 import IntegrationsSettingsCard from "../components/settings/IntegrationsSettingsCard";
 import AboutUpdatesCard from "../components/settings/AboutUpdatesCard";
+import AccountPasswordCard from "../components/settings/AccountPasswordCard";
 import ThemePreferenceControl from "../components/ThemePreferenceControl";
 import SourceCategoryManager from "../components/sources/SourceCategoryManager";
 import { Button } from "../components/ui/button";
@@ -47,6 +50,8 @@ import {
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import { useJobRunner } from "../hooks/useJobRunner";
+import { useAuth } from "../context/AuthContext";
+import { Switch } from "../components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -65,6 +70,7 @@ const UPDATE_INTERVAL_OPTIONS = [
 
 export default function SettingsPage() {
   const { health } = useEngineHealth();
+  const { user, multiUser } = useAuth();
   const { format: dateFormat, setFormat: setDateFormat } = useDateFormat();
   const { updateCheck, refresh: refreshUpdateCheck } = useAppUpdateCheck(Boolean(health));
   const [updateCheckRefreshing, setUpdateCheckRefreshing] = useState(false);
@@ -81,18 +87,22 @@ export default function SettingsPage() {
   const [deleting, setDeleting] = useState(false);
   const [updateIntervalHours, setUpdateIntervalHours] = useState("24");
   const [updateIntervalSaving, setUpdateIntervalSaving] = useState(false);
+  const [autoRecompute, setAutoRecompute] = useState(true);
+  const [autoRecomputeSaving, setAutoRecomputeSaving] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!health) return;
     try {
-      const [filamentRows, patSettings, updateSettings] = await Promise.all([
+      const [filamentRows, patSettings, updateSettings, autoRecomputeSettings] = await Promise.all([
         fetchCustomFilaments(),
         fetchGitHubPatSettings(),
         fetchSourceUpdateCheckSettings(),
+        fetchAutoRecomputeSettings(),
       ]);
       setFilaments(filamentRows);
       setGithubPat(patSettings);
       setUpdateIntervalHours(String(updateSettings.interval_hours));
+      setAutoRecompute(autoRecomputeSettings.enabled);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
@@ -209,6 +219,8 @@ export default function SettingsPage() {
         refreshing={updateCheckRefreshing}
       />
 
+      {multiUser && user?.provider === "email" && <AccountPasswordCard />}
+
       <Card>
         <CardHeader accent>
           <div className="flex items-start gap-3">
@@ -305,6 +317,35 @@ export default function SettingsPage() {
                 ))}
               </SelectContent>
             </Select>
+          </label>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader accent>
+          <CardTitle className="text-base">Auto update build</CardTitle>
+          <CardDescription>
+            When enabled, Print Partner automatically recomputes small plans a few seconds after
+            file picks or colors change (when the stale banner appears on Build).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <label className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+            <span className="text-sm font-medium">Auto-recompute stale builds</span>
+            <Switch
+              checked={autoRecompute}
+              disabled={!health || autoRecomputeSaving}
+              onCheckedChange={(checked) => {
+                setAutoRecomputeSaving(true);
+                void saveAutoRecomputeSettings(checked)
+                  .then((s) => setAutoRecompute(s.enabled))
+                  .catch((e) =>
+                    setLoadError(e instanceof Error ? e.message : String(e)),
+                  )
+                  .finally(() => setAutoRecomputeSaving(false));
+              }}
+              aria-label="Auto-recompute stale builds"
+            />
           </label>
         </CardContent>
       </Card>

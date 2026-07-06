@@ -25,7 +25,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { isBrowserDocumentNavigation, isSpaClientPath } from "./lib/spa-nav.js";
 import type { SaasDbStore } from "./adapters/saas/index.js";
+import type { SelfHostDbStore } from "./adapters/self-host/index.js";
 import type { AppRepository } from "./db/repository.js";
+import { getDb } from "./db/client.js";
+import { createAuthStore, type AuthStore } from "./services/auth-store.js";
 
 export type RuntimePorts = AppPorts & {
   repository?: AppRepository;
@@ -55,12 +58,28 @@ function resolveRepository(ports: RuntimePorts): AppRepository | null {
   return null;
 }
 
+function resolveAuthStore(ports: RuntimePorts, config: ServerConfig): AuthStore | null {
+  if (!config.multiUser) return null;
+  const db = ports.db;
+  if ("sqlite" in db) {
+    const sqlite = (db as SelfHostDbStore).sqlite;
+    if (sqlite?.drizzle) return createAuthStore(getDb(sqlite), "sqlite");
+  }
+  if ("bundle" in db) {
+    const bundle = (db as SaasDbStore).bundle;
+    if (bundle.postgres?.drizzle) return createAuthStore(bundle.postgres.drizzle, "postgres");
+    if (bundle.sqlite?.drizzle) return createAuthStore(getDb(bundle.sqlite), "sqlite");
+  }
+  return null;
+}
+
 export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
   const app = Fastify({ logger: true, bodyLimit: config.uploadMaxBytes });
+  const authStore = resolveAuthStore(ports, config);
 
   await app.register(cookie);
-  registerTenantMiddleware(app, config);
-  registerAuthRoutes(app, config);
+  registerTenantMiddleware(app, config, authStore);
+  registerAuthRoutes(app, config, authStore);
   registerApiKeyAuth(app, config);
 
   await app.register(cors, { origin: config.corsOrigin, credentials: true });
@@ -102,6 +121,7 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
       dataDir: config.dataDir,
       config,
       jobs,
+      authStore,
     };
 
     await registerCoreRoutes(app, coreDeps);

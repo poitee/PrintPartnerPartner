@@ -48,5 +48,6 @@ export function saveKitManifest(
 ): KitManifestRecord {
   const merged = { ...EMPTY_KIT_MANIFEST, ...kit };
   repo.setSetting(kitManifestSettingKey(profileId), JSON.stringify(merged));
+  repo.markProfileConfigModified(profileId);
   return merged;
 }

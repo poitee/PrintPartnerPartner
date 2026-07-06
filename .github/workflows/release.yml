@@ -43,6 +43,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Set GHCR package visibility to public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          if gh api --method PATCH \
+            "/orgs/poitee/packages/container/print-partner/visibility" \
+            -f visibility=public 2>/dev/null; then
+            echo "Set org package visibility to public"
+          else
+            gh api --method PATCH \
+              "/user/packages/container/print-partner/visibility" \
+              -f visibility=public
+            echo "Set user package visibility to public"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

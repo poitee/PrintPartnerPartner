@@ -390,7 +390,6 @@ export function StlNamingSettingsCard({ engineReady }: SettingsCardProps) {
       const next = await saveStlNaming(draft);
       setSaved(next);
       setDraft(next);
-      toast.success("STL naming rules saved. Run Update build on plans to apply.");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setLoadError(msg);

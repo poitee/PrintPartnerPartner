@@ -1,38 +1,426 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Check, ChevronsUpDown, Copy, Hammer, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { buildRoute } from "../lib/routes";
+import { cn } from "../lib/utils";
+import { usePlanActions } from "../context/PlanActionsContext";
 import { useProfileSelection } from "../context/ProfileContext";
+import {
+  useCreateProfileMutation,
+  useDeleteProfileMutation,
+  useDuplicateProfileMutation,
+  useUpdateProfileMutation,
+} from "../queries/profiles";
+import { Button } from "./ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "./ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Switch } from "./ui/switch";
 
 type Props = {
   disabled?: boolean;
   className?: string;
 };
 
-/** Compact plan selector — hoisted in AppLayout header for workflow pages. */
+type SwitchPrompt = {
+  targetId: number;
+  targetName: string;
+  actionLabel: "created" | "duplicated";
+};
+
+/** Header plan combobox with inline CRUD. */
 export default function PlanPicker({ disabled, className }: Props) {
+  const navigate = useNavigate();
   const { profiles, selectedProfileId, setSelectedProfileId, loading } =
     useProfileSelection();
+  const createMutation = useCreateProfileMutation();
+  const updateMutation = useUpdateProfileMutation();
+  const deleteMutation = useDeleteProfileMutation();
+  const duplicateMutation = useDuplicateProfileMutation();
+  const { registerOpenCreate } = usePlanActions();
+
+  const [open, setOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [renameName, setRenameName] = useState("");
+  const [duplicateName, setDuplicateName] = useState("");
+  const [duplicateClearCheckoff, setDuplicateClearCheckoff] = useState(false);
+  const [switchPrompt, setSwitchPrompt] = useState<SwitchPrompt | null>(null);
+
+  const selected = profiles.find((p) => p.id === selectedProfileId);
+  const busy =
+    createMutation.isPending ||
+    updateMutation.isPending ||
+    deleteMutation.isPending ||
+    duplicateMutation.isPending;
+
+  useEffect(() => {
+    setRenameName(selected?.name ?? "");
+  }, [selected?.id, selected?.name]);
+
+  useEffect(() => {
+    registerOpenCreate(() => setCreateOpen(true));
+    return () => registerOpenCreate(null);
+  }, [registerOpenCreate]);
+
+  const actionsGroup = (
+    <CommandGroup heading="Actions">
+      <CommandItem
+        value="create-build"
+        onSelect={() => {
+          setOpen(false);
+          setCreateOpen(true);
+        }}
+      >
+        <Plus className="mr-2 h-4 w-4" />
+        Create build…
+      </CommandItem>
+      {selectedProfileId != null && (
+        <>
+          <CommandItem
+            value="rename-plan"
+            onSelect={() => {
+              setOpen(false);
+              setRenameOpen(true);
+            }}
+          >
+            <Hammer className="mr-2 h-4 w-4" />
+            Rename…
+          </CommandItem>
+          <CommandItem
+            value="duplicate-plan"
+            onSelect={() => {
+              setOpen(false);
+              setDuplicateName(`${selected?.name ?? "Plan"} (copy)`);
+              setDuplicateClearCheckoff(false);
+              setDuplicateOpen(true);
+            }}
+          >
+            <Copy className="mr-2 h-4 w-4" />
+            Duplicate…
+          </CommandItem>
+          <CommandItem
+            value="delete-plan"
+            onSelect={() => {
+              setOpen(false);
+              setDeleteOpen(true);
+            }}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete…
+          </CommandItem>
+        </>
+      )}
+    </CommandGroup>
+  );
+
+  const plansGroup = (
+    <CommandGroup heading="Plans">
+      {profiles.map((p) => (
+        <CommandItem
+          key={p.id}
+          value={p.name}
+          onSelect={() => {
+            setSelectedProfileId(p.id);
+            setOpen(false);
+          }}
+        >
+          <Check
+            className={cn(
+              "mr-2 h-4 w-4",
+              selectedProfileId === p.id ? "opacity-100" : "opacity-0",
+            )}
+          />
+          <span className="truncate">{p.name}</span>
+          <span className="ml-auto text-xs text-muted-foreground">
+            {p.part_count}
+            {p.build_stale ? " · stale" : ""}
+          </span>
+        </CommandItem>
+      ))}
+    </CommandGroup>
+  );
+
+  const shouldAskToSwitch = () => {
+    if (selectedProfileId == null) return false;
+    return (selected?.part_count ?? 0) > 0;
+  };
+
+  const activatePlan = (id: number) => {
+    setSelectedProfileId(id);
+    navigate(buildRoute(id), { replace: true });
+  };
+
+  const offerSwitchOrActivate = (
+    targetId: number,
+    targetName: string,
+    actionLabel: SwitchPrompt["actionLabel"],
+  ) => {
+    if (shouldAskToSwitch() && selectedProfileId !== targetId) {
+      setSwitchPrompt({ targetId, targetName, actionLabel });
+      return;
+    }
+    activatePlan(targetId);
+    const verb = actionLabel === "created" ? "Created" : "Duplicated";
+    toast.success(`${verb} plan “${targetName}”`);
+  };
+
+  const onCreate = async () => {
+    const name = newName.trim();
+    if (!name) return;
+    try {
+      const created = await createMutation.mutateAsync(name);
+      setNewName("");
+      setCreateOpen(false);
+      offerSwitchOrActivate(created.id, name, "created");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const onRename = async () => {
+    if (selectedProfileId == null) return;
+    const name = renameName.trim();
+    if (!name) return;
+    try {
+      await updateMutation.mutateAsync({ id: selectedProfileId, name });
+      setRenameOpen(false);
+      toast.success(`Renamed plan to “${name}”`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const confirmDuplicate = async () => {
+    if (selectedProfileId == null) return;
+    const name = duplicateName.trim();
+    if (!name) return;
+    try {
+      const copy = await duplicateMutation.mutateAsync({
+        id: selectedProfileId,
+        name,
+        clearCheckoff: duplicateClearCheckoff,
+      });
+      setDuplicateOpen(false);
+      offerSwitchOrActivate(copy.id, name, "duplicated");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (selectedProfileId == null || !selected) return;
+    const deletedName = selected.name;
+    try {
+      await deleteMutation.mutateAsync(selectedProfileId);
+      setDeleteOpen(false);
+      toast.success(`Deleted plan “${deletedName}”`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const label =
+    selected != null
+      ? `${selected.name} (${selected.part_count} parts)`
+      : profiles.length === 0
+        ? "Create your first build"
+        : "Select plan";
 
   return (
-    <label className={className ?? "flex min-w-[180px] items-center gap-2 text-sm"}>
-      <span className="shrink-0 text-xs text-muted-foreground">Plan</span>
-      <select
-        className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-        value={selectedProfileId ?? ""}
-        onChange={(e) => {
-          const v = e.target.value;
-          setSelectedProfileId(v === "" ? null : Number(v));
-        }}
-        disabled={disabled || loading || profiles.length === 0}
-        aria-label="Select plan"
-      >
-        {profiles.length === 0 ? (
-          <option value="">No plans yet</option>
-        ) : (
-          profiles.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name} ({p.part_count} parts)
-            </option>
-          ))
-        )}
-      </select>
-    </label>
+    <>
+      {profiles.length === 0 ? (
+        <Button
+          variant="outline"
+          disabled={disabled || loading || busy}
+          className={cn("min-w-0 justify-between font-normal", className)}
+          onClick={() => setCreateOpen(true)}
+          aria-label="Create build"
+        >
+          <span className="truncate">{label}</span>
+          <Plus className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      ) : (
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            aria-label="Select plan"
+            disabled={disabled || loading || busy}
+            className={cn("min-w-0 justify-between font-normal", className)}
+          >
+            <span className="truncate">{label}</span>
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[min(100vw-2rem,320px)] p-0" align="end">
+          <Command>
+            <CommandInput placeholder="Search plans…" />
+            <CommandList>
+              <CommandEmpty>No plans found.</CommandEmpty>
+              {plansGroup}
+              <CommandSeparator />
+              {actionsGroup}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+      )}
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create build</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label htmlFor="plan-create-name">Plan name</Label>
+            <Input
+              id="plan-create-name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void onCreate()}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={!newName.trim() || busy} onClick={() => void onCreate()}>
+              Create
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename plan</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label htmlFor="plan-rename-name">Name</Label>
+            <Input
+              id="plan-rename-name"
+              value={renameName}
+              onChange={(e) => setRenameName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void onRename()}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setRenameOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={!renameName.trim() || busy} onClick={() => void onRename()}>
+              Rename
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={duplicateOpen} onOpenChange={setDuplicateOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Duplicate plan</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label htmlFor="plan-dup-name">Name</Label>
+            <Input
+              id="plan-dup-name"
+              value={duplicateName}
+              onChange={(e) => setDuplicateName(e.target.value)}
+            />
+          </div>
+          <label className="flex items-start justify-between gap-3 rounded-md border border-border p-3">
+            <span className="space-y-0.5">
+              <span className="block text-sm font-medium">Clear checkoff progress</span>
+              <span className="block text-xs text-muted-foreground">
+                Start the copy with nothing marked printed.
+              </span>
+            </span>
+            <Switch
+              checked={duplicateClearCheckoff}
+              onCheckedChange={setDuplicateClearCheckoff}
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setDuplicateOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={!duplicateName.trim() || busy} onClick={() => void confirmDuplicate()}>
+              Duplicate
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete plan?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Delete “{selected?.name}” and all its parts, layers, and print settings?
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={() => void confirmDelete()}>
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={switchPrompt != null} onOpenChange={(o) => !o && setSwitchPrompt(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Switch to new plan?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {switchPrompt && selected
+              ? `${switchPrompt.actionLabel === "created" ? "Created" : "Duplicated"} “${switchPrompt.targetName}”. Switch now or stay on “${selected.name}”?`
+              : ""}
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setSwitchPrompt(null)}
+            >
+              Stay on current
+            </Button>
+            <Button
+              onClick={() => {
+                if (switchPrompt) activatePlan(switchPrompt.targetId);
+                setSwitchPrompt(null);
+              }}
+            >
+              Switch plan
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
