@@ -4,7 +4,11 @@ import { DATE_FORMAT_DEFAULT, type DateFormatId, type JobSnapshot } from "@print
 import type { AppRepository } from "../db/repository.js";
 import { exportDownloadKey } from "../lib/secure-path.js";
 import { syncProjectById } from "./sources.js";
-import { exportProfileStlPack, type StlPackGroupBy } from "../services/export-stl-pack.js";
+import {
+  exportProfileStlPack,
+  exportStlPackJobMessage,
+  type StlPackGroupBy,
+} from "../services/export-stl-pack.js";
 import { zipDirectoryToFile } from "../services/zip-dir.js";
 import { exportProfileHtml } from "../services/export-html.js";
 import { exportKitBundle } from "../services/export-kit.js";
@@ -12,6 +16,7 @@ import { checkAllSourceUpdates } from "../services/source-update-check.js";
 import { runExport3mfJob } from "../services/export-3mf-job.js";
 import { runPackPreviewJob } from "../services/plate-workspace.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
+import { tenantStorage } from "../middleware/tenant-context.js";
 
 export type JobHandler = (
   jobId: string,
@@ -83,7 +88,11 @@ export class InProcessJobRunner {
     }
   }
 
-  async start(kind: string, payload: Record<string, unknown>): Promise<string> {
+  async start(
+    kind: string,
+    payload: Record<string, unknown>,
+    tenantId = "default",
+  ): Promise<string> {
     const jobId = crypto.randomUUID();
     const snap: JobSnapshot = {
       job_id: jobId,
@@ -95,8 +104,8 @@ export class InProcessJobRunner {
       error: null,
     };
     this.jobs.set(jobId, snap);
-    this.jobMeta.set(jobId, { payload, updatedAt: Date.now() });
-    void this.runJob(jobId, kind, payload);
+    this.jobMeta.set(jobId, { payload: { ...payload, _tenant_id: tenantId }, updatedAt: Date.now() });
+    void this.runJob(jobId, kind, { ...payload, _tenant_id: tenantId });
     return jobId;
   }
 
@@ -151,49 +160,54 @@ export class InProcessJobRunner {
   }
 
   private async runJob(jobId: string, kind: string, payload: Record<string, unknown>): Promise<void> {
-    this.emit(jobId, { status: "running", message: "Running…", progress: 10 });
-    try {
-      let result: Record<string, unknown>;
-      if (kind === "sync") {
-        result = await this.runSync(payload);
-      } else if (kind === "recompute") {
-        result = await this.runRecompute(payload);
-      } else if (kind === "import-scan") {
-        const projectId = Number(payload.project_id);
-        result = await syncProjectById(this.repo, this.deps.reposDir, projectId);
-      } else if (kind === "check-source-updates") {
-        result = await checkAllSourceUpdates(this.repo);
-      } else if (kind === "export-stl-pack") {
-        result = await this.runExportStlPack(payload);
-      } else if (kind === "export-checklist-html") {
-        result = await this.runExportChecklistHtml(payload);
-      } else if (kind === "export-kit-bundle") {
-        result = await this.runExportKitBundle(payload);
-      } else if (kind === "export-3mf") {
-        result = await this.runExport3mf(payload);
-      } else if (kind === "pack-preview") {
-        result = await this.runPackPreview(payload);
-      } else {
-        result = { stub: true, kind, payload };
+    const tenantId = String(payload._tenant_id ?? "default");
+    await tenantStorage.run(tenantId, async () => {
+      this.emit(jobId, { status: "running", message: "Running…", progress: 10 });
+      try {
+        let result: Record<string, unknown>;
+        if (kind === "sync") {
+          result = await this.runSync(payload);
+        } else if (kind === "recompute") {
+          result = await this.runRecompute(payload);
+        } else if (kind === "import-scan") {
+          const projectId = Number(payload.project_id);
+          result = await syncProjectById(this.repo, this.deps.reposDir, projectId);
+        } else if (kind === "check-source-updates") {
+          result = await checkAllSourceUpdates(this.repo);
+        } else if (kind === "export-stl-pack") {
+          result = await this.runExportStlPack(payload);
+        } else if (kind === "export-checklist-html") {
+          result = await this.runExportChecklistHtml(payload);
+        } else if (kind === "export-kit-bundle") {
+          result = await this.runExportKitBundle(payload);
+        } else if (kind === "export-3mf") {
+          result = await this.runExport3mf(payload);
+        } else if (kind === "pack-preview") {
+          result = await this.runPackPreview(payload);
+        } else {
+          result = { stub: true, kind, payload };
+        }
+        const doneMessage =
+          kind === "export-stl-pack" ? exportStlPackJobMessage(result) : "Complete";
+        this.emit(jobId, {
+          status: "done",
+          message: doneMessage,
+          progress: 100,
+          result,
+          error: null,
+          finished_at: new Date().toISOString(),
+        });
+      } catch (e) {
+        this.emit(jobId, {
+          status: "error",
+          message: e instanceof Error ? e.message : String(e),
+          progress: 100,
+          error: e instanceof Error ? e.message : String(e),
+          result: null,
+          finished_at: new Date().toISOString(),
+        });
       }
-      this.emit(jobId, {
-        status: "done",
-        message: "Complete",
-        progress: 100,
-        result,
-        error: null,
-        finished_at: new Date().toISOString(),
-      });
-    } catch (e) {
-      this.emit(jobId, {
-        status: "error",
-        message: e instanceof Error ? e.message : String(e),
-        progress: 100,
-        error: e instanceof Error ? e.message : String(e),
-        result: null,
-        finished_at: new Date().toISOString(),
-      });
-    }
+    });
   }
 
   private async runSync(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -346,27 +360,31 @@ export async function registerJobRoutes(
 
   app.post("/jobs/sync", limited, async (request) => {
     const body = (request.body ?? {}) as Record<string, unknown>;
-    const job_id = await jobs.start("sync", body);
+    const job_id = await jobs.start("sync", body, request.tenantId);
     return { job_id };
   });
 
   app.post("/jobs/recompute", limited, async (request) => {
     const body = request.body as { profile_id?: number; apply_manifest?: boolean };
-    const job_id = await jobs.start("recompute", {
-      profile_id: body.profile_id,
-      apply_manifest: body.apply_manifest ?? false,
-    });
+    const job_id = await jobs.start(
+      "recompute",
+      {
+        profile_id: body.profile_id,
+        apply_manifest: body.apply_manifest ?? false,
+      },
+      request.tenantId,
+    );
     return { job_id };
   });
 
   app.post("/jobs/import-scan", async (request) => {
     const body = request.body as { project_id?: number };
-    const job_id = await jobs.start("import-scan", { project_id: body.project_id });
+    const job_id = await jobs.start("import-scan", { project_id: body.project_id }, request.tenantId);
     return { job_id };
   });
 
-  app.post("/jobs/check-source-updates", async () => {
-    const job_id = await jobs.start("check-source-updates", {});
+  app.post("/jobs/check-source-updates", async (request) => {
+    const job_id = await jobs.start("check-source-updates", {}, request.tenantId);
     return { job_id };
   });
 
@@ -376,28 +394,38 @@ export async function registerJobRoutes(
       missing_only?: boolean;
       group_by?: string;
     };
-    const job_id = await jobs.start("export-stl-pack", {
-      profile_id: body.profile_id,
-      missing_only: body.missing_only ?? false,
-      group_by: body.group_by === "color" ? "color" : "color_dir",
-    });
+    const job_id = await jobs.start(
+      "export-stl-pack",
+      {
+        profile_id: body.profile_id,
+        missing_only: body.missing_only ?? false,
+        group_by: body.group_by === "color" ? "color" : "color_dir",
+      },
+      request.tenantId,
+    );
     return { job_id };
   });
 
   app.post("/jobs/export-checklist-html", async (request) => {
     const body = request.body as { profile_id?: number };
-    const job_id = await jobs.start("export-checklist-html", {
-      profile_id: body.profile_id,
-    });
+    const job_id = await jobs.start(
+      "export-checklist-html",
+      { profile_id: body.profile_id },
+      request.tenantId,
+    );
     return { job_id };
   });
 
   app.post("/jobs/export-kit-bundle", limited, async (request) => {
     const body = request.body as { profile_id?: number; include_print_progress?: boolean };
-    const job_id = await jobs.start("export-kit-bundle", {
-      profile_id: body.profile_id,
-      include_print_progress: body.include_print_progress ?? false,
-    });
+    const job_id = await jobs.start(
+      "export-kit-bundle",
+      {
+        profile_id: body.profile_id,
+        include_print_progress: body.include_print_progress ?? false,
+      },
+      request.tenantId,
+    );
     return { job_id };
   });
 
@@ -409,13 +437,17 @@ export async function registerJobRoutes(
       missing_only?: boolean;
       enabled_printer_ids?: string[];
     };
-    const job_id = await jobs.start("export-3mf", {
-      profile_id: body.profile_id,
-      layout_mode: body.layout_mode ?? "per_plate",
-      spacing_mm: body.spacing_mm ?? 4,
-      missing_only: body.missing_only ?? false,
-      enabled_printer_ids: body.enabled_printer_ids,
-    });
+    const job_id = await jobs.start(
+      "export-3mf",
+      {
+        profile_id: body.profile_id,
+        layout_mode: body.layout_mode ?? "per_plate",
+        spacing_mm: body.spacing_mm ?? 4,
+        missing_only: body.missing_only ?? false,
+        enabled_printer_ids: body.enabled_printer_ids,
+      },
+      request.tenantId,
+    );
     return { job_id };
   });
 
@@ -427,13 +459,17 @@ export async function registerJobRoutes(
       auto_assign?: boolean;
       spacing_mm?: number;
     };
-    const job_id = await jobs.start("pack-preview", {
-      profile_id: body.profile_id,
-      enabled_printer_ids: body.enabled_printer_ids,
-      assignments: body.assignments,
-      auto_assign: body.auto_assign ?? false,
-      spacing_mm: body.spacing_mm,
-    });
+    const job_id = await jobs.start(
+      "pack-preview",
+      {
+        profile_id: body.profile_id,
+        enabled_printer_ids: body.enabled_printer_ids,
+        assignments: body.assignments,
+        auto_assign: body.auto_assign ?? false,
+        spacing_mm: body.spacing_mm,
+      },
+      request.tenantId,
+    );
     return { job_id };
   });
 

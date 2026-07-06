@@ -155,6 +155,12 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `PORT` | `18765` (dev) / `8080` (Docker) | HTTP port |
 | `STATIC_DIR` | unset | When set, the server also serves the built SPA from this directory (single-port mode) |
 | `DEPLOY_MODE` | `self-host` | `self-host` or `saas` |
+| `MULTI_USER` | `0` (self-host) / `1` (saas default) | Enable login, per-user data, and in-app sharing |
+| `SESSION_SECRET` | unset | Required when `MULTI_USER=1` or OAuth in production |
+| `SMTP_HOST` / `SMTP_FROM` | unset | Send password reset emails (see [`web/DEPLOY.md`](web/DEPLOY.md)) |
+| `APP_PUBLIC_URL` | unset | Public URL for reset links when behind a reverse proxy |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_CALLBACK_URL` | unset | GitHub OAuth |
+| `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` / `DISCORD_CALLBACK_URL` | unset | Discord OAuth |
 | `CORS_ORIGIN` / `ALLOWED_ORIGINS` | `true` | Allowed CORS origin(s); comma-separated list for multiple (`ALLOWED_ORIGINS` takes precedence) |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload / request body limit (512 MiB) |
@@ -179,7 +185,7 @@ npm ci
 npm run dev
 ```
 
-This runs both apps with hot reload:
+`npm run dev` runs a **predev** step that builds `@print-partner/contracts` and `@print-partner/domain` before starting the API and UI. On a fresh clone, `npm ci && npm run dev` is enough — you do not need a separate `npm run build` first.
 
 - **UI** (Vite) — [http://127.0.0.1:5173](http://127.0.0.1:5173)
 - **API** (Fastify) — [http://127.0.0.1:18765](http://127.0.0.1:18765) (`/health`)

@@ -206,7 +206,6 @@ export default function SourceDetailSheet({
       setSavedOverride(saved.override);
       setOverrideDraft(mergeStlNamingProfiles(globalNaming, saved.override));
       setNamingNote("Naming rules saved.");
-      toast.success("Naming rules saved. Run Update build on plans using this source to apply.");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setNamingLoadError(msg);

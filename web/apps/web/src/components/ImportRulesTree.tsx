@@ -23,6 +23,7 @@ import {
   type StlTreeNode,
 } from "../api/importRulesTree";
 import { suggestRulesFromTopLevelFolders } from "../lib/importRulesSuggest";
+import { findDuplicateBasenames } from "../lib/importRuleConflicts";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { cn } from "../lib/utils";
@@ -34,7 +35,7 @@ type Props = {
   variant?: "default" | "inline";
   selectedFilePath?: string | null;
   onFileSelect?: (path: string | null) => void;
-  onSelectionStats?: (selected: number, total: number) => void;
+  onSelectionStats?: (selected: number, total: number, duplicateBasenames: string[]) => void;
   className?: string;
 };
 
@@ -288,14 +289,18 @@ export default function ImportRulesTree({
   }, [inline]);
 
   const selected = useMemo(() => collectCheckedFiles(nodes).length, [nodes]);
+  const duplicateBasenames = useMemo(
+    () => findDuplicateBasenames(collectCheckedFiles(nodes)),
+    [nodes],
+  );
   const visibleFilePaths = useMemo(
     () => collectVisibleFilePaths(nodes, filter),
     [nodes, filter],
   );
 
   useEffect(() => {
-    onSelectionStats?.(selected, total);
-  }, [selected, total, onSelectionStats]);
+    onSelectionStats?.(selected, total, duplicateBasenames);
+  }, [selected, total, duplicateBasenames, onSelectionStats]);
 
   const applyNodes = (next: StlTreeNode[], userInitiated = true) => {
     const synced = refreshFolderStates(next);

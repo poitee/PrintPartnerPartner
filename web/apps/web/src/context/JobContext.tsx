@@ -6,12 +6,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   connectJobWebSocket,
   fetchJob,
   type JobEvent,
   type JobSnapshot,
 } from "../api/engine";
+import { invalidateAfterJob } from "../queries/invalidation";
 
 export type ActiveJob = {
   jobId: string;
@@ -22,13 +24,18 @@ export type ActiveJob = {
 };
 
 type JobContextValue = {
+  /** All in-flight or recently finished jobs (most recent last). */
+  activeJobs: ActiveJob[];
+  /** @deprecated Use activeJobs — first active job for backward compat. */
   activeJob: ActiveJob | null;
   runJob: (
     kind: string,
     start: () => Promise<string>,
     onDone?: (snapshot: JobSnapshot) => void,
+    options?: { profileId?: number | null },
   ) => Promise<void>;
-  clearJob: () => void;
+  clearJob: (jobId?: string) => void;
+  isJobKindRunning: (kind: string) => boolean;
 };
 
 const JobContext = createContext<JobContextValue | null>(null);
@@ -50,54 +57,88 @@ async function pollJobUntilTerminal(
   throw new Error("Job timed out waiting for completion");
 }
 
-export function JobProvider({ children }: { children: ReactNode }) {
-  const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
+function upsertJob(jobs: ActiveJob[], next: ActiveJob): ActiveJob[] {
+  const idx = jobs.findIndex((j) => j.jobId === next.jobId);
+  if (idx >= 0) {
+    const copy = [...jobs];
+    copy[idx] = next;
+    return copy;
+  }
+  return [...jobs, next];
+}
 
-  const clearJob = useCallback(() => {
-    setActiveJob(null);
+export function JobProvider({ children }: { children: ReactNode }) {
+  const qc = useQueryClient();
+  const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
+
+  const clearJob = useCallback((jobId?: string) => {
+    if (jobId) {
+      setActiveJobs((prev) => prev.filter((j) => j.jobId !== jobId));
+    } else {
+      setActiveJobs([]);
+    }
   }, []);
+
+  const isJobKindRunning = useCallback(
+    (kind: string) =>
+      activeJobs.some(
+        (j) =>
+          j.kind === kind &&
+          (j.status === "pending" || j.status === "running"),
+      ),
+    [activeJobs],
+  );
 
   const runJob = useCallback(
     async (
       kind: string,
       start: () => Promise<string>,
       onDone?: (snapshot: JobSnapshot) => void,
+      options?: { profileId?: number | null },
     ) => {
       let disconnect: (() => void) | null = null;
       let finished = false;
       try {
         const jobId = await start();
-        setActiveJob({
+        const initial: ActiveJob = {
           jobId,
           kind,
           status: "pending",
           message: "Starting…",
           progress: null,
-        });
+        };
+        setActiveJobs((prev) => upsertJob(prev, initial));
 
         const finish = (snap: JobSnapshot) => {
           if (finished) return;
           finished = true;
           disconnect?.();
           onDone?.(snap);
-          setActiveJob({
-            jobId,
-            kind,
-            status: snap.status,
-            message: snap.message,
-            progress: snap.progress,
-          });
-          setTimeout(() => setActiveJob(null), 2500);
+          invalidateAfterJob(qc, kind, snap, options?.profileId);
+          setActiveJobs((prev) =>
+            upsertJob(prev, {
+              jobId,
+              kind,
+              status: snap.status,
+              message: snap.message,
+              progress: snap.progress,
+            }),
+          );
+          setTimeout(() => {
+            setActiveJobs((prev) => prev.filter((j) => j.jobId !== jobId));
+          }, 2500);
         };
 
         const onProgress = (ev: JobEvent | JobSnapshot) => {
-          setActiveJob({
-            jobId,
-            kind,
-            status: ev.status,
-            message: ev.message,
-            progress: ev.progress,
-          });
+          setActiveJobs((prev) =>
+            upsertJob(prev, {
+              jobId,
+              kind,
+              status: ev.status,
+              message: ev.message,
+              progress: ev.progress,
+            }),
+          );
           if (JOB_TERMINAL.has(ev.status)) {
             void fetchJob(jobId).then(finish).catch(() => finish(ev as JobSnapshot));
           }
@@ -115,30 +156,38 @@ export function JobProvider({ children }: { children: ReactNode }) {
           if (finished) return;
           finished = true;
           disconnect?.();
-          setActiveJob({
-            jobId,
+          setActiveJobs((prev) =>
+            upsertJob(prev, {
+              jobId,
+              kind,
+              status: "error",
+              message: e instanceof Error ? e.message : String(e),
+              progress: null,
+            }),
+          );
+        });
+      } catch (e) {
+        setActiveJobs((prev) =>
+          upsertJob(prev, {
+            jobId: "",
             kind,
             status: "error",
             message: e instanceof Error ? e.message : String(e),
             progress: null,
-          });
-        });
-      } catch (e) {
-        setActiveJob({
-          jobId: "",
-          kind,
-          status: "error",
-          message: e instanceof Error ? e.message : String(e),
-          progress: null,
-        });
+          }),
+        );
       }
     },
-    [],
+    [qc],
   );
 
+  const activeJob = activeJobs.find(
+    (j) => j.status === "pending" || j.status === "running",
+  ) ?? activeJobs[activeJobs.length - 1] ?? null;
+
   const value = useMemo(
-    () => ({ activeJob, runJob, clearJob }),
-    [activeJob, runJob, clearJob],
+    () => ({ activeJobs, activeJob, runJob, clearJob, isJobKindRunning }),
+    [activeJobs, activeJob, runJob, clearJob, isJobKindRunning],
   );
 
   return <JobContext.Provider value={value}>{children}</JobContext.Provider>;

@@ -51,6 +51,13 @@ export class SqliteDatabase {
     if (!projectCols.some((c) => c.name === "tag")) {
       this.sqlite.exec("ALTER TABLE projects ADD COLUMN tag TEXT");
     }
+    const profileCols = this.sqlite.pragma("table_info(build_profiles)") as { name: string }[];
+    if (!profileCols.some((c) => c.name === "config_modified_at")) {
+      this.sqlite.exec("ALTER TABLE build_profiles ADD COLUMN config_modified_at TEXT");
+    }
+    if (!profileCols.some((c) => c.name === "last_recomputed_at")) {
+      this.sqlite.exec("ALTER TABLE build_profiles ADD COLUMN last_recomputed_at TEXT");
+    }
     const row = this.sqlite
       .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
       .get("default", schemaVersionKey) as { value?: string } | undefined;

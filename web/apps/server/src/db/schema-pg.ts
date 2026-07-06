@@ -39,6 +39,8 @@ export const buildProfiles = pgTable(
     tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
     name: text("name").notNull(),
     orderNumber: text("order_number"),
+    configModifiedAt: text("config_modified_at"),
+    lastRecomputedAt: text("last_recomputed_at"),
   },
   (t) => [uniqueIndex("uq_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -105,5 +107,58 @@ export const appSettings = pgTable(
   (t) => [uniqueIndex("uq_app_settings_tenant_key").on(t.tenantId, t.key)],
 );
 
+export const users = pgTable("users", {
+  id: text("id").primaryKey(),
+  email: text("email").unique(),
+  displayName: text("display_name").notNull(),
+  passwordHash: text("password_hash"),
+  isAdmin: boolean("is_admin").notNull().default(false),
+  createdAt: text("created_at").notNull(),
+});
+
+export const authIdentities = pgTable(
+  "auth_identities",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+  },
+  (t) => [uniqueIndex("uq_auth_identity_provider").on(t.provider, t.providerUserId)],
+);
+
+export const sessions = pgTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: text("expires_at").notNull(),
+});
+
+export const planShares = pgTable("plan_shares", {
+  id: text("id").primaryKey(),
+  token: text("token").notNull().unique(),
+  fromUserId: text("from_user_id")
+    .notNull()
+    .references(() => users.id),
+  planId: integer("plan_id").notNull(),
+  planName: text("plan_name").notNull(),
+  recipientEmail: text("recipient_email"),
+  bundleJson: text("bundle_json").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 3;
+export const currentSchemaVersion = 5;

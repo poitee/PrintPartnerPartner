@@ -51,25 +51,25 @@ const WORKFLOW_STEPS = [
     num: 1,
     label: "Sources",
     path: sourcesRoute(),
-    description: "Add or sync repos and set import rules",
+    description: "Register repos, sync, and set import rules; search STLs across repos",
   },
   {
     num: 2,
     label: "Build",
     path: null as string | null,
-    description: "Attach sources, pick STLs, and update the build",
+    description: "Manage builds, attach sources, pick STLs, set role colors, Update build",
   },
   {
     num: 3,
     label: "Review",
     path: null as string | null,
-    description: "Validate parts, edit quantities, and export STLs",
+    description: "Validation summary, 3D previews, quantity edits, Export STLs",
   },
   {
     num: 4,
     label: "Checkoff",
     path: null as string | null,
-    description: "Print a checklist and mark units as you finish them",
+    description: "Per-unit progress, printable checklist, export missing STLs",
   },
 ] as const;
 
@@ -226,6 +226,61 @@ export default function HelpPage() {
               );
             })}
           </ol>
+        </CardContent>
+      </Card>
+
+      <Card id="kit-variants">
+        <CardHeader accent>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Hammer className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <CardTitle className="text-base">Kit variants</CardTitle>
+              <CardDescription>
+                Optional per-repo manifests that let you pick one variant per group on Build.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <ol className="list-decimal space-y-2 pl-5">
+            <li>
+              Sync the source, then on <strong className="font-medium text-foreground">Build</strong>{" "}
+              apply a stack preset (if available) or attach the base repo.
+            </li>
+            <li>
+              Expand the base source card → <strong className="font-medium text-foreground">Kit variants</strong>{" "}
+              and pick one option per group (selections save automatically).
+            </li>
+            <li>
+              Run <strong className="font-medium text-foreground">Update build</strong> so variant
+              parts appear on Review and Checkoff.
+            </li>
+          </ol>
+          <ul className="list-disc space-y-2 pl-5">
+            <li>
+              Add a repo-root{" "}
+              <code className="font-mono text-xs">print-partner.manifest.yaml</code> with{" "}
+              <code className="font-mono text-xs">pick_one</code> option groups, then sync the
+              source.
+            </li>
+            <li>
+              Stack presets (when configured) attach base + addon layers and pre-fill variant
+              choices — see the workflow guide below for Voron / LDO examples.
+            </li>
+          </ul>
+          <p className="text-xs">
+            Maintainer docs:{" "}
+            <a
+              href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/playbooks/kit-studio-build.md"
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary hover:underline"
+            >
+              kit-studio-build playbook
+            </a>
+          </p>
         </CardContent>
       </Card>
 

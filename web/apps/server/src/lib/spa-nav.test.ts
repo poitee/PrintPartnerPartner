@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { isBrowserDocumentNavigation, isSpaClientPath } from "./spa-nav.js";
+import { isBrowserDocumentNavigation, isSpaClientPath, isStaticAssetPath } from "./spa-nav.js";
 
 describe("isSpaClientPath", () => {
   it("matches workflow routes", () => {
     expect(isSpaClientPath("/sources")).toBe(true);
     expect(isSpaClientPath("/build?profile=3")).toBe(true);
     expect(isSpaClientPath("/builds")).toBe(true);
+    expect(isSpaClientPath("/login")).toBe(true);
+    expect(isSpaClientPath("/forgot-password")).toBe(true);
+    expect(isSpaClientPath("/reset-password")).toBe(true);
     expect(isSpaClientPath("/plans/7/studio")).toBe(true);
   });
 
@@ -13,6 +16,19 @@ describe("isSpaClientPath", () => {
     expect(isSpaClientPath("/health")).toBe(false);
     expect(isSpaClientPath("/sources/1/cover")).toBe(false);
     expect(isSpaClientPath("/assets/app.js")).toBe(false);
+  });
+});
+
+describe("isStaticAssetPath", () => {
+  it("matches built assets", () => {
+    expect(isStaticAssetPath("/assets/index-abc123.js")).toBe(true);
+    expect(isStaticAssetPath("/assets/index-abc123.css")).toBe(true);
+    expect(isStaticAssetPath("/favicon.ico")).toBe(true);
+  });
+
+  it("ignores API routes", () => {
+    expect(isStaticAssetPath("/plans")).toBe(false);
+    expect(isStaticAssetPath("/auth/me")).toBe(false);
   });
 });
 

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Check, ChevronDown, Download, RefreshCw, Search, Upload } from "lucide-react";
+import { Check, ChevronDown, Download, MoreHorizontal, Search, Upload } from "lucide-react";
 import {
   applyRoleColorsToParts,
   fetchFilamentCatalog,
@@ -30,10 +30,21 @@ import {
 import { isSpoolmanIntegrationConfigured } from "../hooks/useSpoolmanEnabled";
 import { allCatalogColors, catalogColorGroups } from "./FilamentSwatch";
 import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { cn } from "../lib/utils";
 import { filterFilamentSpools, formatSpoolOptionLabel } from "../lib/spoolPickerUtils";
+import {
+  ROLE_COLOR_SAVED_CLEAR_MS,
+  roleColorSaveStatusLabel,
+  type RoleColorSaveStatus,
+} from "../lib/roleColorSave";
 
 const ROLE_LABELS = Object.fromEntries(
   DEFAULT_STL_NAMING_PROFILE.roles.map((r) => [r.id, r.label]),
@@ -50,7 +61,9 @@ type Props = {
   disabled?: boolean;
   /** Bump after Update build so roles/part counts reload. */
   refreshKey?: number;
-  onUpdated?: () => void;
+  onUpdated?: () => void | Promise<void>;
+  /** Called whenever role color rows change (load, save, import). */
+  onRolesChange?: (rows: RoleFilamentRow[]) => void;
 };
 
 function normalizeHex(hex: string): string | null {
@@ -116,6 +129,7 @@ type RoleColorRowProps = {
   spoolmanConfigured: boolean;
   roleSpools: SpoolmanSpoolRow[];
   selectedSpoolId?: number;
+  saveStatus?: RoleColorSaveStatus;
   onPickCatalog: (colorId: string) => void | Promise<void>;
   onPickCustomHex: (hex: string) => void | Promise<void>;
   onPickSpool: (spoolId: string) => void | Promise<void>;
@@ -130,10 +144,12 @@ function RoleColorRow({
   spoolmanConfigured,
   roleSpools,
   selectedSpoolId,
+  saveStatus = "idle",
   onPickCatalog,
   onPickCustomHex,
   onPickSpool,
 }: RoleColorRowProps) {
+  const saveLabel = roleColorSaveStatusLabel(saveStatus);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hexDraft, setHexDraft] = useState(row.filament_hex?.slice(0, 7) ?? DEFAULT_HEX);
@@ -183,6 +199,19 @@ function RoleColorRow({
                 <span className="text-xs text-muted-foreground">
                   {row.part_count} part{row.part_count === 1 ? "" : "s"}
                 </span>
+                {saveLabel && (
+                  <span
+                    className={cn(
+                      "text-[10px] font-medium",
+                      saveStatus === "saved" && "text-emerald-600 dark:text-emerald-400",
+                      saveStatus === "error" && "text-destructive",
+                      saveStatus === "saving" && "text-muted-foreground",
+                    )}
+                    aria-live="polite"
+                  >
+                    {saveLabel}
+                  </span>
+                )}
               </span>
               <span className="block truncate text-xs text-muted-foreground">
                 {row.filament_display || (hasColor ? row.filament_hex : "No color set")}
@@ -325,6 +354,7 @@ export default function RoleFilamentPicker({
   disabled,
   refreshKey = 0,
   onUpdated,
+  onRolesChange,
 }: Props) {
   const [rows, setRows] = useState<RoleFilamentRow[]>([]);
   const [catalog, setCatalog] = useState<FilamentCatalog | null>(null);
@@ -332,30 +362,47 @@ export default function RoleFilamentPicker({
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingRole, setSavingRole] = useState<string | null>(null);
+  const [roleSaveStatus, setRoleSaveStatus] = useState<Record<string, RoleColorSaveStatus>>({});
   const [busyAction, setBusyAction] = useState<"import" | "regenerate" | "apply" | null>(null);
+  const savedClearTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const markRoleSaved = useCallback((role: string) => {
+    setRoleSaveStatus((prev) => ({ ...prev, [role]: "saved" }));
+    const existing = savedClearTimers.current.get(role);
+    if (existing) clearTimeout(existing);
+    savedClearTimers.current.set(
+      role,
+      setTimeout(() => {
+        setRoleSaveStatus((prev) => {
+          if (prev[role] !== "saved") return prev;
+          const next = { ...prev };
+          delete next[role];
+          return next;
+        });
+        savedClearTimers.current.delete(role);
+      }, ROLE_COLOR_SAVED_CLEAR_MS),
+    );
+  }, []);
+
+  useEffect(() => {
+    const timers = savedClearTimers.current;
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+    };
+  }, []);
 
   const afterColorChange = useCallback(
-    (
+    async (
       result: { updated: number; thumbnails_cleared: number; roles: RoleFilamentRow[] },
       role: string,
     ) => {
       setRows(result.roles);
+      await onUpdated?.();
       bumpThumbnailCache();
-      onUpdated?.();
-      const label = ROLE_LABELS[role as StlNamingRoleId] ?? role;
-      if (result.updated > 0) {
-        toast.success(
-          `Applied ${label} to ${result.updated} part${result.updated === 1 ? "" : "s"}${
-            result.thumbnails_cleared > 0 ? " — previews refreshing" : ""
-          }`,
-        );
-      } else {
-        toast.message(
-          `Saved ${label} color — applies when parts with that role are included.`,
-        );
-      }
+      markRoleSaved(role);
     },
-    [onUpdated],
+    [markRoleSaved, onUpdated],
   );
 
   const load = useCallback(async () => {
@@ -388,6 +435,10 @@ export default function RoleFilamentPicker({
     void load();
   }, [load, refreshKey]);
 
+  useEffect(() => {
+    if (loaded) onRolesChange?.(rows);
+  }, [loaded, rows, onRolesChange]);
+
   const colorGroups = useMemo(() => catalogColorGroups(catalog), [catalog]);
   const colorById = useMemo(() => {
     const map = new Map<string, CatalogColor>();
@@ -397,6 +448,7 @@ export default function RoleFilamentPicker({
 
   const onPickCatalog = async (role: string, colorId: string) => {
     setSavingRole(role);
+    setRoleSaveStatus((prev) => ({ ...prev, [role]: "saving" }));
     try {
       const result = await saveRoleFilament(profileId, {
         role,
@@ -404,9 +456,10 @@ export default function RoleFilamentPicker({
         filament_custom_hex: null,
         spoolman_spool_id: null,
       });
-      afterColorChange(result, role);
+      await afterColorChange(result, role);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
+      setRoleSaveStatus((prev) => ({ ...prev, [role]: "error" }));
     } finally {
       setSavingRole(null);
     }
@@ -436,6 +489,7 @@ export default function RoleFilamentPicker({
 
   const onPickCustomHex = async (role: string, hex: string) => {
     setSavingRole(role);
+    setRoleSaveStatus((prev) => ({ ...prev, [role]: "saving" }));
     try {
       const result = await saveRoleFilament(profileId, {
         role,
@@ -443,9 +497,10 @@ export default function RoleFilamentPicker({
         filament_custom_hex: hex || null,
         spoolman_spool_id: null,
       });
-      afterColorChange(result, role);
+      await afterColorChange(result, role);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
+      setRoleSaveStatus((prev) => ({ ...prev, [role]: "error" }));
     } finally {
       setSavingRole(null);
     }
@@ -470,8 +525,8 @@ export default function RoleFilamentPicker({
       const applied = await applyColorPreset(profileId, preset);
       const result = await applyRoleColorsToParts(profileId);
       setRows(result.roles);
+      await onUpdated?.();
       bumpThumbnailCache();
-      onUpdated?.();
       toast.success(
         `Imported ${applied} role color${applied === 1 ? "" : "s"}${
           result.updated > 0
@@ -494,16 +549,10 @@ export default function RoleFilamentPicker({
     try {
       const result = await applyRoleColorsToParts(profileId);
       setRows(result.roles);
+      await onUpdated?.();
       bumpThumbnailCache();
-      onUpdated?.();
       if (result.updated === 0) {
         toast.message("Set role colors above first, then run Update build to include parts.");
-      } else {
-        toast.success(
-          `Applied role colors to ${result.updated} part${result.updated === 1 ? "" : "s"}${
-            result.thumbnails_cleared > 0 ? " — previews refreshing" : ""
-          }`,
-        );
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -519,11 +568,11 @@ export default function RoleFilamentPicker({
     setBusyAction("regenerate");
     try {
       const { cleared } = await regeneratePlanThumbnails(profileId);
+      await onUpdated?.();
       bumpThumbnailCache();
-      onUpdated?.();
-      toast.success(
-        cleared > 0 ? `Regenerating thumbnails (${cleared} cleared)` : "Thumbnails refreshed",
-      );
+      if (cleared > 0) {
+        toast.message(`Regenerating thumbnails (${cleared} cleared)`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setLoadError(msg);
@@ -588,6 +637,11 @@ export default function RoleFilamentPicker({
               spoolmanConfigured={spoolmanConfigured}
               roleSpools={roleSpools}
               selectedSpoolId={selectedSpoolId}
+              saveStatus={
+                savingRole === row.role
+                  ? "saving"
+                  : roleSaveStatus[row.role] ?? "idle"
+              }
               onPickCatalog={(colorId) => onPickCatalog(row.role, colorId)}
               onPickCustomHex={(hex) => onPickCustomHex(row.role, hex)}
               onPickSpool={(spoolId) => onPickSpool(row, spoolId)}
@@ -598,17 +652,9 @@ export default function RoleFilamentPicker({
 
       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
         <span className="mr-auto text-xs text-muted-foreground">
-          Pick a color per role — it applies to every included part with that role.
+          Pick a color per role — it applies to every included part with that role. Review and
+          Checkoff previews update automatically.
         </span>
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={disabled || busyAction !== null}
-          onClick={() => void onApplyAllRoleColors()}
-          title="Re-apply saved role colors to all matching parts and refresh previews"
-        >
-          {busyAction === "apply" ? "Applying…" : "Apply all role colors"}
-        </Button>
         <Button variant="outline" size="sm" disabled={disabled} onClick={onSaveColors}>
           <Download className="h-4 w-4" aria-hidden />
           Save colors
@@ -622,16 +668,33 @@ export default function RoleFilamentPicker({
           <Upload className="h-4 w-4" aria-hidden />
           {busyAction === "import" ? "Importing…" : "Import colors"}
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={disabled || busyAction !== null}
-          onClick={() => void onRegenerateThumbnails()}
-          title="Clear cached thumbnails so updated colors re-render"
-        >
-          <RefreshCw className="h-4 w-4" aria-hidden />
-          {busyAction === "regenerate" ? "Regenerating…" : "Regenerate thumbnails"}
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={disabled || busyAction !== null}
+              aria-label="More color actions"
+            >
+              <MoreHorizontal className="h-4 w-4" aria-hidden />
+              Advanced
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              disabled={busyAction !== null}
+              onClick={() => void onApplyAllRoleColors()}
+            >
+              {busyAction === "apply" ? "Resetting…" : "Reset parts to role colors"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={busyAction !== null}
+              onClick={() => void onRegenerateThumbnails()}
+            >
+              {busyAction === "regenerate" ? "Regenerating…" : "Regenerate thumbnails"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
   );

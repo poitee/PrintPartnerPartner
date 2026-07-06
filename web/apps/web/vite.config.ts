@@ -20,6 +20,8 @@ const API_PREFIXES = [
   "integrations",
   "legal",
   "help",
+  "auth",
+  "shares",
   "kit-catalog",
   "manifest-registry",
   "manifest-templates",

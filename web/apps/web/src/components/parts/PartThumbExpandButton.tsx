@@ -2,7 +2,7 @@ import { Maximize2 } from "lucide-react";
 import PartThumb from "./PartThumb";
 import type { PreviewDialogPart } from "./PartPreviewDialog";
 
-type Props<P extends PreviewDialogPart> = {
+type Props<P extends PreviewDialogPart & { id: number }> = {
   part: P;
   compact?: boolean;
   sizePx?: number;
@@ -15,7 +15,7 @@ type Props<P extends PreviewDialogPart> = {
  * 3D preview dialog. Styled so the printed sheet is identical to the plain
  * thumbnail (the expand badge carries `no-print`).
  */
-export default function PartThumbExpandButton<P extends PreviewDialogPart>({
+export default function PartThumbExpandButton<P extends PreviewDialogPart & { id: number }>({
   part,
   compact,
   sizePx,

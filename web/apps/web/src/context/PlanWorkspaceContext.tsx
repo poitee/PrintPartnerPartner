@@ -4,19 +4,17 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
-import {
-  fetchPlanReview,
-  patchPart,
-  patchPartProgress,
-  type PlanReview,
-} from "../api/engine";
-import { mergeProgressIntoReview } from "../lib/reviewParts";
+import type { PlanReview } from "../api/engine";
 import { formatCheckoffSummary } from "../lib/checkoffProgress";
 import { useEngineHealth } from "../hooks/useEngineHealth";
+import {
+  usePatchPartMutation,
+  usePatchPartProgressMutation,
+  usePlanReviewQuery,
+} from "../queries/planReview";
 import { useProfileSelection } from "./ProfileContext";
 
 type PlanWorkspaceValue = {
@@ -27,9 +25,8 @@ type PlanWorkspaceValue = {
   loadedRevision: number;
   progressSummary: string;
   reload: (profileId: number, options?: { includeExcluded?: boolean }) => Promise<void>;
-  invalidate: () => void;
-  /** Alias for invalidate — bumps revision so Review refetches after Build recompute. */
-  bumpPlanRevision: () => void;
+  invalidate: () => Promise<void>;
+  bumpPlanRevision: () => Promise<void>;
   setQuantity: (partId: number, qty: number) => Promise<void>;
   setIncluded: (partId: number, included: boolean) => Promise<void>;
   setSpoolmanSpool: (partId: number, spoolman_spool_id: string | null) => Promise<void>;
@@ -54,96 +51,57 @@ function summaryFromReview(review: PlanReview | null): string {
 export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
   const { health } = useEngineHealth();
   const { selectedProfileId } = useProfileSelection();
-  const [review, setReview] = useState<PlanReview | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
-  const [loadedRevision, setLoadedRevision] = useState(0);
   const [busyPartId, setBusyPartId] = useState<number | null>(null);
-  const profileIdRef = useRef<number | null>(null);
-  const includeExcludedRef = useRef(false);
-  const revisionRef = useRef(revision);
-  revisionRef.current = revision;
+  const [includeExcluded, setIncludeExcluded] = useState(false);
 
-  const invalidate = useCallback(() => {
+  const {
+    data: review = null,
+    isLoading,
+    error: queryError,
+    refetch,
+    dataUpdatedAt,
+  } = usePlanReviewQuery(selectedProfileId, {
+    includeExcluded,
+    enabled: Boolean(health?.ok),
+  });
+
+  const patchPartMutation = usePatchPartMutation(selectedProfileId);
+  const patchProgressMutation = usePatchPartProgressMutation(selectedProfileId);
+
+  const invalidate = useCallback(async () => {
     setRevision((r) => r + 1);
-  }, []);
+    await refetch();
+  }, [refetch]);
 
   const reload = useCallback(
     async (profileId: number, options?: { includeExcluded?: boolean }) => {
       if (!health?.ok) return;
-      profileIdRef.current = profileId;
       if (options?.includeExcluded != null) {
-        includeExcludedRef.current = options.includeExcluded;
+        setIncludeExcluded(options.includeExcluded);
       }
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await fetchPlanReview(profileId, {
-          includeExcluded: includeExcludedRef.current,
-        });
-        setReview(data);
-        setLoadedRevision(revisionRef.current);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        setReview(null);
-      } finally {
-        setLoading(false);
+      if (profileId === selectedProfileId) {
+        await refetch();
       }
     },
-    [health?.ok],
+    [health?.ok, selectedProfileId, refetch],
   );
-
-  useEffect(() => {
-    if (!health?.ok || selectedProfileId == null) {
-      profileIdRef.current = null;
-      setReview(null);
-      return;
-    }
-    void reload(selectedProfileId);
-  }, [health?.ok, selectedProfileId, reload]);
-
-  useEffect(() => {
-    if (selectedProfileId == null) return;
-    if (loadedRevision < revision) {
-      void reload(selectedProfileId);
-    }
-  }, [revision, loadedRevision, selectedProfileId, reload]);
-
-  useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible") return;
-      const pid = profileIdRef.current;
-      if (pid == null) return;
-      if (loadedRevision < revisionRef.current) {
-        void reload(pid);
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [loadedRevision, reload]);
 
   const setQuantity = useCallback(
     async (partId: number, qty: number) => {
       if (!review) return;
       const clamped = Math.max(1, Math.floor(qty));
-      const prev = review.part_groups
-        .flatMap((g) => g.parts)
-        .find((p) => p.id === partId);
-      if (prev && clamped < prev.printed_count) {
-        // qty reduced below printed count — server resyncs units on patch
-      }
       setBusyPartId(partId);
       try {
-        await patchPart(partId, { quantity_override: clamped });
-        await reload(review.profile_id);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        await patchPartMutation.mutateAsync({
+          partId,
+          body: { quantity_override: clamped },
+        });
       } finally {
         setBusyPartId(null);
       }
     },
-    [review, reload],
+    [review, patchPartMutation],
   );
 
   const setIncluded = useCallback(
@@ -151,16 +109,12 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
       if (!review) return;
       setBusyPartId(partId);
       try {
-        await patchPart(partId, { included });
-        await reload(review.profile_id);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        if (profileIdRef.current != null) await reload(profileIdRef.current);
+        await patchPartMutation.mutateAsync({ partId, body: { included } });
       } finally {
         setBusyPartId(null);
       }
     },
-    [review, reload],
+    [review, patchPartMutation],
   );
 
   const setSpoolmanSpool = useCallback(
@@ -168,63 +122,49 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
       if (!review) return;
       setBusyPartId(partId);
       try {
-        await patchPart(partId, { spoolman_spool_id });
-        await reload(review.profile_id);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        await patchPartMutation.mutateAsync({
+          partId,
+          body: { spoolman_spool_id },
+        });
       } finally {
         setBusyPartId(null);
       }
     },
-    [review, reload],
+    [review, patchPartMutation],
   );
 
   const toggleUnit = useCallback(
     async (partId: number, unitIndex: number, completed: boolean) => {
       if (!review) return;
-      const part = review.part_groups.flatMap((g) => g.parts).find((p) => p.id === partId);
-      if (!part) return;
       setBusyPartId(partId);
-      const optimisticUnits = [...part.print_units];
-      while (optimisticUnits.length < part.quantity_effective) optimisticUnits.push(false);
-      if (unitIndex < optimisticUnits.length) optimisticUnits[unitIndex] = completed;
-      const optimisticPrinted = optimisticUnits.filter(Boolean).length;
-      const optimisticMissing = optimisticPrinted < part.quantity_effective;
-      setReview(
-        mergeProgressIntoReview(review, partId, {
-          printed_count: optimisticPrinted,
-          print_units: optimisticUnits,
-          missing: optimisticMissing,
-        }),
-      );
       try {
-        const progress = await patchPartProgress(partId, unitIndex, completed);
-        setReview((r) =>
-          r
-            ? mergeProgressIntoReview(r, partId, {
-                printed_count: progress.printed_count,
-                print_units: progress.print_units,
-                missing: progress.missing,
-              })
-            : r,
-        );
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-        if (profileIdRef.current != null) await reload(profileIdRef.current);
+        await patchProgressMutation.mutateAsync({
+          partId,
+          unitIndex,
+          completed,
+          optimisticReview: review,
+        });
       } finally {
         setBusyPartId(null);
       }
     },
-    [review, reload],
+    [review, patchProgressMutation],
   );
+
+  const loadedRevision = revision;
 
   const value = useMemo(
     (): PlanWorkspaceValue => ({
       review,
-      loading,
-      error,
+      loading: isLoading,
+      error:
+        queryError instanceof Error
+          ? queryError.message
+          : queryError
+            ? String(queryError)
+            : null,
       revision,
-      loadedRevision,
+      loadedRevision: dataUpdatedAt > 0 ? revision : loadedRevision,
       progressSummary: summaryFromReview(review),
       reload,
       invalidate,
@@ -237,9 +177,10 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
     }),
     [
       review,
-      loading,
-      error,
+      isLoading,
+      queryError,
       revision,
+      dataUpdatedAt,
       loadedRevision,
       reload,
       invalidate,
@@ -262,12 +203,11 @@ export function usePlanWorkspace(): PlanWorkspaceValue {
   return ctx;
 }
 
-export function usePlanRevisionBump(): () => void {
+export function usePlanRevisionBump(): () => Promise<void> {
   const ctx = useContext(PlanWorkspaceContext);
-  return ctx?.invalidate ?? (() => {});
+  return ctx?.invalidate ?? (async () => {});
 }
 
-/** Refetch plan review when a workflow page mounts after Build bumped revision. */
 export function useReviewEnterRefetch(active: boolean) {
   const { selectedProfileId } = useProfileSelection();
   const { revision, loadedRevision, reload } = usePlanWorkspace();

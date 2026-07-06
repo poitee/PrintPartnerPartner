@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { partMeshUrl, uploadPartThumbnail } from "../api/engine";
+import { fetchWithRetry } from "./fetchWithRetry";
 
 const SIZE = 256;
 const MESH_MAX_BYTES = 15 * 1024 * 1024;
@@ -94,7 +95,7 @@ export function generatePartThumbnail(
   return enqueue(async () => {
     let res: Response;
     try {
-      res = await fetch(await partMeshUrl(partId));
+      res = await fetchWithRetry(() => partMeshUrl(partId));
     } catch {
       return null;
     }
