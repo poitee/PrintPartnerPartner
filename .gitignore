@@ -2,6 +2,8 @@ node_modules/
 .venv/
 dist/
 build/
+!web/apps/web/src/components/build/
+!web/apps/web/src/components/build/**
 .DS_Store
 # Local IDE / editor metadata (never ship in releases)
 .cursor/
