@@ -4,5 +4,5 @@ import { registerTenantMiddleware as registerTenant } from "../routes/auth.js";
 
 /** Legacy export — tenant + auth middleware lives in routes/auth.ts */
 export function registerSaasAuth(app: FastifyInstance, config: ServerConfig): void {
-  registerTenant(app, config);
+  registerTenant(app, config, null);
 }

@@ -1,34 +1,24 @@
-import { useCallback, useEffect, useState } from "react";
-import {
-  ensureEngineRunning,
-  fetchHealth,
-  type HealthResponse,
-} from "../api/engine";
+import { useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import type { HealthResponse } from "../api/engine";
+import { useHealthQuery } from "../queries/health";
+import { queryKeys } from "../queries/keys";
 
-export function useEngineHealth(pollMs = 8000) {
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+export function useEngineHealth(_pollMs = 8000) {
+  const qc = useQueryClient();
+  const { data: health, error, isLoading, isFetching } = useHealthQuery();
 
   const refresh = useCallback(async () => {
-    setError(null);
-    try {
-      await ensureEngineRunning();
-      const h = await fetchHealth();
-      setHealth(h);
-    } catch (e) {
-      setHealth(null);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    await qc.invalidateQueries({ queryKey: queryKeys.health });
+  }, [qc]);
 
-  useEffect(() => {
-    void refresh();
-    const id = window.setInterval(() => void refresh(), pollMs);
-    return () => window.clearInterval(id);
-  }, [refresh, pollMs]);
-
-  return { health, error, loading, refresh };
+  return {
+    health: health ?? null,
+    error: error instanceof Error ? error.message : error ? String(error) : null,
+    loading: isLoading,
+    fetching: isFetching,
+    refresh,
+  };
 }
+
+export type { HealthResponse };

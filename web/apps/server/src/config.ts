@@ -11,6 +11,12 @@ export type ServerConfig = {
   corsOrigin: string | boolean | string[];
   staticDir: string | null;
   databaseUrl: string | null;
+  /** When true, require user login (self-host or saas). Default off in self-host. */
+  multiUser: boolean;
+  discordClientId: string | null;
+  discordClientSecret: string | null;
+  discordCallbackUrl: string | null;
+  discordOAuthConfigured: boolean;
   saasBasicAuth: string | null;
   saasAllowAnonymous: boolean;
   authRequired: boolean;
@@ -29,6 +35,17 @@ export type ServerConfig = {
   integrationApiKey: string | null;
   /** When false, skip GitHub / override version checks for app updates */
   updateCheckEnabled: boolean;
+  /** Public URL for password reset links (e.g. https://print.example.com). Falls back to request Host. */
+  appPublicUrl: string | null;
+  smtpHost: string | null;
+  smtpPort: number;
+  smtpUser: string | null;
+  smtpPass: string | null;
+  smtpFrom: string | null;
+  smtpSecure: boolean;
+  smtpConfigured: boolean;
+  /** When true and SMTP is off, API may return reset URL in dev/non-prod responses. */
+  passwordResetDevExpose: boolean;
   /** GitHub owner/repo for release lookup (e.g. poitee/PrintPartnerPartner) */
   githubRepo: string;
   /** Air-gapped override: treat this as the latest published version */
@@ -55,6 +72,9 @@ function resolveBasicAuth(): string | null {
 export function validateProductionConfig(config: ServerConfig): void {
   const isProd = process.env.NODE_ENV === "production";
   if (!isProd) return;
+  if (config.multiUser && !config.sessionSecret) {
+    throw new Error("SESSION_SECRET is required when MULTI_USER is enabled");
+  }
   if (config.deployMode === "saas" && !config.sessionSecret && config.githubOAuthConfigured) {
     throw new Error("SESSION_SECRET is required in production SaaS mode with OAuth enabled");
   }
@@ -87,16 +107,35 @@ export function loadConfig(): ServerConfig {
   const githubClientId = process.env.GITHUB_CLIENT_ID ?? null;
   const githubClientSecret = process.env.GITHUB_CLIENT_SECRET ?? null;
   const githubCallbackUrl = process.env.GITHUB_CALLBACK_URL ?? null;
+  const discordClientId = process.env.DISCORD_CLIENT_ID ?? null;
+  const discordClientSecret = process.env.DISCORD_CLIENT_SECRET ?? null;
+  const discordCallbackUrl = process.env.DISCORD_CALLBACK_URL ?? null;
+  const multiUser =
+    process.env.MULTI_USER === "1" || (deployMode === "saas" && process.env.MULTI_USER !== "0");
 
   const saasBasicAuth = resolveBasicAuth();
   const saasAllowAnonymous = process.env.SAAS_ALLOW_ANONYMOUS === "1";
+  const oauthConfigured = Boolean(githubClientId || discordClientId);
   const authRequired =
-    deployMode === "saas" &&
-    !saasAllowAnonymous &&
-    Boolean(saasBasicAuth || githubClientId);
+    multiUser ||
+    (deployMode === "saas" &&
+      !saasAllowAnonymous &&
+      Boolean(saasBasicAuth || oauthConfigured));
 
   const basicUser = process.env.BASIC_AUTH_USER ?? null;
   const basicPass = process.env.BASIC_AUTH_PASS ?? null;
+
+  const smtpHost = process.env.SMTP_HOST?.trim() || null;
+  const smtpPort = Number(process.env.SMTP_PORT ?? 587);
+  const smtpUser = process.env.SMTP_USER?.trim() || null;
+  const smtpPass = process.env.SMTP_PASS ?? null;
+  const smtpFrom = process.env.SMTP_FROM?.trim() || null;
+  const smtpSecure = process.env.SMTP_SECURE === "1" || smtpPort === 465;
+  const smtpConfigured = Boolean(smtpHost && smtpFrom);
+  const isProd = process.env.NODE_ENV === "production";
+  const passwordResetDevExpose =
+    process.env.PASSWORD_RESET_DEV_EXPOSE === "1" ||
+    (!isProd && process.env.PASSWORD_RESET_DEV_EXPOSE !== "0");
 
   return {
     deployMode,
@@ -107,6 +146,11 @@ export function loadConfig(): ServerConfig {
     corsOrigin: parseCorsOrigin(process.env.ALLOWED_ORIGINS ?? process.env.CORS_ORIGIN),
     staticDir: process.env.STATIC_DIR ?? null,
     databaseUrl: process.env.DATABASE_URL ?? null,
+    multiUser,
+    discordClientId,
+    discordClientSecret,
+    discordCallbackUrl,
+    discordOAuthConfigured: Boolean(discordClientId && discordClientSecret && discordCallbackUrl),
     saasBasicAuth,
     saasAllowAnonymous,
     authRequired,
@@ -126,5 +170,14 @@ export function loadConfig(): ServerConfig {
     githubRepo: process.env.GITHUB_REPO?.trim() || "poitee/PrintPartnerPartner",
     latestVersionOverride: process.env.PRINT_PARTNER_LATEST_VERSION?.trim() || null,
     updateCheckCacheHours: Number(process.env.PRINT_PARTNER_UPDATE_CHECK_CACHE_HOURS ?? 12),
+    appPublicUrl: process.env.APP_PUBLIC_URL?.trim() || null,
+    smtpHost,
+    smtpPort,
+    smtpUser,
+    smtpPass,
+    smtpFrom,
+    smtpSecure,
+    smtpConfigured,
+    passwordResetDevExpose,
   };
 }

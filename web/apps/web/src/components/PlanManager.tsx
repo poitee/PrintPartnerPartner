@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -8,7 +8,7 @@ import {
   duplicateProfile,
   updateProfile,
 } from "../api/engine";
-import { buildRoute } from "../lib/routes";
+import { buildRoute, isBuildPath, isBuildsPath } from "../lib/routes";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -18,6 +18,13 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import { Switch } from "./ui/switch";
 import { useProfileSelection } from "../context/ProfileContext";
 
@@ -45,6 +52,7 @@ export default function PlanManager({
   defaultOpen,
 }: PlanManagerProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const {
     profiles,
     selectedProfileId,
@@ -72,6 +80,16 @@ export default function PlanManager({
   const activatePlan = (id: number) => {
     setSelectedProfileId(id);
     navigate(buildRoute(id), { replace: true });
+  };
+
+  const onSelectPlan = (value: string) => {
+    if (!value) return;
+    const id = Number(value);
+    setSelectedProfileId(id);
+    setRenameName("");
+    if (isBuildPath(location.pathname) || isBuildsPath(location.pathname)) {
+      navigate(buildRoute(id), { replace: true });
+    }
   };
 
   const offerSwitchOrActivate = (targetId: number, targetName: string, actionLabel: SwitchPrompt["actionLabel"]) => {
@@ -187,29 +205,26 @@ export default function PlanManager({
   const body = (
     <div className="space-y-3">
       {!hideSelector && (
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted-foreground">Plan</span>
-          <select
-            className="rounded-md border border-input bg-background px-2 py-1.5"
-            value={selectedProfileId ?? ""}
-            onChange={(e) => {
-              const v = e.target.value;
-              setSelectedProfileId(v === "" ? null : Number(v));
-              setRenameName("");
-            }}
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Active build</Label>
+          <Select
+            value={selectedProfileId != null ? String(selectedProfileId) : undefined}
+            onValueChange={onSelectPlan}
             disabled={disabled || loading || busy || profiles.length === 0}
           >
-            {profiles.length === 0 ? (
-              <option value="">No plans yet</option>
-            ) : (
-              profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.part_count} parts)
-                </option>
-              ))
-            )}
-          </select>
-        </label>
+            <SelectTrigger className="min-h-10 w-full">
+              <SelectValue placeholder={profiles.length === 0 ? "No builds yet" : "Select build…"} />
+            </SelectTrigger>
+            <SelectContent>
+              {profiles.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.name} ({p.part_count} part{p.part_count === 1 ? "" : "s"}
+                  {p.build_stale ? ", stale" : ""})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
@@ -299,8 +314,10 @@ export default function PlanManager({
               <p className="text-sm font-semibold">Manage builds</p>
               <p className="truncate text-xs text-muted-foreground">
                 {selected
-                  ? `${selected.name} · ${selected.part_count} part${selected.part_count === 1 ? "" : "s"}`
-                  : "No plan selected — use the header dropdown"}
+                  ? `${selected.name} · ${selected.part_count} part${selected.part_count === 1 ? "" : "s"}${selected.build_stale ? " · stale" : ""}`
+                  : hideSelector
+                    ? "No build selected — use the header dropdown"
+                    : "No build selected"}
               </p>
             </div>
             <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />

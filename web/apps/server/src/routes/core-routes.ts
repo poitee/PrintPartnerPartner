@@ -20,6 +20,8 @@ import { registerJobRoutes, type InProcessJobRunner } from "./jobs.js";
 import { registerApiV1ExtensionRoutes } from "./api-v1-extensions.js";
 import { registerIntegrationRoutes } from "./integrations.js";
 import { registerWebhookRoutes } from "./webhooks.js";
+import { registerShareRoutes } from "./shares.js";
+import type { AuthStore } from "../services/auth-store.js";
 import { createIntegrationPort } from "../integrations/store.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
 
@@ -32,11 +34,13 @@ export type CoreRouteDeps = {
   dataDir: string;
   config: ServerConfig;
   jobs: InProcessJobRunner;
+  authStore?: AuthStore | null;
 };
 
 export type CoreRouteOptions = {
   /** v1-only routes: integrations, webhooks, artifacts, job list */
   apiV1Extensions?: boolean;
+  authStore?: AuthStore | null;
 };
 
 export async function registerCoreRoutes(
@@ -69,6 +73,11 @@ export async function registerCoreRoutes(
   await registerPrinterRoutes(app, { repo: deps.repo });
   await registerPrintPlanRoutes(app, { repo: deps.repo });
   await registerManifestRoutes(app, { repo: deps.repo });
+
+  const authStore = options.authStore ?? deps.authStore;
+  if (deps.config.multiUser && authStore) {
+    registerShareRoutes(app, { repo: deps.repo, authStore, config: deps.config });
+  }
 
   if (options.apiV1Extensions) {
     await registerApiV1ExtensionRoutes(app, {

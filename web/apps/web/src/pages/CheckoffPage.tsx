@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ClipboardCheck, CheckSquare, ChevronDown, Printer } from "lucide-react";
 import { toast } from "sonner";
+import StaleBuildBanner from "../components/StaleBuildBanner";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
@@ -23,11 +24,13 @@ import {
 import {
   startExportChecklistHtml,
   startExportStlPack,
+  startRecompute,
   type ReviewPart,
   type StlPackGroupBy,
 } from "../api/engine";
 import { buildRoute, reviewRoute } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
+import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
 import { groupCheckoffParts } from "../lib/checkoffGroups";
 import { formatCheckoffSummary } from "../lib/checkoffProgress";
 import {
@@ -136,6 +139,7 @@ export default function CheckoffPage() {
     busyPartId,
   } = usePlanWorkspace();
   const { busy: exportBusy, message, runJob } = useJobRunner("export");
+  const recomputeJob = useJobRunner("recompute");
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
   const persistedUi = useMemo(() => loadPersistedCheckoffUi(), []);
   const [filter, setFilter] = useState<CheckoffFilterMode>(persistedUi.filter);
@@ -184,6 +188,22 @@ export default function CheckoffPage() {
     profiles.find((p) => p.id === selectedProfileId)?.name ??
     review?.plan_name ??
     "Checkoff";
+  const buildStale = profiles.find((p) => p.id === selectedProfileId)?.build_stale ?? false;
+
+  const onUpdateBuild = () => {
+    if (selectedProfileId == null) return;
+    void recomputeJob.runJob(
+      () => startRecompute(selectedProfileId, { apply_manifest: true }),
+      (snap) => {
+        if (snap.status === "error") {
+          toast.error(snap.message || "Update failed");
+          return;
+        }
+        void reload(selectedProfileId);
+      },
+      { profileId: selectedProfileId },
+    );
+  };
 
   const includedParts = useMemo(() => {
     if (!review) return [];
@@ -215,9 +235,7 @@ export default function CheckoffPage() {
   const onToggleUnit = useCallback(
     (part: ReviewPart, unitIndex: number) => {
       const next = !part.print_units[unitIndex];
-      void toggleUnit(part.id, unitIndex, next).then(() => {
-        toast.success(next ? "Marked printed" : "Marked not printed");
-      });
+      void toggleUnit(part.id, unitIndex, next);
     },
     [toggleUnit],
   );
@@ -245,14 +263,10 @@ export default function CheckoffPage() {
           group_by: groupBy,
         }),
       (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "Missing-STL export failed");
-          return;
-        }
-        completeExportDownload("Missing-parts STL", snap.result, {
+        handleStlPackExportJobDone("Missing-parts STL", snap, {
           pathField: "root_path",
         });
-        if (selectedProfileId != null) void reload(selectedProfileId);
+        if (snap.status === "done" && selectedProfileId != null) void reload(selectedProfileId);
       },
     );
   };
@@ -367,6 +381,12 @@ export default function CheckoffPage() {
               </DropdownMenu>
             </PageHeaderActions>
           }
+        />
+
+        <StaleBuildBanner
+          stale={buildStale}
+          busy={recomputeJob.busy}
+          onUpdate={onUpdateBuild}
         />
 
         <p className="hidden text-sm text-muted-foreground md:block">

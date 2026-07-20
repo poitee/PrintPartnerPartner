@@ -14,6 +14,7 @@ import {
   sourceStlPreviewUrl,
   uploadPartThumbnail,
 } from "../api/engine";
+import { fetchWithRetry } from "../lib/fetchWithRetry";
 
 type Props = {
   partId: number | null;
@@ -153,7 +154,7 @@ function previewTarget(
 
 function previewErrorMessage(status: number, kind: "mesh" | "png"): string {
   if (status === 404 && kind === "mesh") {
-    return "STL preview not found. Sync the source, then restart the Print Partner engine if preview still fails.";
+    return "STL not ready yet — source may still be syncing. Wait a moment and try again.";
   }
   if (status === 413) {
     return "STL is too large for live 3D preview — showing PNG instead.";
@@ -269,7 +270,7 @@ export default function Preview3D({
     const showPngFallback = async (meshStatus?: number) => {
       try {
         const url = previewUrlWithColor(await previewUrlFor(), resolvedColor);
-        const response = await fetch(url);
+        const response = await fetchWithRetry(url);
         if (cancelled) return;
         if (!response.ok) {
           setMode("error");
@@ -300,8 +301,7 @@ export default function Preview3D({
       cleanupThree();
 
       try {
-        const url = await meshUrlFor();
-        const response = await fetch(url);
+        const response = await fetchWithRetry(meshUrlFor);
         if (cancelled) return;
 
         if (response.status === 413 || !response.ok) {
@@ -431,7 +431,7 @@ export default function Preview3D({
             ? await partPreviewUrl(target.partId)
             : await sourceStlPreviewUrl(target.sourceId, target.relativePath);
         const url = previewUrlWithColor(base, resolvedColor);
-        const response = await fetch(url);
+        const response = await fetchWithRetry(url);
         if (cancelled) return;
         if (!response.ok) return;
         setPngSrc(url);

@@ -1,4 +1,4 @@
-import { type ComponentType, type MouseEvent, useEffect, useState } from "react";
+import { type ComponentType, type MouseEvent, type ReactNode, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   BookOpen,
@@ -8,6 +8,8 @@ import {
   Hammer,
   Layers,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
 } from "lucide-react";
 import CommandPalette from "../components/CommandPalette";
@@ -25,6 +27,10 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import PlanPicker from "../components/PlanPicker";
+import CreatePlanButton from "../components/CreatePlanButton";
+import SaveStatusIndicator from "../components/SaveStatusIndicator";
+import UserMenu from "../components/UserMenu";
+import WorkflowProgress from "../components/WorkflowProgress";
 import UpdateAvailableBanner, {
   dismissUpdateBanner,
   isUpdateBannerDismissed,
@@ -49,6 +55,13 @@ import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
 import ThemePreferenceControl from "../components/ThemePreferenceControl";
 import { useEngineHealth } from "../hooks/useEngineHealth";
+import { readSidebarCollapsed, writeSidebarCollapsed } from "../lib/persistedSidebarUi";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../components/ui/tooltip";
 
 type NavEntry = {
   to: string;
@@ -59,13 +72,13 @@ type NavEntry = {
 };
 
 const secondaryNav: Omit<NavEntry, "hint">[] = [
+  { to: buildsRoute(), label: "Builds", icon: Layers },
   { to: "/settings", label: "Settings", icon: Settings },
   { to: "/help", label: "Help", icon: BookOpen },
 ];
 
 const NAV_HINTS: Record<string, string> = {
   Sources: "Register repos and set import folders",
-  Builds: "Create, rename, duplicate, and delete plans",
   Build: "Attach sources, pick files, set colors and quantities",
   Review: "Validate parts, edit quantities, and export",
   Checkoff: "Track what you've printed on the shop floor",
@@ -85,15 +98,38 @@ function BrandMark({ className }: { className?: string }) {
   );
 }
 
-function navLinkClass(active: boolean, compact = false) {
+function navLinkClass(active: boolean, opts?: { compact?: boolean; sidebarCollapsed?: boolean }) {
+  const compact = opts?.compact ?? false;
+  const sidebarCollapsed = opts?.sidebarCollapsed ?? false;
   return cn(
     "relative flex transition-colors",
-    compact
-      ? "shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium"
-      : "flex-col gap-0.5 rounded-md px-3 py-2 text-sm font-medium",
+    sidebarCollapsed
+      ? "items-center justify-center rounded-md p-2.5"
+      : compact
+        ? "shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium"
+        : "flex-col gap-0.5 rounded-md px-3 py-2 text-sm font-medium",
     active
       ? "bg-primary/12 text-primary shadow-sm before:absolute before:left-0 before:top-1/2 before:h-[60%] before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary"
       : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+    sidebarCollapsed && active && "before:hidden",
+  );
+}
+
+function SidebarTooltip({
+  label,
+  collapsed,
+  children,
+}: {
+  label: string;
+  collapsed: boolean;
+  children: ReactNode;
+}) {
+  if (!collapsed) return children;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -104,32 +140,51 @@ function NavItem({
   icon: Icon,
   isActive: matchPath,
   onNavigate,
-}: NavEntry & { onNavigate?: (to: string, e: MouseEvent<HTMLAnchorElement>) => void }) {
+  sidebarCollapsed = false,
+}: NavEntry & {
+  onNavigate?: (to: string, e: MouseEvent<HTMLAnchorElement>) => void;
+  sidebarCollapsed?: boolean;
+}) {
   const location = useLocation();
   const customActive = matchPath?.(location.pathname);
 
-  return (
+  const link = (
     <NavLink
       to={to}
       end={matchPath == null}
       onClick={(e) => onNavigate?.(to, e)}
-      className={({ isActive }) => navLinkClass(matchPath ? Boolean(customActive) : isActive)}
+      className={({ isActive }) =>
+        navLinkClass(matchPath ? Boolean(customActive) : isActive, { sidebarCollapsed })
+      }
+      aria-label={sidebarCollapsed ? label : undefined}
+      title={sidebarCollapsed ? undefined : label}
     >
-      <span className="flex items-center gap-2 pl-0.5">
+      <span
+        className={cn(
+          "flex items-center gap-2 pl-0.5",
+          sidebarCollapsed && "justify-center pl-0",
+        )}
+      >
         <Icon
           className={cn(
             "h-4 w-4 shrink-0",
             (matchPath ? customActive : location.pathname === to.split("?")[0]) && "text-primary",
           )}
         />
-        {label}
+        {!sidebarCollapsed && label}
       </span>
-      {(matchPath ? customActive : location.pathname === to.split("?")[0]) && (
+      {!sidebarCollapsed && (matchPath ? customActive : location.pathname === to.split("?")[0]) && (
         <span className="pl-6 text-[11px] font-normal leading-snug text-muted-foreground">
           {hint}
         </span>
       )}
     </NavLink>
+  );
+
+  return (
+    <SidebarTooltip label={sidebarCollapsed ? `${label} — ${hint}` : label} collapsed={sidebarCollapsed}>
+      {link}
+    </SidebarTooltip>
   );
 }
 
@@ -139,6 +194,15 @@ export default function AppLayout() {
   const { health } = useEngineHealth();
   const { updateCheck } = useAppUpdateCheck(Boolean(health));
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed());
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      writeSidebarCollapsed(next);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (updateCheck?.latest_version) {
@@ -174,19 +238,11 @@ export default function AppLayout() {
   const showPlanInHeader =
     activePlanName &&
     (isBuildPath(location.pathname) ||
-      isBuildsPath(location.pathname) ||
       isReviewPath(location.pathname) ||
       isCheckoffPath(location.pathname));
 
   const pipelineNav: NavEntry[] = [
     { to: sourcesRoute(), label: "Sources", hint: NAV_HINTS.Sources, icon: FolderGit2 },
-    {
-      to: buildsRoute(selectedProfileId),
-      label: "Builds",
-      hint: NAV_HINTS.Builds,
-      icon: Layers,
-      isActive: (pathname) => isBuildsPath(pathname),
-    },
     {
       to: buildRoute(selectedProfileId),
       label: "Build",
@@ -211,43 +267,108 @@ export default function AppLayout() {
   ];
 
   return (
+    <TooltipProvider delayDuration={300}>
     <div className="flex min-h-screen min-w-0 bg-background">
-      <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-card lg:flex print:hidden">
-        <div className="border-b border-border px-4 py-4">
-          <div className="flex items-center gap-2.5">
+      <aside
+        className={cn(
+          "hidden shrink-0 flex-col border-r border-border bg-card transition-[width] duration-200 ease-out lg:flex print:hidden",
+          sidebarCollapsed ? "w-[4.25rem]" : "w-56",
+        )}
+      >
+        <div className={cn("border-b border-border", sidebarCollapsed ? "px-2 py-3" : "px-4 py-4")}>
+          <div
+            className={cn(
+              "flex items-center gap-2.5",
+              sidebarCollapsed && "justify-center",
+            )}
+          >
             <BrandMark />
-            <div className="min-w-0">
-              <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
-              <p className="text-xs text-muted-foreground">
-                Sources → Build → Review → Checkoff
-              </p>
-            </div>
+            {!sidebarCollapsed && (
+              <div className="min-w-0">
+                <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
+                <p className="text-xs text-muted-foreground">
+                  Sources → Build → Review → Checkoff
+                </p>
+              </div>
+            )}
           </div>
         </div>
-        <nav className="flex flex-1 flex-col gap-1 p-3">
+        <nav className={cn("flex flex-1 flex-col gap-1", sidebarCollapsed ? "p-2" : "p-3")}>
           {pipelineNav.map((item) => (
-            <NavItem key={item.label} {...item} onNavigate={onPipelineNavigate} />
+            <NavItem
+              key={item.label}
+              {...item}
+              onNavigate={onPipelineNavigate}
+              sidebarCollapsed={sidebarCollapsed}
+            />
           ))}
-          <Separator className="my-2" />
-          {secondaryNav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                cn(navLinkClass(isActive), "flex-row items-center gap-2 pl-0.5")
-              }
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {item.label}
-            </NavLink>
-          ))}
+          {!sidebarCollapsed && (
+            <div className="px-1 py-2">
+              <WorkflowProgress />
+            </div>
+          )}
+          <Separator className={cn("my-2", sidebarCollapsed && "mx-1")} />
+          {secondaryNav.map((item) => {
+            const to = item.to === buildsRoute() ? buildsRoute(selectedProfileId) : item.to;
+            const active =
+              location.pathname === item.to.split("?")[0] ||
+              (item.label === "Builds" && isBuildsPath(location.pathname));
+            const link = (
+              <NavLink
+                key={item.to}
+                to={to}
+                className={cn(
+                  navLinkClass(active, { sidebarCollapsed }),
+                  !sidebarCollapsed && "flex-row items-center gap-2 pl-0.5",
+                )}
+                aria-label={sidebarCollapsed ? item.label : undefined}
+              >
+                <item.icon className="h-4 w-4 shrink-0" />
+                {!sidebarCollapsed && item.label}
+              </NavLink>
+            );
+            return (
+              <SidebarTooltip key={item.to} label={item.label} collapsed={sidebarCollapsed}>
+                {link}
+              </SidebarTooltip>
+            );
+          })}
         </nav>
-        <div className="space-y-2 border-t border-border p-3">
-          <div className="px-1">
-            <p className="mb-1.5 text-xs font-medium text-muted-foreground">Theme</p>
-            <ThemePreferenceControl compact className="w-full" />
-          </div>
-          <SupportCta variant="ghost" size="sm" className="w-full justify-start text-muted-foreground" />
+        <div className={cn("space-y-2 border-t border-border", sidebarCollapsed ? "p-2" : "p-3")}>
+          {!sidebarCollapsed && (
+            <>
+              <div className="px-1">
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">Theme</p>
+                <ThemePreferenceControl compact className="w-full" />
+              </div>
+              <SupportCta
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start text-muted-foreground"
+              />
+            </>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size={sidebarCollapsed ? "icon" : "sm"}
+            className={cn(
+              "text-muted-foreground",
+              !sidebarCollapsed && "w-full justify-start",
+            )}
+            onClick={toggleSidebar}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!sidebarCollapsed}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <>
+                <PanelLeftClose className="h-4 w-4" />
+                Collapse sidebar
+              </>
+            )}
+          </Button>
         </div>
       </aside>
 
@@ -264,8 +385,12 @@ export default function AppLayout() {
             )}
           </div>
           <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:justify-end">
+            <SaveStatusIndicator />
             <SupportCta variant="secondary" size="sm" className="hidden shrink-0 sm:inline-flex" />
             <ThemePreferenceControl compact className="hidden shrink-0 md:inline-flex" />
+            <UserMenu />
+            <CreatePlanButton className="hidden sm:inline-flex" />
+            <CreatePlanButton size="icon" showLabel={false} className="sm:hidden" />
             <PlanPicker className="min-w-0 flex-1 sm:min-w-[200px] sm:max-w-xs" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -289,7 +414,10 @@ export default function AppLayout() {
                 <DropdownMenuSeparator className="sm:hidden" />
                 {secondaryNav.map((item) => (
                   <DropdownMenuItem key={item.to} asChild>
-                    <NavLink to={item.to} className="flex w-full cursor-pointer items-center gap-2">
+                    <NavLink
+                      to={item.to === buildsRoute() ? buildsRoute(selectedProfileId) : item.to}
+                      className="flex w-full cursor-pointer items-center gap-2"
+                    >
                       <item.icon className="h-4 w-4" />
                       {item.label}
                     </NavLink>
@@ -301,23 +429,26 @@ export default function AppLayout() {
         </header>
 
         <nav
-          className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card px-2 py-2 lg:hidden print:hidden [-webkit-overflow-scrolling:touch]"
+          className="flex shrink-0 flex-col gap-2 border-b border-border bg-card px-2 py-2 lg:hidden print:hidden"
           aria-label="Workflow"
         >
-          {pipelineNav.map((item) => (
-            <NavLink
-              key={item.label}
-              to={item.to}
-              onClick={(e) => onPipelineNavigate(item.to, e)}
-              className={({ isActive }) => {
-                const active = item.isActive?.(location.pathname) ?? isActive;
-                return navLinkClass(active, true);
-              }}
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              {item.label}
-            </NavLink>
-          ))}
+          <div className="flex gap-1 overflow-x-auto [-webkit-overflow-scrolling:touch]">
+            {pipelineNav.map((item) => (
+              <NavLink
+                key={item.label}
+                to={item.to}
+                onClick={(e) => onPipelineNavigate(item.to, e)}
+                className={({ isActive }) => {
+                  const active = item.isActive?.(location.pathname) ?? isActive;
+                  return navLinkClass(active, { compact: true });
+                }}
+              >
+                <item.icon className="h-4 w-4 shrink-0" />
+                {item.label}
+              </NavLink>
+            ))}
+          </div>
+          <WorkflowProgress compact className="mx-1" />
         </nav>
 
         <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 pb-20 sm:p-5 sm:pb-16 lg:pb-14 print:overflow-visible print:p-0">
@@ -339,5 +470,6 @@ export default function AppLayout() {
       <CommandPalette />
       <Toaster position="bottom-right" richColors closeButton />
     </div>
+    </TooltipProvider>
   );
 }

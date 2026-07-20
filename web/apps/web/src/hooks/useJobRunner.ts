@@ -3,25 +3,25 @@ import { useJobContext } from "../context/JobContext";
 import type { JobSnapshot } from "../api/engine";
 
 export function useJobRunner(kind = "job") {
-  const { activeJob, runJob: runContextJob } = useJobContext();
+  const { activeJobs, isJobKindRunning, runJob: runContextJob } = useJobContext();
   const [localMessage, setLocalMessage] = useState("");
 
-  const busy =
-    activeJob != null &&
-    !["done", "error", "cancelled"].includes(activeJob.status);
+  const jobForKind = activeJobs.find((j) => j.kind === kind);
+  const busy = isJobKindRunning(kind);
 
   const message =
-    activeJob?.message ||
+    jobForKind?.message ||
     localMessage ||
-    (activeJob ? `${activeJob.status}` : "");
+    (jobForKind ? `${jobForKind.status}` : "");
 
   const runJob = useCallback(
     async (
       start: () => Promise<string>,
       onDone?: (snapshot: JobSnapshot) => void,
+      options?: { profileId?: number | null },
     ) => {
       setLocalMessage("");
-      await runContextJob(kind, start, onDone);
+      await runContextJob(kind, start, onDone, options);
     },
     [kind, runContextJob],
   );

@@ -4,12 +4,14 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { fetchProfiles, type ProfileSummary } from "../api/engine";
+import { useQueryClient } from "@tanstack/react-query";
+import type { ProfileSummary } from "../api/engine";
 import { useEngineHealth } from "../hooks/useEngineHealth";
+import { queryKeys } from "../queries/keys";
+import { useProfilesQuery } from "../queries/profiles";
 
 const STORAGE_KEY = "pp-selected-profile-id";
 
@@ -37,17 +39,17 @@ function readStoredId(): number | null {
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
   const { health } = useEngineHealth();
-  const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
-  const [selectedProfileId, setSelectedProfileIdState] = useState<number | null>(
-    readStoredId,
-  );
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const selectedProfileIdRef = useRef(selectedProfileId);
-  selectedProfileIdRef.current = selectedProfileId;
+  const qc = useQueryClient();
+  const {
+    data: profiles = [],
+    isLoading,
+    error: queryError,
+    refetch,
+  } = useProfilesQuery(Boolean(health?.ok));
+
+  const [selectedProfileId, setSelectedProfileIdState] = useState<number | null>(readStoredId);
 
   const setSelectedProfileId = useCallback((id: number | null) => {
-    selectedProfileIdRef.current = id;
     setSelectedProfileIdState(id);
     try {
       if (id == null) sessionStorage.removeItem(STORAGE_KEY);
@@ -57,46 +59,44 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const reloadProfiles = useCallback(async () => {
-    if (!health) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const list = await fetchProfiles();
-      setProfiles(list);
-      const current = selectedProfileIdRef.current;
-      if (list.length === 0) {
-        setSelectedProfileId(null);
-      } else if (current == null || !list.some((p) => p.id === current)) {
-        setSelectedProfileId(list[0].id);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [health, setSelectedProfileId]);
-
   useEffect(() => {
-    void reloadProfiles();
-  }, [reloadProfiles]);
+    if (profiles.length === 0) {
+      if (selectedProfileId != null) setSelectedProfileId(null);
+    } else if (
+      selectedProfileId == null ||
+      !profiles.some((p) => p.id === selectedProfileId)
+    ) {
+      setSelectedProfileId(profiles[0].id);
+    }
+  }, [profiles, selectedProfileId, setSelectedProfileId]);
+
+  const reloadProfiles = useCallback(async () => {
+    if (!health?.ok) return;
+    await qc.invalidateQueries({ queryKey: queryKeys.profiles });
+    await refetch();
+  }, [health?.ok, qc, refetch]);
 
   const value = useMemo(
-    () => ({
+    (): ProfileContextValue => ({
       profiles,
       selectedProfileId,
       setSelectedProfileId,
       reloadProfiles,
-      loading,
-      error,
+      loading: isLoading,
+      error:
+        queryError instanceof Error
+          ? queryError.message
+          : queryError
+            ? String(queryError)
+            : null,
     }),
     [
       profiles,
       selectedProfileId,
       setSelectedProfileId,
       reloadProfiles,
-      loading,
-      error,
+      isLoading,
+      queryError,
     ],
   );
 
