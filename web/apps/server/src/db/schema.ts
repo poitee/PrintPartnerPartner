@@ -37,6 +37,8 @@ export const buildProfiles = sqliteTable(
     tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
     name: text("name").notNull(),
     orderNumber: text("order_number"),
+    configModifiedAt: text("config_modified_at"),
+    lastRecomputedAt: text("last_recomputed_at"),
   },
   (t) => [uniqueIndex("uq_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -105,8 +107,61 @@ export const appSettings = sqliteTable(
   (t) => [uniqueIndex("uq_app_settings_tenant_key").on(t.tenantId, t.key)],
 );
 
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  email: text("email").unique(),
+  displayName: text("display_name").notNull(),
+  passwordHash: text("password_hash"),
+  isAdmin: integer("is_admin", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at").notNull(),
+});
+
+export const authIdentities = sqliteTable(
+  "auth_identities",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    providerUserId: text("provider_user_id").notNull(),
+  },
+  (t) => [uniqueIndex("uq_auth_identity_provider").on(t.provider, t.providerUserId)],
+);
+
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: text("expires_at").notNull(),
+});
+
+export const planShares = sqliteTable("plan_shares", {
+  id: text("id").primaryKey(),
+  token: text("token").notNull().unique(),
+  fromUserId: text("from_user_id")
+    .notNull()
+    .references(() => users.id),
+  planId: integer("plan_id").notNull(),
+  planName: text("plan_name").notNull(),
+  recipientEmail: text("recipient_email"),
+  bundleJson: text("bundle_json").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const passwordResetTokens = sqliteTable("password_reset_tokens", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 3;
+export const currentSchemaVersion = 5;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -180,4 +235,41 @@ export const schemaMigrations: string[] = [
     value TEXT NOT NULL DEFAULT ''
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS uq_app_settings_tenant_key ON app_settings (tenant_id, key)`,
+  `CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE,
+    display_name TEXT NOT NULL,
+    password_hash TEXT,
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS auth_identities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    provider_user_id TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_auth_identity_provider ON auth_identities (provider, provider_user_id)`,
+  `CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS plan_shares (
+    id TEXT PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE,
+    from_user_id TEXT NOT NULL REFERENCES users(id),
+    plan_id INTEGER NOT NULL,
+    plan_name TEXT NOT NULL,
+    recipient_email TEXT,
+    bundle_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
 ];

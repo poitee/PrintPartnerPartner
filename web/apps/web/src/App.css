@@ -1,15 +1,5 @@
 /* Legacy page hooks + printable checkoff/review sheet (paper tokens) */
 
-select:not([class*="rounded-md"]) {
-  width: 100%;
-  margin-bottom: 0.75rem;
-  padding: 0.5rem 0.65rem;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--background);
-  color: var(--foreground);
-}
-
 .filament-select {
   max-width: 12rem;
   font-size: 0.8rem;
@@ -1102,6 +1092,24 @@ select:not([class*="rounded-md"]) {
   font-family: system-ui, sans-serif;
 }
 
+/* Screen-only: softer sheet in dark app theme (print stays pure white below). */
+@media screen {
+  .dark .checkoff-sheet {
+    --paper-bg: #f0ebe3;
+    --paper-bg-screen-dark: #ebe4d9;
+    --paper-fg: #1c1917;
+    --paper-muted: #78716c;
+    --paper-muted-fg: #44403c;
+    --paper-border: #d6d3d1;
+    --paper-border-strong: #a8a29e;
+    --paper-surface: #faf8f5;
+    --paper-surface-hover: #f5f2ed;
+    --paper-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    background: var(--paper-bg-screen-dark, var(--paper-bg));
+    border: 1px solid var(--paper-border);
+  }
+}
+
 .sheet-header {
   border-bottom: 2px solid var(--paper-fg);
   padding-bottom: 0.75rem;
@@ -1622,10 +1630,18 @@ select:not([class*="rounded-md"]) {
 
   html,
   body {
-    background: var(--paper-bg) !important;
+    background: #ffffff !important;
   }
 
   .checkoff-sheet {
+    --paper-bg: #ffffff;
+    --paper-fg: #111827;
+    --paper-muted: #6b7280;
+    --paper-muted-fg: #374151;
+    --paper-border: #d1d5db;
+    --paper-border-strong: #9ca3af;
+    --paper-surface: #f9fafb;
+    --paper-surface-hover: #f3f4f6;
     box-shadow: none;
     margin: 0;
     max-width: none;

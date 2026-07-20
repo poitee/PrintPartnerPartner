@@ -26,6 +26,7 @@ import {
   sourcesRoute,
 } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
+import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
 import {
   CommandDialog,
   CommandEmpty,
@@ -227,11 +228,7 @@ export default function CommandPalette() {
                 void stlExportJob.runJob(
                   () => startExportStlPack(selectedProfileId, { group_by: groupBy }),
                   (snap) => {
-                    if (snap.status === "error") {
-                      toast.error(snap.message || "STL export failed");
-                      return;
-                    }
-                    completeExportDownload("STL export", snap.result, {
+                    handleStlPackExportJobDone("STL export", snap, {
                       pathField: "root_path",
                     });
                   },
@@ -260,11 +257,7 @@ export default function CommandPalette() {
                       group_by: groupBy,
                     }),
                   (snap) => {
-                    if (snap.status === "error") {
-                      toast.error(snap.message || "Export failed");
-                      return;
-                    }
-                    completeExportDownload("Missing-parts STL", snap.result, {
+                    handleStlPackExportJobDone("Missing-parts STL", snap, {
                       pathField: "root_path",
                     });
                   },

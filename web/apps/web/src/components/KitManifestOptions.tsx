@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   fetchPlanKitManifest,
   fetchPlanManifestBuilder,
@@ -19,6 +20,7 @@ import { cn } from "../lib/utils";
 type Props = {
   profileId: number;
   baseSourceName?: string | null;
+  buildStale?: boolean;
   disabled?: boolean;
   /** Nested inside a source card — omit outer card chrome. */
   compact?: boolean;
@@ -35,6 +37,7 @@ function variantLabel(variant: { id: string; label?: string | null }): string {
 export default function KitManifestOptions({
   profileId,
   baseSourceName,
+  buildStale = false,
   disabled = false,
   compact = false,
 }: Props) {
@@ -149,13 +152,58 @@ export default function KitManifestOptions({
   }
 
   if (visibleGroups.length === 0) {
-    return null;
+    const emptyHint = (
+      <p className="text-xs text-muted-foreground">
+        No variant manifest on this source — add a{" "}
+        <code className="font-mono">print-partner.manifest.yaml</code> to the repo after sync.{" "}
+        <Link to="/help#kit-variants" className="text-primary hover:underline">
+          Learn about kit variants
+        </Link>
+      </p>
+    );
+
+    if (compact) {
+      return (
+        <details className="group rounded-md border border-border">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+            <span className="text-xs font-semibold text-muted-foreground">
+              {baseSourceName ? `${baseSourceName} kit variants` : "Kit variants"}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="border-t border-border px-3 pb-3 pt-2">{emptyHint}</div>
+        </details>
+      );
+    }
+
+    return (
+      <section className="rounded-lg border border-border bg-card p-4">
+        <div className="mb-1">
+          <h3 className="text-sm font-semibold">
+            {baseSourceName ? `${baseSourceName} kit variants` : "Kit variants"}
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            Pick one option per group, then run{" "}
+            <strong className="font-medium text-foreground">Update build</strong> to apply.
+          </p>
+        </div>
+        {emptyHint}
+      </section>
+    );
   }
 
   const title = baseSourceName ? `${baseSourceName} kit variants` : "Kit variants";
 
+  const staleHint = buildStale ? (
+    <p className="text-xs text-amber-700 dark:text-amber-300">
+      Run <strong className="font-medium text-foreground">Update build</strong> to apply variant
+      parts to Review and Checkoff.
+    </p>
+  ) : null;
+
   const inner = (
     <>
+      {staleHint}
       {(saveStatusLabel || showRetry) && (
         <div className={cn("flex flex-wrap items-center justify-end gap-2", compact ? "mb-2" : "mb-3")}>
           <div className="flex shrink-0 items-center gap-2 text-xs" aria-live="polite">
@@ -235,7 +283,16 @@ export default function KitManifestOptions({
           <span className="text-xs font-semibold text-muted-foreground">{title}</span>
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
         </summary>
-        <div className="space-y-3 border-t border-border px-3 pb-3 pt-2">{inner}</div>
+        <div className="space-y-2 border-t border-border px-3 pb-3 pt-2">
+          <p className="text-[11px] text-muted-foreground">
+            Pick one per group, then{" "}
+            <strong className="font-medium text-foreground">Update build</strong>.{" "}
+            <Link to="/help#kit-variants" className="text-primary hover:underline">
+              Help
+            </Link>
+          </p>
+          {inner}
+        </div>
       </details>
     );
   }
@@ -250,8 +307,11 @@ export default function KitManifestOptions({
       <div className="mb-1">
         <h3 className="text-sm font-semibold">{title}</h3>
         <p className="text-xs text-muted-foreground">
-          Pick variants for this build. Changes save automatically and are kept after{" "}
-          <strong className="font-medium text-foreground">Update build</strong>.
+          Pick one option per group, then run{" "}
+          <strong className="font-medium text-foreground">Update build</strong> to apply.{" "}
+          <Link to="/help#kit-variants" className="text-primary hover:underline">
+            Help
+          </Link>
         </p>
       </div>
       {inner}

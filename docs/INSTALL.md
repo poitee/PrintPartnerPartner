@@ -157,6 +157,31 @@ Add your user to the `docker` group (see Install Docker above) or run commands w
 
 The default Compose file publishes port 8080 on all interfaces. Check your host firewall allows inbound TCP 8080. Use `http://<your-server-ip>:8080` from other machines.
 
+### `denied` or `unauthorized` when pulling the image
+
+The pre-built image lives at `ghcr.io/poitee/print-partner`. If the registry rejects the pull (`denied`, `unauthorized`, or `403`), the package may still be private or your Docker client is not logged in.
+
+**Workarounds (pick one):**
+
+1. **Build from source** (no registry needed):
+
+```bash
+docker compose up --build -d
+```
+
+2. **Log in to GHCR** (if you have access to the private package):
+
+```bash
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+docker compose pull && docker compose up -d
+```
+
+Use a [personal access token](https://github.com/settings/tokens) with `read:packages` scope, or `gh auth token` after `gh auth login`.
+
+Release tags should publish the image as public automatically; if pull still fails on a fresh clone, use option 1 while waiting for the maintainer to fix package visibility.
+
+**Note:** The first release cut after the GHCR visibility workflow was added may still require a one-time manual **Make public** on the GitHub Packages page (`Package settings → Change visibility`) if `docker compose pull` fails before that release runs.
+
 ### Build fails or container exits immediately
 
 Read the log output from `docker compose logs` (or `docker compose up --build` when building from source). Ensure you have enough disk space and a working internet connection for the first pull or build.
@@ -167,7 +192,7 @@ Read the log output from `docker compose logs` (or `docker compose up --build` w
 
 | Goal | Where to go |
 |------|-------------|
-| Run without Docker (Node 22, hot reload) | [README — Run locally without Docker](../README.md#run-locally-without-docker) |
+| Run without Docker (Node 22, hot reload) | [README — Run locally without Docker](../README.md#run-locally-without-docker) — `npm run dev` builds shared packages first |
 | Full env var reference, SaaS, API keys | [`web/DEPLOY.md`](../web/DEPLOY.md) |
 | Architecture and design | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) |
 

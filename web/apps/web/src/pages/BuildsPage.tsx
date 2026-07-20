@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Layers } from "lucide-react";
 import PageHeader from "../components/layout/PageHeader";
 import PlanManager from "../components/PlanManager";
+import IncomingSharesCard from "../components/share/IncomingSharesCard";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { Button } from "../components/ui/button";
 import { useProfileSelection } from "../context/ProfileContext";
@@ -31,6 +32,8 @@ export default function BuildsPage() {
           ) : undefined
         }
       />
+
+      <IncomingSharesCard />
 
       <div className="section-card">
         <PlanManager hideSelector={false} disabled={!health} />

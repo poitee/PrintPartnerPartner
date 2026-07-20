@@ -19,6 +19,10 @@ const ROLE_ORDER = ["primary", "accent", "clear", "opaque"] as const;
  */
 export type StlPackGroupBy = "color" | "color_dir";
 
+/** Appended to user-facing warnings when STL files are missing on disk. */
+export const STL_EXPORT_MISSING_HINT =
+  "Sync Sources and fix Review blockers, then export again.";
+
 function safeFolderName(folderKey: string): string {
   if (folderKey === "(root)") return "_root";
   const safe = folderKey.replace(/\//g, "_").replace(/[^\w\-.]+/g, "_");
@@ -60,7 +64,8 @@ export function exportProfileStlPack(
   const included = parts.filter((p) => p.included);
   const missingPath = included.filter((p) => !p.absolutePath);
   const warnings: string[] = missingPath.map(
-    (p) => `Missing STL: ${p.relativePath} (${p.sourceLayer})`,
+    (p) =>
+      `Missing STL: ${p.relativePath} (${p.sourceLayer}). ${STL_EXPORT_MISSING_HINT}`,
   );
 
   const byRoleFolder = new Map<string, Map<string, Array<[MergePart, number]>>>();
@@ -131,4 +136,21 @@ export function exportProfileStlPack(
     Object.entries(fileCounts).filter(([, v]) => v > 0),
   );
   return { rootPath: outputRoot, fileCounts: resultCounts, warnings };
+}
+
+/** User-facing job completion message for STL pack export. */
+export function exportStlPackJobMessage(result: {
+  file_total?: number;
+  warnings?: string[];
+}): string {
+  const fileTotal = result.file_total ?? 0;
+  const warnings = result.warnings ?? [];
+  if (fileTotal === 0) {
+    if (warnings.length > 0) return warnings[0]!;
+    return `No STL files exported. ${STL_EXPORT_MISSING_HINT}`;
+  }
+  if (warnings.length > 0) {
+    return `Exported ${fileTotal} file(s) with ${warnings.length} warning(s)`;
+  }
+  return "Complete";
 }

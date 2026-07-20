@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Hammer, Layers } from "lucide-react";
+import StaleBuildBanner from "../components/StaleBuildBanner";
+import MergeConflictBanner from "../components/MergeConflictBanner";
+import BuildSourcesPanel from "../components/build/BuildSourcesPanel";
+import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
+import PlanManager from "../components/PlanManager";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import RoleFilamentPicker from "../components/RoleFilamentPicker";
 import KitManifestOptions from "../components/KitManifestOptions";
@@ -15,6 +20,13 @@ import ShareImportSetupPanel, {
 } from "../components/share/ShareImportSetupPanel";
 import type { KitImportJobResult } from "../api/engine";
 import { Badge } from "../components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
 import { Button } from "../components/ui/button";
 import {
   DropdownMenu,
@@ -35,27 +47,35 @@ import {
 import {
   addProfileAddonLayer,
   deleteProfileLayer,
+  fetchAutoRecomputeSettings,
   fetchPlanLayers,
   fetchSources,
+  fetchStlNaming,
   replaceProfileLayer,
   setProfileBaseLayer,
   startExportStlPack,
   startRecompute,
   type ProfileLayer,
+  type RoleFilamentRow,
   type SourceSummary,
   type StlPackGroupBy,
   DEFAULT_STL_NAMING_PROFILE,
+  type StlNamingProfile,
 } from "../api/engine";
-import { buildRoute, buildsRoute, reviewRoute, settingsRoute, sourcesRoute } from "../lib/routes";
-import { completeExportDownload } from "../lib/exportActions";
+import { buildRoute, reviewRoute, settingsRoute } from "../lib/routes";
+import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
+import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { takeKitImportResult } from "../lib/kitImportStash";
 import { useProfileSelection } from "../context/ProfileContext";
+import { usePlanActions } from "../context/PlanActionsContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
+import { useAutoRecompute } from "../hooks/useAutoRecompute";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { layersEqual } from "../lib/planDataStable";
+import { meshColorForStlPath } from "../lib/rolePreviewColor";
 
 type BuildLocationState = {
   kitImport?: KitImportJobResult;
@@ -69,10 +89,12 @@ function BuildPageContent() {
   const location = useLocation();
   const navigate = useNavigate();
   const { health } = useEngineHealth();
-  const { selectedProfileId, reloadProfiles } = useProfileSelection();
-  const { invalidate: bumpPlanRevision } = usePlanWorkspace();
+  const { selectedProfileId, reloadProfiles, profiles } = useProfileSelection();
+  const { openCreatePlan } = usePlanActions();
+  const { invalidate: bumpPlanRevision, review, invalidate: reloadReview } = usePlanWorkspace();
   const { busy, runJob } = useJobRunner("recompute");
   const exportStlJob = useJobRunner("stl-export");
+  const pendingConflictCheckRef = useRef(false);
 
   const [layers, setLayers] = useState<ProfileLayer[]>([]);
   const [sources, setSources] = useState<SourceSummary[]>([]);
@@ -83,6 +105,53 @@ function BuildPageContent() {
   const [kitImportSetup, setKitImportSetup] = useState<KitImportJobResult | null>(null);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
   const [filamentRefreshKey, setFilamentRefreshKey] = useState(0);
+  const [autoRecomputeEnabled, setAutoRecomputeEnabled] = useState(true);
+  const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
+  const [namingProfile, setNamingProfile] = useState<StlNamingProfile>(DEFAULT_STL_NAMING_PROFILE);
+
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
+  const buildStale = selectedProfile?.build_stale ?? false;
+
+  const mergeConflicts = useMemo(
+    () => review?.issues.filter((i) => i.code === "merge_conflict") ?? [],
+    [review],
+  );
+  const mergeConflictGroups = useMemo(
+    () => groupMergeConflictsByFilename(mergeConflicts),
+    [mergeConflicts],
+  );
+
+  useEffect(() => {
+    if (!pendingConflictCheckRef.current || !review) return;
+    pendingConflictCheckRef.current = false;
+    if (mergeConflicts.length > 0) {
+      toast.warning(
+        `Build updated with ${mergeConflicts.length} duplicate part conflict${
+          mergeConflicts.length === 1 ? "" : "s"
+        } — resolve on Review.`,
+      );
+    }
+  }, [review, mergeConflicts.length]);
+
+  useEffect(() => {
+    if (!health?.ok) return;
+    void fetchAutoRecomputeSettings()
+      .then((s) => setAutoRecomputeEnabled(s.enabled))
+      .catch(() => {});
+    void fetchStlNaming()
+      .then(setNamingProfile)
+      .catch(() => {});
+  }, [health?.ok]);
+
+  const resolvePreviewMeshColor = useCallback(
+    (relativePath: string) => meshColorForStlPath(relativePath, namingProfile, roleFilaments),
+    [namingProfile, roleFilaments],
+  );
+
+  const onRoleFilamentsUpdated = useCallback(async () => {
+    await bumpPlanRevision();
+    setFilamentRefreshKey((k) => k + 1);
+  }, [bumpPlanRevision]);
 
   useEffect(() => {
     const state = location.state as BuildLocationState | null;
@@ -126,6 +195,25 @@ function BuildPageContent() {
     () => layers.filter((l) => l.layer_type !== "base"),
     [layers],
   );
+
+  const attachedSourceIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const layer of layers) {
+      if (layer.project_id != null) ids.add(layer.project_id);
+    }
+    return ids;
+  }, [layers]);
+
+  const addonSourceOptions = useMemo(
+    () => sources.filter((s) => !attachedSourceIds.has(s.id)),
+    [sources, attachedSourceIds],
+  );
+
+  useEffect(() => {
+    if (addonSourceId && !addonSourceOptions.some((s) => String(s.id) === addonSourceId)) {
+      setAddonSourceId("");
+    }
+  }, [addonSourceId, addonSourceOptions]);
 
   const sourceById = useMemo(() => {
     const map = new Map<number, SourceSummary>();
@@ -172,6 +260,19 @@ function BuildPageContent() {
     await Promise.all([flushImportRules(), flushKitManifest()]);
   }, [flushImportRules, flushKitManifest]);
 
+  useAutoRecompute({
+    profileId: selectedProfileId,
+    stale: buildStale,
+    enabled: autoRecomputeEnabled,
+    beforeRecompute: flushPendingSaves,
+    onDone: () => {
+      bumpPlanRevision();
+      setFilamentRefreshKey((k) => k + 1);
+      if (selectedProfileId != null) void loadProfileData(selectedProfileId);
+      void reloadProfiles();
+    },
+  });
+
   useEffect(() => {
     return () => {
       void flushPendingSaves();
@@ -201,12 +302,14 @@ function BuildPageContent() {
           toast.error(snap.message || "Update build failed");
           return;
         }
-        toast.success("Build updated");
+        pendingConflictCheckRef.current = true;
         bumpPlanRevision();
         setFilamentRefreshKey((k) => k + 1);
         void loadProfileData(selectedProfileId);
         void reloadProfiles();
+        void reloadReview();
       },
+      { profileId: selectedProfileId },
     );
   };
 
@@ -215,11 +318,7 @@ function BuildPageContent() {
     void exportStlJob.runJob(
       () => startExportStlPack(selectedProfileId, { group_by: groupBy }),
       (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "STL export failed");
-          return;
-        }
-        completeExportDownload("STL export", snap.result, { pathField: "root_path" });
+        handleStlPackExportJobDone("STL export", snap, { pathField: "root_path" });
       },
     );
   };
@@ -340,13 +439,39 @@ function BuildPageContent() {
         }
       />
 
-      <p className="text-sm text-muted-foreground">
-        <Button variant="ghost" className="h-auto px-0 text-sm text-primary" asChild>
-          <Link to={buildsRoute(selectedProfileId)}>Manage builds</Link>
-        </Button>
-        {" "}
-        — create, rename, duplicate, or delete plans.
-      </p>
+      <PlanManager
+        disabled={!health}
+        collapsible
+        defaultOpen={profiles.length === 0 || selectedProfileId == null}
+      />
+
+      <StaleBuildBanner stale={buildStale} busy={busy} onUpdate={() => void onUpdateBuild()} />
+
+      {!buildStale && mergeConflicts.length > 0 && (
+        <MergeConflictBanner
+          conflictCount={mergeConflicts.length}
+          groupedByFilename={mergeConflictGroups}
+          profileId={selectedProfileId}
+        />
+      )}
+
+      {!health ? null : profiles.length === 0 ? (
+        <EmptyState
+          icon={Hammer}
+          title="No build plan yet"
+          description="Use Manage builds above to create a plan, then attach sources and pick STL files below."
+          action={{
+            label: "Create build",
+            onClick: openCreatePlan,
+          }}
+        />
+      ) : selectedProfileId == null ? (
+        <EmptyState
+          icon={Hammer}
+          title="Select a build plan"
+          description="Choose a plan in Manage builds above or the header dropdown."
+        />
+      ) : null}
 
       {kitImportSetup &&
         ((kitImportSetup.unmatched_sources?.length ?? 0) > 0 ||
@@ -375,9 +500,14 @@ function BuildPageContent() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" asChild>
-                <Link to={sourcesRoute()}>Manage sources</Link>
-              </Button>
+              {selectedProfileId != null && (
+                <BuildSourcesPanel
+                  profileId={selectedProfileId}
+                  layers={layers}
+                  onLayersChange={setLayers}
+                  disabled={!health || busy}
+                />
+              )}
               <Button
                 variant="ghost"
                 size="sm"
@@ -404,19 +534,22 @@ function BuildPageContent() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-2 p-4 pt-0">
-                <select
-                  className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-                  value={pendingBaseSourceId}
+                <Select
+                  value={pendingBaseSourceId || undefined}
+                  onValueChange={setPendingBaseSourceId}
                   disabled={!health || selectedProfileId == null}
-                  onChange={(e) => setPendingBaseSourceId(e.target.value)}
                 >
-                  <option value="">Choose base source…</option>
-                  {sources.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose base source…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sources.map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button
                   size="sm"
                   onClick={() => void onSetBaseSource()}
@@ -449,28 +582,39 @@ function BuildPageContent() {
                   <KitManifestOptions
                     profileId={selectedProfileId}
                     baseSourceName={row.sourceName}
+                    buildStale={buildStale}
                     disabled={!health || busy}
                     compact
                   />
                 ) : undefined
               }
+              meshColorForPath={resolvePreviewMeshColor}
             />
           ))}
 
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <select
-              className="min-h-10 w-full min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-2 text-base sm:py-1.5 sm:text-sm"
-              value={addonSourceId}
-              onChange={(e) => setAddonSourceId(e.target.value)}
+            <Select
+              value={addonSourceId || undefined}
+              onValueChange={setAddonSourceId}
               disabled={!health || selectedProfileId == null || needsBaseSource}
             >
-              <option value="">Add addon…</option>
-              {sources.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="min-h-10 w-full min-w-0 flex-1 sm:w-auto">
+                <SelectValue placeholder="Add addon…" />
+              </SelectTrigger>
+              <SelectContent>
+                {addonSourceOptions.length === 0 ? (
+                  <SelectItem value="__none" disabled>
+                    All sources already attached
+                  </SelectItem>
+                ) : (
+                  addonSourceOptions.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      {s.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
             <Button
               size="sm"
               className="min-h-10 w-full sm:w-auto"
@@ -499,9 +643,7 @@ function BuildPageContent() {
           <h3 className="mb-1 mt-4 text-sm font-semibold">Colors by role</h3>
           <p className="mb-3 text-xs text-muted-foreground">
             Pick a filament color for each role — it applies to every included part with that role.
-            Review and Checkoff update automatically; use{" "}
-            <strong className="font-medium text-foreground">Apply all role colors</strong> after
-            importing a preset or if previews look stale.
+            Review and Checkoff previews update automatically when you change a color.
           </p>
           {selectedProfileId == null ? (
             <p className="text-sm text-muted-foreground">Select a build plan in the header first.</p>
@@ -510,7 +652,8 @@ function BuildPageContent() {
               profileId={selectedProfileId}
               disabled={!health || busy}
               refreshKey={filamentRefreshKey}
-              onUpdated={() => bumpPlanRevision()}
+              onRolesChange={setRoleFilaments}
+              onUpdated={onRoleFilamentsUpdated}
             />
           )}
         </section>

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BookOpen, ChevronDown, ChevronRight } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, Maximize2 } from "lucide-react";
 import ImportRulesTree from "./ImportRulesTree";
 import Preview3D from "./Preview3D";
+import PartPreviewDialog from "./parts/PartPreviewDialog";
 import SourceDocsSheet from "./sources/SourceDocsSheet";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -34,6 +35,8 @@ type Props = {
   onRemove?: () => void;
   /** Shown inside expanded card (e.g. kit manifest variants for base layer). */
   expandedExtra?: ReactNode;
+  /** Resolve mesh color from the selected STL path (role filament defaults). */
+  meshColorForPath?: (relativePath: string) => string | undefined;
 };
 
 function syncLabel(
@@ -56,6 +59,7 @@ export default function SourceFilePickerCard({
   onChangeSource,
   onRemove,
   expandedExtra,
+  meshColorForPath,
 }: Props) {
   const { formatDate } = useDateFormat();
   const expandedKey = `pp-build-source-${sourceId}-expanded`;
@@ -76,7 +80,9 @@ export default function SourceFilePickerCard({
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [selectedCount, setSelectedCount] = useState(0);
   const [totalFiles, setTotalFiles] = useState(0);
+  const [duplicateBasenames, setDuplicateBasenames] = useState<string[]>([]);
   const [docsOpen, setDocsOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const onSaved = useCallback(
     (rules: string[]) => {
@@ -174,6 +180,11 @@ export default function SourceFilePickerCard({
     const parts = selectedFilePath.split("/");
     return parts[parts.length - 1] || selectedFilePath;
   }, [selectedFilePath]);
+
+  const previewMeshColor = useMemo(() => {
+    if (!selectedFilePath || !meshColorForPath) return undefined;
+    return meshColorForPath(selectedFilePath);
+  }, [selectedFilePath, meshColorForPath]);
 
   const selectionLabel =
     totalFiles > 0 ? `${selectedCount} of ${totalFiles} STL file(s) selected` : null;
@@ -299,6 +310,19 @@ export default function SourceFilePickerCard({
               </Button>
             )}
           </div>
+          {duplicateBasenames.length > 0 && (
+            <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-muted-foreground">
+              <strong className="font-medium text-foreground">Duplicate filenames selected</strong>
+              {" — "}
+              {duplicateBasenames.slice(0, 4).join(", ")}
+              {duplicateBasenames.length > 4
+                ? ` (+${duplicateBasenames.length - 4} more)`
+                : ""}
+              . Overlapping import rules may cause merge conflicts — narrow rules or exclude extras
+              on Review after{" "}
+              <strong className="font-medium text-foreground">Update build</strong>.
+            </p>
+          )}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]">
             <ImportRulesTree
               key={sourceId}
@@ -308,19 +332,36 @@ export default function SourceFilePickerCard({
               selectedFilePath={selectedFilePath}
               onFileSelect={setSelectedFilePath}
               onRulesChange={onPendingRulesChange}
-              onSelectionStats={(selected, total) => {
+              onSelectionStats={(selected, total, duplicates) => {
                 setSelectedCount(selected);
                 setTotalFiles(total);
+                setDuplicateBasenames(duplicates);
               }}
             />
-            <aside className="rounded-md border border-border bg-muted/20 p-3">
-              <h4 className="mb-2 text-xs font-semibold text-muted-foreground">STL preview</h4>
+            <aside className="relative rounded-md border border-border bg-muted/20 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h4 className="text-xs font-semibold text-muted-foreground">STL preview</h4>
+                {selectedFilePath && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                    aria-label="Open larger preview"
+                    onClick={() => setPreviewOpen(true)}
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+                    Expand
+                  </Button>
+                )}
+              </div>
               <Preview3D
                 partId={null}
                 sourceId={sourceId}
                 relativePath={selectedFilePath}
                 preferSource
                 filename={previewFilename}
+                meshColor={previewMeshColor}
                 className="min-h-[220px]"
               />
               <p className="mt-2 text-xs text-muted-foreground">
@@ -336,6 +377,22 @@ export default function SourceFilePickerCard({
         sourceName={sourceName}
         open={docsOpen}
         onOpenChange={setDocsOpen}
+      />
+
+      <PartPreviewDialog
+        part={
+          previewOpen && selectedFilePath
+            ? {
+                sourceId,
+                relativePath: selectedFilePath,
+                filename: previewFilename ?? selectedFilePath,
+                filament_hex: previewMeshColor,
+                preferSource: true,
+              }
+            : null
+        }
+        size="large"
+        onClose={() => setPreviewOpen(false)}
       />
     </Card>
   );

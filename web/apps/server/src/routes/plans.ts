@@ -5,8 +5,11 @@ import { applyManifestToProfile } from "../services/manifest-apply.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
 import { buildPlanManifestBuilder } from "../services/plan-manifest-builder.js";
 import { preloadSpoolmanForColorIds, enrichRoleFilamentRows } from "../services/filament-resolve.js";
-import { clearPlanThumbnailCache } from "../services/plan-thumbnails.js";
+import { clearPartThumbnailCacheAtHexes, clearPlanThumbnailCache } from "../services/plan-thumbnails.js";
 import { canonicalRoleOrder, loadRoleFilamentDefaults } from "../services/role-filament-store.js";
+import { resolvePartFilamentHex } from "../services/filament-catalog.js";
+import { resolvePartStl } from "../services/part-paths.js";
+import { normalizePartRole } from "../services/role-filament.js";
 
 type RouteDeps = { repo: AppRepository; dataDir: string; thumbsDir: string };
 
@@ -109,7 +112,14 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       deps.repo.addAddonLayer(id, Number(body.project_id));
       return { profile_id: id, layers: deps.repo.getProfileLayers(id) };
     } catch (e) {
-      return reply.status(404).send({ detail: e instanceof Error ? e.message : String(e) });
+      const detail = e instanceof Error ? e.message : String(e);
+      if (detail.includes("already attached")) {
+        return reply.status(409).send({ detail });
+      }
+      if (detail === "Project not found") {
+        return reply.status(404).send({ detail });
+      }
+      return reply.status(400).send({ detail });
     }
   });
 
@@ -196,8 +206,12 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
     };
     const role = String(body.role ?? "").trim();
     if (!role) return reply.status(400).send({ detail: "role is required" });
+    const normalizedRole = normalizePartRole(role);
     const spoolRef =
       body.spoolman_spool_id !== undefined ? body.spoolman_spool_id : undefined;
+    const partsBeforeUpdate = deps.repo
+      .getProfilePartRows(id)
+      .filter((p) => p.included && normalizePartRole(p.role) === normalizedRole);
     const updated = deps.repo.bulkSetRoleFilament(
       id,
       role,
@@ -206,10 +220,21 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       spoolRef,
     );
     const refreshThumbnails = body.refresh_thumbnails !== false;
-    const thumbnails_cleared =
-      refreshThumbnails && updated > 0
-        ? clearPlanThumbnailCache(deps.repo, deps.thumbsDir, id, { role })
-        : 0;
+    let thumbnails_cleared = 0;
+    if (refreshThumbnails) {
+      for (const before of partsBeforeUpdate) {
+        const stl = resolvePartStl(deps.repo, before);
+        if (!stl) continue;
+        const after = deps.repo.getPartRow(before.id);
+        const newHex = after ? resolvePartFilamentHex(after) : null;
+        thumbnails_cleared += clearPartThumbnailCacheAtHexes(
+          deps.thumbsDir,
+          stl,
+          normalizedRole,
+          [resolvePartFilamentHex(before), newHex],
+        );
+      }
+    }
     const roles = deps.repo.getRoleFilaments(id);
     await enrichRoleFilamentRows(roles, { repo: deps.repo, dataDir: deps.dataDir });
     return { updated, thumbnails_cleared, roles };

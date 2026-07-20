@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
 import type { PlanReview, ReviewPart, RoleFilamentRow, SpoolmanSpoolRow } from "../../api/engine";
 import { fetchRoleFilaments, fetchSpoolmanSpools } from "../../api/engine";
 import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
@@ -23,6 +22,7 @@ import { useProfileSelection } from "../../context/ProfileContext";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import PartPreviewDialog from "../parts/PartPreviewDialog";
 import PartThumbExpandButton from "../parts/PartThumbExpandButton";
+import FilterSelect, { filterSelectOut, filterSelectValue } from "./FilterSelect";
 import PartSpoolPicker from "../PartSpoolPicker";
 import SpoolRemainingBadge from "../SpoolRemainingBadge";
 import ReviewSheetMobileCard from "./ReviewSheetMobileCard";
@@ -271,7 +271,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
   }, []);
 
   const onQtyChange = (part: ReviewPart, next: number) => {
-    void setQuantity(part.id, next).then(() => toast.success("Quantity updated"));
+    void setQuantity(part.id, next);
   };
 
   const onRemove = (part: ReviewPart) => setRemoveTarget(part);
@@ -280,13 +280,11 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
     if (!removeTarget) return;
     const target = removeTarget;
     setRemoveTarget(null);
-    void setIncluded(target.id, false).then(() =>
-      toast.success(`Removed ${target.filename}`),
-    );
+    void setIncluded(target.id, false);
   };
 
   const onRestore = (part: ReviewPart) => {
-    void setIncluded(part.id, true).then(() => toast.success(`Restored ${part.filename}`));
+    void setIncluded(part.id, true);
   };
 
   const onSpoolChange = (partId: number, spoolman_spool_id: string | null) => {
@@ -315,95 +313,87 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
         />
 
         <div className="flex flex-wrap gap-2">
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs"
-            value={ui.printFilter}
-            onChange={(e) =>
-              patchUi({ printFilter: e.target.value as PersistedReviewPartsUi["printFilter"] })
-            }
+          <FilterSelect
             aria-label="Print status"
-          >
-            <option value="all">Print: all</option>
-            <option value="missing">Missing</option>
-            <option value="partial">Partial</option>
-            <option value="complete">Complete</option>
-          </select>
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs"
-            value={ui.includedFilter}
-            onChange={(e) =>
-              patchUi({
-                includedFilter: e.target.value as PersistedReviewPartsUi["includedFilter"],
-              })
+            value={ui.printFilter}
+            onValueChange={(v) =>
+              patchUi({ printFilter: v as PersistedReviewPartsUi["printFilter"] })
             }
+            options={[
+              { value: "all", label: "Print: all" },
+              { value: "missing", label: "Missing" },
+              { value: "partial", label: "Partial" },
+              { value: "complete", label: "Complete" },
+            ]}
+            disabled={disabled}
+          />
+          <FilterSelect
             aria-label="Included filter"
-          >
-            <option value="included">Included only</option>
-            <option value="excluded">Excluded only</option>
-            <option value="all">All parts</option>
-          </select>
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs max-w-[10rem]"
-            value={ui.sourceLayer ?? ""}
-            onChange={(e) => patchUi({ sourceLayer: e.target.value || null })}
+            value={ui.includedFilter}
+            onValueChange={(v) =>
+              patchUi({ includedFilter: v as PersistedReviewPartsUi["includedFilter"] })
+            }
+            options={[
+              { value: "included", label: "Included only" },
+              { value: "excluded", label: "Excluded only" },
+              { value: "all", label: "All parts" },
+            ]}
+            disabled={disabled}
+          />
+          <FilterSelect
             aria-label="Source layer"
-          >
-            <option value="">All sources</option>
-            {facets.sourceLayers.map((layer) => (
-              <option key={layer} value={layer}>
-                {sourceLabelFromLayer(layer)}
-              </option>
-            ))}
-          </select>
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs max-w-[10rem]"
-            value={ui.folder ?? ""}
-            onChange={(e) => patchUi({ folder: e.target.value || null })}
+            value={filterSelectOut(ui.sourceLayer)}
+            onValueChange={(v) => patchUi({ sourceLayer: filterSelectValue(v) || null })}
+            options={[
+              { value: "__empty", label: "All sources" },
+              ...facets.sourceLayers.map((layer) => ({
+                value: layer,
+                label: sourceLabelFromLayer(layer),
+              })),
+            ]}
+            disabled={disabled}
+          />
+          <FilterSelect
             aria-label="Folder"
-          >
-            <option value="">All folders</option>
-            {facets.folders.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs"
-            value={ui.role ?? ""}
-            onChange={(e) => patchUi({ role: e.target.value || null })}
+            value={filterSelectOut(ui.folder)}
+            onValueChange={(v) => patchUi({ folder: filterSelectValue(v) || null })}
+            options={[
+              { value: "__empty", label: "All folders" },
+              ...facets.folders.map((f) => ({ value: f, label: f })),
+            ]}
+            disabled={disabled}
+          />
+          <FilterSelect
             aria-label="Role"
-          >
-            <option value="">All roles</option>
-            {facets.roles.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs max-w-[10rem]"
-            value={ui.filament ?? ""}
-            onChange={(e) => patchUi({ filament: e.target.value || null })}
+            value={filterSelectOut(ui.role)}
+            onValueChange={(v) => patchUi({ role: filterSelectValue(v) || null })}
+            options={[
+              { value: "__empty", label: "All roles" },
+              ...facets.roles.map((r) => ({ value: r, label: r })),
+            ]}
+            disabled={disabled}
+          />
+          <FilterSelect
             aria-label="Filament"
-          >
-            <option value="">All filaments</option>
-            {facets.filaments.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
-          <select
-            className="h-9 rounded-md border border-input bg-background px-2 text-xs"
-            value={ui.sort}
-            onChange={(e) => patchUi({ sort: e.target.value as PersistedReviewPartsUi["sort"] })}
+            value={filterSelectOut(ui.filament)}
+            onValueChange={(v) => patchUi({ filament: filterSelectValue(v) || null })}
+            options={[
+              { value: "__empty", label: "All filaments" },
+              ...facets.filaments.map((f) => ({ value: f, label: f })),
+            ]}
+            disabled={disabled}
+          />
+          <FilterSelect
             aria-label="Sort"
-          >
-            <option value="folder">Sort: folder</option>
-            <option value="filename">Sort: filename</option>
-            <option value="qty">Sort: quantity</option>
-          </select>
+            value={ui.sort}
+            onValueChange={(v) => patchUi({ sort: v as PersistedReviewPartsUi["sort"] })}
+            options={[
+              { value: "folder", label: "Sort: folder" },
+              { value: "filename", label: "Sort: filename" },
+              { value: "qty", label: "Sort: quantity" },
+            ]}
+            disabled={disabled}
+          />
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-sm">

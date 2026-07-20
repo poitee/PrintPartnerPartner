@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { getDb, SqliteDatabase } from "./db/client.js";
 import { AppRepository } from "./db/repository.js";
 import { globalThumbnailPath } from "./lib/thumbnails.js";
-import { clearPlanThumbnailCache } from "./services/plan-thumbnails.js";
+import { clearPartThumbnailCacheAtHexes, clearPlanThumbnailCache } from "./services/plan-thumbnails.js";
 import { canonicalRoleOrder, loadRoleFilamentDefaults } from "./services/role-filament-store.js";
 import { resolvePartFilamentHex } from "./services/filament-catalog.js";
 import { resolvePartStl } from "./services/part-paths.js";
@@ -41,6 +41,32 @@ describe("clearPlanThumbnailCache", () => {
     expect(cleared).toBeGreaterThan(0);
 
     sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("clearPartThumbnailCacheAtHexes", () => {
+  it("clears both previous and new filament color caches", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-thumb-hexes-"));
+    const thumbsDir = join(dir, "thumbs");
+    mkdirSync(thumbsDir, { recursive: true });
+    const stlPath = join(dir, "widget.stl");
+    writeFileSync(stlPath, "solid widget");
+
+    const oldHex = "#c41230";
+    const newHex = "#000000";
+    const oldThumb = globalThumbnailPath(thumbsDir, stlPath, "primary", oldHex);
+    const newThumb = globalThumbnailPath(thumbsDir, stlPath, "primary", newHex);
+    mkdirSync(join(oldThumb, ".."), { recursive: true });
+    writeFileSync(oldThumb, Buffer.from("old"));
+    writeFileSync(newThumb, Buffer.from("new"));
+
+    const cleared = clearPartThumbnailCacheAtHexes(thumbsDir, stlPath, "primary", [
+      oldHex,
+      newHex,
+    ]);
+    expect(cleared).toBeGreaterThanOrEqual(2);
+
     rmSync(dir, { recursive: true, force: true });
   });
 });
