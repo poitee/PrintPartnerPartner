@@ -5,6 +5,7 @@ import { Hammer, Layers } from "lucide-react";
 import StaleBuildBanner from "../components/StaleBuildBanner";
 import MergeConflictBanner from "../components/MergeConflictBanner";
 import BuildSourcesPanel from "../components/build/BuildSourcesPanel";
+import BuildRecipePanel from "../components/build/BuildRecipePanel";
 import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -71,6 +72,7 @@ import { usePlanActions } from "../context/PlanActionsContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
+import { useCopilotUiOptional } from "../context/CopilotUiContext";
 import { useAutoRecompute } from "../hooks/useAutoRecompute";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
@@ -79,6 +81,20 @@ import { meshColorForStlPath } from "../lib/rolePreviewColor";
 
 type BuildLocationState = {
   kitImport?: KitImportJobResult;
+  focusKit?: {
+    groupId?: string;
+    stlFilter?: string;
+    sourceName?: string;
+    sourceId?: number;
+  };
+};
+
+type KitFocusState = {
+  groupId?: string;
+  stlFilter?: string;
+  sourceName?: string;
+  sourceId?: number;
+  seq: number;
 };
 
 export default function BuildPage() {
@@ -94,7 +110,9 @@ function BuildPageContent() {
   const { invalidate: bumpPlanRevision, review, invalidate: reloadReview } = usePlanWorkspace();
   const { busy, runJob } = useJobRunner("recompute");
   const exportStlJob = useJobRunner("stl-export");
+  const copilot = useCopilotUiOptional();
   const pendingConflictCheckRef = useRef(false);
+  const appliedIntentSeqRef = useRef(0);
 
   const [layers, setLayers] = useState<ProfileLayer[]>([]);
   const [sources, setSources] = useState<SourceSummary[]>([]);
@@ -108,6 +126,7 @@ function BuildPageContent() {
   const [autoRecomputeEnabled, setAutoRecomputeEnabled] = useState(true);
   const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
   const [namingProfile, setNamingProfile] = useState<StlNamingProfile>(DEFAULT_STL_NAMING_PROFILE);
+  const [kitFocus, setKitFocus] = useState<KitFocusState | null>(null);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
   const buildStale = selectedProfile?.build_stale ?? false;
@@ -160,6 +179,17 @@ function BuildPageContent() {
       window.history.replaceState({}, document.title);
       return;
     }
+    if (state?.focusKit) {
+      setKitFocus({
+        groupId: state.focusKit.groupId,
+        stlFilter: state.focusKit.stlFilter,
+        sourceName: state.focusKit.sourceName,
+        sourceId: state.focusKit.sourceId,
+        seq: Date.now(),
+      });
+      window.history.replaceState({}, document.title);
+      return;
+    }
     // Fall back to the sessionStorage stash in case location.state was dropped
     // by an intervening navigation (e.g. ?profile= URL sync).
     if (selectedProfileId != null) {
@@ -167,6 +197,31 @@ function BuildPageContent() {
       if (stashed) setKitImportSetup(stashed);
     }
   }, [location.state, selectedProfileId]);
+
+  // Same-route re-opens via intentSeq (survives late-loaded layers).
+  useEffect(() => {
+    if (!copilot || copilot.intentSeq === 0) return;
+    if (copilot.intentSeq === appliedIntentSeqRef.current) return;
+    const intent = copilot.lastIntent;
+    if (!intent || intent.kind !== "focus_kit_option") return;
+    appliedIntentSeqRef.current = copilot.intentSeq;
+    setKitFocus({
+      groupId: intent.groupId,
+      stlFilter: intent.stlFilter,
+      sourceName: intent.sourceName,
+      sourceId: intent.sourceId,
+      seq: copilot.intentSeq,
+    });
+  }, [copilot, copilot?.intentSeq]);
+
+  useEffect(() => {
+    if (!kitFocus) return;
+    const bits = [
+      kitFocus.groupId ? `option “${kitFocus.groupId}”` : null,
+      kitFocus.stlFilter ? `STL filter “${kitFocus.stlFilter}”` : null,
+    ].filter(Boolean);
+    if (bits.length) toast.message(`Build · ${bits.join(" · ")}`);
+  }, [kitFocus?.seq]); // eslint-disable-line react-hooks/exhaustive-deps -- toast once per focus seq
 
   const loadProfileData = useCallback(async (profileId: number) => {
     setLoadError(null);
@@ -519,6 +574,10 @@ function BuildPageContent() {
             </div>
           </div>
 
+          {selectedProfileId != null && (
+            <BuildRecipePanel profileId={selectedProfileId} />
+          )}
+
           {needsBaseSource && (
             <Card className="border-dashed">
               <CardHeader className="p-4">
@@ -561,7 +620,17 @@ function BuildPageContent() {
             </Card>
           )}
 
-          {sourceCardLayers.map((row, index) => (
+          {sourceCardLayers.map((row, index) => {
+            const focusMatchesSource =
+              kitFocus != null &&
+              ((kitFocus.sourceId != null && kitFocus.sourceId === row.sourceId) ||
+                (kitFocus.sourceName != null &&
+                  kitFocus.sourceName.toLowerCase() === row.sourceName.toLowerCase()) ||
+                (kitFocus.sourceId == null &&
+                  kitFocus.sourceName == null &&
+                  (Boolean(kitFocus.groupId) || Boolean(kitFocus.stlFilter)) &&
+                  row.layerType === "base"));
+            return (
             <SourceFilePickerCard
               key={row.key}
               sourceId={row.sourceId}
@@ -571,6 +640,9 @@ function BuildPageContent() {
               allSources={sources}
               disabled={!health || busy}
               defaultExpanded={index === 0}
+              forceExpanded={focusMatchesSource}
+              stlFilter={focusMatchesSource ? kitFocus?.stlFilter ?? null : null}
+              stlFilterFocusSeq={focusMatchesSource ? kitFocus?.seq ?? 0 : 0}
               onChangeSource={(projectId) => void onChangeLayerProject(row.layer, projectId)}
               onRemove={
                 row.layerType === "addon"
@@ -585,12 +657,15 @@ function BuildPageContent() {
                     buildStale={buildStale}
                     disabled={!health || busy}
                     compact
+                    focusGroupId={kitFocus?.groupId ?? null}
+                    focusSeq={kitFocus?.seq ?? 0}
                   />
                 ) : undefined
               }
               meshColorForPath={resolvePreviewMeshColor}
             />
-          ))}
+            );
+          })}
 
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <Select

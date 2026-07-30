@@ -17,6 +17,7 @@ import { runExport3mfJob } from "../services/export-3mf-job.js";
 import { runPackPreviewJob } from "../services/plate-workspace.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import { tenantStorage } from "../middleware/tenant-context.js";
+import { extractPendingPdfsForSource } from "../services/source-docs-index.js";
 
 export type JobHandler = (
   jobId: string,
@@ -28,6 +29,7 @@ export type JobRunnerDeps = {
   reposDir: string;
   exportsDir: string;
   dataDir: string;
+  sourceDocsMaxBytes?: number;
 };
 
 export type JobListFilters = {
@@ -166,12 +168,19 @@ export class InProcessJobRunner {
       try {
         let result: Record<string, unknown>;
         if (kind === "sync") {
-          result = await this.runSync(payload);
+          result = await this.runSync(jobId, payload);
         } else if (kind === "recompute") {
           result = await this.runRecompute(payload);
         } else if (kind === "import-scan") {
           const projectId = Number(payload.project_id);
-          result = await syncProjectById(this.repo, this.deps.reposDir, projectId);
+          result = await syncProjectById(this.repo, this.deps.reposDir, projectId, undefined, {
+            maxDocsBytes: this.deps.sourceDocsMaxBytes,
+            onProgress: (patch) => this.emit(jobId, patch),
+            enqueuePdfExtract: (pid) =>
+              this.start("extract-source-docs", { project_id: pid }, tenantId),
+          });
+        } else if (kind === "extract-source-docs") {
+          result = await this.runExtractSourceDocs(jobId, payload);
         } else if (kind === "check-source-updates") {
           result = await checkAllSourceUpdates(this.repo);
         } else if (kind === "export-stl-pack") {
@@ -188,7 +197,11 @@ export class InProcessJobRunner {
           result = { stub: true, kind, payload };
         }
         const doneMessage =
-          kind === "export-stl-pack" ? exportStlPackJobMessage(result) : "Complete";
+          kind === "export-stl-pack"
+            ? exportStlPackJobMessage(result)
+            : kind === "sync" && Number(result.failed ?? 0) > 0
+              ? `Synced ${result.synced ?? 0}, ${result.failed} failed — check Settings → GitHub PAT if rate-limited`
+              : "Complete";
         this.emit(jobId, {
           status: "done",
           message: doneMessage,
@@ -210,15 +223,82 @@ export class InProcessJobRunner {
     });
   }
 
-  private async runSync(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async runSync(
+    jobId: string,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
     const ids = Array.isArray(payload.project_ids)
       ? (payload.project_ids as number[])
       : this.repo.listProjectIds();
+    const tenantId = String(payload._tenant_id ?? "default");
     const results: Array<Record<string, unknown>> = [];
-    for (const id of ids) {
-      results.push({ project_id: id, ...(await syncProjectById(this.repo, this.deps.reposDir, id)) });
+    const failures: Array<{ project_id: number; name: string | null; error: string }> = [];
+    const hasPat = Boolean(this.repo.getSetting("github_pat")?.trim());
+    if (!hasPat && ids.length > 10) {
+      this.emit(jobId, {
+        message:
+          "No GitHub PAT configured — unauthenticated API limit is 60/hour. Add a token in Settings → GitHub PAT for bulk sync.",
+        progress: 2,
+      });
     }
-    return { synced: results.length, results };
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i]!;
+      const row = this.repo.getProjectRow(id);
+      this.emit(jobId, {
+        message: `Syncing ${row?.name ?? `source ${id}`} (${i + 1}/${ids.length})`,
+        progress: Math.round((i / Math.max(ids.length, 1)) * 90),
+      });
+      try {
+        results.push({
+          project_id: id,
+          ...(await syncProjectById(this.repo, this.deps.reposDir, id, undefined, {
+            maxDocsBytes: this.deps.sourceDocsMaxBytes,
+            onProgress: (patch) => this.emit(jobId, patch),
+            enqueuePdfExtract: (pid) =>
+              this.start("extract-source-docs", { project_id: pid }, tenantId),
+          })),
+        });
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        const isRateLimit = /rate limit exceeded/i.test(errMsg);
+        const friendly = isRateLimit
+          ? `${errMsg} Add a GitHub PAT in Settings to raise the limit from 60/hour to 5,000/hour.`
+          : errMsg;
+        failures.push({ project_id: id, name: row?.name ?? null, error: friendly });
+        if (isRateLimit) {
+          // Remaining sources will also fail without a PAT — stop early.
+          for (let j = i + 1; j < ids.length; j++) {
+            const skipped = this.repo.getProjectRow(ids[j]!);
+            failures.push({
+              project_id: ids[j]!,
+              name: skipped?.name ?? null,
+              error: "Skipped — GitHub API rate limit exceeded. Add a PAT in Settings and retry.",
+            });
+          }
+          break;
+        }
+        // Continue with other sources (bad branch / missing repo should not abort the whole batch).
+        continue;
+      }
+    }
+    if (results.length === 0 && failures.length > 0) {
+      throw new Error(failures.map((f) => `${f.name ?? f.project_id}: ${f.error}`).join("; "));
+    }
+    return { synced: results.length, failed: failures.length, results, failures };
+  }
+
+  private async runExtractSourceDocs(
+    jobId: string,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const projectId = Number(payload.project_id);
+    const row = this.repo.getProjectRow(projectId);
+    if (!row?.localPath) throw new Error("Source has no local path");
+    this.emit(jobId, { message: "Extracting PDF text…", progress: 15 });
+    const result = await extractPendingPdfsForSource(this.repo, projectId, row.localPath, {
+      onProgress: (msg, progress) => this.emit(jobId, { message: msg, progress }),
+    });
+    return { project_id: projectId, ...result };
   }
 
   private async runRecompute(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -338,6 +418,36 @@ export class InProcessJobRunner {
     return this.jobs.get(jobId) ?? null;
   }
 
+  /** Wait until a job reaches a terminal status (or timeout). */
+  async waitForTerminal(
+    jobId: string,
+    timeoutMs = 120_000,
+  ): Promise<JobSnapshot> {
+    const isTerminal = (s: JobSnapshot) =>
+      s.status === "done" || s.status === "error" || s.status === "cancelled";
+
+    return new Promise<JobSnapshot>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        unsub();
+        reject(new Error(`Job ${jobId} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      const unsub = this.subscribe(jobId, (event) => {
+        if (isTerminal(event)) {
+          clearTimeout(timer);
+          unsub();
+          resolve(event);
+        }
+      });
+      // Close race: job may have finished between start and subscribe.
+      const existing = this.jobs.get(jobId);
+      if (existing && isTerminal(existing)) {
+        clearTimeout(timer);
+        unsub();
+        resolve(existing);
+      }
+    });
+  }
+
   async cancel(jobId: string): Promise<boolean> {
     const snap = this.jobs.get(jobId);
     if (!snap || snap.status === "done" || snap.status === "error" || snap.status === "cancelled") {
@@ -385,6 +495,16 @@ export async function registerJobRoutes(
 
   app.post("/jobs/check-source-updates", async (request) => {
     const job_id = await jobs.start("check-source-updates", {}, request.tenantId);
+    return { job_id };
+  });
+
+  app.post("/jobs/extract-source-docs", async (request) => {
+    const body = request.body as { project_id?: number };
+    const job_id = await jobs.start(
+      "extract-source-docs",
+      { project_id: body.project_id },
+      request.tenantId,
+    );
     return { job_id };
   });
 
@@ -502,11 +622,22 @@ export function registerJobWebSocket(
   });
 }
 
-export function createJobRunner(getRepo: () => AppRepository, dataDir: string): InProcessJobRunner {
+export function createJobRunner(
+  getRepo: () => AppRepository,
+  dataDir: string,
+  options?: { sourceDocsMaxBytes?: number },
+): InProcessJobRunner {
+  const maxDocs =
+    options?.sourceDocsMaxBytes ??
+    (() => {
+      const raw = Number(process.env.SOURCE_DOCS_MAX_BYTES ?? 1024 * 1024 * 1024);
+      return Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 1024 * 1024 * 1024;
+    })();
   return new InProcessJobRunner({
     getRepo,
     reposDir: join(dataDir, "repos"),
     exportsDir: join(dataDir, "exports"),
     dataDir,
+    sourceDocsMaxBytes: maxDocs,
   });
 }

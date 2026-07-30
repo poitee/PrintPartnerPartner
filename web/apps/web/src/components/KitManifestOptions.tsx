@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   fetchPlanKitManifest,
@@ -24,6 +24,10 @@ type Props = {
   disabled?: boolean;
   /** Nested inside a source card — omit outer card chrome. */
   compact?: boolean;
+  /** Copilot: kit option group id to expand/scroll/highlight. */
+  focusGroupId?: string | null;
+  /** Bump when copilot re-applies focus. */
+  focusSeq?: number;
 };
 
 function groupLabel(groupId: string, group: RepoManifestOptionGroup): string {
@@ -40,6 +44,8 @@ export default function KitManifestOptions({
   buildStale = false,
   disabled = false,
   compact = false,
+  focusGroupId = null,
+  focusSeq = 0,
 }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -48,6 +54,10 @@ export default function KitManifestOptions({
   const [pendingSelections, setPendingSelections] = useState<Record<string, string>>({});
   const [userEdited, setUserEdited] = useState(false);
   const [optionGroups, setOptionGroups] = useState<Record<string, RepoManifestOptionGroup>>({});
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [highlightGroupId, setHighlightGroupId] = useState<string | null>(null);
+  const appliedFocusSeqRef = useRef(0);
+  const groupRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const { registerFlush, unregisterFlush } = useKitManifestSaveRegistry();
 
@@ -135,6 +145,26 @@ export default function KitManifestOptions({
       ),
     [optionGroups],
   );
+
+  useEffect(() => {
+    if (!focusSeq || focusSeq === appliedFocusSeqRef.current) return;
+    if (!focusGroupId || !loaded) return;
+    appliedFocusSeqRef.current = focusSeq;
+    const match = visibleGroups.find(
+      ([gid, group]) =>
+        gid === focusGroupId ||
+        gid.toLowerCase() === focusGroupId.toLowerCase() ||
+        groupLabel(gid, group).toLowerCase() === focusGroupId.toLowerCase(),
+    );
+    const targetId = match?.[0] ?? focusGroupId;
+    setDetailsOpen(true);
+    setHighlightGroupId(targetId);
+    requestAnimationFrame(() => {
+      groupRefs.current.get(targetId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+    const t = window.setTimeout(() => setHighlightGroupId(null), 3500);
+    return () => window.clearTimeout(t);
+  }, [focusSeq, focusGroupId, loaded, visibleGroups]);
 
   const onPickVariant = (groupId: string, variantId: string) => {
     const next = { ...pendingSelections, [groupId]: variantId };
@@ -236,8 +266,20 @@ export default function KitManifestOptions({
       <div className="space-y-4">
         {visibleGroups.map(([groupId, group]) => {
           const selected = pendingSelections[groupId] ?? "";
+          const focused = highlightGroupId === groupId;
           return (
-            <div key={groupId} className="option-group space-y-2">
+            <div
+              key={groupId}
+              ref={(el) => {
+                if (el) groupRefs.current.set(groupId, el);
+                else groupRefs.current.delete(groupId);
+              }}
+              className={cn(
+                "option-group space-y-2 rounded-md transition-colors",
+                focused && "bg-info/10 ring-2 ring-info/40 ring-offset-2 ring-offset-background",
+              )}
+              data-kit-group={groupId}
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <h4 className="text-sm font-medium capitalize">{groupLabel(groupId, group)}</h4>
                 <Badge variant="muted">choose one</Badge>
@@ -278,6 +320,8 @@ export default function KitManifestOptions({
           "group rounded-md border border-border",
           dirty && "border-primary/40",
         )}
+        open={detailsOpen || undefined}
+        onToggle={(e) => setDetailsOpen((e.target as HTMLDetailsElement).open)}
       >
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
           <span className="text-xs font-semibold text-muted-foreground">{title}</span>

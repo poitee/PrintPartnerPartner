@@ -1,0 +1,15 @@
+schema: print-partner/structure@1
+source_name: Boop
+ref_documented: main
+stl_root: null   # versioned beta folders
+folders:
+  - {path: beta_4/STL, current: true, note: "boop_front.stl, boop_upper_pcb.stl, boop_upper_wired.stl, [a]_boop_center_optical_3mm/4mm_belt_spacing.stl, [a]_belt_clamp_x2.stl"}
+  - {path: beta_3/STL, note: "older; bowden_toolheads/ + mods/zruncho/"}
+  - {path: beta_1/STL, note: "oldest; Tap_Magnet_* + X_Carriage_Front_Mini_* parts"}
+option_groups:
+  - {id: upper, choose_one: [beta_4/STL/boop_upper_pcb.stl, beta_4/STL/boop_upper_wired.stl]}
+  - {id: belt_spacing, choose_one: ["[a]_boop_center_optical_3mm_belt_spacing.stl", "[a]_boop_center_optical_4mm_belt_spacing.stl"]}
+naming_quirks: ["beta_N folder = revision; select ONE beta folder only"]
+known_overlaps:
+  - {with: Voron-Tap, note: "beta_4 'redesigned to use parts from Voron Tap RC8' (hardware, not STLs)"}
+  - {with: Voron-0 / Micron toolheads, note: "targets front-facing MGN9 rails + V0.2-style toolheads"}

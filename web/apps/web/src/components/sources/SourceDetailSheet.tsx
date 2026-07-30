@@ -5,11 +5,13 @@ import {
   fetchImportRules,
   fetchSourceDocMarkdown,
   fetchSourceDocs,
+  fetchSourceNotes,
   fetchSourceNaming,
   fetchStlNaming,
   mergeStlNamingProfiles,
   saveImportRules,
   saveSourceNaming,
+  type SourceNote,
   type SourceSummary,
   type StlNamingProfile,
 } from "../../api/engine";
@@ -29,6 +31,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 
 type DetailTab = "docs" | "rules" | "naming";
+type DocsSubTab = "synced" | "notes";
 
 type Props = {
   source: SourceSummary | null;
@@ -36,6 +39,8 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   initialTab?: DetailTab;
   highlightPath?: string | null;
+  /** Optional keyword filter for Synced docs / Advisor notes lists (from copilot ui_open_docs). */
+  docsQuery?: string | null;
   busy?: boolean;
   onEdit: (source: SourceSummary) => void;
   onDelete: (source: SourceSummary) => void;
@@ -54,6 +59,7 @@ export default function SourceDetailSheet({
   onOpenChange,
   initialTab = "docs",
   highlightPath = null,
+  docsQuery = null,
   busy = false,
   onEdit,
   onDelete,
@@ -61,9 +67,14 @@ export default function SourceDetailSheet({
   runImportScan,
 }: Props) {
   const [tab, setTab] = useState<DetailTab>(initialTab);
-  const [docs, setDocs] = useState<Array<{ path: string; title: string }>>([]);
+  const [docsSubTab, setDocsSubTab] = useState<DocsSubTab>("synced");
+  const [docs, setDocs] = useState<
+    Array<{ path: string; title: string; kind?: string; extract_status?: string }>
+  >([]);
+  const [notes, setNotes] = useState<SourceNote[]>([]);
   const [activeDoc, setActiveDoc] = useState<string | null>(null);
   const [docContent, setDocContent] = useState("");
+  const [activeNoteId, setActiveNoteId] = useState<number | null>(null);
   const [pendingRules, setPendingRules] = useState<string[]>([]);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<string | null>(null);
@@ -116,22 +127,33 @@ export default function SourceDetailSheet({
   useEffect(() => {
     if (!open || !source) return;
     setTab(initialTab);
+    setDocsSubTab("synced");
     setSelectedFilePath(highlightPath);
     setScanResult(null);
     setActiveDoc(null);
     setDocContent("");
+    setActiveNoteId(null);
+    setNotes([]);
     void (async () => {
       try {
-        const docList = await fetchSourceDocs(source.id);
+        const [docList, noteList] = await Promise.all([
+          fetchSourceDocs(source.id),
+          fetchSourceNotes(source.id),
+        ]);
         setDocs(docList);
+        setNotes(noteList);
         if (docList.length > 0) {
           const first = docList[0].path;
           setActiveDoc(first);
           const md = await fetchSourceDocMarkdown(source.id, first);
           setDocContent(md);
+        } else if (noteList.length > 0) {
+          setDocsSubTab("notes");
+          setActiveNoteId(noteList[0].id);
         }
       } catch {
         setDocs([]);
+        setNotes([]);
       }
       if (initialTab === "rules" || highlightPath) {
         try {
@@ -217,9 +239,37 @@ export default function SourceDetailSheet({
 
   if (!source) return null;
 
+  const queryNorm = (docsQuery ?? "").trim().toLowerCase();
+  const filteredDocs = queryNorm
+    ? docs.filter(
+        (d) =>
+          d.title.toLowerCase().includes(queryNorm) ||
+          d.path.toLowerCase().includes(queryNorm),
+      )
+    : docs;
+  const filteredNotes = queryNorm
+    ? notes.filter(
+        (n) =>
+          n.title.toLowerCase().includes(queryNorm) ||
+          n.body_markdown.toLowerCase().includes(queryNorm),
+      )
+    : notes;
+  const activeNote = filteredNotes.find((n) => n.id === activeNoteId) ?? null;
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="flex w-full max-w-2xl flex-col p-0">
+    <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
+      <SheetContent
+        side="left"
+        showOverlay={false}
+        className="flex w-full max-w-2xl flex-col p-0"
+        onInteractOutside={(e) => {
+          // Keep docked; nav/Build stay clickable without Escape.
+          e.preventDefault();
+        }}
+        onPointerDownOutside={(e) => {
+          e.preventDefault();
+        }}
+      >
         <SheetHeader className="border-b p-4">
           <div className="flex items-start gap-3">
             <SourceCardCover
@@ -251,32 +301,117 @@ export default function SourceDetailSheet({
           </TabsList>
 
           <TabsContent value="docs" className="mt-0 min-h-0 flex-1 overflow-hidden px-4 pb-4">
-            <div className="grid h-[min(60vh,480px)] gap-4 md:grid-cols-[160px_1fr]">
-              <ScrollArea className="h-full rounded-md border border-border">
-                <ul className="p-2 text-sm">
-                  {docs.map((d) => (
-                    <li key={d.path}>
-                      <button
-                        type="button"
-                        className={`w-full rounded px-2 py-1 text-left hover:bg-accent ${activeDoc === d.path ? "bg-accent" : ""}`}
-                        onClick={() => void loadDoc(d.path)}
-                      >
-                        {d.title}
-                      </button>
-                    </li>
-                  ))}
-                  {docs.length === 0 && (
-                    <li className="px-2 py-1 text-muted-foreground">No markdown docs in synced tree.</li>
-                  )}
-                </ul>
-              </ScrollArea>
-              <ScrollArea className="h-full rounded-md border border-border">
-                <pre className="whitespace-pre-wrap p-3 text-xs">{docContent || "Select a document."}</pre>
-              </ScrollArea>
-            </div>
+            <Tabs
+              value={docsSubTab}
+              onValueChange={(v) => setDocsSubTab(v as DocsSubTab)}
+              className="flex h-[min(60vh,480px)] flex-col gap-2"
+            >
+              <TabsList className="w-fit">
+                <TabsTrigger value="synced">
+                  Synced docs{filteredDocs.length > 0 ? ` (${filteredDocs.length})` : ""}
+                </TabsTrigger>
+                <TabsTrigger value="notes">
+                  Advisor notes{filteredNotes.length > 0 ? ` (${filteredNotes.length})` : ""}
+                </TabsTrigger>
+              </TabsList>
+              {queryNorm ? (
+                <p className="text-xs text-muted-foreground">Filtering docs by “{docsQuery}”</p>
+              ) : null}
+              <TabsContent value="synced" className="mt-0 min-h-0 flex-1 overflow-hidden">
+                {docs.length === 0 ? (
+                  <div className="space-y-2 rounded-md border border-border p-4 text-sm text-muted-foreground">
+                    <p>
+                      Sync this source to pull README/PDFs from the repository into Synced docs.
+                    </p>
+                    {notes.length > 0 ? (
+                      <p>
+                        {notes.length} Advisor note{notes.length === 1 ? "" : "s"} available — open
+                        the Advisor notes tab. Empty Synced docs does not mean import failed.
+                      </p>
+                    ) : !source.last_synced_at ? (
+                      <p>This source has not been synced yet.</p>
+                    ) : (
+                      <p>No markdown or PDF docs found in the synced tree.</p>
+                    )}
+                  </div>
+                ) : filteredDocs.length === 0 ? (
+                  <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
+                    No synced docs match “{docsQuery}”.
+                  </p>
+                ) : (
+                  <div className="grid h-full gap-4 md:grid-cols-[160px_1fr]">
+                    <ScrollArea className="h-full rounded-md border border-border">
+                      <ul className="p-2 text-sm">
+                        {filteredDocs.map((d) => (
+                          <li key={d.path}>
+                            <button
+                              type="button"
+                              className={`w-full rounded px-2 py-1 text-left hover:bg-accent ${activeDoc === d.path ? "bg-accent" : ""}`}
+                              onClick={() => void loadDoc(d.path)}
+                            >
+                              {d.title}
+                              {d.kind === "pdf" &&
+                              d.extract_status &&
+                              d.extract_status !== "ready" ? (
+                                <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                                  PDF · {d.extract_status}
+                                </span>
+                              ) : null}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </ScrollArea>
+                    <ScrollArea className="h-full rounded-md border border-border">
+                      <pre className="whitespace-pre-wrap p-3 text-xs">
+                        {docContent || "Select a document."}
+                      </pre>
+                    </ScrollArea>
+                  </div>
+                )}
+              </TabsContent>
+              <TabsContent value="notes" className="mt-0 min-h-0 flex-1 overflow-hidden">
+                {notes.length === 0 ? (
+                  <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
+                    No Advisor notes yet. Import a domain research pack (workflow / pitfalls /
+                    quotes) or add notes from the kit advisor.
+                  </p>
+                ) : filteredNotes.length === 0 ? (
+                  <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
+                    No Advisor notes match “{docsQuery}”.
+                  </p>
+                ) : (
+                  <div className="grid h-full gap-4 md:grid-cols-[160px_1fr]">
+                    <ScrollArea className="h-full rounded-md border border-border">
+                      <ul className="p-2 text-sm">
+                        {filteredNotes.map((n) => (
+                          <li key={n.id}>
+                            <button
+                              type="button"
+                              className={`w-full rounded px-2 py-1 text-left hover:bg-accent ${activeNoteId === n.id ? "bg-accent" : ""}`}
+                              onClick={() => setActiveNoteId(n.id)}
+                            >
+                              {n.title || "Note"}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </ScrollArea>
+                    <ScrollArea className="h-full rounded-md border border-border">
+                      <pre className="whitespace-pre-wrap p-3 text-xs">
+                        {activeNote?.body_markdown || "Select a note."}
+                      </pre>
+                    </ScrollArea>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
-          <TabsContent value="rules" className="mt-0 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-4">
+          <TabsContent
+            value="rules"
+            className="mt-0 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-4"
+          >
             {selectedFilePath && (
               <div className="h-40 shrink-0 overflow-hidden rounded-md border border-border">
                 <Preview3D
@@ -306,7 +441,10 @@ export default function SourceDetailSheet({
             </Button>
           </TabsContent>
 
-          <TabsContent value="naming" className="mt-0 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-4">
+          <TabsContent
+            value="naming"
+            className="mt-0 flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-4 pb-4"
+          >
             <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-4 py-1">
                 <p className="text-sm text-muted-foreground">

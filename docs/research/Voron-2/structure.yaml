@@ -1,0 +1,33 @@
+schema: print-partner/structure@1
+source_name: Voron-2
+ref_documented: Voron2.4 (default branch)
+stl_root: STLs/
+folders:
+  - {path: STLs/Gantry, required: true, note: "AB_Drive_Units, Front_Idlers, X_Axis, Z_Joints subfolders + z belt clips"}
+  - {path: STLs/Z_Drive, required: true}
+  - {path: STLs/Z_Idlers, required: true}
+  - {path: STLs/Z_Endstop, required: true, note: "nozzle_probe.stl — replaced by Tap/Klicky/LDO nozzle_probe_ldo"}
+  - {path: STLs/Electronics_Bay, required: true}
+  - {path: STLs/Panel_Mounting, required: true}
+  - {path: STLs/Skirts, required: true, note: "size subfolders 250/ 300/ 350/"}
+  - {path: STLs/Exhaust_Filter, required: false}
+  - {path: STLs/Spool_Management, required: false}
+  - {path: STLs/Tools, required: false, note: "jigs"}
+  - {path: STLs/Test_Prints, required: false, note: "exclude from kit manifests"}
+  - {path: STLs/Superceded_Parts, required: false, note: "note misspelling 'Superceded'; exclude from manifests"}
+option_groups:
+  - id: skirt_size
+    choose_one: [STLs/Skirts/250, STLs/Skirts/300, STLs/Skirts/350]
+  - id: panel_clip_foam
+    choose_one: ["corner/midspan_panel_clip_4mm_*", "corner/midspan_panel_clip_6mm_*"]
+    note: "4mm vs 6mm foam-tape thickness variants in STLs/Panel_Mounting"
+  - id: power_inlet
+    choose_one: [STLs/Skirts/power_inlet_IECGS_1mm.stl, STLs/Skirts/power_inlet_IECGS_1.2mm.stl, STLs/Skirts/power_inlet_filtered.stl]
+naming_quirks:
+  - "[a]_ accent prefix; _xN quantity suffix"
+  - "'Superceded_Parts' misspelling is the real folder name"
+  - "STLs/readme.md lowercase"
+  - "older tags (V2.4r1 and earlier) nest under STLs/VORON2.4/... — path mapping breaks across r1->r2"
+known_overlaps:
+  - {with: Voron-Trident, paths: "Tools/MGN*_rail_guide, Electronics_Bay parts (pcb_din_clip_x3, raspberrypi_bracket, rs25_psu_bracket, PSU_stabilizer_50mm), mini12864 skirt parts share filenames"}
+  - {with: LDOVoron2, paths: "nozzle_probe.stl replaced by nozzle_probe_ldo.stl; plug panel replaced by plug_panel_1.2mm (deprecated as of V2.4R2)"}

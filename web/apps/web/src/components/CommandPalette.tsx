@@ -46,7 +46,11 @@ type Action = {
   run: () => void;
 };
 
-export default function CommandPalette() {
+type Props = {
+  onOpenAssistant?: () => void;
+};
+
+export default function CommandPalette({ onOpenAssistant }: Props) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -318,6 +322,18 @@ export default function CommandPalette() {
           },
         },
       );
+      if (health.capabilities?.includes("ai_assistant") && onOpenAssistant) {
+        list.push({
+          id: "open-assistant",
+          label: "Open kit advisor",
+          hint: "AI guidance",
+          group: "Actions",
+          run: () => {
+            onOpenAssistant();
+            setOpen(false);
+          },
+        });
+      }
     }
 
     return list;
@@ -335,6 +351,7 @@ export default function CommandPalette() {
     onSources,
     flushBuildSaves,
     importSharedBuild,
+    onOpenAssistant,
   ]);
 
   const groups = ["Navigate", "Workflow", "Actions"] as const;

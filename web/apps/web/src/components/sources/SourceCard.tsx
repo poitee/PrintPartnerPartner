@@ -97,6 +97,9 @@ export default function SourceCard({
           {source.last_commit_sha && (
             <Badge variant="muted">{shortSha(source.last_commit_sha)}</Badge>
           )}
+          {(source.doc_count ?? 0) > 0 && (
+            <Badge variant="muted">{source.doc_count} docs</Badge>
+          )}
         </div>
         <div className="mt-auto flex flex-wrap gap-1">
           <Button size="sm" onClick={() => onOpen(source)}>

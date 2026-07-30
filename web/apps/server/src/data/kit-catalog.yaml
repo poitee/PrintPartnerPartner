@@ -279,3 +279,13 @@ stack_presets:
     default_selections:
       toolhead: stealthburner
       probe: voron_tap
+  ldo_trident_r2:
+    label: LDO Trident R2 (Voron-Trident @ VTr2 + LDO + SB)
+    base: voron_trident
+    # R2 identity is Voron-Trident @ tag VTr2 (not LDOVoronTrident as base).
+    base_tag: VTr2
+    addon_sources:
+      - Voron-Stealthburner
+      - LDOVoronTrident
+      - Leviathan
+    default_selections: {}

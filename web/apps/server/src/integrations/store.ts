@@ -168,3 +168,13 @@ export function createIntegrationPort(deps: IntegrationStoreDeps): IntegrationPo
 export function getIntegrationConfig(repo: AppRepository, id: string): IntegrationSummary | null {
   return loadRaw(repo).find((x) => x.id === id) ?? null;
 }
+
+/** Internal: unredacted integrations of a given type (newest first). */
+export function listIntegrationsByType(
+  repo: AppRepository,
+  type: IntegrationType,
+): IntegrationSummary[] {
+  return loadRaw(repo)
+    .filter((x) => x.type === type)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+}

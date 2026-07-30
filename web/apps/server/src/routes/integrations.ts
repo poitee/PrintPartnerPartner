@@ -14,6 +14,7 @@ const VALID_TYPES = new Set<IntegrationType>([
   "bambu",
   "spoolman",
   "slicer_folder",
+  "ai_assistant",
 ]);
 
 export async function registerIntegrationRoutes(

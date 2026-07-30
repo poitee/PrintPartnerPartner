@@ -9,4 +9,78 @@ describe("loadConfig", () => {
     expect(config.deployMode).toBe("self-host");
     if (prev !== undefined) process.env.DEPLOY_MODE = prev;
   });
+
+  it("keeps AI disabled unless AI_ENABLED=1 with credentials", () => {
+    const prev = {
+      AI_ENABLED: process.env.AI_ENABLED,
+      AI_PROVIDER: process.env.AI_PROVIDER,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    };
+    delete process.env.AI_ENABLED;
+    process.env.AI_PROVIDER = "anthropic";
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    expect(loadConfig().aiEnabled).toBe(false);
+
+    process.env.AI_ENABLED = "1";
+    const enabled = loadConfig();
+    expect(enabled.aiEnabled).toBe(true);
+    expect(enabled.aiProvider).toBe("anthropic");
+    expect(enabled.aiModel).toBeTruthy();
+
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("parses AI daily budget env vars (0 = unlimited)", () => {
+    const prev = {
+      AI_DAILY_REQUEST_BUDGET: process.env.AI_DAILY_REQUEST_BUDGET,
+      AI_DAILY_TOKEN_BUDGET: process.env.AI_DAILY_TOKEN_BUDGET,
+    };
+    delete process.env.AI_DAILY_REQUEST_BUDGET;
+    delete process.env.AI_DAILY_TOKEN_BUDGET;
+    expect(loadConfig().aiDailyRequestBudget).toBe(0);
+    expect(loadConfig().aiDailyTokenBudget).toBe(0);
+
+    process.env.AI_DAILY_REQUEST_BUDGET = "40";
+    process.env.AI_DAILY_TOKEN_BUDGET = "100000";
+    const capped = loadConfig();
+    expect(capped.aiDailyRequestBudget).toBe(40);
+    expect(capped.aiDailyTokenBudget).toBe(100000);
+
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("defaults SOURCE_DOCS_MAX_BYTES to 1 GiB", () => {
+    const prev = process.env.SOURCE_DOCS_MAX_BYTES;
+    delete process.env.SOURCE_DOCS_MAX_BYTES;
+    expect(loadConfig().sourceDocsMaxBytes).toBe(1024 * 1024 * 1024);
+    if (prev === undefined) delete process.env.SOURCE_DOCS_MAX_BYTES;
+    else process.env.SOURCE_DOCS_MAX_BYTES = prev;
+  });
+
+  it("defaults assistant URL ingest on with 512 KiB max", () => {
+    const prevAllow = process.env.ASSISTANT_ALLOW_URL_INGEST;
+    const prevMax = process.env.ASSISTANT_GUIDE_INGEST_MAX_BYTES;
+    delete process.env.ASSISTANT_ALLOW_URL_INGEST;
+    delete process.env.ASSISTANT_GUIDE_INGEST_MAX_BYTES;
+    const cfg = loadConfig();
+    expect(cfg.assistantAllowUrlIngest).toBe(true);
+    expect(cfg.assistantGuideIngestMaxBytes).toBe(512 * 1024);
+
+    process.env.ASSISTANT_ALLOW_URL_INGEST = "0";
+    process.env.ASSISTANT_GUIDE_INGEST_MAX_BYTES = "1024";
+    const off = loadConfig();
+    expect(off.assistantAllowUrlIngest).toBe(false);
+    expect(off.assistantGuideIngestMaxBytes).toBe(1024);
+
+    if (prevAllow === undefined) delete process.env.ASSISTANT_ALLOW_URL_INGEST;
+    else process.env.ASSISTANT_ALLOW_URL_INGEST = prevAllow;
+    if (prevMax === undefined) delete process.env.ASSISTANT_GUIDE_INGEST_MAX_BYTES;
+    else process.env.ASSISTANT_GUIDE_INGEST_MAX_BYTES = prevMax;
+  });
 });
