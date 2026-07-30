@@ -1,0 +1,15 @@
+schema: print-partner/structure@1
+source_name: Voron-Legacy
+ref_documented: main
+stl_root: STLs/
+folders:
+  - {path: "STLs/Gantry", required: true, note: "subfolders WITH SPACES: 'AB Drive Units', 'Front Idlers', 'X Carriage', 'XY Joints'"}
+  - {path: "STLs/Z Axis", required: true, note: "space in folder name; 'Bed Carriages' subfolder; z_shaft_suport_* (sic, single-p 'suport')"}
+  - {path: STLs/Electronics, required: true}
+  - {path: STLs/Tools, required: false}
+option_groups: []
+naming_quirks:
+  - "spaces in directory names ('Z Axis', 'AB Drive Units') — URL-encode / quote in paths"
+  - "typo 'suport' in z_shaft_suport_*.stl filenames is real"
+known_overlaps:
+  - {with: Klicky-Probe, note: "covered by Printers/Voron/v1.8_v2.4_Legacy_Trident scope"}

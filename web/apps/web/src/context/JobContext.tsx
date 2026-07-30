@@ -48,13 +48,29 @@ async function pollJobUntilTerminal(
   intervalMs = 400,
   maxAttempts = 150,
 ): Promise<JobSnapshot> {
+  let lastSnap: JobSnapshot | null = null;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const snap = await fetchJob(jobId);
+    lastSnap = snap;
     onProgress(snap);
-    if (JOB_TERMINAL.has(snap.status)) return snap;
+    if (JOB_TERMINAL.has(snap.status)) {
+      return snap;
+    }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  throw new Error("Job timed out waiting for completion");
+  throw new Error(
+    lastSnap
+      ? `Job timed out waiting for completion (last status: ${lastSnap.status})`
+      : "Job timed out waiting for completion",
+  );
+}
+
+/** Sync (and similar long jobs) can exceed the default ~60s poll window once docs/PDFs are included. */
+function pollAttemptsForKind(kind: string): number {
+  if (kind === "sync" || kind === "extract-source-docs" || kind === "import-scan") {
+    return 4500; // ~30 minutes at 400ms
+  }
+  return 150;
 }
 
 function upsertJob(jobs: ActiveJob[], next: ActiveJob): ActiveJob[] {
@@ -152,7 +168,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
           },
         );
 
-        void pollJobUntilTerminal(jobId, onProgress).catch((e) => {
+        void pollJobUntilTerminal(jobId, onProgress, 400, pollAttemptsForKind(kind)).catch((e) => {
           if (finished) return;
           finished = true;
           disconnect?.();

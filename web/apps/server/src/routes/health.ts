@@ -3,6 +3,21 @@ import type { ServerConfig } from "../config.js";
 import type { AppPorts } from "../ports/index.js";
 import { pingBundle } from "../db/database.js";
 import type { SaasDbStore } from "../adapters/saas/index.js";
+import type { AppRepository } from "../db/repository.js";
+import { resolveAssistantRuntime } from "../assistant/resolve-assistant.js";
+
+function tryGetRepository(ports: AppPorts): AppRepository | null {
+  const runtime = ports as AppPorts & {
+    repository?: AppRepository;
+    db?: { repository?: AppRepository | null; defaultRepository?: AppRepository | null };
+  };
+  try {
+    if (runtime.repository) return runtime.repository;
+  } catch {
+    /* not connected yet */
+  }
+  return runtime.db?.repository ?? runtime.db?.defaultRepository ?? null;
+}
 
 export async function registerHealthRoutes(
   app: FastifyInstance,
@@ -31,6 +46,18 @@ export async function registerHealthRoutes(
       }
     }
 
+    let aiAssistant = config.aiEnabled;
+    if (!aiAssistant) {
+      const repo = tryGetRepository(ports);
+      if (repo) {
+        try {
+          aiAssistant = resolveAssistantRuntime(repo, config).enabled;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
     return {
       ok: dbOk,
       version: config.version,
@@ -46,6 +73,7 @@ export async function registerHealthRoutes(
         "integrations_api",
         ...(config.multiUser ? ["multi_user_auth", "plan_sharing"] : []),
         ...(config.smtpConfigured ? ["password_reset_email"] : []),
+        ...(aiAssistant ? ["ai_assistant"] : []),
       ],
       db: {
         connected: dbOk,

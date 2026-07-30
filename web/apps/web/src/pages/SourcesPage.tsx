@@ -24,6 +24,11 @@ import {
 } from "../api/engine";
 import GitHubRefField, { type GithubRefType } from "../components/GitHubRefField";
 import { useDateFormat } from "../context/DateFormatContext";
+import {
+  mapCopilotSourceTab,
+  useCopilotUiOptional,
+  type CopilotSourceTab,
+} from "../context/CopilotUiContext";
 import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -75,6 +80,14 @@ import {
   savePersistedSourcesUi,
 } from "../lib/persistedSourcesUi";
 import { toastJobResult } from "../lib/jobToasts";
+
+type PendingOpenSource = {
+  sourceName?: string;
+  sourceId?: number;
+  tab: CopilotSourceTab;
+  path?: string | null;
+  query?: string;
+};
 
 type WizardForm = {
   name: string;
@@ -143,6 +156,7 @@ function UpdateStatusBadge({ status }: { status?: SourceSummary["update_status"]
 
 export default function SourcesPage() {
   const location = useLocation();
+  const copilot = useCopilotUiOptional();
   const { formatDate } = useDateFormat();
   const { health, error: healthError } = useEngineHealth();
   const { busy, runJob } = useJobRunner("sync");
@@ -156,8 +170,9 @@ export default function SourcesPage() {
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<WizardForm>(emptyForm([]));
   const [detailSource, setDetailSource] = useState<SourceSummary | null>(null);
-  const [detailTab, setDetailTab] = useState<"docs" | "rules" | "naming">("docs");
+  const [detailTab, setDetailTab] = useState<CopilotSourceTab>("docs");
   const [highlightPath, setHighlightPath] = useState<string | null>(null);
+  const [docsQuery, setDocsQuery] = useState<string | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<SourceSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [reposImportNote, setReposImportNote] = useState<string | null>(null);
@@ -173,16 +188,122 @@ export default function SourcesPage() {
   const [viewMode, setViewMode] = useState<SourceViewMode>(persistedUi.viewMode);
   const searchSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stlSearchFocus, setStlSearchFocus] = useState(false);
+  const [stlInitialQuery, setStlInitialQuery] = useState("");
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
   const importSharedBuild = useImportSharedBuild();
+  const pendingOpenRef = useRef<PendingOpenSource | null>(null);
+  const appliedIntentSeqRef = useRef(0);
+  const openMissToastAtRef = useRef(0);
+  const [pendingOpenTick, setPendingOpenTick] = useState(0);
 
+  const queueOpenSource = useCallback((pending: PendingOpenSource) => {
+    pendingOpenRef.current = pending;
+    setPendingOpenTick((n) => n + 1);
+  }, []);
+
+  // Bootstrap from navigate state (one-shot).
   useEffect(() => {
-    const state = location.state as { stlSearch?: boolean } | null;
+    const state = location.state as {
+      stlSearch?: boolean;
+      stlQuery?: string;
+      openSource?: {
+        sourceName?: string;
+        sourceId?: number;
+        tab?: string;
+        path?: string | null;
+        query?: string;
+      };
+    } | null;
     if (state?.stlSearch) {
       setStlSearchFocus(true);
+      if (state.stlQuery) setStlInitialQuery(state.stlQuery);
       window.history.replaceState({}, document.title);
     }
-  }, [location.state]);
+    if (state?.openSource) {
+      queueOpenSource({
+        sourceName: state.openSource.sourceName,
+        sourceId: state.openSource.sourceId,
+        tab: mapCopilotSourceTab(state.openSource.tab),
+        path: state.openSource.path,
+        query: state.openSource.query,
+      });
+      // Clear route state only after we queue — apply when sources are ready.
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state, queueOpenSource]);
+
+  // Same-route re-opens via intentSeq (survives late-loaded sources).
+  useEffect(() => {
+    if (!copilot || copilot.intentSeq === 0) return;
+    if (copilot.intentSeq === appliedIntentSeqRef.current) return;
+    const intent = copilot.lastIntent;
+    if (!intent) return;
+    if (intent.kind === "open_source") {
+      appliedIntentSeqRef.current = copilot.intentSeq;
+      queueOpenSource({
+        sourceName: intent.sourceName,
+        sourceId: intent.sourceId,
+        tab: mapCopilotSourceTab(intent.tab),
+        path: intent.path,
+        query: intent.query,
+      });
+    } else if (intent.kind === "focus_stl_search") {
+      appliedIntentSeqRef.current = copilot.intentSeq;
+      setStlSearchFocus(true);
+      if (intent.query) setStlInitialQuery(intent.query);
+    }
+  }, [copilot, copilot?.intentSeq, queueOpenSource]);
+
+  // Apply pending open once the source list can resolve the target.
+  useEffect(() => {
+    const pending = pendingOpenRef.current;
+    if (!pending || sources.length === 0) return;
+    const source =
+      (pending.sourceId != null
+        ? sources.find((s) => s.id === pending.sourceId)
+        : undefined) ??
+      (pending.sourceName
+        ? sources.find(
+            (s) =>
+              s.name === pending.sourceName ||
+              s.name.toLowerCase() === pending.sourceName!.toLowerCase(),
+          )
+        : undefined);
+    if (!source) {
+      const now = Date.now();
+      if (now - openMissToastAtRef.current > 4000) {
+        openMissToastAtRef.current = now;
+        toast.message(
+          pending.sourceName
+            ? `Source “${pending.sourceName}” not found yet`
+            : "Source not found yet",
+        );
+      }
+      return;
+    }
+    pendingOpenRef.current = null;
+    setDetailSource(source);
+    setDetailTab(pending.tab);
+    setHighlightPath(pending.path ?? null);
+    setDocsQuery(pending.query);
+  }, [sources, pendingOpenTick]);
+
+  // Hard timeout if the source name never resolves (clear leftover pending).
+  useEffect(() => {
+    if (pendingOpenTick === 0) return;
+    if (!pendingOpenRef.current) return;
+    const timer = window.setTimeout(() => {
+      const leftover = pendingOpenRef.current;
+      if (!leftover) return;
+      pendingOpenRef.current = null;
+      toast.message(
+        leftover.sourceName
+          ? `Source “${leftover.sourceName}” not found — check the name or add/sync it on Sources.`
+          : "Source not found — check the name or add/sync it on Sources.",
+      );
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [pendingOpenTick]);
 
   useEffect(() => {
     savePersistedSourcesUi({
@@ -245,12 +366,13 @@ export default function SourcesPage() {
 
   const openDetail = (
     source: SourceSummary,
-    tab: "docs" | "rules" = "docs",
+    tab: CopilotSourceTab = "docs",
     path: string | null = null,
   ) => {
     setDetailSource(source);
     setDetailTab(tab);
     setHighlightPath(path);
+    setDocsQuery(undefined);
   };
 
   const onStlHit = (hit: StlSearchHit) => {
@@ -632,6 +754,7 @@ export default function SourcesPage() {
   );
 
   return (
+    <div className={detailSource != null ? "lg:pl-[min(42rem,100%)]" : undefined}>
     <>
       <RouteBreadcrumbs items={[{ label: "Sources" }]} />
       <PageHeader
@@ -725,6 +848,7 @@ export default function SourcesPage() {
         hasSyncedSources={hasSyncedSources}
         onSelectHit={onStlHit}
         autoFocus={stlSearchFocus}
+        initialQuery={stlInitialQuery}
       />
 
       <SourcesToolbar
@@ -1104,10 +1228,12 @@ export default function SourcesPage() {
           if (!open) {
             setDetailSource(null);
             setHighlightPath(null);
+            setDocsQuery(undefined);
           }
         }}
         initialTab={detailTab}
         highlightPath={highlightPath}
+        docsQuery={docsQuery}
         busy={busy}
         onEdit={openEditWizard}
         onDelete={setDeleteTarget}
@@ -1120,5 +1246,6 @@ export default function SourcesPage() {
         }}
       />
     </>
+    </div>
   );
 }

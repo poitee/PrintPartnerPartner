@@ -122,10 +122,14 @@ export async function registerManifestRoutes(
       saveKitManifest(deps.repo, id, kit);
       return {
         profile_id: id,
-        preset_id: presetId,
+        preset_id: result.preset_id,
         missing_sources: result.missing_sources,
         layers: result.layers,
         selections: result.selections,
+        base_source_name: result.base_source_name,
+        tag: result.tag,
+        branch: result.branch,
+        needs_sync: result.needs_sync,
       };
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });

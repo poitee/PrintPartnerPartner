@@ -1,0 +1,12 @@
+schema: print-partner/structure@1
+source_name: Pocket-Watch
+ref_documented: main
+stl_root: STLs/
+folders:
+  - {path: STLs/, required: true, note: "flat: Nightwatch_Shuttle/Guidler/Latch/Mounting_Bracket + [a]_ Midbody/Motor_Plate/Covers; BMG_Shaft_Mod_Spacer_x1.STL"}
+option_groups:
+  - id: cover_fitting
+    choose_one: ["[a]_Nightwatch_Cover_ECAS04_x1.stl", "[a]_Nightwatch_Cover_M10_x1.stl"]
+    note: "each also has _Multibody_Logo variant"
+naming_quirks: ["[a]_ accents; _x1 suffixes; mixed .stl/.STL"]
+known_overlaps: [{with: Voron-0, note: "targets V0-class toolhead slot; UNKNOWN full compatibility (no README/manual text fetched)"}]

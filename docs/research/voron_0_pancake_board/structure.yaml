@@ -1,0 +1,12 @@
+schema: print-partner/structure@1
+source_name: voron_0_pancake_board
+ref_documented: master
+stl_root: stl/   # lowercase
+parts:
+  - {stl: stl/backingplate.stl}
+  - {stl: stl/cover.stl}
+other: [gerber/ + gerber.zip (PCB fab), doc/pancakeboard.pdf, KiCad sources at repo root]
+option_groups: []
+naming_quirks: ["lowercase stl/ root; Readme.md capital-R only; KiCad files at repo ROOT"]
+known_overlaps:
+  - {with: LDO-Picobilical / Voron-Hardware V0-Umbilical, note: "competing V0 toolhead wiring solutions"}

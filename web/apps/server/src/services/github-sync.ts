@@ -1,6 +1,8 @@
 import { Octokit } from "@octokit/rest";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
 
 function safeRepoFilePath(repoDir: string, relativePath: string): string | null {
   const normalized = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
@@ -77,39 +79,92 @@ export async function listGithubTags(
   };
 }
 
+export type SyncDocKind = "readme" | "md" | "pdf";
+
+export type SyncDocEntry = {
+  path: string;
+  kind: SyncDocKind;
+  sizeBytes: number;
+};
+
+export type SyncProgress = {
+  phase: "stls" | "docs";
+  current: number;
+  total: number;
+  path?: string;
+  message?: string;
+};
+
 export type SyncResult = {
   commitSha: string | null;
   stlPaths: string[];
   downloaded: number;
+  docPaths: SyncDocEntry[];
+  docsDownloaded: number;
+  docsSkippedBytes: number;
 };
 
-async function downloadStlRaw(
+function classifyDocPath(path: string): SyncDocKind | null {
+  const lower = path.toLowerCase();
+  if (!lower.endsWith(".md") && !lower.endsWith(".pdf")) return null;
+  if (lower.endsWith(".pdf")) return "pdf";
+  const base = lower.split("/").pop() ?? lower;
+  if (base === "readme.md" || base.startsWith("readme.")) return "readme";
+  return "md";
+}
+
+/** Prefer streaming for large blobs; buffer small ones. */
+const STREAM_THRESHOLD_BYTES = 2 * 1024 * 1024;
+
+async function downloadRawFile(
   owner: string,
   repo: string,
   branch: string,
   path: string,
   dest: string,
   token?: string | null,
-): Promise<boolean> {
+  expectedSize?: number | null,
+): Promise<{ ok: boolean; bytes: number }> {
   const segments = path.split("/").map(encodeURIComponent).join("/");
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${segments}`;
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(url, { headers });
-  if (!res.ok) return false;
-  const buf = Buffer.from(await res.arrayBuffer());
+  if (!res.ok) return { ok: false, bytes: 0 };
   mkdirSync(dirname(dest), { recursive: true });
+
+  const contentLength = Number(res.headers.get("content-length") ?? NaN);
+  const sizeHint =
+    (Number.isFinite(contentLength) && contentLength > 0 ? contentLength : null) ??
+    (expectedSize != null && expectedSize > 0 ? expectedSize : null);
+
+  if (sizeHint != null && sizeHint >= STREAM_THRESHOLD_BYTES && res.body) {
+    const nodeStream = Readable.fromWeb(res.body as import("node:stream/web").ReadableStream);
+    await pipeline(nodeStream, createWriteStream(dest));
+    return { ok: true, bytes: sizeHint };
+  }
+
+  const buf = Buffer.from(await res.arrayBuffer());
   writeFileSync(dest, buf);
-  return true;
+  return { ok: true, bytes: buf.byteLength };
 }
 
-/** Fetch GitHub tree via Octokit; download STLs from raw.githubusercontent.com. */
+export type SyncGithubOptions = {
+  download?: boolean;
+  maxDownloads?: number;
+  tag?: string | null;
+  /** Per-source docs budget (default 1 GiB). */
+  maxDocsBytes?: number;
+  onProgress?: (progress: SyncProgress) => void;
+};
+
+/** Fetch GitHub tree via Octokit; download STLs + markdown/PDF docs from raw.githubusercontent.com. */
 export async function syncGithubSource(
   url: string,
   branch: string,
   repoDir: string,
   token?: string | null,
-  options?: { download?: boolean; maxDownloads?: number; tag?: string | null },
+  options?: SyncGithubOptions,
 ): Promise<SyncResult> {
   const ref = parseGithubUrl(url);
   if (!ref) throw new Error("Invalid GitHub repository URL");
@@ -136,21 +191,95 @@ export async function syncGithubSource(
     (item) => item.type === "blob" && item.path?.toLowerCase().endsWith(".stl"),
   );
 
+  const docBlobs = tree.data.tree.filter((item) => {
+    if (item.type !== "blob" || !item.path) return false;
+    return classifyDocPath(item.path) != null;
+  });
+
+
   const stlPaths = stlBlobs.map((b) => b.path!).sort();
+  const docEntries: SyncDocEntry[] = docBlobs
+    .map((b) => {
+      const path = b.path!;
+      const kind = classifyDocPath(path)!;
+      return { path, kind, sizeBytes: typeof b.size === "number" ? b.size : 0 };
+    })
+    .sort((a, b) => a.path.localeCompare(b.path));
+
   let downloaded = 0;
+  let docsDownloaded = 0;
+  let docsSkippedBytes = 0;
   const shouldDownload = options?.download !== false;
   const maxDownloads = options?.maxDownloads ?? 500;
+  const maxDocsBytes = options?.maxDocsBytes ?? 1024 * 1024 * 1024;
 
   mkdirSync(repoDir, { recursive: true });
 
   if (shouldDownload) {
-    for (const path of stlPaths.slice(0, maxDownloads)) {
+    const stlSlice = stlPaths.slice(0, maxDownloads);
+    for (let i = 0; i < stlSlice.length; i++) {
+      const path = stlSlice[i]!;
+      options?.onProgress?.({
+        phase: "stls",
+        current: i + 1,
+        total: stlSlice.length,
+        path,
+        message: `Downloading STL ${i + 1}/${stlSlice.length}`,
+      });
       const dest = safeRepoFilePath(repoDir, path);
       if (!dest) continue;
-      const ok = await downloadStlRaw(ref.owner, ref.repo, refName, path, dest, token);
-      if (ok) downloaded++;
+      const result = await downloadRawFile(ref.owner, ref.repo, refName, path, dest, token);
+      if (result.ok) downloaded++;
+    }
+
+    let docsBudgetUsed = 0;
+    const docsToFetch: SyncDocEntry[] = [];
+    for (const entry of docEntries) {
+      const size = entry.sizeBytes > 0 ? entry.sizeBytes : 0;
+      // Always include PDFs even when size unknown; enforce total budget when size known.
+      if (size > 0 && docsBudgetUsed + size > maxDocsBytes) {
+        docsSkippedBytes += size;
+        continue;
+      }
+      docsToFetch.push(entry);
+      docsBudgetUsed += size;
+    }
+
+    for (let i = 0; i < docsToFetch.length; i++) {
+      const entry = docsToFetch[i]!;
+      options?.onProgress?.({
+        phase: "docs",
+        current: i + 1,
+        total: docsToFetch.length,
+        path: entry.path,
+        message: `Downloading doc ${i + 1}/${docsToFetch.length}: ${entry.path}`,
+      });
+      const dest = safeRepoFilePath(repoDir, entry.path);
+      if (!dest) continue;
+      const result = await downloadRawFile(
+        ref.owner,
+        ref.repo,
+        refName,
+        entry.path,
+        dest,
+        token,
+        entry.sizeBytes,
+      );
+      if (result.ok) {
+        docsDownloaded++;
+        if (result.bytes > 0) entry.sizeBytes = result.bytes;
+      }
     }
   }
 
-  return { commitSha, stlPaths, downloaded };
+  return {
+    commitSha,
+    stlPaths,
+    downloaded,
+    docPaths: docEntries,
+    docsDownloaded,
+    docsSkippedBytes,
+  };
 }
+
+export { classifyDocPath, safeRepoFilePath };

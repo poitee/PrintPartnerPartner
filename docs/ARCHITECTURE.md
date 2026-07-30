@@ -100,6 +100,25 @@ flowchart LR
 
 Plan management (header **Create build**, **Manage builds** on Build, sidebar **Builds**) is separate from this pipeline; the active plan is shared across Build, Review, and Checkoff.
 
+## Kit advisor (assistant as tool host)
+
+Print Partner hosts MCP-shaped **product-verb tools** for the kit advisor LLM. The chat loop in `web/apps/server/src/assistant/` exposes read tools and confirm-to-apply mutate tools; the SPA renders Apply cards (including editable `suggested_excludes`). A thin **stdio MCP server** (`npm run mcp -w @print-partner/server`) reuses the same tool implementations for external hosts — see [`web/DEPLOY.md`](../web/DEPLOY.md).
+
+```mermaid
+flowchart LR
+  Chat[Chat / LLM] --> Tools[Assistant tools]
+  Tools --> Graph[Interaction graph]
+  Tools --> Catalog[kit-catalog]
+  Tools --> Domain[assistant-domain]
+  Tools --> Sources[Sources + sync]
+  Tools --> Plan[Plan layers]
+  Tools -->|"safeOutboundFetch"| Web[Guide URLs]
+```
+
+- **Interaction graph** (`services/interaction-graph.ts`) merges domain `compatibility.yaml`, catalog `pick_one` / `replaces_slot`, and `_global/merge_conflicts.yaml`. Tools: `get_interaction_graph`, `check_stack_compatibility`. Soft warnings also appear on `add_addon` / `apply_stack_preset` proposes and in plan Review (`compat_*` issue codes).
+- **URL ingest**: `ingest_guide_url` / `ingest_guide_text` return untrusted `GuideExtract` evidence (heuristic extract, optional LLM refine when the assistant is configured); `propose_add_source` / `import_guide_notes` / `propose_exclude_replaced_parts` close the loop behind Apply. Confirmed `suggested_excludes` on `add_addon` / `apply_stack_preset` Apply cards merge into kit-manifest exclude.
+- Domain packs under `assistant-domain/` remain runtime context (not training). See [assistant-domain-ingest-schema.md](./assistant-domain-ingest-schema.md).
+
 ## Deploy modes at a glance
 
 | Mode | App DB | Files | Auth |

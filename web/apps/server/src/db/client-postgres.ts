@@ -98,6 +98,66 @@ export class PostgresDatabase {
         expires_at TEXT NOT NULL,
         created_at TEXT NOT NULL
       )`);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS source_docs (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL DEFAULT 'default',
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        content_hash TEXT,
+        extract_status TEXT NOT NULL DEFAULT 'pending',
+        extract_error TEXT,
+        page_count INTEGER,
+        updated_at TEXT NOT NULL
+      )`);
+    await this.pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_source_docs_project_path
+      ON source_docs (project_id, path)`);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS source_notes (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL DEFAULT 'default',
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        profile_id INTEGER REFERENCES build_profiles(id) ON DELETE SET NULL,
+        title TEXT NOT NULL DEFAULT '',
+        body_markdown TEXT NOT NULL DEFAULT '',
+        author_user_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS plan_decisions (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL DEFAULT 'default',
+        profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        actor TEXT NOT NULL DEFAULT 'assistant',
+        kind TEXT NOT NULL,
+        action_type TEXT,
+        params_json TEXT NOT NULL DEFAULT '{}',
+        label TEXT NOT NULL DEFAULT '',
+        summary TEXT NOT NULL DEFAULT '',
+        rationale TEXT,
+        result_json TEXT
+      )`);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_plan_decisions_profile
+      ON plan_decisions (profile_id, created_at)`);
+    await this.pool.query(`
+      CREATE TABLE IF NOT EXISTS plan_snapshots (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL DEFAULT 'default',
+        profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+        name TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'user',
+        payload_json TEXT NOT NULL DEFAULT '{}'
+      )`);
+    await this.pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_plan_snapshots_profile
+      ON plan_snapshots (profile_id, created_at)`);
   }
 
   async ping(): Promise<boolean> {

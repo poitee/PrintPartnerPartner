@@ -1,0 +1,19 @@
+schema: print-partner/structure@1
+source_name: LDOVoronSW
+ref_documented: s1
+stl_root: STLs/
+parts:
+  - {stl: STLs/counterweight_wheel.stl}
+  - {stl: STLs/heatbed_terminal_cover.stl}
+  - {stl: STLs/led_pcb_mount.stl}
+  - {stl: STLs/lmf350-23b24uh_mount.stl}
+  - {stl: STLs/rs25_vertical_mount.stl}
+  - {stl: STLs/toolhead_breakout_pcb_mount.stl}
+  - {stl: STLs/wago_221-413_3x3_vertical_mount.stl}
+  - {stl: STLs/y_belt_anchor_sensorless.stl, note: "sensorless-homing option"}
+subfolders: [STLs/Grills, STLs/TouchPanel]
+option_groups:
+  - {id: y_homing, choose_one: [y_belt_anchor_sensorless.stl, "stock endstop parts in Voron-Switchwire"]}
+naming_quirks: ["default branch `s1` — neither main nor master; .f3d sources alongside stls"]
+known_overlaps:
+  - {with: Voron-Switchwire, note: "Grills subfolder overlaps STL/Grills naming upstream; RS25 vertical mount vs upstream rs_25_mount.stl"}

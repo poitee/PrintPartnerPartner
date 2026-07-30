@@ -41,6 +41,7 @@ The app service has a healthcheck that polls `GET /health` every 30s using Node'
 | `PP_VERSION` | `3.0.0-web` (baked into release images) | Health payload version |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload limit (512 MiB) |
+| `SOURCE_DOCS_MAX_BYTES` | `1073741824` | Per-source budget for synced markdown/PDF docs (~1 GiB). Operator escape hatch only. |
 | `PRINT_PARTNER_API_KEY` | unset | When set (self-host), requires Bearer or `X-Print-Partner-Api-Key` on `/api/v1/*` |
 | `OPENAPI_UI` | unset | Set to `1` to expose `/api/v1/docs` in production |
 | `REDIS_URL` | unset | Optional; when set in SaaS, enables BullMQ job queue (see SaaS) |
@@ -48,6 +49,89 @@ The app service has a healthcheck that polls `GET /health` every 30s using Node'
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped override — skip GitHub and compare against this version |
 | `PRINT_PARTNER_UPDATE_CHECK_CACHE_HOURS` | `12` | How long to cache the latest release lookup |
+| `AI_ENABLED` | unset | Operator fallback: set to `1` to enable the kit advisor via env when no Settings integration is configured |
+| `AI_PROVIDER` | `none` | `anthropic`, `openai`, `ollama`, or `none` (env fallback) |
+| `ANTHROPIC_API_KEY` | unset | Required when `AI_PROVIDER=anthropic` (env fallback) |
+| `OPENAI_API_KEY` | unset | Required when `AI_PROVIDER=openai` (env fallback) |
+| `OPENAI_BASE_URL` | `https://api.openai.com` | Optional OpenAI-compatible base URL (env fallback) |
+| `OLLAMA_URL` | `http://127.0.0.1:11434` | Default Ollama host for env fallback / Settings defaults |
+| `AI_MODEL` | provider default | Model id (env fallback) |
+| `AI_MAX_TOKENS` | `2048` | Max completion tokens per chat turn (also used when Settings omits `max_tokens`) |
+| `AI_DAILY_REQUEST_BUDGET` | `0` (unlimited) | Soft per-tenant daily chat request cap; `0` disables. Overridable via Settings `daily_request_budget`. Exceeded → `429` on `/assistant/chat` |
+| `AI_DAILY_TOKEN_BUDGET` | `0` (unlimited) | Soft per-tenant daily estimated-token cap (chars÷4 + reply); `0` disables. Overridable via Settings `daily_token_budget`. Exceeded → `429` |
+| `ASSISTANT_ALLOW_URL_INGEST` | enabled | Set to `0` to disable `ingest_guide_url` (SSRF-safe outbound fetch of user-supplied guide URLs) |
+| `ASSISTANT_GUIDE_INGEST_MAX_BYTES` | `524288` (512 KiB) | Max response body size for a single guide URL fetch |
+
+**URL ingest safety:** `ingest_guide_url` uses the same SSRF guard as cover/image fetches (`safeOutboundFetch`): HTTP(S) only, DNS-resolved, private/loopback/metadata blocked. Guide text is treated as untrusted evidence; mutations require Apply cards (`propose_add_source`, etc.). There is no autonomous crawler.
+
+### Kit advisor MCP (stdio)
+
+A thin **stdio MCP server** exposes the same assistant product verbs (`get_kit_catalog`, `ingest_guide_url`, `add_addon`, …) for hosts like Cursor / Claude Desktop. It opens the self-host SQLite data dir and reuses `invokeAssistantTool` / `applyAssistantAction`. Mutating tools only **propose**; call `confirm_apply` (optional `suggested_excludes` override) or `dismiss_proposed_action` — same confirm-to-apply rule as the SPA.
+
+```bash
+cd web
+# Optional: point at the same data volume the app uses
+export PRINT_PARTNER_DATA_DIR=./data
+# Optional: default plan_id when tools omit it
+export PRINT_PARTNER_MCP_PLAN_ID=1
+npm run mcp -w @print-partner/server
+```
+
+Cursor / Claude Desktop example (`mcp.json` / Claude config):
+
+```json
+{
+  "mcpServers": {
+    "print-partner": {
+      "command": "npm",
+      "args": ["run", "mcp", "-w", "@print-partner/server"],
+      "cwd": "/absolute/path/to/PrintPartnerPartner/web",
+      "env": {
+        "PRINT_PARTNER_DATA_DIR": "/absolute/path/to/data",
+        "DEPLOY_MODE": "self-host"
+      }
+    }
+  }
+}
+```
+
+Requires `DEPLOY_MODE=self-host` (default). Do not point two writers at the same SQLite file concurrently with the running Docker/API process unless you accept SQLite locking risk — prefer stopping the app or using a copy of `PRINT_PARTNER_DATA_DIR` for MCP experiments.
+
+**Recommended (self-host):** configure the kit advisor in the UI under **Settings → Optional integrations → AI assistant** (provider, Ollama URL, model, API key when needed). An enabled `ai_assistant` integration takes precedence over env. Env vars remain the SaaS/operator default path when no Settings integration exists. Keys stay server-side and are redacted in integration list responses / never returned by `/assistant/status`.
+
+**Learning from your other builds (examples, not training):** when **Use my other builds as examples** is on (default), the advisor receives compact summaries of other plans this user/tenant can access (layers, kit selections, inferred stack preset). That is few-shot *context* for the current chat only — it does **not** fine-tune or train the model. Toggle it in Settings or per-chat in the kit advisor sheet. Mutating suggestions appear as **Apply / Dismiss** action cards; nothing writes until `POST /assistant/actions/apply`.
+
+**Chat history:** successful turns are stored per tenant (`GET/DELETE /assistant/history`). The kit advisor sheet reloads prior turns when opened and can **Clear** history. Continuing a conversation sends the loaded turns plus the new message to `/assistant/chat`.
+
+**Domain research packs (not fine-tuning):** curated YAML/MD under `assistant-domain/` is summarized into every chat system prompt (capped). Ship defaults live in the server package; you can import research output via `POST /assistant/domain/import` (writes under `PRINT_PARTNER_DATA_DIR/assistant-domain/`). On startup the server upserts **Advisor notes** (Workflow / Pitfalls / Quotes) onto matching live sources when the pack files change. Research brief + schemas: [`docs/assistant-research-brief.md`](../docs/assistant-research-brief.md), [`docs/assistant-domain-ingest-schema.md`](../docs/assistant-domain-ingest-schema.md). Check loaded pack with `GET /assistant/domain`. Re-backfill notes: `POST /assistant/domain/import` with `{"backfill_notes":true,"write_files":false}`.
+
+**Daily usage caps:** optional soft budgets (`AI_DAILY_REQUEST_BUDGET` / `AI_DAILY_TOKEN_BUDGET`, or Settings fields `daily_request_budget` / `daily_token_budget`) count per tenant per UTC day. When exceeded, `POST /assistant/chat` returns **429** with a clear problem detail. `/assistant/status` reports used vs budget when caps are set. Rate limits (requests/minute) still apply separately.
+
+**Docker Compose + Ollama on the host:** the app container cannot reach Ollama at `http://127.0.0.1:11434` (that is the container’s own loopback, not the Mac/Linux host). Do all of the following:
+
+1. **Settings URL** (or `OLLAMA_URL`): use `http://host.docker.internal:11434` — not `127.0.0.1` / `localhost`. Compose defines `extra_hosts: host.docker.internal:host-gateway` so this works on Linux as well as Docker Desktop (Mac/Windows).
+2. **Host Ollama must accept non-localhost clients.** Ollama often binds `127.0.0.1` only, which rejects Docker bridge traffic. On the **host** (not in Compose), start Ollama with:
+   ```bash
+   # macOS (launchd) — then restart Ollama
+   launchctl setenv OLLAMA_HOST 0.0.0.0
+   # or for a one-off shell session:
+   OLLAMA_HOST=0.0.0.0 ollama serve
+   ```
+   Confirm with `lsof -nP -iTCP:11434 -sTCP:LISTEN` — you want `*:11434` or `0.0.0.0:11434`, not `127.0.0.1:11434`.
+3. **Recreate the app container** after pulling compose changes: `docker compose up -d --force-recreate`.
+4. In **Settings → Optional integrations → AI assistant**, set the URL above, set **Model** to an exact name from `ollama list` on the host (e.g. `llama3.1:latest` — not a placeholder like `llama3.2` unless that model is installed), save, and click **Test connection**. Test verifies both reachability and that the model exists. A failure usually means wrong URL (`127.0.0.1` inside the container), Ollama still bound to localhost only, or a model name that is not installed.
+
+Env fallback example:
+
+```yaml
+environment:
+  AI_ENABLED: "1"
+  AI_PROVIDER: ollama
+  OLLAMA_URL: http://host.docker.internal:11434
+  AI_MODEL: llama3.1:latest
+```
+
+From inside the running container you can smoke-test: `node -e "fetch('http://host.docker.internal:11434/api/tags').then(r=>console.log(r.status)).catch(e=>console.error(e))"`. Chat uses Ollama’s **native `POST /api/chat`** (not the OpenAI-compatible endpoint) so the server can set `num_ctx` — Ollama’s OpenAI endpoint ignores context-size options and silently truncates long prompts, which cuts off the system prompt. Default context is 16384 tokens; override with `OLLAMA_NUM_CTX`. The model name must exist on the host.
 
 ### Checking for app updates
 
