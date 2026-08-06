@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   extractGuideAdvice,
+  fetchWebPageText,
   htmlToPlainText,
   ingestGuideText,
   ingestGuideUrl,
@@ -54,6 +55,28 @@ describe("guide ingest", () => {
     expect(extract.open_questions.some((q) => /Klicky/i.test(q))).toBe(true);
   });
 
+  it("LDO Trident kit page: Voron-Trident base, LDO addons, optional Klicky not required", () => {
+    const html = `
+      <html><body>
+        <h1>Voron Trident Kit | LDO Documentation</h1>
+        <p>Thank you for purchasing the LDO Voron Trident Kit!</p>
+        <p>Nevermore Filter - Instead of the stock exhaust we include parts for the Nevermore Micro V5.</p>
+        <p>Klicky Mod - Instead of the included Omron inductive probe, We also provide the parts to build your machine using the optional Klicky mod by jlas1.</p>
+        <a href="https://github.com/jlas1/Klicky-Probe">Klicky</a>
+        <a href="https://github.com/VoronDesign/Voron-Trident/tree/main/CAD">CAD</a>
+        <a href="https://github.com/VoronDesign/Voron-2/blob/Voron2.4/STLs/TEST_PRINTS/Voron_Design_Cube_v7.stl">Cube</a>
+        <p>Printed Parts Guide (LDO supplement)</p>
+      </body></html>
+    `;
+    const text = htmlToPlainText(html);
+    const extract = extractGuideAdvice(text, { html });
+    expect(extract.detected_printer_or_base).toBe("Voron-Trident");
+    expect(extract.required_addons).toContain("LDOVoronTrident");
+    expect(extract.required_addons).not.toContain("Klicky-Probe");
+    expect(extract.required_addons).not.toContain("LDOVoron2");
+    expect(extract.open_questions.some((q) => /Klicky/i.test(q))).toBe(true);
+  });
+
   it("ingestGuideText returns banner + extract", async () => {
     const result = await ingestGuideText(
       "Install Klicky-Probe on Voron-2. Replaces inductive probe. https://github.com/jlas1/Klicky-Probe",
@@ -76,6 +99,20 @@ describe("guide ingest", () => {
     expect(result.ok).toBe(true);
     expect(result.extract.links.some((l) => l.kind === "github")).toBe(true);
     expect(result.untrusted_text).toMatch(/Tap|probe/i);
+  });
+
+  it("fetchWebPageText returns title + text without GuideExtract", async () => {
+    const html = `<html><head><title>Docs</title></head><body><p>Plain page</p></body></html>`;
+    const fetchFn = vi.fn(async () =>
+      new Response(html, { status: 200, headers: { "content-type": "text/html" } }),
+    ) as unknown as typeof import("../lib/outbound-url.js").safeOutboundFetch;
+
+    const page = await fetchWebPageText("https://example.com/page", { fetchFn });
+    expect(page.ok).toBe(true);
+    expect(page.title).toBe("Docs");
+    expect(page.text).toMatch(/Plain page/);
+    expect(page.untrusted_banner).toMatch(/UNTRUSTED/i);
+    expect(page).not.toHaveProperty("extract");
   });
 
   it("seeds Voron-Tap subject from raw.githubusercontent.com guide URL", async () => {
@@ -203,5 +240,30 @@ describe("guide ingest", () => {
     expect(result.ok).toBe(true);
     expect(result.extract.required_addons).toEqual(["Voron-Tap"]);
     expect(result.extract.required_addons).not.toContain("Klicky-Probe");
+  });
+
+  it("treats hardware kit product pages as BOM evidence (generic, no kit-name detector)", () => {
+    const text = `
+      Expandable multi-material 5-lane kit SKU for klipper printer voron BMCU ERCF
+      Note: This kit does not include any printed parts or the control board (EBB42).
+      What you will receive: This kit includes all parts and electronic accessories except the controller board (EBB42).
+      That means you need to purchase 5x EBB42 boards separately for this unit to function fully.
+      More information: https://github.com/ExampleOrg/ExampleMMU
+      Off-the-shelf electronics (EBB42 with EBB36 also fully compatible).
+    `;
+    const html = `<a href="https://github.com/ExampleOrg/ExampleMMU">More information</a>`;
+    const extract = extractGuideAdvice(text, { html });
+    expect(extract.detected_printer_or_base).toBeNull();
+    expect(extract.notes.some((n) => /not an STL source|BOM/i.test(n))).toBe(true);
+    expect(extract.notes.some((n) => /printed parts/i.test(n))).toBe(true);
+    expect(extract.notes.some((n) => /controller boards|boards separately/i.test(n))).toBe(true);
+    expect(extract.notes.some((n) => /5-lane|5 lanes/i.test(n))).toBe(true);
+    expect(extract.notes.some((n) => /Standalone project|linked GitHub source/i.test(n))).toBe(
+      true,
+    );
+    expect(extract.links.some((l) => /ExampleOrg\/ExampleMMU/i.test(l.url))).toBe(true);
+    expect(extract.open_questions.some((q) => /electronics board/i.test(q))).toBe(true);
+    expect(extract.open_questions.some((q) => /No GitHub repo link/i.test(q))).toBe(false);
+    expect(extract.open_questions.some((q) => /keep plan base/i.test(q))).toBe(false);
   });
 });

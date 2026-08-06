@@ -395,6 +395,161 @@ describe("assistant tools + example builds", () => {
     expect(repo.listSources().some((s) => s.name === "New-Mod")).toBe(true);
   });
 
+  it("propose_add_source Apply chains a Sync → Update follow-up card when a plan is active", async () => {
+    const plan = repo.createProfile("Chain plan");
+    const { proposedAction } = await invokeAssistantTool(
+      "propose_add_source",
+      {
+        name: "EMU",
+        url: "https://github.com/DW-Tas/emu",
+        source_kind: "github",
+        plan_id: plan.id,
+      },
+      { repo, activePlanId: plan.id },
+    );
+    expect(proposedAction?.plan_id).toBe(plan.id);
+    const result = await applyAssistantAction(proposedAction!, {
+      repo,
+      jobs: { start: async () => "x" } as never,
+    });
+    expect(result.ok).toBe(true);
+    const followUp = (result.result as { follow_up_action?: { type: string; params: Record<string, unknown> } })
+      .follow_up_action;
+    expect(followUp?.type).toBe("apply_build_recipe");
+    expect(followUp?.params.workflow).toBe("sync_then_recompute");
+    const steps = followUp?.params.steps as Array<{ type: string }>;
+    expect(steps.map((s) => s.type)).toEqual(["start_sync", "start_recompute"]);
+  });
+
+  it("propose_add_source Apply without a plan returns needs_sync but no follow-up card", async () => {
+    const { proposedAction } = await invokeAssistantTool(
+      "propose_add_source",
+      { name: "Orphan-Mod", url: "https://github.com/example/orphan", source_kind: "github" },
+      { repo },
+    );
+    const result = await applyAssistantAction(proposedAction!, {
+      repo,
+      jobs: { start: async () => "x" } as never,
+    });
+    expect(result.ok).toBe(true);
+    const res = result.result as { needs_sync?: boolean; follow_up_action?: unknown };
+    expect(res.needs_sync).toBe(true);
+    expect(res.follow_up_action).toBeUndefined();
+  });
+
+  it("inspect_repo_tree rejects non-GitHub URLs with a sync-first hint", async () => {
+    const raw = JSON.parse(
+      (
+        await invokeAssistantTool(
+          "inspect_repo_tree",
+          { url: "https://www.printables.com/model/12345-some-mod" },
+          { repo },
+        )
+      ).content,
+    );
+    expect(raw.error).toMatch(/Not a GitHub URL/i);
+    expect(raw.hint).toMatch(/propose_add_source/);
+  });
+
+  it("inspect_repo_tree summarizes a synced source from local STLs", async () => {
+    const source = repo.createSource({
+      name: "EMU",
+      url: "https://github.com/DW-Tas/emu",
+      source_kind: "github",
+    });
+    const repoPath = join(dataDir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "STL", "Base", "Optional"), { recursive: true });
+    mkdirSync(join(repoPath, "User_Mods", "EMU_Lite", "STL"), { recursive: true });
+    mkdirSync(join(repoPath, "User_Mods", "TPU_feet", "STLs"), { recursive: true });
+    writeFileSync(join(repoPath, "STL", "Base", "base_frame.stl"), "solid a");
+    writeFileSync(join(repoPath, "STL", "Base", "Optional", "foot.stl"), "solid b");
+    writeFileSync(join(repoPath, "User_Mods", "EMU_Lite", "STL", "lite.stl"), "solid c");
+    writeFileSync(join(repoPath, "User_Mods", "TPU_feet", "STLs", "foot.stl"), "solid d");
+    repo.updateSource(source.id, {
+      local_path: repoPath,
+      last_synced_at: new Date().toISOString(),
+    });
+
+    const raw = JSON.parse(
+      (await invokeAssistantTool("inspect_repo_tree", { source_name: "EMU" }, { repo })).content,
+    );
+    expect(raw.banner).toMatch(/UNTRUSTED/i);
+    expect(raw.origin).toBe("local_synced_stls");
+    expect(raw.total_stls).toBe(4);
+    expect(
+      raw.variant_candidates.some((c: { group_id: string }) => c.group_id === "user_mods"),
+    ).toBe(true);
+  });
+
+  it("detect_build_decisions surfaces decisions for a synced EMU-like source", async () => {
+    const source = repo.createSource({
+      name: "EMU",
+      url: "https://github.com/DW-Tas/emu",
+      source_kind: "github",
+    });
+    const repoPath = join(dataDir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "STL", "Combiner", "Deprecated Options", "Encoder_no_sensor"), {
+      recursive: true,
+    });
+    mkdirSync(join(repoPath, "User_Mods", "EMU_Lite", "STL"), { recursive: true });
+    mkdirSync(join(repoPath, "User_Mods", "EMU_Split_base", "STL"), { recursive: true });
+    writeFileSync(join(repoPath, "STL", "Combiner", "combiner_body.stl"), "solid a");
+    writeFileSync(
+      join(repoPath, "STL", "Combiner", "Deprecated Options", "Encoder_no_sensor", "old.stl"),
+      "solid b",
+    );
+    writeFileSync(join(repoPath, "User_Mods", "EMU_Lite", "STL", "lite.stl"), "solid c");
+    writeFileSync(join(repoPath, "User_Mods", "EMU_Split_base", "STL", "split.stl"), "solid d");
+    writeFileSync(
+      join(repoPath, "README.md"),
+      "# EMU\nOff-the-shelf electronics (EBB42 with EBB36 also fully compatible). Solo Lane Boards (SLB).\nSupports single lane, dual lane, or multi-lane expandable setups.\nOptionally install Klicky-Probe for probing.",
+    );
+    repo.updateSource(source.id, {
+      local_path: repoPath,
+      last_synced_at: new Date().toISOString(),
+    });
+    const plan = repo.createProfile("EMU plan", source.id);
+
+    const raw = JSON.parse(
+      (
+        await invokeAssistantTool(
+          "detect_build_decisions",
+          { source_name: "EMU", plan_id: plan.id },
+          { repo, activePlanId: plan.id },
+        )
+      ).content,
+    );
+    expect(raw.banner).toMatch(/UNTRUSTED/i);
+    expect(raw.method).toBe("heuristic");
+    expect(raw.decision_count).toBeGreaterThanOrEqual(2);
+    const ids = raw.decisions.map((d: { id: string }) => d.id);
+    expect(ids).toContain("user_mods");
+    expect(ids).toContain("electronics_board");
+    expect(ids).toContain("lane_count");
+    const mods = raw.decisions.find((d: { id: string }) => d.id === "user_mods");
+    expect(mods.kind).toBe("optional_mod");
+    expect(mods.options.map((o: { id: string }) => o.id)).toContain("none");
+    expect(raw.hint).toMatch(/Candidates only|ONE decision at a time/i);
+  });
+
+  it("propose_add_source rejects storefront product URLs", async () => {
+    const raw = JSON.parse(
+      (
+        await invokeAssistantTool(
+          "propose_add_source",
+          {
+            name: "Trianglelabs-EMU",
+            url: "https://trianglelab.net/products/emu-5-lane-kit",
+            source_kind: "github",
+          },
+          { repo },
+        )
+      ).content,
+    );
+    expect(raw.error).toMatch(/Not a GitHub source URL/i);
+    expect(raw.hint).toMatch(/ingest_guide_url/i);
+  });
+
   it("ingest_guide_text tool returns GuideExtract", async () => {
     const raw = JSON.parse(
       (
@@ -474,5 +629,203 @@ describe("assistant tools + example builds", () => {
     const { loadKitManifest } = await import("../services/kit-manifest-store.js");
     const kit = loadKitManifest(repo, plan.id);
     expect(kit.exclude).toEqual(expect.arrayContaining(["nozzle_probe", "z_endstop"]));
+  });
+
+  it("blocks re-propose of dismissed add_addon fingerprint", async () => {
+    const base = repo.createSource({
+      name: "Voron-2",
+      url: "https://example.com/v2.git",
+      source_kind: "github",
+    });
+    const addon = repo.createSource({
+      name: "Bad-Addon",
+      url: "https://example.com/bad.git",
+      source_kind: "github",
+    });
+    repo.updateSource(addon.id, {
+      local_path: join(dataDir, "repos", String(addon.id)),
+      last_synced_at: new Date().toISOString(),
+    });
+    mkdirSync(join(dataDir, "repos", String(addon.id)), { recursive: true });
+    const plan = repo.createProfile("Plan", base.id);
+
+    const first = await invokeAssistantTool(
+      "add_addon",
+      { plan_id: plan.id, source_name: "Bad-Addon" },
+      { repo, activePlanId: plan.id },
+    );
+    expect(first.proposedAction?.type).toBe("add_addon");
+
+    const { logDismissedAction } = await import("../services/plan-decisions.js");
+    logDismissedAction(repo, first.proposedAction!);
+
+    const again = await invokeAssistantTool(
+      "add_addon",
+      { plan_id: plan.id, source_name: "Bad-Addon" },
+      { repo, activePlanId: plan.id },
+    );
+    expect(again.proposedAction).toBeUndefined();
+    expect(JSON.parse(again.content).error).toBe("user_dismissed");
+  });
+
+  it("digest Prefer line appears after applying the same action twice", async () => {
+    const base = repo.createSource({
+      name: "Voron-2",
+      url: "https://example.com/v2.git",
+      source_kind: "github",
+    });
+    const other = repo.createSource({
+      name: "OtherKit",
+      url: "https://example.com/other.git",
+      source_kind: "github",
+    });
+    repo.updateSource(other.id, { last_synced_at: new Date().toISOString() });
+    const plan = repo.createProfile("Plan", base.id);
+
+    for (let i = 0; i < 2; i += 1) {
+      const result = await applyAssistantAction(
+        {
+          id: `a${i}`,
+          type: "set_base",
+          plan_id: plan.id,
+          label: "Set base",
+          summary: "test",
+          params: { source_name: "OtherKit" },
+        },
+        { repo, jobs: { start: async () => "j1" } as never },
+      );
+      expect(result.ok).toBe(true);
+    }
+
+    const { buildPreferencesDigest } = await import("./preferences-digest.js");
+    const digest = buildPreferencesDigest(repo, plan.id);
+    expect(digest).toContain("Prefer (2×): set_base source_name=OtherKit");
+  });
+
+  it("fetch_web_page returns plain text without storing guide evidence", async () => {
+    const { fetchWebPageText } = await import("../services/guide-ingest.js");
+    const html = `<html><head><title>Kit Docs</title></head><body><p>Hello kit world</p></body></html>`;
+    const fetchFn = async () =>
+      new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+    const page = await fetchWebPageText("https://example.com/docs", {
+      fetchFn: fetchFn as never,
+    });
+    expect(page.ok).toBe(true);
+    expect(page.title).toBe("Kit Docs");
+    expect(page.text).toMatch(/Hello kit world/);
+    expect(page.untrusted_banner).toMatch(/UNTRUSTED/i);
+
+    // Tool path: mock via fetch_web_page by stubbing at module level is heavy;
+    // exercise the handler with a real call that will fail SSRF on private — use public mock via vi.
+    const { vi } = await import("vitest");
+    const outbound = await import("../lib/outbound-url.js");
+    const spy = vi.spyOn(outbound, "safeOutboundFetch").mockResolvedValue(
+      new Response(html, { status: 200 }),
+    );
+    try {
+      const raw = JSON.parse(
+        (
+          await invokeAssistantTool(
+            "fetch_web_page",
+            { url: "https://example.com/docs" },
+            { repo },
+          )
+        ).content,
+      );
+      expect(raw.ok).toBe(true);
+      expect(raw.text).toMatch(/Hello kit world/);
+      expect(raw.title).toBe("Kit Docs");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("read_source_file reads text, rejects traversal and binary, caps size", async () => {
+    const source = repo.createSource({
+      name: "EMU",
+      url: "https://github.com/DW-Tas/emu",
+      source_kind: "github",
+    });
+    const repoPath = join(dataDir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "docs"), { recursive: true });
+    writeFileSync(join(repoPath, "README.md"), "# EMU\nHello from README\n");
+    writeFileSync(join(repoPath, "docs", "notes.md"), "notes body");
+    writeFileSync(join(repoPath, "part.stl"), "solid x\0binary");
+    const big = "x".repeat(120 * 1024);
+    writeFileSync(join(repoPath, "big.md"), big);
+    repo.updateSource(source.id, {
+      local_path: repoPath,
+      last_synced_at: new Date().toISOString(),
+    });
+
+    const ok = JSON.parse(
+      (
+        await invokeAssistantTool(
+          "read_source_file",
+          { source: "EMU", path: "README.md" },
+          { repo },
+        )
+      ).content,
+    );
+    expect(ok.text).toMatch(/Hello from README/);
+    expect(ok.untrusted_banner).toMatch(/UNTRUSTED/i);
+
+    const traversal = JSON.parse(
+      (
+        await invokeAssistantTool(
+          "read_source_file",
+          { source: "EMU", path: "../etc/passwd" },
+          { repo },
+        )
+      ).content,
+    );
+    expect(traversal.error).toMatch(/traversal|Invalid path/i);
+
+    const binaryExt = JSON.parse(
+      (
+        await invokeAssistantTool(
+          "read_source_file",
+          { source: "EMU", path: "part.stl" },
+          { repo },
+        )
+      ).content,
+    );
+    expect(binaryExt.error).toMatch(/binary/i);
+
+    const capped = JSON.parse(
+      (
+        await invokeAssistantTool(
+          "read_source_file",
+          { source: "EMU", path: "big.md" },
+          { repo },
+        )
+      ).content,
+    );
+    expect(capped.truncated).toBe(true);
+    expect(capped.text.length).toBeLessThanOrEqual(100 * 1024);
+  });
+
+  it("web_search returns structured result with untrusted banner", async () => {
+    const { vi } = await import("vitest");
+    const outbound = await import("../lib/outbound-url.js");
+    const html = `
+      <a class="result__a" href="https://example.com/a">Title A</a>
+      <a class="result__snippet">Snippet A</a>
+    `;
+    const spy = vi.spyOn(outbound, "safeOutboundFetch").mockResolvedValue(
+      new Response(html, { status: 200 }),
+    );
+    try {
+      const raw = JSON.parse(
+        (
+          await invokeAssistantTool("web_search", { query: "voron tap" }, { repo })
+        ).content,
+      );
+      expect(raw.untrusted_banner).toMatch(/UNTRUSTED/i);
+      expect(raw.provider).toBeTruthy();
+      expect(Array.isArray(raw.hits)).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

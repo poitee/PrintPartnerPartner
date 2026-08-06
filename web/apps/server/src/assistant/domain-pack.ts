@@ -37,6 +37,21 @@ export type AliasResolve = {
   branch?: string | null;
   addons?: string[];
   notes?: string | null;
+  selection?: Record<string, string>;
+};
+
+export type SourceIdentity = {
+  source_name?: string;
+  role?: string;
+  summary?: string;
+  important_tags?: Array<{ id?: string }>;
+};
+
+export type SourceDecisionYaml = {
+  id: string;
+  kind?: string;
+  label?: string;
+  options?: Array<{ id: string; label?: string; selection?: Record<string, string> }>;
 };
 
 export type AliasEntry = {
@@ -250,19 +265,37 @@ function refToTagOrBranch(ref: unknown): { tag?: string | null; branch?: string 
   return { tag: value, branch: null };
 }
 
+function normalizeSelectionMap(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (v == null || v === "") continue;
+    out[k] = String(v);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** Accept both schema docs (phrases/resolve) and research-output (phrase/ref) shapes. */
 export function normalizeAliasEntry(raw: unknown): AliasEntry | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   if (Array.isArray(o.phrases) || o.resolve) {
-    const resolve = (o.resolve ?? {}) as AliasResolve;
+    const resolveRaw = (o.resolve ?? {}) as AliasResolve;
     const phrases = Array.isArray(o.phrases)
       ? o.phrases.map(String).filter(Boolean)
       : typeof o.phrase === "string"
         ? [o.phrase]
         : [];
-    if (!phrases.length && !resolve.source_name) return null;
-    return { phrases, resolve };
+    if (!phrases.length && !resolveRaw.source_name) return null;
+    const selection =
+      normalizeSelectionMap(resolveRaw.selection) ?? normalizeSelectionMap(o.selection);
+    return {
+      phrases,
+      resolve: {
+        ...resolveRaw,
+        ...(selection ? { selection } : {}),
+      },
+    };
   }
   const phraseField = typeof o.phrase === "string" ? o.phrase : "";
   const phrases = phraseField
@@ -271,6 +304,7 @@ export function normalizeAliasEntry(raw: unknown): AliasEntry | null {
     .filter(Boolean);
   if (!phrases.length && !o.source_name) return null;
   const { tag, branch } = refToTagOrBranch(o.ref);
+  const selection = normalizeSelectionMap(o.selection);
   return {
     phrases,
     resolve: {
@@ -280,8 +314,132 @@ export function normalizeAliasEntry(raw: unknown): AliasEntry | null {
       catalog_base_id: o.catalog_base_id != null ? String(o.catalog_base_id) : null,
       addons: splitAddonNames(o.addons),
       notes: o.note != null ? String(o.note) : o.notes != null ? String(o.notes) : null,
+      ...(selection ? { selection } : {}),
     },
   };
+}
+
+/** Load phrase aliases from domain pack alias_map.yaml. */
+export function loadAliasEntries(dataDir?: string | null): AliasEntry[] {
+  const aliasPath = findFile(dataDir, "_global", "alias_map.yaml");
+  if (!aliasPath) return [];
+  const raw = loadYamlFile(aliasPath) as { aliases?: unknown[] } | null;
+  return (raw?.aliases ?? [])
+    .map(normalizeAliasEntry)
+    .filter((a): a is AliasEntry => a != null);
+}
+
+/**
+ * Find identity.yaml for a source_name. Dir names may be sanitized
+ * (e.g. `DW-Tas-emu` for `DW-Tas/emu`); also matches identity.source_name.
+ */
+export function findIdentityForSource(
+  sourceName: string,
+  dataDir?: string | null,
+): SourceIdentity | null {
+  const name = sourceName.trim();
+  if (!name) return null;
+  const sanitized = name.replace(/\//g, "-");
+  for (const root of candidateRoots(dataDir)) {
+    const sourcesRoot = join(root, "sources");
+    if (!existsSync(sourcesRoot)) continue;
+    const direct = [name, sanitized]
+      .map((d) => join(sourcesRoot, d, "identity.yaml"))
+      .find((p) => existsSync(p));
+    if (direct) {
+      const id = loadYamlFile(direct) as SourceIdentity | null;
+      if (id) return id;
+    }
+    let dirs: string[];
+    try {
+      dirs = readdirSync(sourcesRoot, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    } catch {
+      continue;
+    }
+    for (const dir of dirs) {
+      const identity = loadYamlFile(join(sourcesRoot, dir, "identity.yaml")) as SourceIdentity | null;
+      if (!identity) continue;
+      if (
+        identity.source_name === name ||
+        dir === name ||
+        dir === sanitized ||
+        dir.replace(/-/g, "/") === name
+      ) {
+        return identity;
+      }
+    }
+  }
+  return null;
+}
+
+/** Load optional per-source decisions.yaml candidates from the domain pack. */
+export function loadSourceDecisionsYaml(
+  sourceName: string,
+  dataDir?: string | null,
+): SourceDecisionYaml[] {
+  const name = sourceName.trim();
+  if (!name) return [];
+  const sanitized = name.replace(/\//g, "-");
+  for (const root of candidateRoots(dataDir)) {
+    const sourcesRoot = join(root, "sources");
+    if (!existsSync(sourcesRoot)) continue;
+    const candidates = [name, sanitized];
+    let dirs: string[] = [];
+    try {
+      dirs = readdirSync(sourcesRoot, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    } catch {
+      /* ignore */
+    }
+    for (const dir of [...candidates, ...dirs]) {
+      const decisionsPath = join(sourcesRoot, dir, "decisions.yaml");
+      if (!existsSync(decisionsPath)) continue;
+      if (!candidates.includes(dir)) {
+        const identity = loadYamlFile(join(sourcesRoot, dir, "identity.yaml")) as SourceIdentity | null;
+        if (
+          identity?.source_name !== name &&
+          dir !== name &&
+          dir !== sanitized &&
+          dir.replace(/-/g, "/") !== name
+        ) {
+          continue;
+        }
+      }
+      const raw = loadYamlFile(decisionsPath) as { decisions?: unknown[] } | null;
+      const list = Array.isArray(raw?.decisions) ? raw!.decisions! : [];
+      const out: SourceDecisionYaml[] = [];
+      for (const entry of list) {
+        if (!entry || typeof entry !== "object") continue;
+        const row = entry as Record<string, unknown>;
+        const id = typeof row.id === "string" ? row.id.trim() : "";
+        if (!id) continue;
+        const optionsRaw = Array.isArray(row.options) ? row.options : [];
+        const options: SourceDecisionYaml["options"] = [];
+        for (const opt of optionsRaw) {
+          if (!opt || typeof opt !== "object") continue;
+          const o = opt as Record<string, unknown>;
+          const oid = typeof o.id === "string" ? o.id.trim() : "";
+          if (!oid) continue;
+          options.push({
+            id: oid,
+            label: typeof o.label === "string" ? o.label : undefined,
+            selection: normalizeSelectionMap(o.selection),
+          });
+        }
+        out.push({
+          id,
+          kind: typeof row.kind === "string" ? row.kind : undefined,
+          label: typeof row.label === "string" ? row.label : undefined,
+          options,
+        });
+      }
+      return out;
+    }
+  }
+  return [];
 }
 
 /** Accept map form or research array form for stacks. */
@@ -358,73 +516,55 @@ export function normalizeConflict(raw: unknown): {
   };
 }
 
-/** Summarize on-disk domain packs for the assistant system prompt. */
-export function loadAssistantDomainPack(options?: {
-  dataDir?: string | null;
-  maxChars?: number;
-}): string {
-  const dataDir = options?.dataDir ?? null;
-  const maxChars = options?.maxChars ?? MAX_DOMAIN_PACK_CHARS;
-  const sections: string[] = ["## Domain pack (curated — not training)"];
-
-  const aliasPath = findFile(dataDir, "_global", "alias_map.yaml");
-  if (aliasPath) {
-    const raw = loadYamlFile(aliasPath) as { aliases?: unknown[] } | null;
-    const aliasesRaw = raw?.aliases ?? [];
-    const aliases = aliasesRaw
-      .map(normalizeAliasEntry)
-      .filter((a): a is AliasEntry => a != null);
-    if (aliases.length) {
-      sections.push("### Phrase aliases → exact sources");
-      for (const a of aliases.slice(0, 22)) {
-        const phrases = (a.phrases ?? []).slice(0, 4).join(" / ");
-        const r = a.resolve ?? {};
-        const bits = [
-          r.source_name && `source=${r.source_name}`,
-          r.tag && `tag=${r.tag}`,
-          r.branch && `branch=${r.branch}`,
-          r.catalog_base_id && `base_id=${r.catalog_base_id}`,
-          (r.addons?.length ?? 0) > 0 && `addons=[${r.addons!.join(",")}]`,
-        ].filter(Boolean);
-        sections.push(`- "${phrases}" → ${bits.join(" ")}`);
-        if (r.notes) sections.push(`  note: ${String(r.notes).replace(/\s+/g, " ").slice(0, 100)}`);
-      }
-    }
+function formatAliasLines(aliases: AliasEntry[], noteMax = 72): string[] {
+  const lines: string[] = ["### Phrase aliases → exact sources"];
+  for (const a of aliases.slice(0, 48)) {
+    const phrases = (a.phrases ?? []).slice(0, 4).join(" / ");
+    const r = a.resolve ?? {};
+    const bits = [
+      r.source_name && `source=${r.source_name}`,
+      r.tag && `tag=${r.tag}`,
+      r.branch && `branch=${r.branch}`,
+      r.catalog_base_id && `base_id=${r.catalog_base_id}`,
+      (r.addons?.length ?? 0) > 0 && `addons=[${r.addons!.join(",")}]`,
+    ].filter(Boolean);
+    lines.push(`- "${phrases}" → ${bits.join(" ")}`);
+    if (r.notes) lines.push(`  note: ${String(r.notes).replace(/\s+/g, " ").slice(0, noteMax)}`);
   }
+  return lines;
+}
 
+function formatStacksSection(dataDir: string | null): string[] {
   const stacksPath = findFile(dataDir, "_global", "stacks.yaml");
-  if (stacksPath) {
-    const raw = loadYamlFile(stacksPath) as { stacks?: unknown } | null;
-    const stacksRaw = raw?.stacks ?? {};
-    const entries = normalizeStacks(stacksRaw).slice(0, 12);
-    if (entries.length) {
-      sections.push("### Stack recipes");
-      for (const { id, stack: s } of entries) {
-        sections.push(
-          `- ${id}: base=${s.base_source ?? "?"}${s.base_tag ? `@${s.base_tag}` : ""}; addons=[${(s.addon_sources ?? []).join(", ")}]`,
-        );
-      }
-    }
+  if (!stacksPath) return [];
+  const raw = loadYamlFile(stacksPath) as { stacks?: unknown } | null;
+  const entries = normalizeStacks(raw?.stacks ?? {}).slice(0, 12);
+  if (!entries.length) return [];
+  const lines = ["### Stack recipes"];
+  for (const { id, stack: s } of entries) {
+    lines.push(
+      `- ${id}: base=${s.base_source ?? "?"}${s.base_tag ? `@${s.base_tag}` : ""}; addons=[${(s.addon_sources ?? []).join(", ")}]`,
+    );
   }
+  return lines;
+}
 
-  // Merge conflicts before bulky digests so they survive the char budget
+function formatConflictsSection(dataDir: string | null): string[] {
   const conflictsPath = findFile(dataDir, "_global", "merge_conflicts.yaml");
-  if (conflictsPath) {
-    const raw = loadYamlFile(conflictsPath) as { conflicts?: unknown[] } | null;
-    const conflicts = (raw?.conflicts ?? [])
-      .map(normalizeConflict)
-      .filter((c): c is NonNullable<typeof c> => c != null);
-    if (conflicts.length) {
-      sections.push("### Known merge conflicts");
-      for (const c of conflicts.slice(0, 10)) {
-        sections.push(
-          `- ${c.slug_or_path}: ${c.resolution.slice(0, 120)}`,
-        );
-      }
-    }
+  if (!conflictsPath) return [];
+  const raw = loadYamlFile(conflictsPath) as { conflicts?: unknown[] } | null;
+  const conflicts = (raw?.conflicts ?? [])
+    .map(normalizeConflict)
+    .filter((c): c is NonNullable<typeof c> => c != null);
+  if (!conflicts.length) return [];
+  const lines = ["### Known merge conflicts"];
+  for (const c of conflicts.slice(0, 10)) {
+    lines.push(`- ${c.slug_or_path}: ${c.resolution.slice(0, 120)}`);
   }
+  return lines;
+}
 
-  // Per-source digests (identity + compact compat; workflow excerpts capped)
+function formatSourceDigestsSection(dataDir: string | null): string[] {
   for (const root of candidateRoots(dataDir)) {
     const sourcesRoot = join(root, "sources");
     if (!existsSync(sourcesRoot)) continue;
@@ -438,7 +578,7 @@ export function loadAssistantDomainPack(options?: {
       continue;
     }
     if (!dirs.length) continue;
-    sections.push("### Source digests");
+    const lines = ["### Source digests"];
     let mdExcerptCount = 0;
     for (const name of dirs.slice(0, 14)) {
       const dir = join(sourcesRoot, name);
@@ -462,7 +602,7 @@ export function loadAssistantDomainPack(options?: {
             .slice(0, 4)
             .join(",")
         : "";
-      sections.push(
+      lines.push(
         `- ${name}${role ? ` [${role}]` : ""}${tags ? ` tags=${tags}` : ""}${
           summary ? ` — ${summary.slice(0, 80)}` : ""
         }`,
@@ -470,34 +610,77 @@ export function loadAssistantDomainPack(options?: {
       const compatNorm = normalizeCompatibility(compat);
       if (compatNorm) {
         const compatLine = formatCompatibilityDigestLine(compatNorm);
-        if (compatLine) sections.push(compatLine);
+        if (compatLine) lines.push(compatLine);
       }
       if (mdExcerptCount < MAX_SOURCES_WITH_MD_EXCERPTS) {
         const workflowExcerpt = compactExcerpt(workflowText, MAX_WORKFLOW_EXCERPT);
         const pitfallsExcerpt = compactExcerpt(pitfallsText, MAX_PITFALLS_EXCERPT);
         if (workflowExcerpt) {
-          sections.push(`  workflow: ${workflowExcerpt}`);
+          lines.push(`  workflow: ${workflowExcerpt}`);
           mdExcerptCount += 1;
         }
         if (pitfallsExcerpt) {
-          sections.push(`  pitfalls: ${pitfallsExcerpt}`);
+          lines.push(`  pitfalls: ${pitfallsExcerpt}`);
         }
       }
     }
-    break; // first root that has sources/
+    return lines;
   }
+  return [];
+}
 
+function formatPackPitfallsSection(dataDir: string | null): string[] {
   const pitfallsPath = findFile(dataDir, "_global", "pitfalls.md");
-  if (pitfallsPath) {
-    const text = readText(pitfallsPath);
-    if (text?.trim()) {
-      sections.push("### Pack pitfalls");
-      sections.push(text.trim().slice(0, 800));
-    }
+  if (!pitfallsPath) return [];
+  const text = readText(pitfallsPath);
+  if (!text?.trim()) return [];
+  return ["### Pack pitfalls", text.trim().slice(0, 800)];
+}
+
+/**
+ * Pack under budget with priority: stacks/conflicts/digests (workflow+pitfalls)
+ * first, then aliases fill remaining space (notes shortened to fit).
+ * Always reserve room for aliases so phrase → source mappings stay visible.
+ */
+function joinUnderBudget(header: string, priority: string[][], aliases: string[], maxChars: number): string {
+  if (!aliases.length) {
+    return truncate([header, ...priority.flat()].join("\n"), maxChars);
   }
 
-  if (sections.length <= 1) return "";
-  return truncate(sections.join("\n"), maxChars);
+  const aliasReserve = Math.min(1400, Math.floor(maxChars * 0.28));
+  const priorityBudget = Math.max(400, maxChars - aliasReserve);
+  const priorityText = truncate([header, ...priority.flat()].join("\n"), priorityBudget);
+
+  const remaining = maxChars - priorityText.length - 1;
+  let aliasBlock = aliases.join("\n");
+  if (aliasBlock.length > remaining) {
+    aliasBlock = `${aliasBlock.slice(0, Math.max(0, remaining - 20))}\n…[truncated]`;
+  }
+  return truncate(`${priorityText}\n${aliasBlock}`, maxChars);
+}
+
+/** Summarize on-disk domain packs for the assistant system prompt. */
+export function loadAssistantDomainPack(options?: {
+  dataDir?: string | null;
+  maxChars?: number;
+}): string {
+  const dataDir = options?.dataDir ?? null;
+  const maxChars = options?.maxChars ?? MAX_DOMAIN_PACK_CHARS;
+  const header = "## Domain pack (curated — not training)";
+
+  let aliasLines: string[] = [];
+  const aliases = loadAliasEntries(dataDir);
+  if (aliases.length) aliasLines = formatAliasLines(aliases);
+
+  const priority = [
+    formatStacksSection(dataDir),
+    formatConflictsSection(dataDir),
+    formatSourceDigestsSection(dataDir),
+    formatPackPitfallsSection(dataDir),
+  ].filter((s) => s.length > 0);
+
+  if (!aliasLines.length && priority.length === 0) return "";
+  return joinUnderBudget(header, priority, aliasLines, maxChars);
 }
 
 function writeYaml(path: string, data: unknown): void {
@@ -531,7 +714,6 @@ export function importAssistantDomainPack(
   const root = join(options.dataDir, "assistant-domain");
   const sourcesWritten: string[] = [];
   let notesCreated = 0;
-  let sourcesMatchedForNotes = 0;
   const matchedSourceIds = new Set<number>();
 
   if (writeFiles) {
@@ -611,7 +793,7 @@ export function importAssistantDomainPack(
     }
   }
 
-  sourcesMatchedForNotes = matchedSourceIds.size;
+  let sourcesMatchedForNotes = matchedSourceIds.size;
 
   const shouldBackfill = options.repo != null && payload.backfill_notes !== false;
   if (shouldBackfill && options.repo) {
@@ -630,9 +812,27 @@ export function importAssistantDomainPack(
 }
 
 function findSourcePackDir(dataDir: string | null | undefined, sourceName: string): string | null {
+  const name = sourceName.trim();
+  const sanitized = name.replace(/\//g, "-");
   for (const root of candidateRoots(dataDir)) {
-    const dir = join(root, "sources", sourceName);
-    if (existsSync(dir)) return dir;
+    for (const dirName of [name, sanitized]) {
+      const dir = join(root, "sources", dirName);
+      if (existsSync(dir)) return dir;
+    }
+    const sourcesRoot = join(root, "sources");
+    if (!existsSync(sourcesRoot)) continue;
+    let dirs: string[];
+    try {
+      dirs = readdirSync(sourcesRoot, { withFileTypes: true })
+        .filter((d) => d.isDirectory())
+        .map((d) => d.name);
+    } catch {
+      continue;
+    }
+    for (const dirName of dirs) {
+      const identity = loadYamlFile(join(sourcesRoot, dirName, "identity.yaml")) as SourceIdentity | null;
+      if (identity?.source_name === name) return join(sourcesRoot, dirName);
+    }
   }
   return null;
 }

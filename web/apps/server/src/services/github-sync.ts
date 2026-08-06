@@ -3,6 +3,7 @@ import { createWriteStream, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
+import { summarizeRepoTreePaths, type RepoTreeSummary } from "./repo-tree-summary.js";
 
 function safeRepoFilePath(repoDir: string, relativePath: string): string | null {
   const normalized = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
@@ -149,6 +150,83 @@ async function downloadRawFile(
   return { ok: true, bytes: buf.byteLength };
 }
 
+type RepoTreeEntry = {
+  path: string;
+  type: "blob" | "tree";
+  size: number | null;
+};
+
+/** Resolve a ref to a commit and list the full recursive tree (no blob downloads). */
+async function fetchGithubTreeEntries(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  refName: string,
+): Promise<{ commitSha: string; entries: RepoTreeEntry[]; truncated: boolean }> {
+  // getCommit resolves any ref (branch, tag, or SHA), unlike getBranch which only accepts branches.
+  const commitMeta = await octokit.repos.getCommit({ owner, repo, ref: refName });
+  const commitSha = commitMeta.data.sha;
+  const tree = await octokit.git.getTree({
+    owner,
+    repo,
+    tree_sha: commitSha,
+    recursive: "true",
+  });
+  const entries: RepoTreeEntry[] = [];
+  for (const item of tree.data.tree) {
+    if (!item.path || (item.type !== "blob" && item.type !== "tree")) continue;
+    entries.push({
+      path: item.path,
+      type: item.type,
+      size: typeof item.size === "number" ? item.size : null,
+    });
+  }
+  return { commitSha, entries, truncated: tree.data.truncated === true };
+}
+
+export type GithubRepoTreeSummary = {
+  owner: string;
+  repo: string;
+  ref: string;
+  commit_sha: string | null;
+  summary: RepoTreeSummary;
+};
+
+/**
+ * Pre-sync repo inspection: fetch the recursive tree listing only and summarize
+ * top-level dirs, STL counts, and variant-looking subfolders. No blob downloads.
+ */
+export async function fetchGithubRepoTreeSummary(
+  url: string,
+  ref?: string | null,
+  token?: string | null,
+): Promise<GithubRepoTreeSummary> {
+  const parsed = parseGithubUrl(url);
+  if (!parsed) throw new Error("Invalid GitHub repository URL");
+  const octokit = new Octokit(token ? { auth: token } : {});
+  let refName = ref?.trim() || parsed.branch;
+  let resolved: { commitSha: string; entries: RepoTreeEntry[]; truncated: boolean };
+  try {
+    resolved = await fetchGithubTreeEntries(octokit, parsed.owner, parsed.repo, refName);
+  } catch (e) {
+    // URLs without an explicit branch default to "main"; fall back to the repo default branch.
+    if (refName !== "main" || (ref && ref.trim())) throw e;
+    const repoMeta = await octokit.repos.get({ owner: parsed.owner, repo: parsed.repo });
+    const defaultBranch = repoMeta.data.default_branch;
+    if (!defaultBranch || defaultBranch === refName) throw e;
+    refName = defaultBranch;
+    resolved = await fetchGithubTreeEntries(octokit, parsed.owner, parsed.repo, refName);
+  }
+  const blobPaths = resolved.entries.filter((e) => e.type === "blob").map((e) => e.path);
+  return {
+    owner: parsed.owner,
+    repo: parsed.repo,
+    ref: refName,
+    commit_sha: resolved.commitSha,
+    summary: summarizeRepoTreePaths(blobPaths, { truncated: resolved.truncated }),
+  };
+}
+
 export type SyncGithubOptions = {
   download?: boolean;
   maxDownloads?: number;
@@ -172,37 +250,27 @@ export async function syncGithubSource(
 
   const tagName = options?.tag?.trim() || null;
   const refName = tagName || branch || ref.branch;
-  // getCommit resolves any ref (branch, tag, or SHA), unlike getBranch which only accepts branches.
-  const commitMeta = await octokit.repos.getCommit({
-    owner: ref.owner,
-    repo: ref.repo,
-    ref: refName,
-  });
-  const commitSha = commitMeta.data.sha;
-
-  const tree = await octokit.git.getTree({
-    owner: ref.owner,
-    repo: ref.repo,
-    tree_sha: commitSha,
-    recursive: "true",
-  });
-
-  const stlBlobs = tree.data.tree.filter(
-    (item) => item.type === "blob" && item.path?.toLowerCase().endsWith(".stl"),
+  const { commitSha, entries } = await fetchGithubTreeEntries(
+    octokit,
+    ref.owner,
+    ref.repo,
+    refName,
   );
 
-  const docBlobs = tree.data.tree.filter((item) => {
-    if (item.type !== "blob" || !item.path) return false;
-    return classifyDocPath(item.path) != null;
-  });
+  const stlBlobs = entries.filter(
+    (item) => item.type === "blob" && item.path.toLowerCase().endsWith(".stl"),
+  );
 
+  const docBlobs = entries.filter(
+    (item) => item.type === "blob" && classifyDocPath(item.path) != null,
+  );
 
-  const stlPaths = stlBlobs.map((b) => b.path!).sort();
+  const stlPaths = stlBlobs.map((b) => b.path).sort();
   const docEntries: SyncDocEntry[] = docBlobs
     .map((b) => {
-      const path = b.path!;
+      const path = b.path;
       const kind = classifyDocPath(path)!;
-      return { path, kind, sizeBytes: typeof b.size === "number" ? b.size : 0 };
+      return { path, kind, sizeBytes: b.size ?? 0 };
     })
     .sort((a, b) => a.path.localeCompare(b.path));
 

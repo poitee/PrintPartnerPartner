@@ -58,11 +58,32 @@ describe("buildAssistantSystemPrompt", () => {
   it("omits plan snapshot when planId is missing", () => {
     const prompt = buildAssistantSystemPrompt({ catalog: sampleCatalog });
     expect(prompt).not.toContain("Active plan snapshot");
+    expect(prompt).not.toContain("Active plan context");
   });
 
   it("documents that other builds are examples not training", () => {
     const prompt = buildAssistantSystemPrompt({ catalog: sampleCatalog });
     expect(prompt).toMatch(/few-shot examples for context only/i);
     expect(prompt).toMatch(/not training/i);
+  });
+
+  it("includes generic research-loop guidance when tools are available", () => {
+    const prompt = buildAssistantSystemPrompt({
+      catalog: sampleCatalog,
+      toolsAvailable: true,
+    });
+    expect(prompt).toMatch(/Build walkthrough \(research loop\)/i);
+    expect(prompt).toMatch(/detect_build_decisions surfaces \*\*candidates\*\*/i);
+    expect(prompt).toMatch(/stay on that base/i);
+    expect(prompt).toMatch(/SEARCH_PROVIDER|SEARCH_API_KEY/);
+    // No kit-name-bound EMU/Trianglelabs hard rules in the static prompt.
+    expect(prompt).not.toMatch(/Trianglelabs EMU 5-lane/i);
+    expect(prompt).not.toMatch(/never set_base to a Voron printer for an EMU/i);
+  });
+
+  it("softens effects cheat sheet away from hardcoding a specific MMU repo", () => {
+    const prompt = buildAssistantSystemPrompt({ catalog: sampleCatalog });
+    expect(prompt).toMatch(/standalone.*project like an MMU/i);
+    expect(prompt).not.toMatch(/non-catalog bases \(e\.g\. `DW-Tas\/emu`\)/);
   });
 });

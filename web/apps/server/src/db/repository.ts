@@ -50,7 +50,7 @@ import type { FilamentResolveContext } from "../services/filament-resolve.js";
 import { formatSpoolSummaryBadge } from "../integrations/spoolman-client.js";
 import { REMOTE_CHECKED_AT_KEY, REMOTE_UPDATE_STATUS_KEY } from "../services/source-update-check.js";
 import type { PartRow, ProfileSummary, SourceSummary, PlanDecision, PlanSnapshot, PlanSnapshotSummary, PlanSnapshotSource, PlanDecisionActor, PlanDecisionKind } from "@print-partner/contracts";
-import { and, asc, count, eq, sql } from "drizzle-orm";
+import { and, asc, count, eq, ne, sql } from "drizzle-orm";
 import { join, resolve, sep, basename } from "node:path";
 import type { DrizzleDb } from "./client.js";
 import { asSyncDb, type AppDrizzleDb } from "./sync-db-bridge.js";
@@ -2063,6 +2063,25 @@ export class AppRepository {
     return rows.slice(-Math.max(1, limit)).map((r) => this.mapPlanDecision(r));
   }
 
+  /** Recent plan_decisions across the tenant, optionally excluding one plan (cross-plan memory). */
+  listRecentTenantPlanDecisions(
+    limit = 200,
+    excludePlanId?: number | null,
+  ): PlanDecision[] {
+    if (!this.schema.planDecisions) return [];
+    const conditions = [eq(this.schema.planDecisions.tenantId, this.tenantId)];
+    if (excludePlanId != null && excludePlanId > 0) {
+      conditions.push(ne(this.schema.planDecisions.profileId, excludePlanId));
+    }
+    const rows = this.db
+      .select()
+      .from(this.schema.planDecisions)
+      .where(and(...conditions))
+      .orderBy(asc(this.schema.planDecisions.createdAt))
+      .all();
+    return rows.slice(-Math.max(1, limit)).map((r) => this.mapPlanDecision(r));
+  }
+
   createPlanDecision(input: {
     planId: number;
     actor: PlanDecisionActor;
@@ -2094,6 +2113,36 @@ export class AppRepository {
       .returning()
       .get();
     return this.mapPlanDecision(inserted);
+  }
+
+  /** Delete plan_decisions for one plan (tenant-scoped). Returns rows removed. */
+  deletePlanDecisionsForPlan(planId: number): number {
+    if (!this.schema.planDecisions) return 0;
+    if (!planId || planId <= 0) return 0;
+    const before = this.listPlanDecisions(planId, 10_000).length;
+    if (before === 0) return 0;
+    this.db
+      .delete(this.schema.planDecisions)
+      .where(
+        and(
+          eq(this.schema.planDecisions.tenantId, this.tenantId),
+          eq(this.schema.planDecisions.profileId, planId),
+        ),
+      )
+      .run();
+    return before;
+  }
+
+  /** Delete all plan_decisions for this tenant. Returns rows removed. */
+  deleteAllPlanDecisions(): number {
+    if (!this.schema.planDecisions) return 0;
+    const before = this.listRecentTenantPlanDecisions(10_000, null).length;
+    if (before === 0) return 0;
+    this.db
+      .delete(this.schema.planDecisions)
+      .where(eq(this.schema.planDecisions.tenantId, this.tenantId))
+      .run();
+    return before;
   }
 
   private mapPlanSnapshotSummary(row: PlanSnapshotRow): PlanSnapshotSummary {

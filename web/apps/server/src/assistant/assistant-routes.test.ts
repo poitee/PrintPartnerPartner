@@ -28,12 +28,13 @@ describe("assistant routes", () => {
   let dataDir: string;
   let app: ReturnType<typeof Fastify>;
   let jobs: InProcessJobRunner;
+  let repo: ReturnType<typeof createSelfHostPorts>["repository"];
 
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), "pp-assistant-"));
     const ports = createSelfHostPorts(dataDir);
     await ports.db.connect();
-    const repo = ports.repository!;
+    repo = ports.repository!;
     jobs = mockJobs();
 
     const mockAssistant: AssistantPort = {
@@ -67,7 +68,7 @@ describe("assistant routes", () => {
     app.addHook("onRequest", async (req: { tenantId: string }) => {
       req.tenantId = "default";
     });
-    await registerAssistantRoutes(app, { repo, config, jobs });
+    await registerAssistantRoutes(app, { repo: repo!, config, jobs });
     await app.ready();
   });
 
@@ -216,10 +217,62 @@ describe("assistant routes", () => {
     const res = await app.inject({
       method: "POST",
       url: "/assistant/feedback",
-      payload: { rating: "up", message_excerpt: "helpful tip" },
+      payload: { rating: "up", message_excerpt: "helpful tip", comment: "clear steps" },
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ ok: true });
+
+    const listed = await app.inject({ method: "GET", url: "/assistant/feedback" });
+    expect(listed.statusCode).toBe(200);
+    const body = listed.json() as { entries: Array<{ rating: string; message_excerpt: string }> };
+    expect(body.entries.some((e) => e.rating === "up" && e.message_excerpt?.includes("helpful"))).toBe(
+      true,
+    );
+  });
+
+  it("GET /assistant/preferences returns digest in self-host", async () => {
+    const res = await app.inject({ method: "GET", url: "/assistant/preferences" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { digest: string | null; thumbs_prefer: string | null };
+    expect(body).toHaveProperty("digest");
+    expect(body).toHaveProperty("thumbs_prefer");
+  });
+
+  it("DELETE /assistant/decisions requires plan_id or all=true", async () => {
+    const bad = await app.inject({ method: "DELETE", url: "/assistant/decisions" });
+    expect(bad.statusCode).toBe(400);
+
+    const plan = repo!.createProfile("Memory plan");
+    repo!.createPlanDecision({
+      planId: plan.id,
+      actor: "user",
+      kind: "applied_action",
+      actionType: "add_addon",
+      params: { source_name: "Voron-Stealthburner" },
+      label: "Add Stealthburner",
+      summary: "applied",
+    });
+
+    const cleared = await app.inject({
+      method: "DELETE",
+      url: `/assistant/decisions?plan_id=${plan.id}`,
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json()).toMatchObject({ ok: true, scope: "plan", deleted: 1 });
+    expect(repo!.listPlanDecisions(plan.id)).toHaveLength(0);
+  });
+
+  it("DELETE /assistant/feedback clears thumbs ratings", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/assistant/feedback",
+      payload: { rating: "up", message_excerpt: "great" },
+    });
+    const cleared = await app.inject({ method: "DELETE", url: "/assistant/feedback" });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json()).toMatchObject({ ok: true, deleted: 1 });
+    const listed = await app.inject({ method: "GET", url: "/assistant/feedback" });
+    expect((listed.json() as { entries: unknown[] }).entries).toHaveLength(0);
   });
 
   it("persists chat history after non-stream chat", async () => {

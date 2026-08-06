@@ -3,7 +3,7 @@ import type { AssistantProposedAction } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import { loadKitCatalog } from "../services/kit-catalog.js";
 import { isDismissedFingerprint } from "./preferences-digest.js";
-import { scoreStackPreset } from "./history.js";
+import { collectCatalogFeedbackTokens, scoreStackPreset } from "./history.js";
 
 type CatalogBase = {
   source_name?: string;
@@ -53,6 +53,7 @@ export function suggestSoftStackActions(options: {
   const catalog = options.catalog ?? loadKitCatalog();
   const bases = (catalog.bases ?? {}) as Record<string, CatalogBase>;
   const presets = (catalog.stack_presets ?? {}) as Record<string, CatalogPreset>;
+  const knownTokens = collectCatalogFeedbackTokens(catalog);
 
   let baseId: string | null = null;
   let baseDef: CatalogBase | null = null;
@@ -70,7 +71,7 @@ export function suggestSoftStackActions(options: {
     .map(([id, p]) => ({
       id,
       preset: p,
-      score: scoreStackPreset(repo, id) + (p.addon_sources?.length ?? 0) * 0.01,
+      score: scoreStackPreset(repo, id, knownTokens) + (p.addon_sources?.length ?? 0) * 0.01,
     }))
     .sort((a, b) => b.score - a.score);
 

@@ -169,6 +169,13 @@ export function clearAssistantHistory(repo: AppRepository): void {
   repo.setSetting(HISTORY_KEY, JSON.stringify([]));
 }
 
+/** Wipe thumbs ratings for this tenant (ranking scores only — not chat history). */
+export function clearAssistantFeedback(repo: AppRepository): number {
+  const n = loadAssistantFeedback(repo).length;
+  repo.setSetting(FEEDBACK_KEY, JSON.stringify([]));
+  return n;
+}
+
 export type StoredFeedback = {
   id: string;
   rating: AssistantFeedbackRating;
@@ -215,16 +222,57 @@ export function appendAssistantFeedback(
 
 /** Tiny ranking scores from thumbs — never dump raw feedback into the prompt. */
 export type FeedbackScores = {
-  /** plan_id → net score (up=+1, down=-1) */
+  /** plan_id → net score (up=+2, down=-2 with comment boost) */
   byPlanId: Map<number, number>;
   /** stack preset id / source-like token → net score (from excerpts) */
   byToken: Map<string, number>;
 };
 
 const TOKEN_RE = /\b([a-z][a-z0-9_]{2,}(?:\.[a-z0-9_]+)?)\b/gi;
+/** Hyphenated source names (Voron-Trident, LDOVoronTrident, etc.). */
+const SOURCE_NAME_RE = /\b([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)\b/g;
+
+const THUMBS_PREFER_MIN = 2;
+const MAX_THUMBS_PREFER_LINES = 4;
+
+/**
+ * Collect catalog tokens worth scoring from thumbs excerpts (presets, bases, source_names).
+ */
+export function collectCatalogFeedbackTokens(
+  catalog: Record<string, unknown> | null | undefined,
+): string[] {
+  if (!catalog || typeof catalog !== "object") return [];
+  const out = new Set<string>();
+  const presets = (catalog.stack_presets ?? {}) as Record<string, unknown>;
+  for (const id of Object.keys(presets)) {
+    if (id.trim()) out.add(id.trim().toLowerCase());
+  }
+  const bases = (catalog.bases ?? {}) as Record<
+    string,
+    { source_name?: string }
+  >;
+  for (const [id, b] of Object.entries(bases)) {
+    if (id.trim()) out.add(id.trim().toLowerCase());
+    const sn = b?.source_name?.trim();
+    if (sn) out.add(sn.toLowerCase());
+  }
+  const categories = (catalog.addon_categories ?? {}) as Record<
+    string,
+    { sources?: Array<{ name?: string }> }
+  >;
+  for (const cat of Object.values(categories)) {
+    for (const s of cat.sources ?? []) {
+      const n = s.name?.trim();
+      if (n) out.add(n.toLowerCase());
+    }
+  }
+  return [...out];
+}
 
 /**
  * Aggregate assistant_feedback into small ranking scores for recipes / stacks.
+ * Stronger weights: up=+2, down=-2; optional comment adds ±1 when tokens match.
+ * Never dumps raw comments into the prompt — scores only.
  */
 export function aggregateFeedbackScores(
   repo: AppRepository,
@@ -240,17 +288,36 @@ export function aggregateFeedbackScores(
   };
 
   for (const entry of loadAssistantFeedback(repo)) {
-    const delta = entry.rating === "up" ? 1 : entry.rating === "down" ? -1 : 0;
-    if (!delta) continue;
-    if (entry.plan_id != null) bump(byPlanId, entry.plan_id, delta);
+    const baseDelta = entry.rating === "up" ? 2 : entry.rating === "down" ? -2 : 0;
+    if (!baseDelta) continue;
+    if (entry.plan_id != null) bump(byPlanId, entry.plan_id, baseDelta);
     const hay = `${entry.message_excerpt ?? ""} ${entry.comment ?? ""}`;
     if (!hay.trim() || !known.size) continue;
+    const commentBoost =
+      entry.comment && entry.comment.trim()
+        ? entry.rating === "up"
+          ? 1
+          : -1
+        : 0;
+    const delta = baseDelta + commentBoost;
     const seen = new Set<string>();
+    const consider = (tok: string) => {
+      const t = tok.toLowerCase();
+      if (!known.has(t) || seen.has(t)) return;
+      seen.add(t);
+      bump(byToken, t, delta);
+    };
     for (const m of hay.matchAll(TOKEN_RE)) {
-      const tok = (m[1] ?? "").toLowerCase();
-      if (!known.has(tok) || seen.has(tok)) continue;
-      seen.add(tok);
-      bump(byToken, tok, delta);
+      consider(m[1] ?? "");
+    }
+    for (const m of hay.matchAll(SOURCE_NAME_RE)) {
+      consider(m[1] ?? "");
+    }
+    // Exact known-token substring match for multi-word / unusual ids.
+    const hayLower = hay.toLowerCase();
+    for (const tok of known) {
+      if (seen.has(tok)) continue;
+      if (hayLower.includes(tok)) consider(tok);
     }
   }
   return { byPlanId, byToken };
@@ -268,3 +335,32 @@ export function scoreStackPreset(
   const known = knownPresetIds ?? [presetId];
   return aggregateFeedbackScores(repo, known).byToken.get(presetId.toLowerCase()) ?? 0;
 }
+
+/**
+ * High-confidence thumbs summary for the system prompt (scores only — no free text).
+ * Example: `Preferred stacks (thumbs): ldo_trident_r2 (+4)`
+ */
+export function buildThumbsPreferDigestLine(
+  repo: AppRepository,
+  knownTokens: Iterable<string> = [],
+): string | null {
+  const { byToken } = aggregateFeedbackScores(repo, knownTokens);
+  const ranked = [...byToken.entries()]
+    .filter(([, score]) => score >= THUMBS_PREFER_MIN)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, MAX_THUMBS_PREFER_LINES);
+  if (!ranked.length) return null;
+  const bits = ranked.map(([tok, score]) => `${tok} (+${score})`);
+  return `Preferred stacks (thumbs): ${bits.join(", ")}`;
+}
+
+/** Simple stable hash of message excerpt for restoring thumbs UI after reload. */
+export function feedbackExcerptKey(excerpt: string | null | undefined): string {
+  const s = (excerpt ?? "").trim().slice(0, 400);
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  return `ex${h}`;
+}
+
