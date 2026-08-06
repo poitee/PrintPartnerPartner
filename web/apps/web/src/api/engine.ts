@@ -46,9 +46,6 @@ function resolveEngineUrl(path: string): string {
   return withPrefix;
 }
 
-/** @deprecated use SourceSummary */
-export type ProjectSummary = SourceSummary;
-
 export type SourceUpdateCheckSettings = {
   interval_hours: number;
 };
@@ -203,25 +200,6 @@ export async function fetchPlanManifestBuilder(
   profileId: number,
 ): Promise<PlanManifestBuilderBootstrap> {
   return engineFetch(`/plans/${profileId}/plan-manifest-builder`);
-}
-
-export type ApplyStackPresetResult = {
-  profile_id: number;
-  preset_id: string;
-  missing_sources: string[];
-  layers: ProfileLayer[];
-  selections: Record<string, string>;
-};
-
-/** Apply kit-catalog stack preset (base + addons + default selections). */
-export async function applyStackPresetApi(
-  profileId: number,
-  presetId: string,
-): Promise<ApplyStackPresetResult> {
-  return engineFetch(`/plans/${profileId}/apply-stack-preset`, {
-    method: "POST",
-    body: JSON.stringify({ preset_id: presetId }),
-  });
 }
 
 export type ManifestWarning = {
@@ -1492,23 +1470,6 @@ export async function saveSourceNaming(
   });
 }
 
-export type ReportIssueResult = {
-  created: boolean;
-  issue_url?: string;
-  prefilled_url?: string;
-};
-
-export async function reportManifestIssue(body: {
-  profile_id: number;
-  title?: string;
-  details?: string;
-}): Promise<ReportIssueResult> {
-  return engineFetch<ReportIssueResult>("/community/report-issue", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
 export type ManifestRegistryEntry = {
   slug: string;
   target_repo: string;
@@ -2283,6 +2244,25 @@ export async function clearAssistantHistory(): Promise<{ ok: boolean }> {
   return engineFetch<{ ok: boolean }>("/assistant/history", { method: "DELETE" });
 }
 
+/** Clear Apply/Dismiss decision memory for one plan or the whole tenant. */
+export async function clearAssistantDecisions(input: {
+  planId?: number;
+  all?: boolean;
+}): Promise<{ ok: boolean; scope: "plan" | "tenant"; plan_id: number | null; deleted: number }> {
+  const params = new URLSearchParams();
+  if (input.all) params.set("all", "true");
+  else if (input.planId != null) params.set("plan_id", String(input.planId));
+  const q = params.toString();
+  return engineFetch(`/assistant/decisions${q ? `?${q}` : ""}`, { method: "DELETE" });
+}
+
+/** Clear thumbs ratings (ranking only — not chat or decisions). */
+export async function clearAssistantFeedback(): Promise<{ ok: boolean; deleted: number }> {
+  return engineFetch<{ ok: boolean; deleted: number }>("/assistant/feedback", {
+    method: "DELETE",
+  });
+}
+
 export async function postAssistantFeedback(input: {
   rating: AssistantFeedbackRating;
   message_excerpt?: string;
@@ -2293,6 +2273,19 @@ export async function postAssistantFeedback(input: {
     method: "POST",
     body: JSON.stringify(input),
   });
+}
+
+export async function fetchAssistantFeedback(): Promise<{
+  entries: Array<{
+    id: string;
+    rating: "up" | "down";
+    plan_id: number | null;
+    excerpt_key: string;
+    message_excerpt: string | null;
+    created_at: string;
+  }>;
+}> {
+  return engineFetch("/assistant/feedback");
 }
 
 export async function applyAssistantAction(

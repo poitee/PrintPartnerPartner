@@ -111,7 +111,7 @@ export function CopilotUiProvider({ children }: { children: ReactNode }) {
         setSelectedProfileId(profileFromParams);
       }
 
-      let note: string | null = null;
+      let note: string | null;
       switch (action.type) {
         case "ui_navigate": {
           const route = String(params.route ?? "sources");

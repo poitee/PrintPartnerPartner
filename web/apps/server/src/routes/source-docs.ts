@@ -1,9 +1,8 @@
 import {
   createReadStream,
   existsSync,
-  statSync,
 } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { AppRepository } from "../db/repository.js";
 import { fetchGithubReadme } from "../services/github-readme.js";
@@ -247,10 +246,3 @@ export async function registerSourceDocsRoutes(
     }
   });
 }
-
-/** @deprecated — kept for callers; prefer registerSourceDocsRoutes. */
-export async function registerRepoManifestDocsShim(): Promise<void> {
-  /* no-op */
-}
-
-export { join, statSync };
