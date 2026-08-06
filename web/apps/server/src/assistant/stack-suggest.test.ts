@@ -107,4 +107,99 @@ describe("suggestSoftStackActions", () => {
     expect(actions.map((a) => a.type)).toEqual(["add_addon"]);
     expect(actions[0]!.params.source_name).toBe("Voron-Stealthburner");
   });
+
+  it("skips soft suggest when fingerprint was dismissed", () => {
+    const actions = suggestSoftStackActions({
+      repo: mockRepo({
+        layers: [{ layer_type: "base", project_name: "Voron-2" }],
+        decisions: [
+          {
+            id: 1,
+            plan_id: 1,
+            created_at: "2026-01-01T00:00:00.000Z",
+            actor: "user",
+            kind: "dismissed_action",
+            action_type: "apply_stack_preset",
+            params: { preset_id: "v24_sb_tap" },
+            label: "",
+            summary: "",
+            rationale: null,
+            result: null,
+          },
+        ],
+      }),
+      planId: 1,
+      catalog,
+    });
+    expect(actions).toEqual([]);
+  });
+
+  it("ranks presets higher when thumbs feedback boosts the token", () => {
+    const store = new Map<string, string>();
+    store.set(
+      "assistant_feedback",
+      JSON.stringify([
+        {
+          id: "f1",
+          rating: "up",
+          message_excerpt: "Love v24_sb_tap",
+          plan_id: 1,
+          comment: null,
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "f2",
+          rating: "up",
+          message_excerpt: "v24_sb_tap again",
+          plan_id: 1,
+          comment: null,
+          created_at: "2026-01-02T00:00:00.000Z",
+        },
+      ]),
+    );
+    const repo = {
+      getProfile: () => ({ id: 1, name: "P" }),
+      getProfileLayers: () => [
+        {
+          id: 1,
+          layer_type: "base",
+          project_name: "Voron-2",
+          project_id: 1,
+          layer_order: 0,
+        },
+      ],
+      listPlanDecisions: () => [],
+      getSetting: (k: string) => store.get(k) ?? null,
+      setSetting: () => undefined,
+    } as unknown as AppRepository;
+
+    const multiCatalog = {
+      bases: {
+        voron_2_4: {
+          source_name: "Voron-2",
+          default_addons: ["Voron-Stealthburner"],
+        },
+      },
+      stack_presets: {
+        other_preset: {
+          label: "Other",
+          base: "voron_2_4",
+          addon_sources: ["Voron-Tap", "Voron-Stealthburner", "Extra"],
+        },
+        v24_sb_tap: {
+          label: "2.4 SB Tap",
+          base: "voron_2_4",
+          addon_sources: ["Voron-Stealthburner"],
+        },
+      },
+    };
+
+    const actions = suggestSoftStackActions({
+      repo,
+      planId: 1,
+      catalog: multiCatalog,
+    });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]!.params.preset_id).toBe("v24_sb_tap");
+  });
 });

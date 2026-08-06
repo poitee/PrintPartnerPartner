@@ -2,7 +2,7 @@ import type { AppRepository } from "../db/repository.js";
 import { loadKitCatalog } from "../services/kit-catalog.js";
 import { loadKitManifest } from "../services/kit-manifest-store.js";
 import { loadRoleFilamentDefaults } from "../services/role-filament-store.js";
-import { aggregateFeedbackScores } from "./history.js";
+import { aggregateFeedbackScores, collectCatalogFeedbackTokens } from "./history.js";
 
 const MAX_EXAMPLE_PLANS = 5;
 const MAX_EXAMPLE_CHARS = 4500;
@@ -107,8 +107,8 @@ export type ExampleBuildsOptions = {
 export function summarizeOtherBuildsAsExamples(options: ExampleBuildsOptions): string | null {
   const catalog = options.catalog ?? loadKitCatalog();
   const maxPlans = options.maxPlans ?? MAX_EXAMPLE_PLANS;
-  const presets = Object.keys((catalog.stack_presets ?? {}) as Record<string, unknown>);
-  const feedback = aggregateFeedbackScores(options.repo, presets);
+  const knownTokens = collectCatalogFeedbackTokens(catalog);
+  const feedback = aggregateFeedbackScores(options.repo, knownTokens);
   const profiles = options.repo
     .listProfiles()
     .filter((p) => p.id !== options.excludePlanId)
