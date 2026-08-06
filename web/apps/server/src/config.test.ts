@@ -83,4 +83,36 @@ describe("loadConfig", () => {
     if (prevMax === undefined) delete process.env.ASSISTANT_GUIDE_INGEST_MAX_BYTES;
     else process.env.ASSISTANT_GUIDE_INGEST_MAX_BYTES = prevMax;
   });
+
+  it("parses SEARCH_PROVIDER and SEARCH_API_KEY (with Brave/Exa fallbacks)", () => {
+    const prev = {
+      SEARCH_PROVIDER: process.env.SEARCH_PROVIDER,
+      SEARCH_API_KEY: process.env.SEARCH_API_KEY,
+      BRAVE_API_KEY: process.env.BRAVE_API_KEY,
+      EXA_API_KEY: process.env.EXA_API_KEY,
+    };
+    delete process.env.SEARCH_PROVIDER;
+    delete process.env.SEARCH_API_KEY;
+    delete process.env.BRAVE_API_KEY;
+    delete process.env.EXA_API_KEY;
+    expect(loadConfig().searchProvider).toBeNull();
+    expect(loadConfig().searchApiKey).toBeNull();
+
+    process.env.SEARCH_PROVIDER = "brave";
+    process.env.BRAVE_API_KEY = "brave-key";
+    const brave = loadConfig();
+    expect(brave.searchProvider).toBe("brave");
+    expect(brave.searchApiKey).toBe("brave-key");
+
+    process.env.SEARCH_API_KEY = "shared-key";
+    expect(loadConfig().searchApiKey).toBe("shared-key");
+
+    process.env.SEARCH_PROVIDER = "not-a-provider";
+    expect(loadConfig().searchProvider).toBeNull();
+
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
 });

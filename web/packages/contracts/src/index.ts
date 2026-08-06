@@ -278,6 +278,22 @@ export type JobSnapshot = JobEvent & {
 /** AI assistant provider id (server config / status). */
 export type AiProviderId = "anthropic" | "openai" | "ollama" | "none";
 
+/** Web search backend for assistant research tools. */
+export type SearchProviderId =
+  | "anthropic-native"
+  | "openai-native"
+  | "brave"
+  | "exa"
+  | "duckduckgo"
+  | "none";
+
+export type SearchSetupOption = {
+  id: SearchProviderId;
+  label: string;
+  summary: string;
+  setup: string;
+};
+
 export type AssistantStatus = {
   enabled: boolean;
   provider: AiProviderId;
@@ -294,6 +310,12 @@ export type AssistantStatus = {
   daily_requests_used?: number;
   /** Estimated tokens used today (UTC) for this tenant. */
   daily_tokens_used?: number;
+  /** Active web search backend + setup guidance for all options. */
+  search?: {
+    provider: SearchProviderId;
+    configured: boolean;
+    options: SearchSetupOption[];
+  };
 };
 
 export type AssistantChatRole = "user" | "assistant" | "system";

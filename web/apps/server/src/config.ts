@@ -1,6 +1,19 @@
-import type { AiProviderId, DeployMode } from "@print-partner/contracts";
+import type { AiProviderId, DeployMode, SearchProviderId } from "@print-partner/contracts";
 
-export type { DeployMode, AiProviderId };
+export type { DeployMode, AiProviderId, SearchProviderId };
+
+const SEARCH_PROVIDER_IDS: SearchProviderId[] = [
+  "anthropic-native",
+  "openai-native",
+  "brave",
+  "exa",
+  "duckduckgo",
+  "none",
+];
+
+function isSearchProviderId(raw: string): raw is SearchProviderId {
+  return (SEARCH_PROVIDER_IDS as string[]).includes(raw);
+}
 
 export type ServerConfig = {
   deployMode: DeployMode;
@@ -83,6 +96,16 @@ export type ServerConfig = {
   assistantAllowUrlIngest: boolean;
   /** Max bytes for a single guide URL fetch. Default 512 KiB. */
   assistantGuideIngestMaxBytes: number;
+  /**
+   * Explicit web search backend (`null` = auto-resolve).
+   * Env: `SEARCH_PROVIDER`.
+   */
+  searchProvider: SearchProviderId | null;
+  /**
+   * API key for Brave / Exa search backends.
+   * Env: `SEARCH_API_KEY`, with `BRAVE_API_KEY` / `EXA_API_KEY` as fallbacks.
+   */
+  searchApiKey: string | null;
 };
 
 const DEFAULT_DATA_DIR = process.env.PRINT_PARTNER_DATA_DIR ?? "./data";
@@ -131,6 +154,22 @@ function parseAiProvider(raw: string | undefined): AiProviderId {
     return raw;
   }
   return "none";
+}
+
+function parseSearchProvider(raw: string | undefined): SearchProviderId | null {
+  const trimmed = raw?.trim().toLowerCase();
+  if (!trimmed) return null;
+  if (isSearchProviderId(trimmed)) return trimmed;
+  return null;
+}
+
+function resolveSearchApiKey(): string | null {
+  return (
+    process.env.SEARCH_API_KEY?.trim() ||
+    process.env.BRAVE_API_KEY?.trim() ||
+    process.env.EXA_API_KEY?.trim() ||
+    null
+  );
 }
 
 function defaultAiModel(provider: AiProviderId, explicit: string | null): string | null {
@@ -274,5 +313,7 @@ export function loadConfig(): ServerConfig {
       const raw = Number(process.env.ASSISTANT_GUIDE_INGEST_MAX_BYTES ?? 512 * 1024);
       return Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 512 * 1024;
     })(),
+    searchProvider: parseSearchProvider(process.env.SEARCH_PROVIDER),
+    searchApiKey: resolveSearchApiKey(),
   };
 }

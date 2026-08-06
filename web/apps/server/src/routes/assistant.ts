@@ -17,14 +17,25 @@ import { buildAssistantSystemPrompt } from "../assistant/assistant-context.js";
 import { runAssistantTurn } from "../assistant/tool-loop.js";
 import { recoverProposedActionsFromText } from "../assistant/recover-proposals-from-text.js";
 import { applyAssistantAction } from "../assistant/tools.js";
+import { getSearchStatus } from "../services/search/index.js";
+import {
+  buildPreferencesDigest,
+  isDismissedFingerprint,
+} from "../assistant/preferences-digest.js";
 import {
   appendAssistantFeedback,
   appendAssistantHistory,
   appendPendingProposedActions,
+  buildThumbsPreferDigestLine,
+  clearAssistantFeedback,
   clearAssistantHistory,
+  collectCatalogFeedbackTokens,
+  feedbackExcerptKey,
+  loadAssistantFeedback,
   loadAssistantHistory,
   removePendingProposedAction,
 } from "../assistant/history.js";
+import { loadKitCatalog } from "../services/kit-catalog.js";
 import {
   checkDailyBudget,
   estimateTokens,
@@ -45,7 +56,10 @@ async function recoverFakeRecipeIfNeeded(
   toolCtx: ToolContext,
 ): Promise<{ content: string; proposedActions: AssistantProposedAction[] }> {
   if (proposedActions.length > 0 || !content.trim()) {
-    return { content, proposedActions };
+    return {
+      content,
+      proposedActions: filterDismissedProposed(toolCtx, proposedActions),
+    };
   }
   const recovered = await recoverProposedActionsFromText(content, toolCtx);
   if (!recovered.actions.length && recovered.cleanedContent === content) {
@@ -53,8 +67,21 @@ async function recoverFakeRecipeIfNeeded(
   }
   return {
     content: recovered.cleanedContent,
-    proposedActions: [...proposedActions, ...recovered.actions],
+    proposedActions: filterDismissedProposed(toolCtx, [
+      ...proposedActions,
+      ...recovered.actions,
+    ]),
   };
+}
+
+function filterDismissedProposed(
+  toolCtx: ToolContext,
+  actions: AssistantProposedAction[],
+): AssistantProposedAction[] {
+  return actions.filter((a) => {
+    if (!a.plan_id || a.plan_id <= 0) return true;
+    return !isDismissedFingerprint(toolCtx.repo, a.plan_id, a.type, a.params ?? {});
+  });
 }
 
 function persistTurnHistory(
@@ -156,6 +183,7 @@ export async function registerAssistantRoutes(
     const runtime = resolveAssistantRuntime(deps.repo, deps.config);
     const assistant = createAssistantPort(runtime);
     const usage = loadDailyUsage(deps.repo);
+    const search = getSearchStatus(deps.config, runtime.provider);
     return {
       enabled: assistant.configured && runtime.enabled,
       provider: assistant.provider,
@@ -166,6 +194,7 @@ export async function registerAssistantRoutes(
       daily_token_budget: runtime.aiDailyTokenBudget || null,
       daily_requests_used: usage.requests,
       daily_tokens_used: usage.tokens,
+      search,
     };
   });
 
@@ -176,6 +205,91 @@ export async function registerAssistantRoutes(
   app.delete("/assistant/history", async () => {
     clearAssistantHistory(deps.repo);
     return { ok: true };
+  });
+
+  /** Debug: preferences digest injected into the system prompt (self-host only). */
+  app.get("/assistant/preferences", async (request, reply) => {
+    if (deps.config.deployMode !== "self-host") {
+      return sendProblem(
+        reply,
+        404,
+        "Not Found",
+        "Preferences debug endpoint is available in self-host mode only",
+      );
+    }
+    const q = request.query as { plan_id?: string };
+    const raw = q.plan_id != null ? Number(q.plan_id) : NaN;
+    const planId = Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : null;
+    if (planId != null && !deps.repo.getProfile(planId)) {
+      return sendProblem(reply, 404, "Not Found", "Plan not found");
+    }
+    const digest = buildPreferencesDigest(deps.repo, planId);
+    const catalogTokens = collectCatalogFeedbackTokens(loadKitCatalog());
+    const thumbs_prefer = buildThumbsPreferDigestLine(deps.repo, catalogTokens);
+    return {
+      plan_id: planId,
+      digest,
+      thumbs_prefer,
+    };
+  });
+
+  /**
+   * Clear Apply/Dismiss/note decision memory.
+   * Requires either `plan_id` (one plan) or `all=true` (entire tenant) — never ambiguous.
+   */
+  app.delete("/assistant/decisions", async (request, reply) => {
+    const q = request.query as { plan_id?: string; all?: string };
+    const all =
+      q.all === "true" || q.all === "1" || String(q.all ?? "").toLowerCase() === "yes";
+    const raw = q.plan_id != null ? Number(q.plan_id) : NaN;
+    const planId = Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : null;
+
+    if (all && planId != null) {
+      return sendProblem(
+        reply,
+        400,
+        "Bad Request",
+        "Pass either plan_id or all=true, not both",
+      );
+    }
+    if (!all && planId == null) {
+      return sendProblem(
+        reply,
+        400,
+        "Bad Request",
+        "Specify plan_id=<id> to clear one plan, or all=true to clear all decision memory for this tenant",
+      );
+    }
+
+    if (planId != null) {
+      if (!deps.repo.getProfile(planId)) {
+        return sendProblem(reply, 404, "Not Found", "Plan not found");
+      }
+      const deleted = deps.repo.deletePlanDecisionsForPlan(planId);
+      return { ok: true, scope: "plan" as const, plan_id: planId, deleted };
+    }
+
+    const deleted = deps.repo.deleteAllPlanDecisions();
+    return { ok: true, scope: "tenant" as const, plan_id: null, deleted };
+  });
+
+  /** Recent thumbs ratings for restoring UI state (excerpt keys only). */
+  app.get("/assistant/feedback", async () => {
+    const entries = loadAssistantFeedback(deps.repo).map((e) => ({
+      id: e.id,
+      rating: e.rating,
+      plan_id: e.plan_id,
+      excerpt_key: feedbackExcerptKey(e.message_excerpt),
+      message_excerpt: e.message_excerpt?.slice(0, 400) ?? null,
+      created_at: e.created_at,
+    }));
+    return { entries };
+  });
+
+  /** Clear all thumbs ratings for this tenant (does not clear chat or decisions). */
+  app.delete("/assistant/feedback", async () => {
+    const deleted = clearAssistantFeedback(deps.repo);
+    return { ok: true, deleted };
   });
 
   app.post(
@@ -190,7 +304,7 @@ export async function registerAssistantRoutes(
         rating: body.rating,
         message_excerpt: body.message_excerpt,
         plan_id: typeof body.plan_id === "number" ? body.plan_id : undefined,
-        comment: body.comment,
+        comment: typeof body.comment === "string" ? body.comment.slice(0, 200) : undefined,
       });
       return { ok: true, id: entry.id };
     },
