@@ -59,10 +59,37 @@ The app service has a healthcheck that polls `GET /health` every 30s using Node'
 | `AI_MAX_TOKENS` | `2048` | Max completion tokens per chat turn (also used when Settings omits `max_tokens`) |
 | `AI_DAILY_REQUEST_BUDGET` | `0` (unlimited) | Soft per-tenant daily chat request cap; `0` disables. Overridable via Settings `daily_request_budget`. Exceeded → `429` on `/assistant/chat` |
 | `AI_DAILY_TOKEN_BUDGET` | `0` (unlimited) | Soft per-tenant daily estimated-token cap (chars÷4 + reply); `0` disables. Overridable via Settings `daily_token_budget`. Exceeded → `429` |
-| `ASSISTANT_ALLOW_URL_INGEST` | enabled | Set to `0` to disable `ingest_guide_url` (SSRF-safe outbound fetch of user-supplied guide URLs) |
-| `ASSISTANT_GUIDE_INGEST_MAX_BYTES` | `524288` (512 KiB) | Max response body size for a single guide URL fetch |
+| `ASSISTANT_ALLOW_URL_INGEST` | enabled | Set to `0` to disable `ingest_guide_url` / `fetch_web_page` (SSRF-safe outbound fetch of user-supplied URLs) |
+| `ASSISTANT_GUIDE_INGEST_MAX_BYTES` | `524288` (512 KiB) | Max response body size for a single guide / page URL fetch |
+| `SEARCH_PROVIDER` | unset | Prefer `brave`, `exa`, `duckduckgo`, `anthropic-native`, `openai-native`, or `none`. When unset, resolution picks provider-native then DuckDuckGo |
+| `SEARCH_API_KEY` | unset | Shared key for Brave or Exa when that provider is selected |
+| `BRAVE_API_KEY` | unset | Alias for Brave Search (`SEARCH_PROVIDER=brave`) |
+| `EXA_API_KEY` | unset | Alias for Exa Search (`SEARCH_PROVIDER=exa`) |
 
-**URL ingest safety:** `ingest_guide_url` uses the same SSRF guard as cover/image fetches (`safeOutboundFetch`): HTTP(S) only, DNS-resolved, private/loopback/metadata blocked. Guide text is treated as untrusted evidence; mutations require Apply cards (`propose_add_source`, etc.). There is no autonomous crawler.
+**URL ingest safety:** `ingest_guide_url`, `fetch_web_page`, and `web_search` use the same SSRF guard as cover/image fetches (`safeOutboundFetch`): HTTP(S) only, DNS-resolved, private/loopback/metadata blocked. Guide and search text is treated as untrusted evidence; mutations require Apply cards (`propose_add_source`, etc.). There is no autonomous crawler.
+
+### Search backends
+
+The kit advisor `web_search` tool can use several HTTP / provider backends (`web/apps/server/src/services/search/`):
+
+| Backend | When | Notes |
+|---------|------|--------|
+| **anthropic-native** / **openai-native** | Active AI provider is Anthropic or OpenAI | Status reports native search availability; structured HTTP tool hits still come from an HTTP backend (Brave/Exa/DuckDuckGo) |
+| **brave** | `SEARCH_PROVIDER=brave` | Requires `SEARCH_API_KEY` or `BRAVE_API_KEY` |
+| **exa** | `SEARCH_PROVIDER=exa` | Requires `SEARCH_API_KEY` or `EXA_API_KEY` |
+| **duckduckgo** | Default free fallback | HTML scrape — brittle; prefer Brave/Exa for reliability |
+
+**Resolution order:** explicit `SEARCH_PROVIDER` → provider-native (when the active AI provider supports it) → `duckduckgo`.
+
+### Link → build pipeline
+
+When a user pastes a guide or product URL into the kit advisor:
+
+1. `fetch_web_page` / `ingest_guide_url` (or pasted text via `ingest_guide_text`) gather untrusted page evidence.
+2. After a relevant source is on the plan and synced, `detect_build_decisions` proposes variant / optional-mod / config candidates.
+3. The advisor walks decisions one at a time; confirming choices emits `update_kit_selections` **Apply** cards (readable key → value selections in the SPA).
+
+Mutations never auto-apply — the user must click Apply.
 
 ### Kit advisor MCP (stdio)
 
@@ -100,6 +127,8 @@ Requires `DEPLOY_MODE=self-host` (default). Do not point two writers at the same
 **Recommended (self-host):** configure the kit advisor in the UI under **Settings → Optional integrations → AI assistant** (provider, Ollama URL, model, API key when needed). An enabled `ai_assistant` integration takes precedence over env. Env vars remain the SaaS/operator default path when no Settings integration exists. Keys stay server-side and are redacted in integration list responses / never returned by `/assistant/status`.
 
 **Learning from your other builds (examples, not training):** when **Use my other builds as examples** is on (default), the advisor receives compact summaries of other plans this user/tenant can access (layers, kit selections, inferred stack preset). That is few-shot *context* for the current chat only — it does **not** fine-tune or train the model. Toggle it in Settings or per-chat in the kit advisor sheet. Mutating suggestions appear as **Apply / Dismiss** action cards; nothing writes until `POST /assistant/actions/apply`.
+
+**Decision memory (Apply / Dismiss / thumbs — not training):** confirmed Apply cards and Dismissals are stored as `plan_decisions` and summarized into every chat system prompt (`## User preferences` + cross-plan memory). High-frequency Sync / Update workflow applies (`start_sync`, `start_recompute`, Sync→Update recipes) are filtered out of Prefer/Avoid digests unless they are the only signal. Dismissed fingerprints are hard-blocked from tool proposes and soft suggestions until the user asks again. Thumbs up/down (optional one-line reason) update ranking scores only — raw comments never enter the prompt; high-confidence stack tokens may appear as `Preferred stacks (thumbs): …`. Clear chat history does **not** erase decisions or feedback. To reset memory: kit advisor sheet **Clear decisions** (current plan) / **Clear thumbs**, or API `DELETE /assistant/decisions?plan_id=<id>` (one plan), `DELETE /assistant/decisions?all=true` (tenant), `DELETE /assistant/feedback` (thumbs). Self-host debug: `GET /assistant/preferences?plan_id=` returns the digest string used in the prompt.
 
 **Chat history:** successful turns are stored per tenant (`GET/DELETE /assistant/history`). The kit advisor sheet reloads prior turns when opened and can **Clear** history. Continuing a conversation sends the loaded turns plus the new message to `/assistant/chat`.
 

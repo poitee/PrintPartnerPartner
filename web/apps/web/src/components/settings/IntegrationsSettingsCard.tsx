@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 import {
   createIntegration,
   deleteIntegration,
+  fetchAssistantStatus,
   fetchIntegrations,
   fetchSpoolmanDefaultSettings,
   saveSpoolmanDefaultIntegration,
@@ -10,6 +11,7 @@ import {
   updateIntegration,
   type IntegrationSummary,
 } from "../../api/engine";
+import type { AssistantStatus } from "@print-partner/contracts";
 import { Button } from "../ui/button";
 import {
   Select,
@@ -48,6 +50,7 @@ export default function IntegrationsSettingsCard({ engineReady }: Props) {
   /** Soft daily caps; empty = use env / unlimited. */
   const [aiDailyRequestBudget, setAiDailyRequestBudget] = useState("");
   const [aiDailyTokenBudget, setAiDailyTokenBudget] = useState("");
+  const [assistantStatus, setAssistantStatus] = useState<AssistantStatus | null>(null);
 
   const spoolmanItems = useMemo(
     () => items.filter((i) => i.type === "spoolman"),
@@ -62,12 +65,14 @@ export default function IntegrationsSettingsCard({ engineReady }: Props) {
     if (!engineReady) return;
     setLoadError(null);
     try {
-      const [integrations, defaults] = await Promise.all([
+      const [integrations, defaults, status] = await Promise.all([
         fetchIntegrations(),
         fetchSpoolmanDefaultSettings(),
+        fetchAssistantStatus().catch(() => null),
       ]);
       setItems(integrations);
       setDefaultId(defaults.integration_id);
+      setAssistantStatus(status);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
@@ -484,6 +489,32 @@ export default function IntegrationsSettingsCard({ engineReady }: Props) {
                 Soft per-tenant caps for `/assistant/chat` (UTC day). Leave blank for unlimited /
                 env defaults. See DEPLOY.md.
               </p>
+              {assistantStatus?.search && (
+                <div className="space-y-1.5 rounded-md border border-border bg-muted/30 p-2.5">
+                  <p className="text-sm font-medium">
+                    Web search:{" "}
+                    <span className="font-mono text-foreground">
+                      {assistantStatus.search.provider}
+                    </span>
+                    {!assistantStatus.search.configured && (
+                      <span className="ml-1 text-amber-700 dark:text-amber-400">
+                        (not configured)
+                      </span>
+                    )}
+                  </p>
+                  <ul className="space-y-1 text-xs text-muted-foreground">
+                    {assistantStatus.search.options
+                      .filter((o) => o.id !== "none")
+                      .map((o) => (
+                        <li key={o.id}>
+                          <span className="font-medium text-foreground">{o.label}</span>
+                          {" — "}
+                          {o.setup}
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              )}
               <Button
                 className="min-h-10"
                 disabled={!engineReady || busy || !aiCanAdd}
@@ -597,6 +628,32 @@ export default function IntegrationsSettingsCard({ engineReady }: Props) {
                       />
                     </label>
                   </div>
+                  {assistantStatus?.search && (
+                    <div className="space-y-1.5 rounded-md border border-border bg-muted/30 p-2.5">
+                      <p className="text-sm font-medium">
+                        Web search:{" "}
+                        <span className="font-mono text-foreground">
+                          {assistantStatus.search.provider}
+                        </span>
+                        {!assistantStatus.search.configured && (
+                          <span className="ml-1 text-amber-700 dark:text-amber-400">
+                            (not configured)
+                          </span>
+                        )}
+                      </p>
+                      <ul className="space-y-1 text-xs text-muted-foreground">
+                        {assistantStatus.search.options
+                          .filter((o) => o.id !== "none")
+                          .map((o) => (
+                            <li key={o.id}>
+                              <span className="font-medium text-foreground">{o.label}</span>
+                              {" — "}
+                              {o.setup}
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  )}
                   <div className="flex flex-wrap items-center gap-2 pt-1">
                     <label className="flex items-center gap-2 text-sm">
                       <input
