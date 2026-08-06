@@ -33,6 +33,7 @@ import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetDescription,
   SheetHeader,
@@ -662,6 +663,14 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
           e.preventDefault();
         }}
       >
+        <SheetClose
+          type="button"
+          className="absolute right-3 top-3 rounded-sm p-1.5 opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring"
+          aria-label="Close kit advisor"
+        >
+          <X className="h-4 w-4" />
+          <span className="sr-only">Close</span>
+        </SheetClose>
         <SheetHeader className="pr-12">
           <SheetTitle className="flex items-center gap-2 text-base">
             <Sparkles className="h-4 w-4 text-primary" aria-hidden />
