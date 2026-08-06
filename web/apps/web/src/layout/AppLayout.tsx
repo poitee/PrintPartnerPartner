@@ -413,8 +413,9 @@ export default function AppLayout() {
                 variant="outline"
                 size="sm"
                 className="shrink-0 gap-1.5"
-                onClick={() => setAssistantOpenPersisted(true)}
-                aria-label="Open kit advisor"
+                onClick={() => setAssistantOpenPersisted(!assistantOpen)}
+                aria-label={assistantOpen ? "Close kit advisor" : "Open kit advisor"}
+                aria-pressed={assistantOpen}
               >
                 <Sparkles className="h-4 w-4" />
                 <span className="hidden sm:inline">Advisor</span>
