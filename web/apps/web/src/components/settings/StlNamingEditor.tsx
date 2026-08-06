@@ -129,7 +129,7 @@ function StlNamingEditorBody({
         } catch (e) {
           setPreview(null);
           if (isEngineNotFoundError(e)) {
-            setPreviewError("Preview API not available yet (engine update required).");
+            setPreviewError("Unable to preview naming — this feature isn't available right now.");
           } else {
             setPreviewError(e instanceof Error ? e.message : String(e));
           }
@@ -365,7 +365,7 @@ export function StlNamingSettingsCard({ engineReady }: SettingsCardProps) {
     } catch (e) {
       if (isEngineNotFoundError(e)) {
         setApiMissing(true);
-        setLoadError("STL naming API not available yet — update the engine to enable this feature.");
+        setLoadError("Unable to load naming rules — this feature isn't available right now.");
       } else {
         setLoadError(e instanceof Error ? e.message : String(e));
       }

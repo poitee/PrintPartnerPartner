@@ -14,22 +14,12 @@ export function buildsRoute(profileId?: number | null): string {
   return withProfile("/builds", profileId ?? null);
 }
 
-/** @deprecated use buildRoute */
-export function planRoute(profileId?: number | null): string {
-  return buildRoute(profileId);
-}
-
 export function reviewRoute(profileId?: number | null): string {
   return withProfile("/review", profileId ?? null);
 }
 
 export function sourcesRoute(): string {
   return "/sources";
-}
-
-/** @deprecated Plate step removed — use reviewRoute */
-export function plateRoute(profileId?: number | null): string {
-  return reviewRoute(profileId);
 }
 
 export function settingsRoute(): string {

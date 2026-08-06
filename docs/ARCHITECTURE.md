@@ -113,11 +113,20 @@ flowchart LR
   Tools --> Sources[Sources + sync]
   Tools --> Plan[Plan layers]
   Tools -->|"safeOutboundFetch"| Web[Guide URLs]
+  Research[web_search / fetch_web_page / read_source_file] --> Synth[Synthesize]
+  Synth --> Cards[Decision / Apply cards]
+  Chat --> Research
+  Chat --> Prompt[System prompt]
+  Prompt --> PlanCtx[Dynamic plan-context block]
 ```
 
+- **Research loop**: read tools (`web_search`, `fetch_web_page`, `read_source_file`, plus catalog/docs tools) gather untrusted evidence; the model synthesizes options, then emits decision / Apply cards (`update_kit_selections`, `ui_focus_kit_option`, etc.). Nothing mutates until the user confirms.
+- **Plan context**: every chat turn injects a dynamic plan snapshot into the system prompt (`## Active plan snapshot` — layers, kit selections, stale flag) via `summarizePlan` in `assistant/assistant-context.ts`, alongside preferences digests and domain packs.
 - **Interaction graph** (`services/interaction-graph.ts`) merges domain `compatibility.yaml`, catalog `pick_one` / `replaces_slot`, and `_global/merge_conflicts.yaml`. Tools: `get_interaction_graph`, `check_stack_compatibility`. Soft warnings also appear on `add_addon` / `apply_stack_preset` proposes and in plan Review (`compat_*` issue codes).
 - **URL ingest**: `ingest_guide_url` / `ingest_guide_text` return untrusted `GuideExtract` evidence (heuristic extract, optional LLM refine when the assistant is configured); `propose_add_source` / `import_guide_notes` / `propose_exclude_replaced_parts` close the loop behind Apply. Confirmed `suggested_excludes` on `add_addon` / `apply_stack_preset` Apply cards merge into kit-manifest exclude.
+- **Link → build pipeline**: applying `propose_add_source` for a syncable source returns a **Sync → Update** follow-up card (same `sync_then_recompute` workflow as `set_base` / `set_source_git_ref`). `inspect_repo_tree` previews a GitHub repo's folders/STL counts pre-sync (tree listing only, `services/repo-tree-summary.ts` + `fetchGithubRepoTreeSummary`); `detect_build_decisions` (`assistant/build-decisions.ts`) turns variant-looking folders + README extract into a decision list (variant / optional_mod / config, heuristic first with a guarded LLM refine) the advisor walks one at a time into `update_kit_selections` / `ui_focus_kit_option`. Repos without manifest YAML or path-hints get sibling-folder fallback option groups in `plan-manifest-builder.ts` so Build pickers appear (e.g. EMU `User_Mods/`, `(Option)` folders).
 - Domain packs under `assistant-domain/` remain runtime context (not training). See [assistant-domain-ingest-schema.md](./assistant-domain-ingest-schema.md).
+- **Decision memory**: Apply/Dismiss write `plan_decisions`; thumbs write `assistant_feedback`. Digests (prefer/avoid, notes, cross-plan patterns, high-confidence thumbs scores) inject into the system prompt every turn. Sync/recompute noise is omitted from Prefer/Avoid unless it is the only signal. Dismissed action fingerprints are hard-filtered on tool propose and soft stack suggest. This is runtime ranking/context only — **no fine-tuning**. Clear chat history does not clear decisions/feedback; use kit advisor **Clear decisions** / **Clear thumbs**, or `DELETE /assistant/decisions?plan_id=` / `?all=true` and `DELETE /assistant/feedback`. Operators can inspect the digest via self-host `GET /assistant/preferences?plan_id=`.
 
 ## Deploy modes at a glance
 

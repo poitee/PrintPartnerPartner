@@ -9,9 +9,7 @@ import {
   isKitStudioPath,
   isPlanWorkflowPath,
   isReviewPath,
-  planRoute,
   planStudioRoute,
-  plateRoute,
   reviewRoute,
   withProfile,
 } from "./routes";
@@ -37,12 +35,10 @@ describe("planStudioRoute", () => {
 });
 
 describe("workflow routes", () => {
-  it("build, builds, review, and plate include profile when provided", () => {
+  it("build, builds, review, and checkoff include profile when provided", () => {
     expect(buildRoute(5)).toBe("/build?profile=5");
     expect(buildsRoute(5)).toBe("/builds?profile=5");
-    expect(planRoute(5)).toBe("/build?profile=5");
     expect(reviewRoute(5)).toBe("/review?profile=5");
-    expect(plateRoute(5)).toBe("/review?profile=5");
     expect(checkoffRoute(5)).toBe("/checkoff?profile=5");
   });
 });

@@ -4,9 +4,12 @@ import type { AssistantChatMessage, AssistantProposedAction } from "@print-partn
 import { isAssistantUiAction } from "@print-partner/contracts";
 import {
   applyAssistantAction,
+  clearAssistantDecisions,
+  clearAssistantFeedback,
   clearAssistantHistory,
   createSourceNote,
   dismissAssistantAction,
+  fetchAssistantFeedback,
   fetchAssistantHistory,
   fetchAssistantStatus,
   fetchProfileLayers,
@@ -57,6 +60,55 @@ function nextId(): string {
   return `t${turnSeq}`;
 }
 
+/** Match server feedbackExcerptKey — restore thumbs after reload. */
+function feedbackExcerptKey(excerpt: string): string {
+  const s = excerpt.trim().slice(0, 400);
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  return `ex${h}`;
+}
+
+/** Readable key → value rows for Apply card params (kit selections expand). */
+function actionParamRows(action: AssistantProposedAction): Array<{ key: string; value: string }> {
+  const params = action.params;
+  if (!params) return [];
+
+  if (action.type === "update_kit_selections") {
+    const selections = params.selections;
+    if (selections && typeof selections === "object" && !Array.isArray(selections)) {
+      return Object.entries(selections as Record<string, unknown>)
+        .filter(([, v]) => v != null && v !== "")
+        .map(([k, v]) => ({ key: k, value: String(v) }));
+    }
+  }
+
+  const rows: Array<{ key: string; value: string }> = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (k === "suggested_excludes" || v == null || v === "") continue;
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const entries = Object.entries(v as Record<string, unknown>).filter(
+        ([, ev]) => ev != null && ev !== "",
+      );
+      if (
+        entries.length > 0 &&
+        entries.length <= 6 &&
+        entries.every(([, ev]) => typeof ev === "string" || typeof ev === "number" || typeof ev === "boolean")
+      ) {
+        for (const [sk, sv] of entries) {
+          rows.push({ key: `${k}.${sk}`, value: String(sv) });
+        }
+        continue;
+      }
+      rows.push({ key: k, value: JSON.stringify(v) });
+      continue;
+    }
+    rows.push({ key: k, value: Array.isArray(v) ? v.map(String).join(", ") : String(v) });
+  }
+  return rows;
+}
+
 export default function AssistantChatSheet({ open, onOpenChange }: Props) {
   const { selectedProfileId, reloadProfiles } = useProfileSelection();
   const copilot = useCopilotUiOptional();
@@ -75,10 +127,16 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
   const [toolsNote, setToolsNote] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
+  const [clearingMemory, setClearingMemory] = useState(false);
   const [budgetHint, setBudgetHint] = useState<string | null>(null);
   const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
   const [noteSavedId, setNoteSavedId] = useState<string | null>(null);
   const [showEarlier, setShowEarlier] = useState(false);
+  const [feedbackCommentTurnId, setFeedbackCommentTurnId] = useState<string | null>(null);
+  const [feedbackCommentDraft, setFeedbackCommentDraft] = useState("");
+  const [pendingFeedbackRating, setPendingFeedbackRating] = useState<"up" | "down" | null>(
+    null,
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
   const followUpCardRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -94,8 +152,12 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
     let cancelled = false;
     setHistoryLoading(true);
     setError(null);
-    void Promise.all([fetchAssistantStatus(), fetchAssistantHistory()])
-      .then(([status, hist]) => {
+    void Promise.all([
+      fetchAssistantStatus(),
+      fetchAssistantHistory(),
+      fetchAssistantFeedback().catch(() => ({ entries: [] as const })),
+    ])
+      .then(([status, hist, feedback]) => {
         if (cancelled) return;
         setEnabled(status.enabled);
         setModel(status.model);
@@ -117,21 +179,35 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
         // Reload prior turns unless a stream is in flight.
         if (!busyRef.current) {
           setShowEarlier(false);
+          const byKey = new Map<string, "up" | "down">();
+          for (const e of feedback.entries) {
+            if (e.excerpt_key && (e.rating === "up" || e.rating === "down")) {
+              byKey.set(e.excerpt_key, e.rating);
+            }
+          }
           setTurns(
             hist.messages
               .filter((m) => m.role === "user" || m.role === "assistant")
-              .map((m) => ({
-                id: m.id,
-                role: m.role as "user" | "assistant",
-                content:
+              .map((m) => {
+                const content =
                   m.role === "assistant"
                     ? sanitizeAssistantDisplayText(m.content)
-                    : m.content,
-                actions:
-                  m.role === "assistant" && m.proposed_actions?.length
-                    ? m.proposed_actions.filter((a) => !isAssistantUiAction(a.type))
-                    : undefined,
-              })),
+                    : m.content;
+                const rating =
+                  m.role === "assistant"
+                    ? byKey.get(feedbackExcerptKey(content.slice(0, 400)))
+                    : undefined;
+                return {
+                  id: m.id,
+                  role: m.role as "user" | "assistant",
+                  content,
+                  actions:
+                    m.role === "assistant" && m.proposed_actions?.length
+                      ? m.proposed_actions.filter((a) => !isAssistantUiAction(a.type))
+                      : undefined,
+                  feedback: rating ?? null,
+                };
+              }),
           );
         }
       })
@@ -169,6 +245,51 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setClearingHistory(false);
+    }
+  }
+
+  async function onClearPlanDecisions() {
+    if (busy || clearingMemory || selectedProfileId == null) return;
+    const ok = window.confirm(
+      "Clear Apply/Dismiss memory for this plan? The advisor will forget prefer/avoid for this plan (chat history and thumbs stay).",
+    );
+    if (!ok) return;
+    setClearingMemory(true);
+    setError(null);
+    try {
+      const res = await clearAssistantDecisions({ planId: selectedProfileId });
+      toast.success(
+        res.deleted > 0
+          ? `Cleared ${res.deleted} decision${res.deleted === 1 ? "" : "s"} for this plan`
+          : "No decisions to clear for this plan",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setClearingMemory(false);
+    }
+  }
+
+  async function onClearThumbsFeedback() {
+    if (busy || clearingMemory) return;
+    const ok = window.confirm(
+      "Clear all thumbs ratings? Stack ranking from thumbs will reset (chat and Apply/Dismiss memory stay).",
+    );
+    if (!ok) return;
+    setClearingMemory(true);
+    setError(null);
+    try {
+      const res = await clearAssistantFeedback();
+      setTurns((prev) => prev.map((t) => ({ ...t, feedback: null })));
+      toast.success(
+        res.deleted > 0
+          ? `Cleared ${res.deleted} thumbs rating${res.deleted === 1 ? "" : "s"}`
+          : "No thumbs ratings to clear",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setClearingMemory(false);
     }
   }
 
@@ -365,8 +486,12 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
           ? (followUpRaw as AssistantProposedAction)
           : null;
 
-      void reloadProfiles();
-      void bumpPlanRevision();
+      void reloadProfiles().catch((e) =>
+        toast.error(e instanceof Error ? e.message : "Failed to reload plans"),
+      );
+      void bumpPlanRevision().catch((e) =>
+        toast.error(e instanceof Error ? e.message : "Failed to refresh plan"),
+      );
 
       setExcludeEdits((prev) => {
         if (!(action.id in prev)) return prev;
@@ -466,20 +591,30 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
     });
   }
 
-  async function onFeedback(turn: ChatTurn, rating: "up" | "down") {
+  async function onFeedback(turn: ChatTurn, rating: "up" | "down", comment?: string) {
     setTurns((prev) =>
       prev.map((t) => (t.id === turn.id ? { ...t, feedback: rating } : t)),
     );
+    setFeedbackCommentTurnId(null);
+    setFeedbackCommentDraft("");
+    setPendingFeedbackRating(null);
     try {
       await postAssistantFeedback({
         rating,
         message_excerpt: turn.content.slice(0, 400),
         plan_id:
           selectedProfileId != null && selectedProfileId > 0 ? selectedProfileId : undefined,
+        comment: comment?.trim() ? comment.trim().slice(0, 200) : undefined,
       });
     } catch {
       /* non-blocking */
     }
+  }
+
+  function beginFeedback(turn: ChatTurn, rating: "up" | "down") {
+    setFeedbackCommentTurnId(turn.id);
+    setPendingFeedbackRating(rating);
+    setFeedbackCommentDraft("");
   }
 
   async function onSaveToNotes(turn: ChatTurn) {
@@ -563,7 +698,7 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
                 />
                 Use other builds as examples
               </label>
-              <div className="ml-auto flex items-center gap-1">
+              <div className="ml-auto flex flex-wrap items-center justify-end gap-1">
                 {historyLoading && (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" aria-label="Loading history" />
                 )}
@@ -575,13 +710,41 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
                   disabled={busy || clearingHistory || turns.length === 0}
                   onClick={() => void onClearHistory()}
                   aria-label="Clear chat history"
+                  title="Clear chat history (keeps Apply/Dismiss memory)"
                 >
                   {clearingHistory ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
                     <Eraser className="h-3.5 w-3.5" />
                   )}
-                  Clear
+                  Clear chat
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 gap-1 px-2 text-xs"
+                  disabled={busy || clearingMemory || selectedProfileId == null}
+                  onClick={() => void onClearPlanDecisions()}
+                  aria-label="Clear plan decision memory"
+                  title="Clear Apply/Dismiss prefer/avoid for this plan"
+                >
+                  {clearingMemory ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : null}
+                  Clear decisions
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 gap-1 px-2 text-xs"
+                  disabled={busy || clearingMemory}
+                  onClick={() => void onClearThumbsFeedback()}
+                  aria-label="Clear thumbs ratings"
+                  title="Clear thumbs up/down ranking"
+                >
+                  Clear thumbs
                 </Button>
               </div>
             </div>
@@ -671,7 +834,7 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
                           className="h-6 w-6"
                           aria-label="Helpful"
                           disabled={turn.feedback != null}
-                          onClick={() => void onFeedback(turn, "up")}
+                          onClick={() => beginFeedback(turn, "up")}
                         >
                           <ThumbsUp
                             className={cn(
@@ -687,7 +850,7 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
                           className="h-6 w-6"
                           aria-label="Not helpful"
                           disabled={turn.feedback != null}
-                          onClick={() => void onFeedback(turn, "down")}
+                          onClick={() => beginFeedback(turn, "down")}
                         >
                           <ThumbsDown
                             className={cn(
@@ -718,7 +881,62 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
                           )}
                         </Button>
                       </div>
-                    )}
+                      )}
+                    {turn.role === "assistant" &&
+                      feedbackCommentTurnId === turn.id &&
+                      pendingFeedbackRating &&
+                      turn.feedback == null && (
+                        <form
+                          className="mr-auto flex w-full max-w-[95%] flex-col gap-1.5"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            void onFeedback(
+                              turn,
+                              pendingFeedbackRating,
+                              feedbackCommentDraft,
+                            );
+                          }}
+                        >
+                          <input
+                            type="text"
+                            value={feedbackCommentDraft}
+                            onChange={(e) => setFeedbackCommentDraft(e.target.value)}
+                            maxLength={200}
+                            placeholder="Optional one-line reason"
+                            className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+                            autoFocus
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <Button type="submit" size="sm" className="h-7 px-2 text-xs">
+                              Submit
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-xs"
+                              onClick={() =>
+                                void onFeedback(turn, pendingFeedbackRating, undefined)
+                              }
+                            >
+                              Skip
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => {
+                                setFeedbackCommentTurnId(null);
+                                setPendingFeedbackRating(null);
+                                setFeedbackCommentDraft("");
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </form>
+                      )}
                     {(turn.actions ?? [])
                       .filter((a) => !isAssistantUiAction(a.type))
                       .map((action) => {
@@ -802,18 +1020,12 @@ export default function AssistantChatSheet({ open, onOpenChange }: Props) {
                           })()}
                           {action.params && Object.keys(action.params).length > 0 && !isFollowUp && (
                             <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 rounded-md bg-muted/40 px-2 py-1.5 text-[11px]">
-                              {Object.entries(action.params)
-                                .filter(
-                                  ([k, v]) =>
-                                    k !== "suggested_excludes" && v != null && v !== "",
-                                )
-                                .slice(0, 6)
-                                .map(([k, v]) => (
-                                  <div key={k} className="contents">
-                                    <dt className="font-medium text-muted-foreground">{k}</dt>
-                                    <dd className="truncate font-mono text-foreground">
-                                      {typeof v === "object" ? JSON.stringify(v) : String(v)}
-                                    </dd>
+                              {actionParamRows(action)
+                                .slice(0, 8)
+                                .map(({ key, value }) => (
+                                  <div key={key} className="contents">
+                                    <dt className="font-medium text-muted-foreground">{key}</dt>
+                                    <dd className="truncate font-mono text-foreground">{value}</dd>
                                   </div>
                                 ))}
                             </dl>

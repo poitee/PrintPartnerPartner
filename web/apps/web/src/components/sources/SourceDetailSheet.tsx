@@ -117,7 +117,7 @@ export default function SourceDetailSheet({
     } catch (e) {
       if (isEngineNotFoundError(e)) {
         setNamingApiMissing(true);
-        setNamingLoadError("Naming API not available yet — update the engine to enable overrides.");
+        setNamingLoadError("Unable to load naming overrides — this feature isn't available right now.");
       } else {
         setNamingLoadError(e instanceof Error ? e.message : String(e));
       }

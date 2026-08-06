@@ -26,8 +26,6 @@ export type ActiveJob = {
 type JobContextValue = {
   /** All in-flight or recently finished jobs (most recent last). */
   activeJobs: ActiveJob[];
-  /** @deprecated Use activeJobs — first active job for backward compat. */
-  activeJob: ActiveJob | null;
   runJob: (
     kind: string,
     start: () => Promise<string>,
@@ -197,13 +195,9 @@ export function JobProvider({ children }: { children: ReactNode }) {
     [qc],
   );
 
-  const activeJob = activeJobs.find(
-    (j) => j.status === "pending" || j.status === "running",
-  ) ?? activeJobs[activeJobs.length - 1] ?? null;
-
   const value = useMemo(
-    () => ({ activeJobs, activeJob, runJob, clearJob, isJobKindRunning }),
-    [activeJobs, activeJob, runJob, clearJob, isJobKindRunning],
+    () => ({ activeJobs, runJob, clearJob, isJobKindRunning }),
+    [activeJobs, runJob, clearJob, isJobKindRunning],
   );
 
   return <JobContext.Provider value={value}>{children}</JobContext.Provider>;
