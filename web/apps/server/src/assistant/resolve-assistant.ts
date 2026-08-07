@@ -1,7 +1,8 @@
-import type { AiProviderId } from "@print-partner/contracts";
+import type { AiProviderId, SearchProviderId } from "@print-partner/contracts";
 import type { ServerConfig } from "../config.js";
 import type { AppRepository } from "../db/repository.js";
 import { listIntegrationsByType } from "../integrations/store.js";
+import { isSearchProviderId } from "../services/search/types.js";
 
 /** Runtime AI settings after resolving Settings integration vs env defaults. */
 export type AssistantRuntimeConfig = {
@@ -22,6 +23,22 @@ export type AssistantRuntimeConfig = {
   aiDailyRequestBudget: number;
   /** Soft daily estimated-token cap per tenant (`0` = unlimited). */
   aiDailyTokenBudget: number;
+  /**
+   * Settings override for web search provider.
+   * `null` = no override (use env `SEARCH_PROVIDER` / auto resolution).
+   */
+  searchProvider: SearchProviderId | null;
+  /**
+   * Settings override for Brave/Exa API key.
+   * `null` = no override (use env `SEARCH_API_KEY` / Brave/Exa aliases).
+   */
+  searchApiKey: string | null;
+  /** Whether URL research tools may fetch user-supplied URLs. */
+  assistantAllowUrlIngest: boolean;
+  /** Max response body size for a single guide / page URL fetch. */
+  assistantGuideIngestMaxBytes: number;
+  /** Ollama native chat `num_ctx` (context window). */
+  ollamaNumCtx: number;
   /** Where the active provider settings came from. */
   source: "settings" | "env" | "none";
 };
@@ -87,6 +104,32 @@ function budgetOrEnv(raw: unknown, envFallback: number): number {
   return positiveIntOrDefault(raw, envFallback);
 }
 
+/**
+ * Parse Settings search_provider.
+ * `null` / unset / `"auto"` → no override (env/auto resolution).
+ */
+export function parseSearchProviderOverride(raw: unknown): SearchProviderId | null {
+  if (raw === undefined || raw === null || raw === "" || raw === "auto") return null;
+  if (typeof raw === "string" && isSearchProviderId(raw)) return raw;
+  return null;
+}
+
+const DEFAULT_OLLAMA_NUM_CTX = 16384;
+
+/** Env `OLLAMA_NUM_CTX` (≥ 2048) or default 16384. */
+export function resolveOllamaNumCtx(raw?: unknown): number {
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 2048) {
+    return Math.floor(raw);
+  }
+  if (typeof raw === "string" && raw.trim() && Number.isFinite(Number(raw))) {
+    const n = Number(raw);
+    if (n >= 2048) return Math.floor(n);
+  }
+  const fromEnv = Number(process.env.OLLAMA_NUM_CTX ?? "");
+  if (Number.isFinite(fromEnv) && fromEnv >= 2048) return Math.floor(fromEnv);
+  return DEFAULT_OLLAMA_NUM_CTX;
+}
+
 function fromEnv(config: ServerConfig): AssistantRuntimeConfig {
   return {
     enabled: config.aiEnabled,
@@ -100,6 +143,11 @@ function fromEnv(config: ServerConfig): AssistantRuntimeConfig {
     useOtherBuildsAsExamples: true,
     aiDailyRequestBudget: config.aiDailyRequestBudget,
     aiDailyTokenBudget: config.aiDailyTokenBudget,
+    searchProvider: null,
+    searchApiKey: null,
+    assistantAllowUrlIngest: config.assistantAllowUrlIngest,
+    assistantGuideIngestMaxBytes: config.assistantGuideIngestMaxBytes,
+    ollamaNumCtx: resolveOllamaNumCtx(),
     source: config.aiEnabled ? "env" : "none",
   };
 }
@@ -107,6 +155,9 @@ function fromEnv(config: ServerConfig): AssistantRuntimeConfig {
 /**
  * Prefer an enabled Settings → AI Assistant integration when present and valid;
  * otherwise fall back to env (`AI_ENABLED` / `AI_PROVIDER` / keys).
+ *
+ * User-facing knobs (search, URL ingest, max_tokens, ollama_num_ctx) also prefer
+ * Settings fields when set; env remains the operator/SaaS fallback.
  */
 export function resolveAssistantRuntime(
   repo: AppRepository,
@@ -149,6 +200,36 @@ export function resolveAssistantRuntime(
       env.aiDailyTokenBudget,
     );
 
+    const searchProvider = parseSearchProviderOverride(
+      item.config.search_provider ?? item.config.searchProvider,
+    );
+    const searchKeyRaw = item.config.search_api_key ?? item.config.searchApiKey;
+    // Explicit empty string clears override → fall back to env.
+    const searchApiKey =
+      searchKeyRaw === undefined || searchKeyRaw === null
+        ? null
+        : stringOrNull(searchKeyRaw);
+
+    const allowUrlRaw =
+      item.config.allow_url_ingest ?? item.config.allowUrlIngest;
+    const assistantAllowUrlIngest =
+      allowUrlRaw === undefined || allowUrlRaw === null
+        ? env.assistantAllowUrlIngest
+        : boolOrDefault(allowUrlRaw, env.assistantAllowUrlIngest);
+
+    const guideMaxRaw =
+      item.config.guide_ingest_max_bytes ?? item.config.guideIngestMaxBytes;
+    const assistantGuideIngestMaxBytes =
+      guideMaxRaw === undefined || guideMaxRaw === null || guideMaxRaw === ""
+        ? env.assistantGuideIngestMaxBytes
+        : positiveIntOrDefault(guideMaxRaw, env.assistantGuideIngestMaxBytes);
+
+    const ollamaCtxRaw = item.config.ollama_num_ctx ?? item.config.ollamaNumCtx;
+    const ollamaNumCtx =
+      ollamaCtxRaw === undefined || ollamaCtxRaw === null || ollamaCtxRaw === ""
+        ? resolveOllamaNumCtx()
+        : resolveOllamaNumCtx(ollamaCtxRaw);
+
     return {
       enabled: true,
       provider,
@@ -162,6 +243,11 @@ export function resolveAssistantRuntime(
       useOtherBuildsAsExamples,
       aiDailyRequestBudget: requestBudget,
       aiDailyTokenBudget: tokenBudget,
+      searchProvider,
+      searchApiKey,
+      assistantAllowUrlIngest,
+      assistantGuideIngestMaxBytes,
+      ollamaNumCtx,
       source: "settings",
     };
   }

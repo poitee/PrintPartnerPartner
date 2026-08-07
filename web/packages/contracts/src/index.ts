@@ -302,6 +302,8 @@ export type AssistantStatus = {
   use_other_builds_as_examples: boolean;
   /** Whether the active provider adapter exposes native tool calling. */
   tools_supported: boolean;
+  /** Where active AI provider settings came from (`settings` = UI integration). */
+  source?: "settings" | "env" | "none";
   /** Soft daily request cap (`null` / omitted = unlimited). */
   daily_request_budget?: number | null;
   /** Soft daily estimated-token cap (`null` / omitted = unlimited). */
@@ -310,13 +312,27 @@ export type AssistantStatus = {
   daily_requests_used?: number;
   /** Estimated tokens used today (UTC) for this tenant. */
   daily_tokens_used?: number;
-  /** Active web search backend + setup guidance for all options. */
+  /**
+   * Active web search backend + setup guidance for all options.
+   * `configured` is true when the resolved provider has what it needs (e.g. Brave/Exa key)
+   * without exposing secrets.
+   */
   search?: {
     provider: SearchProviderId;
     configured: boolean;
     options: SearchSetupOption[];
   };
 };
+
+/**
+ * Documented `ai_assistant` integration config keys (stored as IntegrationConfig bag).
+ * Secrets (`api_key`, `search_api_key`) are redacted in list/get responses.
+ *
+ * - provider, model, api_key, base_url / ollama_url
+ * - max_tokens, use_other_builds_as_examples, daily_*_budget, enabled
+ * - search_provider (`SearchProviderId` | null/auto), search_api_key
+ * - allow_url_ingest, guide_ingest_max_bytes, ollama_num_ctx
+ */
 
 export type AssistantChatRole = "user" | "assistant" | "system";
 

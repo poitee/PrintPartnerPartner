@@ -174,4 +174,81 @@ describe("resolveAssistantRuntime", () => {
     expect(runtime.provider).toBe("openai");
     expect(runtime.openaiApiKey).toBe("sk-settings");
   });
+
+  it("honors max_tokens from settings over env", () => {
+    const integrations = createIntegrationPort({
+      repo,
+      getAdapter: getIntegrationAdapter,
+    });
+    integrations.create({
+      type: "ai_assistant",
+      name: "Local",
+      config: {
+        provider: "ollama",
+        base_url: "http://127.0.0.1:11434",
+        model: "llama3.2",
+        enabled: true,
+        max_tokens: 4096,
+      },
+    });
+    const env = { ...loadConfig(), aiMaxTokens: 512 };
+    const runtime = resolveAssistantRuntime(repo, env);
+    expect(runtime.aiMaxTokens).toBe(4096);
+  });
+
+  it("resolves search, URL ingest, and ollama_num_ctx from settings over env", () => {
+    const integrations = createIntegrationPort({
+      repo,
+      getAdapter: getIntegrationAdapter,
+    });
+    integrations.create({
+      type: "ai_assistant",
+      name: "Local",
+      config: {
+        provider: "ollama",
+        base_url: "http://127.0.0.1:11434",
+        model: "llama3.2",
+        enabled: true,
+        search_provider: "brave",
+        search_api_key: "brave-settings-key",
+        allow_url_ingest: false,
+        guide_ingest_max_bytes: 1024,
+        ollama_num_ctx: 8192,
+      },
+    });
+    const env = {
+      ...loadConfig(),
+      searchProvider: "exa" as const,
+      searchApiKey: "env-key-should-not-win",
+      assistantAllowUrlIngest: true,
+      assistantGuideIngestMaxBytes: 524288,
+    };
+    const runtime = resolveAssistantRuntime(repo, env);
+    expect(runtime.searchProvider).toBe("brave");
+    expect(runtime.searchApiKey).toBe("brave-settings-key");
+    expect(runtime.assistantAllowUrlIngest).toBe(false);
+    expect(runtime.assistantGuideIngestMaxBytes).toBe(1024);
+    expect(runtime.ollamaNumCtx).toBe(8192);
+  });
+
+  it("leaves search overrides null when Settings omits them (env used at search layer)", () => {
+    const integrations = createIntegrationPort({
+      repo,
+      getAdapter: getIntegrationAdapter,
+    });
+    integrations.create({
+      type: "ai_assistant",
+      name: "Local",
+      config: {
+        provider: "ollama",
+        base_url: "http://127.0.0.1:11434",
+        model: "llama3.2",
+        enabled: true,
+      },
+    });
+    const runtime = resolveAssistantRuntime(repo, loadConfig());
+    expect(runtime.searchProvider).toBeNull();
+    expect(runtime.searchApiKey).toBeNull();
+    expect(runtime.assistantAllowUrlIngest).toBe(loadConfig().assistantAllowUrlIngest);
+  });
 });

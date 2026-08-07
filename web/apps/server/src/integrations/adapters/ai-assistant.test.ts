@@ -86,4 +86,29 @@ describe("aiAssistantAdapter.testConnection", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/provider/i);
   });
+
+  it("accepts extended Settings config keys without breaking connection test", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ models: [{ name: "llama3.1:latest" }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await aiAssistantAdapter.testConnection({
+      provider: "ollama",
+      base_url: "http://127.0.0.1:11434",
+      model: "llama3.1",
+      max_tokens: 4096,
+      search_provider: "brave",
+      search_api_key: "secret-search",
+      allow_url_ingest: true,
+      guide_ingest_max_bytes: 1024,
+      ollama_num_ctx: 8192,
+      daily_request_budget: 10,
+      daily_token_budget: 100000,
+      use_other_builds_as_examples: false,
+    });
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+  });
 });

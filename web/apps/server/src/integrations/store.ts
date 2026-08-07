@@ -39,6 +39,7 @@ const SETTINGS_KEY = "integrations";
 
 const SECRET_KEYS = new Set([
   "api_key",
+  "search_api_key",
   "token",
   "password",
   "secret",

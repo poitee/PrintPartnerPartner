@@ -15,6 +15,8 @@ type OpenAiDeps = {
   apiKey: string | null;
   baseUrl: string;
   defaultModel: string;
+  /** Ollama native chat context window (`num_ctx`). Defaults from env / 16384. */
+  numCtx?: number;
 };
 
 function toOpenAiMessages(
@@ -98,14 +100,15 @@ function errorLabel(provider: "openai" | "ollama"): string {
 }
 
 /**
- * Context window for Ollama native chat. Ollama's OpenAI-compatible endpoint ignores
- * options.num_ctx and defaults to ~4k, silently truncating the start of long prompts
- * (which drops our system prompt). The native /api/chat endpoint honors num_ctx.
+ * Default context window for Ollama native chat when deps.numCtx is omitted.
+ * Ollama's OpenAI-compatible endpoint ignores options.num_ctx and defaults to ~4k,
+ * silently truncating the start of long prompts (which drops our system prompt).
+ * The native /api/chat endpoint honors num_ctx.
  */
-const OLLAMA_NUM_CTX = (() => {
+function defaultOllamaNumCtx(): number {
   const raw = Number(process.env.OLLAMA_NUM_CTX ?? "");
   return Number.isFinite(raw) && raw >= 2048 ? Math.floor(raw) : 16384;
-})();
+}
 
 type OllamaMsg =
   | { role: "system" | "user" | "assistant" | "tool"; content: string }
@@ -159,6 +162,10 @@ export function createOpenAiCompatibleAssistant(deps: OpenAiDeps): AssistantPort
   const completionsUrl = `${baseUrl}/v1/chat/completions`;
   const ollamaChatUrl = `${baseUrl}/api/chat`;
   const label = errorLabel(deps.provider);
+  const ollamaNumCtx =
+    typeof deps.numCtx === "number" && Number.isFinite(deps.numCtx) && deps.numCtx >= 2048
+      ? Math.floor(deps.numCtx)
+      : defaultOllamaNumCtx();
   // Ollama tool support varies by model; attempt tools for OpenAI always, Ollama best-effort.
   const supportsTools = true;
 
@@ -166,7 +173,7 @@ export function createOpenAiCompatibleAssistant(deps: OpenAiDeps): AssistantPort
     const effectiveModel = (requested || model).trim();
     if (!effectiveModel) {
       throw new Error(
-        "AI model is not configured. Set Model under Settings → Optional integrations → AI assistant (must match `ollama list` for Ollama).",
+        "AI model is not configured. Set Model under Settings → AI assistant (must match `ollama list` for Ollama).",
       );
     }
     return effectiveModel;
@@ -188,7 +195,7 @@ export function createOpenAiCompatibleAssistant(deps: OpenAiDeps): AssistantPort
           model: effectiveModel,
           messages: toOllamaMessages(params.system, params.messages),
           stream,
-          options: { num_ctx: OLLAMA_NUM_CTX, num_predict: params.maxTokens },
+          options: { num_ctx: ollamaNumCtx, num_predict: params.maxTokens },
         }),
       });
     }
@@ -247,7 +254,7 @@ export function createOpenAiCompatibleAssistant(deps: OpenAiDeps): AssistantPort
                 parameters: t.input_schema,
               },
             })),
-            options: { num_ctx: OLLAMA_NUM_CTX, num_predict: params.maxTokens },
+            options: { num_ctx: ollamaNumCtx, num_predict: params.maxTokens },
           }),
         });
         if (!res.ok) {

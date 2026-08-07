@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildResolveSearchInput,
   getSearchSetupGuidance,
+  getSearchStatus,
   resolveSearchProvider,
   searchConfigured,
+  searchOverridesFromRuntime,
   type ResolveSearchInput,
 } from "./index.js";
 import { parseDuckDuckGoHtml } from "./duckduckgo.js";
+import { loadConfig } from "../../config.js";
 
 function baseInput(over: Partial<ResolveSearchInput> = {}): ResolveSearchInput {
   return {
@@ -82,6 +86,67 @@ describe("searchConfigured", () => {
   it("duckduckgo is always configured; none is not", () => {
     expect(searchConfigured("duckduckgo", baseInput())).toBe(true);
     expect(searchConfigured("none", baseInput({ searchProvider: "none" }))).toBe(false);
+  });
+
+  it("brave without key is not configured (missing key → none-like UX)", () => {
+    const input = baseInput({ searchProvider: "brave", searchApiKey: null });
+    expect(resolveSearchProvider(input)).toBe("brave");
+    expect(searchConfigured("brave", input)).toBe(false);
+  });
+});
+
+describe("Settings search overrides", () => {
+  it("buildResolveSearchInput prefers Settings provider and key over env", () => {
+    const config = {
+      ...loadConfig(),
+      searchProvider: "exa" as const,
+      searchApiKey: "env-key",
+      aiProvider: "ollama" as const,
+    };
+    const input = buildResolveSearchInput(config, {
+      searchProvider: "brave",
+      searchApiKey: "settings-key",
+      aiProvider: "ollama",
+    });
+    expect(input.searchProvider).toBe("brave");
+    expect(input.searchApiKey).toBe("settings-key");
+    expect(resolveSearchProvider(input)).toBe("brave");
+  });
+
+  it("searchOverridesFromRuntime omits null search fields so env applies", () => {
+    const config = {
+      ...loadConfig(),
+      searchProvider: "brave" as const,
+      searchApiKey: "env-brave",
+    };
+    const overrides = searchOverridesFromRuntime({
+      provider: "ollama",
+      anthropicApiKey: null,
+      openaiApiKey: null,
+      searchProvider: null,
+      searchApiKey: null,
+    });
+    expect("searchProvider" in overrides).toBe(false);
+    expect("searchApiKey" in overrides).toBe(false);
+    const input = buildResolveSearchInput(config, overrides);
+    expect(input.searchProvider).toBe("brave");
+    expect(input.searchApiKey).toBe("env-brave");
+  });
+
+  it("getSearchStatus accepts runtime overrides object", () => {
+    const config = {
+      ...loadConfig(),
+      searchProvider: null,
+      searchApiKey: null,
+      anthropicApiKey: null,
+      openaiApiKey: null,
+    };
+    const status = getSearchStatus(config, {
+      searchProvider: "none",
+      aiProvider: "ollama",
+    });
+    expect(status.provider).toBe("none");
+    expect(status.configured).toBe(false);
   });
 });
 

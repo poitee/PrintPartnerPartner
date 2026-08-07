@@ -17,7 +17,7 @@ import { buildAssistantSystemPrompt } from "../assistant/assistant-context.js";
 import { runAssistantTurn } from "../assistant/tool-loop.js";
 import { recoverProposedActionsFromText } from "../assistant/recover-proposals-from-text.js";
 import { applyAssistantAction } from "../assistant/tools.js";
-import { getSearchStatus } from "../services/search/index.js";
+import { getSearchStatus, searchOverridesFromRuntime } from "../services/search/index.js";
 import {
   buildPreferencesDigest,
   isDismissedFingerprint,
@@ -183,13 +183,17 @@ export async function registerAssistantRoutes(
     const runtime = resolveAssistantRuntime(deps.repo, deps.config);
     const assistant = createAssistantPort(runtime);
     const usage = loadDailyUsage(deps.repo);
-    const search = getSearchStatus(deps.config, runtime.provider);
+    const search = getSearchStatus(
+      deps.config,
+      searchOverridesFromRuntime(runtime),
+    );
     return {
       enabled: assistant.configured && runtime.enabled,
       provider: assistant.provider,
       model: assistant.model,
       use_other_builds_as_examples: runtime.useOtherBuildsAsExamples,
       tools_supported: assistant.supportsTools,
+      source: runtime.source,
       daily_request_budget: runtime.aiDailyRequestBudget || null,
       daily_token_budget: runtime.aiDailyTokenBudget || null,
       daily_requests_used: usage.requests,
@@ -447,6 +451,7 @@ export async function registerAssistantRoutes(
               useOtherBuildsAsExamples: useExamples,
               dataDir: deps.config.dataDir,
               assistant,
+              runtime,
             },
           });
 
@@ -480,6 +485,7 @@ export async function registerAssistantRoutes(
           useOtherBuildsAsExamples: useExamples,
           dataDir: deps.config.dataDir,
           assistant,
+          runtime,
         };
         const recovered = await recoverFakeRecipeIfNeeded(content, [], toolCtx);
         return {
@@ -540,6 +546,7 @@ export async function registerAssistantRoutes(
               useOtherBuildsAsExamples: useExamples,
               dataDir: deps.config.dataDir,
               assistant,
+              runtime,
             },
           });
         } catch (e) {
@@ -596,6 +603,7 @@ export async function registerAssistantRoutes(
             useOtherBuildsAsExamples: useExamples,
             dataDir: deps.config.dataDir,
             assistant,
+            runtime,
           };
           const recovered = await recoverFakeRecipeIfNeeded(assembled, [], toolCtx);
           for (const action of recovered.proposedActions) {

@@ -2,6 +2,18 @@ import type { AiProviderId, IntegrationConfig, IntegrationTestResult } from "@pr
 import type { IntegrationAdapter } from "../store.js";
 import { assertSafeOutboundUrl } from "../../lib/outbound-url.js";
 
+/**
+ * Connection-test adapter for `ai_assistant` integrations.
+ *
+ * Documented config keys (resolved by `resolveAssistantRuntime`, not this adapter):
+ * provider, model, api_key, base_url / ollama_url, max_tokens,
+ * use_other_builds_as_examples, daily_*_budget, enabled,
+ * search_provider, search_api_key, allow_url_ingest, guide_ingest_max_bytes,
+ * ollama_num_ctx.
+ *
+ * `testConnection` only needs provider credentials + reachability.
+ */
+
 function normalizeBaseUrl(raw: unknown): string | null {
   if (typeof raw !== "string" || !raw.trim()) return null;
   // Repair accidental `http:/host` (one slash) → `http://host`
