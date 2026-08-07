@@ -123,6 +123,7 @@ async function main(): Promise<void> {
       useOtherBuildsAsExamples: runtime.useOtherBuildsAsExamples,
       dataDir: config.dataDir,
       assistant: createAssistantPort(runtime),
+      runtime,
     };
   }
 

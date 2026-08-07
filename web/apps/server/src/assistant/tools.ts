@@ -14,7 +14,7 @@ import {
   replacementsWhenAdding,
 } from "../services/interaction-graph.js";
 import { extractGuideAdvice, fetchWebPageText, ingestGuideText, ingestGuideUrl } from "../services/guide-ingest.js";
-import { searchWeb } from "../services/search/index.js";
+import { searchOverridesFromRuntime, searchWeb } from "../services/search/index.js";
 import { fetchGithubRepoTreeSummary, parseGithubUrl } from "../services/github-sync.js";
 import { walkSourceDocs } from "../services/source-docs-scan.js";
 import { summarizeRepoTreePaths, type RepoTreeSummary } from "../services/repo-tree-summary.js";
@@ -29,6 +29,7 @@ import { summarizeKitCatalog } from "./assistant-context.js";
 import { inferStackPresetId, summarizeOtherBuildsAsExamples } from "./example-builds.js";
 import { gatherSourceDocsForAssistant } from "./source-docs-digest.js";
 import type { AssistantPort } from "./types.js";
+import type { AssistantRuntimeConfig } from "./resolve-assistant.js";
 import type { InProcessJobRunner } from "../routes/jobs.js";
 import { deriveBuildRecipe, recipeToReplaySteps } from "../services/build-recipe.js";
 import {
@@ -697,6 +698,11 @@ export type ToolContext = {
   dataDir?: string | null;
   /** When set and configured, guide ingest may run a structured LLM refinement pass. */
   assistant?: AssistantPort | null;
+  /**
+   * Resolved Settings/env assistant runtime (search, URL ingest, budgets).
+   * When omitted, tools fall back to `loadConfig()` env defaults.
+   */
+  runtime?: AssistantRuntimeConfig | null;
 };
 
 function asInt(raw: unknown): number | null {
@@ -1889,8 +1895,10 @@ export async function invokeAssistantTool(
       }
 
       case "ingest_guide_url": {
-        const config = loadConfig();
-        if (!config.assistantAllowUrlIngest) {
+        const env = loadConfig();
+        const allow =
+          ctx.runtime?.assistantAllowUrlIngest ?? env.assistantAllowUrlIngest;
+        if (!allow) {
           return {
             content: JSON.stringify({
               error: "URL ingest disabled (ASSISTANT_ALLOW_URL_INGEST=0)",
@@ -1899,8 +1907,10 @@ export async function invokeAssistantTool(
         }
         const url = typeof input.url === "string" ? input.url.trim() : "";
         if (!url) return { content: JSON.stringify({ error: "url required" }) };
+        const maxBytes =
+          ctx.runtime?.assistantGuideIngestMaxBytes ?? env.assistantGuideIngestMaxBytes;
         const result = await ingestGuideUrl(url, {
-          maxBytes: config.assistantGuideIngestMaxBytes,
+          maxBytes,
           llm: ctx.assistant?.configured ? ctx.assistant : null,
         });
         return { content: JSON.stringify(result) };
@@ -1910,17 +1920,23 @@ export async function invokeAssistantTool(
         const query = typeof input.query === "string" ? input.query.trim() : "";
         if (!query) return { content: JSON.stringify({ error: "query required" }) };
         const site = typeof input.site === "string" ? input.site.trim() : "";
-        const config = loadConfig();
+        const env = loadConfig();
+        const overrides = ctx.runtime
+          ? searchOverridesFromRuntime(ctx.runtime)
+          : undefined;
         const result = await searchWeb(
           { query, ...(site ? { site } : {}), maxResults: 5 },
-          config,
+          env,
+          overrides,
         );
         return { content: JSON.stringify(result) };
       }
 
       case "fetch_web_page": {
-        const config = loadConfig();
-        if (!config.assistantAllowUrlIngest) {
+        const env = loadConfig();
+        const allow =
+          ctx.runtime?.assistantAllowUrlIngest ?? env.assistantAllowUrlIngest;
+        if (!allow) {
           return {
             content: JSON.stringify({
               error: "URL fetch disabled (ASSISTANT_ALLOW_URL_INGEST=0)",
@@ -1929,8 +1945,10 @@ export async function invokeAssistantTool(
         }
         const url = typeof input.url === "string" ? input.url.trim() : "";
         if (!url) return { content: JSON.stringify({ error: "url required" }) };
+        const maxBytes =
+          ctx.runtime?.assistantGuideIngestMaxBytes ?? env.assistantGuideIngestMaxBytes;
         const page = await fetchWebPageText(url, {
-          maxBytes: config.assistantGuideIngestMaxBytes,
+          maxBytes,
         });
         return { content: JSON.stringify(page) };
       }

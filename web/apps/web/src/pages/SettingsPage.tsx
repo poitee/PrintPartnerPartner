@@ -27,6 +27,7 @@ import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { StlNamingSettingsCard } from "../components/settings/StlNamingEditor";
+import AiAssistantSettingsCard from "../components/settings/AiAssistantSettingsCard";
 import IntegrationsSettingsCard from "../components/settings/IntegrationsSettingsCard";
 import AboutUpdatesCard from "../components/settings/AboutUpdatesCard";
 import AccountPasswordCard from "../components/settings/AccountPasswordCard";
@@ -355,6 +356,8 @@ export default function SettingsPage() {
       </div>
 
       <StlNamingSettingsCard engineReady={Boolean(health)} />
+
+      <AiAssistantSettingsCard engineReady={Boolean(health)} />
 
       <IntegrationsSettingsCard engineReady={Boolean(health)} />
 

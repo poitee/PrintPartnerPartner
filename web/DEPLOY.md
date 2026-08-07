@@ -79,7 +79,7 @@ The kit advisor `web_search` tool can use several HTTP / provider backends (`web
 | **exa** | `SEARCH_PROVIDER=exa` | Requires `SEARCH_API_KEY` or `EXA_API_KEY` |
 | **duckduckgo** | Default free fallback | HTML scrape — brittle; prefer Brave/Exa for reliability |
 
-**Resolution order:** explicit `SEARCH_PROVIDER` → provider-native (when the active AI provider supports it) → `duckduckgo`.
+**Resolution order:** Settings `search_provider` (when set) → env `SEARCH_PROVIDER` → provider-native (when the active AI provider supports it) → `duckduckgo`. Settings `search_api_key` overrides env search keys when present.
 
 ### Link → build pipeline
 
@@ -124,7 +124,22 @@ Cursor / Claude Desktop example (`mcp.json` / Claude config):
 
 Requires `DEPLOY_MODE=self-host` (default). Do not point two writers at the same SQLite file concurrently with the running Docker/API process unless you accept SQLite locking risk — prefer stopping the app or using a copy of `PRINT_PARTNER_DATA_DIR` for MCP experiments.
 
-**Recommended (self-host):** configure the kit advisor in the UI under **Settings → Optional integrations → AI assistant** (provider, Ollama URL, model, API key when needed). An enabled `ai_assistant` integration takes precedence over env. Env vars remain the SaaS/operator default path when no Settings integration exists. Keys stay server-side and are redacted in integration list responses / never returned by `/assistant/status`.
+**Recommended (self-host):** configure the kit advisor in the UI under **Settings → AI assistant** (provider, model, budgets, web search, URL research, Ollama context). An enabled `ai_assistant` integration takes precedence over env for every field it sets. Env vars remain the SaaS/operator default path when no Settings integration exists (or when a field is left unset / Auto). Keys stay server-side and are redacted in integration list responses / never returned by `/assistant/status`.
+
+**Settings vs env (hosted-ready):** user-facing knobs live on the per-tenant `ai_assistant` integration JSON:
+
+| Settings field | Env fallback |
+|----------------|--------------|
+| `provider`, `model`, `api_key`, `base_url` / `ollama_url` | `AI_PROVIDER`, `AI_MODEL`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, `OLLAMA_URL` / `OPENAI_BASE_URL` |
+| `max_tokens` | `AI_MAX_TOKENS` |
+| `daily_request_budget` / `daily_token_budget` | `AI_DAILY_*` |
+| `search_provider` (`null` / Auto = no override) | `SEARCH_PROVIDER` |
+| `search_api_key` | `SEARCH_API_KEY` / `BRAVE_API_KEY` / `EXA_API_KEY` |
+| `allow_url_ingest` | `ASSISTANT_ALLOW_URL_INGEST` |
+| `guide_ingest_max_bytes` | `ASSISTANT_GUIDE_INGEST_MAX_BYTES` |
+| `ollama_num_ctx` | `OLLAMA_NUM_CTX` (default 16384) |
+
+`SOURCE_DOCS_MAX_BYTES` and MCP `PRINT_PARTNER_MCP_PLAN_ID` remain operator-only (not in Settings). `GET /assistant/status` reports `source` (`settings` \| `env` \| `none`) and search `configured` without secrets.
 
 **Learning from your other builds (examples, not training):** when **Use my other builds as examples** is on (default), the advisor receives compact summaries of other plans this user/tenant can access (layers, kit selections, inferred stack preset). That is few-shot *context* for the current chat only — it does **not** fine-tune or train the model. Toggle it in Settings or per-chat in the kit advisor sheet. Mutating suggestions appear as **Apply / Dismiss** action cards; nothing writes until `POST /assistant/actions/apply`.
 
@@ -148,7 +163,7 @@ Requires `DEPLOY_MODE=self-host` (default). Do not point two writers at the same
    ```
    Confirm with `lsof -nP -iTCP:11434 -sTCP:LISTEN` — you want `*:11434` or `0.0.0.0:11434`, not `127.0.0.1:11434`.
 3. **Recreate the app container** after pulling compose changes: `docker compose up -d --force-recreate`.
-4. In **Settings → Optional integrations → AI assistant**, set the URL above, set **Model** to an exact name from `ollama list` on the host (e.g. `llama3.1:latest` — not a placeholder like `llama3.2` unless that model is installed), save, and click **Test connection**. Test verifies both reachability and that the model exists. A failure usually means wrong URL (`127.0.0.1` inside the container), Ollama still bound to localhost only, or a model name that is not installed.
+4. In **Settings → AI assistant**, set the URL above, set **Model** to an exact name from `ollama list` on the host (e.g. `llama3.1:latest` — not a placeholder like `llama3.2` unless that model is installed), save, and click **Test connection**. Test verifies both reachability and that the model exists. A failure usually means wrong URL (`127.0.0.1` inside the container), Ollama still bound to localhost only, or a model name that is not installed.
 
 Env fallback example:
 
@@ -160,7 +175,7 @@ environment:
   AI_MODEL: llama3.1:latest
 ```
 
-From inside the running container you can smoke-test: `node -e "fetch('http://host.docker.internal:11434/api/tags').then(r=>console.log(r.status)).catch(e=>console.error(e))"`. Chat uses Ollama’s **native `POST /api/chat`** (not the OpenAI-compatible endpoint) so the server can set `num_ctx` — Ollama’s OpenAI endpoint ignores context-size options and silently truncates long prompts, which cuts off the system prompt. Default context is 16384 tokens; override with `OLLAMA_NUM_CTX`. The model name must exist on the host.
+From inside the running container you can smoke-test: `node -e "fetch('http://host.docker.internal:11434/api/tags').then(r=>console.log(r.status)).catch(e=>console.error(e))"`. Chat uses Ollama’s **native `POST /api/chat`** (not the OpenAI-compatible endpoint) so the server can set `num_ctx` — Ollama’s OpenAI endpoint ignores context-size options and silently truncates long prompts, which cuts off the system prompt. Default context is 16384 tokens; override with Settings `ollama_num_ctx` or env `OLLAMA_NUM_CTX`. The model name must exist on the host.
 
 ### Checking for app updates
 

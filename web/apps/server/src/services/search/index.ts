@@ -2,7 +2,7 @@
  * Pluggable web search for assistant research tools.
  *
  * Resolution order (`resolveSearchProvider`):
- * 1. Explicit `SEARCH_PROVIDER` (config.searchProvider) when set and valid
+ * 1. Explicit search provider (Settings `search_provider` override, else env `SEARCH_PROVIDER`)
  * 2. Provider-native when AI provider is anthropic/openai with a key
  * 3. DuckDuckGo HTML fallback (no key)
  * 4. `none` if somehow disabled
@@ -10,7 +10,9 @@
  * HTTP backends for `web_search` tool hits: brave / exa / duckduckgo.
  * When the resolved provider is anthropic-native or openai-native, status reports
  * native, but the tool still returns DuckDuckGo hits so the tool loop always gets
- * structured results unless SEARCH_PROVIDER=brave|exa.
+ * structured results unless SEARCH_PROVIDER=brave|exa (or Settings equivalent).
+ *
+ * API keys: Settings `search_api_key` overrides env `SEARCH_API_KEY` / Brave/Exa aliases.
  */
 
 import type { AiProviderId } from "@print-partner/contracts";
@@ -94,6 +96,65 @@ export type ResolveSearchInput = {
   openaiApiKey: string | null;
 };
 
+/** Optional Settings / runtime overrides on top of env `ServerConfig`. */
+export type SearchResolveOverrides = {
+  /** When set (including `null` meaning Auto), overrides env SEARCH_PROVIDER. Pass `undefined` to keep env. */
+  searchProvider?: SearchProviderId | null;
+  searchApiKey?: string | null;
+  aiProvider?: AiProviderId;
+  anthropicApiKey?: string | null;
+  openaiApiKey?: string | null;
+};
+
+/**
+ * Build search resolution input: Settings/runtime overrides → env (`ServerConfig`).
+ * - `searchProvider` present on overrides (even `null`) replaces env; omit the key to keep env.
+ * - `searchApiKey` uses override when a non-empty string; otherwise env.
+ */
+export function buildResolveSearchInput(
+  config: ServerConfig,
+  overrides?: SearchResolveOverrides,
+): ResolveSearchInput {
+  return {
+    searchProvider:
+      overrides && "searchProvider" in overrides
+        ? (overrides.searchProvider ?? null)
+        : config.searchProvider,
+    searchApiKey:
+      overrides?.searchApiKey != null && overrides.searchApiKey !== ""
+        ? overrides.searchApiKey
+        : config.searchApiKey,
+    aiProvider: overrides?.aiProvider ?? config.aiProvider,
+    anthropicApiKey: overrides?.anthropicApiKey ?? config.anthropicApiKey,
+    openaiApiKey: overrides?.openaiApiKey ?? config.openaiApiKey,
+  };
+}
+
+/**
+ * Merge assistant runtime search fields into overrides for `buildResolveSearchInput`.
+ * Runtime `searchProvider` / `searchApiKey` of `null` mean "no Settings override" → env.
+ */
+export function searchOverridesFromRuntime(runtime: {
+  provider: AiProviderId;
+  anthropicApiKey: string | null;
+  openaiApiKey: string | null;
+  searchProvider: SearchProviderId | null;
+  searchApiKey: string | null;
+}): SearchResolveOverrides {
+  const overrides: SearchResolveOverrides = {
+    aiProvider: runtime.provider,
+    anthropicApiKey: runtime.anthropicApiKey,
+    openaiApiKey: runtime.openaiApiKey,
+  };
+  if (runtime.searchProvider != null) {
+    overrides.searchProvider = runtime.searchProvider;
+  }
+  if (runtime.searchApiKey != null) {
+    overrides.searchApiKey = runtime.searchApiKey;
+  }
+  return overrides;
+}
+
 export function resolveSearchProvider(input: ResolveSearchInput): SearchProviderId {
   const explicit = input.searchProvider;
   if (explicit && isSearchProviderId(explicit)) {
@@ -119,14 +180,15 @@ export function searchConfigured(
   return false;
 }
 
-export function getSearchStatus(config: ServerConfig, aiProvider?: AiProviderId): SearchStatus {
-  const input: ResolveSearchInput = {
-    searchProvider: config.searchProvider,
-    searchApiKey: config.searchApiKey,
-    aiProvider: aiProvider ?? config.aiProvider,
-    anthropicApiKey: config.anthropicApiKey,
-    openaiApiKey: config.openaiApiKey,
-  };
+export function getSearchStatus(
+  config: ServerConfig,
+  aiProviderOrOverrides?: AiProviderId | SearchResolveOverrides,
+): SearchStatus {
+  const overrides: SearchResolveOverrides =
+    typeof aiProviderOrOverrides === "string" || aiProviderOrOverrides === undefined
+      ? { aiProvider: aiProviderOrOverrides }
+      : aiProviderOrOverrides;
+  const input = buildResolveSearchInput(config, overrides);
   const provider = resolveSearchProvider(input);
   return {
     provider,
@@ -158,8 +220,7 @@ function setupHintFor(provider: SearchProviderId, missingKey?: boolean): string 
 export async function searchWeb(
   options: WebSearchOptions,
   config: ServerConfig,
-  deps?: {
-    aiProvider?: AiProviderId;
+  deps?: SearchResolveOverrides & {
     fetchFn?: typeof safeOutboundFetch;
   },
 ): Promise<WebSearchResult> {
@@ -174,15 +235,10 @@ export async function searchWeb(
     };
   }
 
-  const input: ResolveSearchInput = {
-    searchProvider: config.searchProvider,
-    searchApiKey: config.searchApiKey,
-    aiProvider: deps?.aiProvider ?? config.aiProvider,
-    anthropicApiKey: config.anthropicApiKey,
-    openaiApiKey: config.openaiApiKey,
-  };
+  const { fetchFn: fetchOverride, ...overrides } = deps ?? {};
+  const input = buildResolveSearchInput(config, overrides);
   const provider = resolveSearchProvider(input);
-  const fetchFn = deps?.fetchFn ?? safeOutboundFetch;
+  const fetchFn = fetchOverride ?? safeOutboundFetch;
 
   if (provider === "none") {
     return {

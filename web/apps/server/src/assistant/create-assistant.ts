@@ -29,6 +29,7 @@ export function createAssistantPort(runtime: AssistantRuntimeConfig): AssistantP
       apiKey: null,
       baseUrl: runtime.ollamaUrl,
       defaultModel: runtime.aiModel ?? "llama3.1",
+      numCtx: runtime.ollamaNumCtx,
     });
   }
 

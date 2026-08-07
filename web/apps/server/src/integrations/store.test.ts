@@ -39,4 +39,40 @@ describe("integration store", () => {
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("redacts search_api_key like api_key", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-int-search-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+    const port = createIntegrationPort({
+      repo,
+      getAdapter: (type) => (type === "spoolman" ? spoolmanAdapter : undefined),
+    });
+
+    const created = port.create({
+      type: "ai_assistant",
+      name: "Advisor",
+      config: {
+        provider: "ollama",
+        model: "llama3.1",
+        search_api_key: "brave-secret",
+        api_key: "unused",
+      },
+    });
+
+    const listed = port.list().find((x) => x.id === created.id)!;
+    expect(listed.config.search_api_key).toBe("****");
+    expect(listed.config.api_key).toBe("****");
+
+    port.update(created.id, {
+      config: { ...listed.config, search_provider: "brave" },
+    });
+    const raw = repo.getSetting("integrations");
+    expect(raw).toContain("brave-secret");
+    expect(raw).not.toContain('"search_api_key":"****"');
+
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

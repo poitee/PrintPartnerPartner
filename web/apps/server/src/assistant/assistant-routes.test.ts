@@ -86,13 +86,18 @@ describe("assistant routes", () => {
       provider: string;
       model: string | null;
       use_other_builds_as_examples: boolean;
+      source?: string;
+      search?: { provider: string; configured: boolean };
     };
     expect(body).toMatchObject({
       enabled: true,
       provider: "anthropic",
       model: "test-model",
       use_other_builds_as_examples: true,
+      source: "env",
     });
+    expect(body.search).toBeDefined();
+    expect(typeof body.search?.configured).toBe("boolean");
     expect(JSON.stringify(body)).not.toContain("test-key");
     expect(mockedCreate).toHaveBeenCalled();
   });
@@ -156,6 +161,7 @@ describe("assistant routes", () => {
       provider: "ollama",
       model: "llama3.2",
       use_other_builds_as_examples: false,
+      source: "settings",
     });
   });
 
