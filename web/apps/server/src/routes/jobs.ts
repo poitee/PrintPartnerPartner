@@ -107,7 +107,10 @@ export class InProcessJobRunner {
     };
     this.jobs.set(jobId, snap);
     this.jobMeta.set(jobId, { payload: { ...payload, _tenant_id: tenantId }, updatedAt: Date.now() });
-    void this.runJob(jobId, kind, { ...payload, _tenant_id: tenantId });
+    // Defer so the HTTP response for job_id can flush before CPU-heavy sync work runs.
+    setImmediate(() => {
+      void this.runJob(jobId, kind, { ...payload, _tenant_id: tenantId });
+    });
     return jobId;
   }
 
@@ -379,6 +382,8 @@ export class InProcessJobRunner {
   }
 
   private async runExport3mf(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    // Yield once more so concurrent health checks / requests can run before STL packing.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     const profileId = Number(payload.profile_id);
     const result = runExport3mfJob(this.repo, profileId, this.deps.exportsDir, {
       layout_mode: String(payload.layout_mode ?? "per_plate"),
