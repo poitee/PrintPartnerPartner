@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { toast } from "sonner";
 import {
   DEFAULT_STL_NAMING_PROFILE,
@@ -24,6 +25,7 @@ import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetHeader,
   SheetTitle,
@@ -270,7 +272,15 @@ export default function SourceDetailSheet({
           e.preventDefault();
         }}
       >
-        <SheetHeader className="border-b p-4">
+        <SheetHeader className="relative border-b p-4 pr-12">
+          <SheetClose
+            type="button"
+            className="absolute right-3 top-3 rounded-sm p-1.5 opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring"
+            aria-label="Close source details"
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </SheetClose>
           <div className="flex items-start gap-3">
             <SourceCardCover
               sourceId={source.id}

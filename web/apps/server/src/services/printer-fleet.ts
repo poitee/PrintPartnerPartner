@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
@@ -7,10 +7,12 @@ import type { PrinterMachine } from "@print-partner/domain";
 
 const FLEET_KEY = "printer.fleet";
 
-const PRESETS_PATH = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "../data/printer_presets.json",
-);
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+/** tsc does not copy JSON into dist/ — fall back to src/data like kit-catalog. */
+const PRESETS_CANDIDATES = [
+  join(MODULE_DIR, "../data/printer_presets.json"),
+  join(MODULE_DIR, "../../src/data/printer_presets.json"),
+];
 
 export type PrinterPreset = {
   id: string;
@@ -58,7 +60,11 @@ export function parsePrinterMachine(data: Record<string, unknown>): PrinterMachi
 }
 
 export function loadPrinterPresets(): PrinterPreset[] {
-  const raw = JSON.parse(readFileSync(PRESETS_PATH, "utf8")) as Array<Record<string, unknown>>;
+  const presetsPath = PRESETS_CANDIDATES.find((p) => existsSync(p));
+  if (!presetsPath) {
+    return [];
+  }
+  const raw = JSON.parse(readFileSync(presetsPath, "utf8")) as Array<Record<string, unknown>>;
   return raw.map((item) => ({
     id: String(item.id ?? ""),
     name: String(item.name ?? "Printer"),
