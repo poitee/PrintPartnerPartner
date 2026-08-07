@@ -100,6 +100,9 @@ describe("export 3mf", () => {
     expect(xml).toContain("<model");
     expect(xml).toContain("<vertex");
     expect(xml).toContain("<triangle");
+    // Prusa/Orca object list reads object@name — must be the STL basename.
+    expect(xml).toContain('name="bracket.stl"');
+    expect(xml).toContain('partnumber="bracket.stl"');
     rmSync(dir, { recursive: true, force: true });
   });
 });
