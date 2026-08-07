@@ -41,31 +41,43 @@ export function sanitize3mfObjectName(name: string): string {
   return cleaned.slice(0, 200) || "part.stl";
 }
 
-export function objectDisplayName(filename: string, unit: number, usedNames: Set<string>): string {
-  const base = sanitize3mfObjectName(filename);
-  let display = base;
-  if (unit > 1) {
-    const dot = base.lastIndexOf(".");
-    const stem = dot >= 0 ? base.slice(0, dot) : base;
-    const suffix = dot >= 0 ? base.slice(dot) : ".stl";
-    display = sanitize3mfObjectName(`${stem}${suffix} (${unit})`);
-  }
-  if (!usedNames.has(display)) {
-    usedNames.add(display);
-    return display;
-  }
+/** Build `stem.stl (n)` while keeping the full string ≤ 200 chars after sanitize. */
+function numberedObjectName(base: string, n: number): string {
+  const tag = ` (${n})`;
+  const budget = Math.max(1, 200 - tag.length);
   const dot = base.lastIndexOf(".");
   const stem = dot >= 0 ? base.slice(0, dot) : base;
   const suffix = dot >= 0 ? base.slice(dot) : ".stl";
-  let n = 2;
-  while (true) {
-    const candidate = sanitize3mfObjectName(`${stem}${suffix} (${n})`);
-    if (!usedNames.has(candidate)) {
-      usedNames.add(candidate);
-      return candidate;
-    }
-    n += 1;
+  const trimmedStem = stem.slice(0, Math.max(1, budget - suffix.length));
+  return sanitize3mfObjectName(`${trimmedStem}${suffix}${tag}`);
+}
+
+export function objectDisplayName(filename: string, unit: number, usedNames: Set<string>): string {
+  const base = sanitize3mfObjectName(filename);
+  const tryName = (name: string): string | null => {
+    if (usedNames.has(name)) return null;
+    usedNames.add(name);
+    return name;
+  };
+
+  if (unit > 1) {
+    const numbered = tryName(numberedObjectName(base, unit));
+    if (numbered) return numbered;
+  } else {
+    const plain = tryName(base);
+    if (plain) return plain;
   }
+
+  for (let n = 2; n < 100_000; n += 1) {
+    const candidate = tryName(numberedObjectName(base, n));
+    if (candidate) return candidate;
+  }
+  const fallback = tryName(sanitize3mfObjectName(`part-${usedNames.size}.stl`));
+  if (fallback) return fallback;
+  // Extremely pathological — still must not hang the event loop.
+  const last = `part-${Date.now()}.stl`;
+  usedNames.add(last);
+  return last;
 }
 
 function filamentMaterialKey(part: MergePartExport): [string, string] {
@@ -98,44 +110,67 @@ type MeshObjectSpec = {
 
 function buildModelXml(objects: MeshObjectSpec[], materials: Map<string, { id: number; label: string; hex: string }>): string {
   const matEntries = [...materials.values()];
-  let resources = "";
+  const parts: string[] = [];
   for (const mat of matEntries) {
-    resources += `    <basematerials id="${mat.id}">\n`;
-    resources += `      <base name="${escapeXml(mat.label)}" displaycolor="${hexToDisplayColor(mat.hex)}"/>\n`;
-    resources += `    </basematerials>\n`;
+    parts.push(`    <basematerials id="${mat.id}">\n`);
+    parts.push(`      <base name="${escapeXml(mat.label)}" displaycolor="${hexToDisplayColor(mat.hex)}"/>\n`);
+    parts.push(`    </basematerials>\n`);
   }
   for (const obj of objects) {
-    resources += `    <object id="${obj.id}" type="model">\n`;
-    resources += `      <mesh>\n        <vertices>\n`;
+    parts.push(`    <object id="${obj.id}" type="model">\n`);
+    parts.push(`      <mesh>\n        <vertices>\n`);
     for (const [x, y, z] of obj.mesh.vertices) {
-      resources += `          <vertex x="${x}" y="${y}" z="${z}"/>\n`;
+      parts.push(`          <vertex x="${x}" y="${y}" z="${z}"/>\n`);
     }
-    resources += `        </vertices>\n        <triangles>\n`;
+    parts.push(`        </vertices>\n        <triangles>\n`);
     for (const [v1, v2, v3] of obj.mesh.faces) {
-      resources += `          <triangle v1="${v1}" v2="${v2}" v3="${v3}"/>\n`;
+      parts.push(`          <triangle v1="${v1}" v2="${v2}" v3="${v3}"/>\n`);
     }
-    resources += `        </triangles>\n      </mesh>\n    </object>\n`;
+    parts.push(`        </triangles>\n      </mesh>\n    </object>\n`);
   }
 
-  let build = "";
+  const buildItems: string[] = [];
   for (const obj of objects) {
     const pid = obj.materialId;
-    build += `    <item objectid="${obj.id}"`;
-    if (pid) build += ` pid="${pid}" pindex="1"`;
-    build += `/>\n`;
+    buildItems.push(`    <item objectid="${obj.id}"`);
+    if (pid) buildItems.push(` pid="${pid}" pindex="1"`);
+    buildItems.push(`/>\n`);
   }
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
+  try {
+    const resources = parts.join("");
+    const build = buildItems.join("");
+    return `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
   <resources>
 ${resources}  </resources>
   <build>
 ${build}  </build>
 </model>`;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/invalid string length|cannot create.*string/i.test(msg)) {
+      throw new Error(
+        "3MF model is too large to encode in memory. Try fewer parts per plate, enable missing-only, or export an STL pack instead.",
+      );
+    }
+    throw e;
+  }
 }
 
 function write3mfZip(outPath: string, modelXml: string): void {
-  const modelBytes = strToU8(modelXml);
+  let modelBytes: Uint8Array;
+  try {
+    modelBytes = strToU8(modelXml);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/invalid string length|cannot create.*string/i.test(msg)) {
+      throw new Error(
+        "3MF model is too large to encode in memory. Try fewer parts per plate, enable missing-only, or export an STL pack instead.",
+      );
+    }
+    throw e;
+  }
   const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
