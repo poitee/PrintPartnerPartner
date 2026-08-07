@@ -35,6 +35,8 @@ export interface JobRunner {
   cancel(jobId: string): Promise<boolean>;
 }
 
+export type { AssistantPort } from "../assistant/types.js";
+
 /** External system connectors (Moonraker, Spoolman, etc.) — see integrations/store.ts. */
 export type { IntegrationPort } from "../integrations/store.js";
 

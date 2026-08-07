@@ -9,6 +9,7 @@ import {
 import type { FilamentResolveContext } from "./filament-resolve.js";
 import type { AppRepository } from "../db/repository.js";
 import type { PartDbRow } from "../db/repository.js";
+import { conflictsForStack } from "./interaction-graph.js";
 
 export type PlanReviewIssue = {
   severity: "blocker" | "warning";
@@ -20,6 +21,8 @@ export type PlanReviewIssue = {
 export type PlanReviewOptions = {
   includeExcluded?: boolean;
   filamentContext?: FilamentResolveContext;
+  /** Optional data dir for domain-pack interaction graph. */
+  dataDir?: string | null;
 };
 
 function filamentLabel(
@@ -198,6 +201,31 @@ export function buildPlanReview(
       message: `Merge conflict for ${part.filename} — exclude duplicates or pick one in Build.`,
       link_hint: "build",
     });
+  }
+
+  // Curated interaction-graph conflicts (same language as assistant check_stack_compatibility)
+  const layerNames = layers
+    .map((l) => l.project_name)
+    .filter((n): n is string => Boolean(n?.trim()));
+  try {
+    const stackCheck = conflictsForStack(layerNames, { dataDir: options.dataDir });
+    const seen = new Set<string>();
+    for (const w of stackCheck.warnings) {
+      if (w.severity !== "warning") continue;
+      const key = `${w.code}:${w.message}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      issues.push({
+        severity: "warning",
+        code: w.code.startsWith("compat_") || w.code === "merge_conflict_curated"
+          ? w.code
+          : "compat_conflict",
+        message: w.message,
+        link_hint: "build",
+      });
+    }
+  } catch {
+    /* domain pack optional */
   }
 
   const grouped = new Map<string, typeof enrichedParts>();

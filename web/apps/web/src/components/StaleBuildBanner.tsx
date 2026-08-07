@@ -23,7 +23,7 @@ export default function StaleBuildBanner({ stale, busy, onUpdate, className }: P
     >
       <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
       <span className="min-w-0 flex-1 text-foreground">
-        Build out of date — Review and Checkoff may not reflect your latest file picks or colors.
+        Build out of date — Review may not reflect your latest file picks or colors.
       </span>
       <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={onUpdate}>
         <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", busy && "animate-spin")} aria-hidden />

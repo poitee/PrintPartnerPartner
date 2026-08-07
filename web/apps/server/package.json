@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "mcp": "tsx src/mcp/stdio-server.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:generate": "drizzle-kit generate"
   },
@@ -24,6 +25,7 @@
     "@fastify/swagger": "^9.7.0",
     "@fastify/swagger-ui": "^6.0.0",
     "@fastify/websocket": "^11.2.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@octokit/rest": "^22.0.1",
     "@print-partner/contracts": "*",
     "@print-partner/domain": "*",
@@ -35,6 +37,7 @@
     "fflate": "^0.8.3",
     "js-yaml": "^5.1.0",
     "nodemailer": "^9.0.3",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.22.0"
   },
   "devDependencies": {

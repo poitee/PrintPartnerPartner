@@ -49,24 +49,64 @@ import { getColorById, resolvePartFilamentHex } from "../services/filament-catal
 import type { FilamentResolveContext } from "../services/filament-resolve.js";
 import { formatSpoolSummaryBadge } from "../integrations/spoolman-client.js";
 import { REMOTE_CHECKED_AT_KEY, REMOTE_UPDATE_STATUS_KEY } from "../services/source-update-check.js";
-import type { PartRow, ProfileSummary, SourceSummary } from "@print-partner/contracts";
-import { and, asc, count, eq, sql } from "drizzle-orm";
-import { join, resolve, sep } from "node:path";
+import type { PartRow, ProfileSummary, SourceSummary, PlanDecision, PlanSnapshot, PlanSnapshotSummary, PlanSnapshotSource, PlanDecisionActor, PlanDecisionKind } from "@print-partner/contracts";
+import { and, asc, count, eq, ne, sql } from "drizzle-orm";
+import { join, resolve, sep, basename } from "node:path";
 import type { DrizzleDb } from "./client.js";
 import { asSyncDb, type AppDrizzleDb } from "./sync-db-bridge.js";
 import { getRequestTenantId } from "../middleware/tenant-context.js";
 import * as defaultSchema from "./schema.js";
 import { DEFAULT_TENANT_ID } from "./schema.js";
 
+function docTitleFromPath(path: string): string {
+  const base = basename(path);
+  if (/^readme\.md$/i.test(base)) return "README";
+  return base;
+}
+
 export type SchemaTables = Pick<
   typeof defaultSchema,
-  "appSettings" | "buildProfiles" | "parts" | "printProgress" | "profileLayers" | "projects"
+  | "appSettings"
+  | "buildProfiles"
+  | "parts"
+  | "printProgress"
+  | "profileLayers"
+  | "projects"
+  | "sourceDocs"
+  | "sourceNotes"
+  | "planDecisions"
+  | "planSnapshots"
 >;
 
 export type ProjectRow = typeof defaultSchema.projects.$inferSelect;
 export type ProfileRow = typeof defaultSchema.buildProfiles.$inferSelect;
 export type LayerRow = typeof defaultSchema.profileLayers.$inferSelect;
 export type PartDbRow = typeof defaultSchema.parts.$inferSelect;
+export type SourceDocRow = typeof defaultSchema.sourceDocs.$inferSelect;
+export type SourceNoteRow = typeof defaultSchema.sourceNotes.$inferSelect;
+export type PlanDecisionRow = typeof defaultSchema.planDecisions.$inferSelect;
+export type PlanSnapshotRow = typeof defaultSchema.planSnapshots.$inferSelect;
+
+export type SourceDocSummary = {
+  id: number;
+  path: string;
+  kind: string;
+  title: string;
+  size_bytes: number;
+  extract_status: string;
+  page_count: number | null;
+};
+
+export type SourceNoteSummary = {
+  id: number;
+  project_id: number;
+  profile_id: number | null;
+  title: string;
+  body_markdown: string;
+  author_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 function readSourceUpdateFields(metadata: Record<string, unknown> | null): {
   update_status: "up_to_date" | "updates_available" | "unknown" | null;
@@ -85,7 +125,7 @@ function readSourceUpdateFields(metadata: Record<string, unknown> | null): {
   };
 }
 
-function sourceSummary(row: ProjectRow): SourceSummary {
+function sourceSummary(row: ProjectRow, docCount = 0): SourceSummary {
   const metadata = parseProjectMetadata(row.metadataJson);
   const { useDefaults } = parseSourceNamingMetadata(metadata);
   const { update_status, update_checked_at } = readSourceUpdateFields(metadata);
@@ -110,6 +150,7 @@ function sourceSummary(row: ProjectRow): SourceSummary {
     naming_use_defaults: useDefaults,
     update_status,
     update_checked_at,
+    doc_count: docCount,
   };
 }
 
@@ -230,7 +271,8 @@ export class AppRepository {
       .where(eq(this.schema.projects.tenantId, this.tenantId))
       .orderBy(asc(this.schema.projects.name))
       .all();
-    return rows.map(sourceSummary);
+    const counts = this.docCountByProjectId();
+    return rows.map((row) => sourceSummary(row, counts.get(row.id) ?? 0));
   }
 
   getSource(id: number): SourceSummary | null {
@@ -239,7 +281,9 @@ export class AppRepository {
       .from(this.schema.projects)
       .where(and(eq(this.schema.projects.tenantId, this.tenantId), eq(this.schema.projects.id, id)))
       .get();
-    return row ? sourceSummary(row) : null;
+    if (!row) return null;
+    const counts = this.docCountByProjectId([id]);
+    return sourceSummary(row, counts.get(id) ?? 0);
   }
 
   getPartRow(id: number): PartDbRow | null {
@@ -1732,5 +1776,459 @@ export class AppRepository {
       warnings,
       unmatched_sources,
     };
+  }
+
+  private docCountByProjectId(projectIds?: number[]): Map<number, number> {
+    const map = new Map<number, number>();
+    if (!this.schema.sourceDocs) return map;
+    const rows = this.db
+      .select({
+        projectId: this.schema.sourceDocs.projectId,
+        c: count(),
+      })
+      .from(this.schema.sourceDocs)
+      .where(eq(this.schema.sourceDocs.tenantId, this.tenantId))
+      .groupBy(this.schema.sourceDocs.projectId)
+      .all();
+    for (const row of rows) {
+      if (projectIds && !projectIds.includes(row.projectId)) continue;
+      map.set(row.projectId, Number(row.c) || 0);
+    }
+    return map;
+  }
+
+  listSourceDocs(projectId: number): SourceDocSummary[] {
+    if (!this.schema.sourceDocs) return [];
+    const rows = this.db
+      .select()
+      .from(this.schema.sourceDocs)
+      .where(
+        and(
+          eq(this.schema.sourceDocs.tenantId, this.tenantId),
+          eq(this.schema.sourceDocs.projectId, projectId),
+        ),
+      )
+      .orderBy(asc(this.schema.sourceDocs.path))
+      .all();
+    return rows.map((row) => ({
+      id: row.id,
+      path: row.path,
+      kind: row.kind,
+      title: docTitleFromPath(row.path),
+      size_bytes: row.sizeBytes ?? 0,
+      extract_status: row.extractStatus,
+      page_count: row.pageCount ?? null,
+    }));
+  }
+
+  replaceSourceDocs(
+    projectId: number,
+    docs: Array<{
+      path: string;
+      kind: string;
+      sizeBytes: number;
+      contentHash?: string | null;
+      extractStatus?: string;
+      pageCount?: number | null;
+      extractError?: string | null;
+    }>,
+  ): void {
+    if (!this.schema.sourceDocs) return;
+    this.db
+      .delete(this.schema.sourceDocs)
+      .where(
+        and(
+          eq(this.schema.sourceDocs.tenantId, this.tenantId),
+          eq(this.schema.sourceDocs.projectId, projectId),
+        ),
+      )
+      .run();
+    const now = new Date().toISOString();
+    for (const doc of docs) {
+      this.db
+        .insert(this.schema.sourceDocs)
+        .values({
+          tenantId: this.tenantId,
+          projectId,
+          path: doc.path,
+          kind: doc.kind,
+          sizeBytes: doc.sizeBytes,
+          contentHash: doc.contentHash ?? null,
+          extractStatus: doc.extractStatus ?? (doc.kind === "pdf" ? "pending" : "na"),
+          extractError: doc.extractError ?? null,
+          pageCount: doc.pageCount ?? null,
+          updatedAt: now,
+        })
+        .run();
+    }
+  }
+
+  updateSourceDocExtract(
+    projectId: number,
+    path: string,
+    patch: {
+      extractStatus: string;
+      contentHash?: string | null;
+      pageCount?: number | null;
+      extractError?: string | null;
+    },
+  ): void {
+    if (!this.schema.sourceDocs) return;
+    this.db
+      .update(this.schema.sourceDocs)
+      .set({
+        extractStatus: patch.extractStatus,
+        contentHash: patch.contentHash ?? undefined,
+        pageCount: patch.pageCount ?? undefined,
+        extractError: patch.extractError ?? null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(
+        and(
+          eq(this.schema.sourceDocs.tenantId, this.tenantId),
+          eq(this.schema.sourceDocs.projectId, projectId),
+          eq(this.schema.sourceDocs.path, path),
+        ),
+      )
+      .run();
+  }
+
+  listPendingPdfDocs(projectId: number): SourceDocSummary[] {
+    return this.listSourceDocs(projectId).filter(
+      (d) => d.kind === "pdf" && (d.extract_status === "pending" || d.extract_status === "error"),
+    );
+  }
+
+  listSourceNotes(projectId: number, profileId?: number | null): SourceNoteSummary[] {
+    if (!this.schema.sourceNotes) return [];
+    const rows = this.db
+      .select()
+      .from(this.schema.sourceNotes)
+      .where(
+        and(
+          eq(this.schema.sourceNotes.tenantId, this.tenantId),
+          eq(this.schema.sourceNotes.projectId, projectId),
+        ),
+      )
+      .orderBy(asc(this.schema.sourceNotes.updatedAt))
+      .all();
+    return rows
+      .filter((row) => {
+        if (profileId === undefined) return true;
+        if (profileId === null) return row.profileId == null;
+        return row.profileId === profileId || row.profileId == null;
+      })
+      .map((row) => ({
+        id: row.id,
+        project_id: row.projectId,
+        profile_id: row.profileId ?? null,
+        title: row.title,
+        body_markdown: row.bodyMarkdown,
+        author_user_id: row.authorUserId ?? null,
+        created_at: row.createdAt,
+        updated_at: row.updatedAt,
+      }));
+  }
+
+  getSourceNote(noteId: number): SourceNoteSummary | null {
+    if (!this.schema.sourceNotes) return null;
+    const row = this.db
+      .select()
+      .from(this.schema.sourceNotes)
+      .where(
+        and(
+          eq(this.schema.sourceNotes.tenantId, this.tenantId),
+          eq(this.schema.sourceNotes.id, noteId),
+        ),
+      )
+      .get();
+    if (!row) return null;
+    return {
+      id: row.id,
+      project_id: row.projectId,
+      profile_id: row.profileId ?? null,
+      title: row.title,
+      body_markdown: row.bodyMarkdown,
+      author_user_id: row.authorUserId ?? null,
+      created_at: row.createdAt,
+      updated_at: row.updatedAt,
+    };
+  }
+
+  createSourceNote(input: {
+    projectId: number;
+    profileId?: number | null;
+    title?: string;
+    bodyMarkdown: string;
+    authorUserId?: string | null;
+  }): SourceNoteSummary {
+    if (!this.schema.sourceNotes) throw new Error("source_notes table unavailable");
+    const now = new Date().toISOString();
+    const inserted = this.db
+      .insert(this.schema.sourceNotes)
+      .values({
+        tenantId: this.tenantId,
+        projectId: input.projectId,
+        profileId: input.profileId ?? null,
+        title: (input.title ?? "").trim() || "Note",
+        bodyMarkdown: input.bodyMarkdown,
+        authorUserId: input.authorUserId ?? null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .get();
+    if (!inserted) throw new Error("Failed to create note");
+    return this.getSourceNote(inserted.id)!;
+  }
+
+  updateSourceNote(
+    noteId: number,
+    patch: Partial<{ title: string; bodyMarkdown: string; profileId: number | null }>,
+  ): SourceNoteSummary {
+    if (!this.schema.sourceNotes) throw new Error("source_notes table unavailable");
+    const existing = this.getSourceNote(noteId);
+    if (!existing) throw new Error("Note not found");
+    const updates: Partial<typeof this.schema.sourceNotes.$inferInsert> = {
+      updatedAt: new Date().toISOString(),
+    };
+    if (patch.title != null) updates.title = patch.title.trim() || "Note";
+    if (patch.bodyMarkdown != null) updates.bodyMarkdown = patch.bodyMarkdown;
+    if (patch.profileId !== undefined) updates.profileId = patch.profileId;
+    this.db
+      .update(this.schema.sourceNotes)
+      .set(updates)
+      .where(eq(this.schema.sourceNotes.id, noteId))
+      .run();
+    return this.getSourceNote(noteId)!;
+  }
+
+  deleteSourceNote(noteId: number): boolean {
+    if (!this.schema.sourceNotes) return false;
+    const existing = this.getSourceNote(noteId);
+    if (!existing) return false;
+    this.db
+      .delete(this.schema.sourceNotes)
+      .where(
+        and(
+          eq(this.schema.sourceNotes.tenantId, this.tenantId),
+          eq(this.schema.sourceNotes.id, noteId),
+        ),
+      )
+      .run();
+    return true;
+  }
+
+  private parseJsonObject(raw: string | null | undefined): Record<string, unknown> {
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private mapPlanDecision(row: PlanDecisionRow): PlanDecision {
+    return {
+      id: row.id,
+      plan_id: row.profileId,
+      created_at: row.createdAt,
+      actor: row.actor as PlanDecisionActor,
+      kind: row.kind as PlanDecisionKind,
+      action_type: row.actionType ?? null,
+      params: this.parseJsonObject(row.paramsJson),
+      label: row.label,
+      summary: row.summary,
+      rationale: row.rationale ?? null,
+      result: row.resultJson ? this.parseJsonObject(row.resultJson) : null,
+    };
+  }
+
+  listPlanDecisions(planId: number, limit = 200): PlanDecision[] {
+    if (!this.schema.planDecisions) return [];
+    const rows = this.db
+      .select()
+      .from(this.schema.planDecisions)
+      .where(
+        and(
+          eq(this.schema.planDecisions.tenantId, this.tenantId),
+          eq(this.schema.planDecisions.profileId, planId),
+        ),
+      )
+      .orderBy(asc(this.schema.planDecisions.createdAt))
+      .all();
+    return rows.slice(-Math.max(1, limit)).map((r) => this.mapPlanDecision(r));
+  }
+
+  /** Recent plan_decisions across the tenant, optionally excluding one plan (cross-plan memory). */
+  listRecentTenantPlanDecisions(
+    limit = 200,
+    excludePlanId?: number | null,
+  ): PlanDecision[] {
+    if (!this.schema.planDecisions) return [];
+    const conditions = [eq(this.schema.planDecisions.tenantId, this.tenantId)];
+    if (excludePlanId != null && excludePlanId > 0) {
+      conditions.push(ne(this.schema.planDecisions.profileId, excludePlanId));
+    }
+    const rows = this.db
+      .select()
+      .from(this.schema.planDecisions)
+      .where(and(...conditions))
+      .orderBy(asc(this.schema.planDecisions.createdAt))
+      .all();
+    return rows.slice(-Math.max(1, limit)).map((r) => this.mapPlanDecision(r));
+  }
+
+  createPlanDecision(input: {
+    planId: number;
+    actor: PlanDecisionActor;
+    kind: PlanDecisionKind;
+    actionType?: string | null;
+    params?: Record<string, unknown>;
+    label?: string;
+    summary?: string;
+    rationale?: string | null;
+    result?: Record<string, unknown> | null;
+  }): PlanDecision {
+    if (!this.schema.planDecisions) throw new Error("plan_decisions table unavailable");
+    const now = new Date().toISOString();
+    const inserted = this.db
+      .insert(this.schema.planDecisions)
+      .values({
+        tenantId: this.tenantId,
+        profileId: input.planId,
+        createdAt: now,
+        actor: input.actor,
+        kind: input.kind,
+        actionType: input.actionType ?? null,
+        paramsJson: JSON.stringify(input.params ?? {}),
+        label: input.label ?? "",
+        summary: input.summary ?? "",
+        rationale: input.rationale ?? null,
+        resultJson: input.result != null ? JSON.stringify(input.result) : null,
+      })
+      .returning()
+      .get();
+    return this.mapPlanDecision(inserted);
+  }
+
+  /** Delete plan_decisions for one plan (tenant-scoped). Returns rows removed. */
+  deletePlanDecisionsForPlan(planId: number): number {
+    if (!this.schema.planDecisions) return 0;
+    if (!planId || planId <= 0) return 0;
+    const before = this.listPlanDecisions(planId, 10_000).length;
+    if (before === 0) return 0;
+    this.db
+      .delete(this.schema.planDecisions)
+      .where(
+        and(
+          eq(this.schema.planDecisions.tenantId, this.tenantId),
+          eq(this.schema.planDecisions.profileId, planId),
+        ),
+      )
+      .run();
+    return before;
+  }
+
+  /** Delete all plan_decisions for this tenant. Returns rows removed. */
+  deleteAllPlanDecisions(): number {
+    if (!this.schema.planDecisions) return 0;
+    const before = this.listRecentTenantPlanDecisions(10_000, null).length;
+    if (before === 0) return 0;
+    this.db
+      .delete(this.schema.planDecisions)
+      .where(eq(this.schema.planDecisions.tenantId, this.tenantId))
+      .run();
+    return before;
+  }
+
+  private mapPlanSnapshotSummary(row: PlanSnapshotRow): PlanSnapshotSummary {
+    return {
+      id: row.id,
+      plan_id: row.profileId,
+      name: row.name,
+      created_at: row.createdAt,
+      source: row.source as PlanSnapshotSource,
+    };
+  }
+
+  listPlanSnapshots(planId: number): PlanSnapshotSummary[] {
+    if (!this.schema.planSnapshots) return [];
+    const rows = this.db
+      .select()
+      .from(this.schema.planSnapshots)
+      .where(
+        and(
+          eq(this.schema.planSnapshots.tenantId, this.tenantId),
+          eq(this.schema.planSnapshots.profileId, planId),
+        ),
+      )
+      .orderBy(asc(this.schema.planSnapshots.createdAt))
+      .all();
+    return rows.map((r) => this.mapPlanSnapshotSummary(r));
+  }
+
+  getPlanSnapshot(snapshotId: number): PlanSnapshot | null {
+    if (!this.schema.planSnapshots) return null;
+    const row = this.db
+      .select()
+      .from(this.schema.planSnapshots)
+      .where(
+        and(
+          eq(this.schema.planSnapshots.tenantId, this.tenantId),
+          eq(this.schema.planSnapshots.id, snapshotId),
+        ),
+      )
+      .get();
+    if (!row) return null;
+    return {
+      ...this.mapPlanSnapshotSummary(row),
+      payload: this.parseJsonObject(row.payloadJson),
+    };
+  }
+
+  createPlanSnapshot(input: {
+    planId: number;
+    name: string;
+    source: PlanSnapshotSource;
+    payload: Record<string, unknown>;
+  }): PlanSnapshot {
+    if (!this.schema.planSnapshots) throw new Error("plan_snapshots table unavailable");
+    const now = new Date().toISOString();
+    const inserted = this.db
+      .insert(this.schema.planSnapshots)
+      .values({
+        tenantId: this.tenantId,
+        profileId: input.planId,
+        name: input.name,
+        createdAt: now,
+        source: input.source,
+        payloadJson: JSON.stringify(input.payload ?? {}),
+      })
+      .returning()
+      .get();
+    return {
+      ...this.mapPlanSnapshotSummary(inserted),
+      payload: this.parseJsonObject(inserted.payloadJson),
+    };
+  }
+
+  deletePlanSnapshot(snapshotId: number): boolean {
+    if (!this.schema.planSnapshots) return false;
+    const existing = this.getPlanSnapshot(snapshotId);
+    if (!existing) return false;
+    this.db
+      .delete(this.schema.planSnapshots)
+      .where(
+        and(
+          eq(this.schema.planSnapshots.tenantId, this.tenantId),
+          eq(this.schema.planSnapshots.id, snapshotId),
+        ),
+      )
+      .run();
+    return true;
   }
 }

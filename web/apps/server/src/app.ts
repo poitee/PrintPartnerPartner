@@ -185,6 +185,26 @@ export async function startServer(config: ServerConfig) {
   const ports = createPorts(config);
   await ports.db.connect();
 
+  // Best-effort: upsert Advisor notes from shipped/imported domain pack onto matching sources.
+  if (ports.repository) {
+    try {
+      const { backfillAdvisorNotesFromDomainPack } = await import(
+        "./assistant/domain-pack.js"
+      );
+      const result = backfillAdvisorNotesFromDomainPack(
+        ports.repository,
+        config.dataDir,
+      );
+      if (result.notes_upserted > 0) {
+        console.info(
+          `[assistant-domain] backfilled ${result.notes_upserted} advisor note(s) across ${result.sources_matched} source(s)`,
+        );
+      }
+    } catch (err) {
+      console.warn("[assistant-domain] note backfill skipped:", err);
+    }
+  }
+
   const app = await buildApp(config, ports);
 
   try {

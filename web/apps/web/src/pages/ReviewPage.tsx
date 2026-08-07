@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -9,6 +9,7 @@ import {
   Hash,
   Layers,
   Palette,
+  Printer,
   RefreshCw,
   XCircle,
 } from "lucide-react";
@@ -18,7 +19,9 @@ import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
-import ReviewPartsSheet from "../components/review/ReviewPartsSheet";
+import ReviewPartsSheet, {
+  type ReviewPartsSheetHandle,
+} from "../components/review/ReviewPartsSheet";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
@@ -30,9 +33,20 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { Card, CardContent } from "../components/ui/card";
-import { startExportStlPack, startRecompute, startSync, type StlPackGroupBy } from "../api/engine";
-import { buildRoute, checkoffRoute, sourcesRoute } from "../lib/routes";
+import {
+  fetchPrinters,
+  startExport3mf,
+  startExportChecklistHtml,
+  startExportStlPack,
+  startRecompute,
+  startSync,
+  type StlPackGroupBy,
+} from "../api/engine";
+import { buildRoute, settingsRoute, sourcesRoute } from "../lib/routes";
+import { completeExportDownload } from "../lib/exportActions";
+import { handleExport3mfJobDone } from "../lib/export3mfJobResult";
 import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
+import { flattenReviewParts } from "../lib/reviewParts";
 import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
@@ -57,9 +71,12 @@ export default function ReviewPage() {
     loadedRevision,
   } = usePlanWorkspace();
   const exportStlJob = useJobRunner("stl-export");
+  const export3mfJob = useJobRunner("export-3mf");
+  const exportJob = useJobRunner("export");
   const recomputeJob = useJobRunner("recompute");
   const syncJob = useJobRunner("sync");
   const [shareOpen, setShareOpen] = useState(false);
+  const sheetRef = useRef<ReviewPartsSheetHandle>(null);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
   const buildStale = selectedProfile?.build_stale ?? false;
@@ -122,6 +139,16 @@ export default function ReviewPage() {
   );
   const hasBlockers = review?.has_blockers ?? blockers.length > 0;
 
+  const missingCount = useMemo(() => {
+    if (!review) return 0;
+    return flattenReviewParts(review.part_groups).filter((p) => p.included && p.missing).length;
+  }, [review]);
+
+  const hasIncludedParts = useMemo(() => {
+    if (!review) return false;
+    return flattenReviewParts(review.part_groups).some((p) => p.included);
+  }, [review]);
+
   const onExportStls = (groupBy: StlPackGroupBy) => {
     if (selectedProfileId == null) return;
     void exportStlJob.runJob(
@@ -131,6 +158,71 @@ export default function ReviewPage() {
       },
     );
   };
+
+  const onExportChecklist = () => {
+    if (selectedProfileId == null) return;
+    void exportJob.runJob(
+      () => startExportChecklistHtml(selectedProfileId),
+      (snap) => {
+        if (snap.status === "error") {
+          toast.error(snap.message || "Checklist export failed");
+          return;
+        }
+        completeExportDownload("Checklist HTML", snap.result);
+      },
+    );
+  };
+
+  const onExportMissing = (groupBy: StlPackGroupBy) => {
+    if (selectedProfileId == null) return;
+    void exportJob.runJob(
+      () =>
+        startExportStlPack(selectedProfileId, {
+          missing_only: true,
+          group_by: groupBy,
+        }),
+      (snap) => {
+        handleStlPackExportJobDone("Missing-parts STL", snap, {
+          pathField: "root_path",
+        });
+        if (snap.status === "done" && selectedProfileId != null) void reload(selectedProfileId);
+      },
+    );
+  };
+
+  const onExport3mf = (layoutMode: "per_plate" | "zip") => {
+    if (selectedProfileId == null) return;
+    void (async () => {
+      try {
+        const printers = await fetchPrinters();
+        if (!printers.length) {
+          toast.error("No printers configured", {
+            description: "Add a printer in Settings before exporting 3MF.",
+          });
+          return;
+        }
+        await export3mfJob.runJob(
+          () =>
+            startExport3mf({
+              profile_id: selectedProfileId,
+              layout_mode: layoutMode,
+              enabled_printer_ids: printers.map((p) => p.id),
+            }),
+          (snap) => {
+            handleExport3mfJobDone("3MF export", snap);
+          },
+        );
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+    })();
+  };
+
+  const onPrint = useCallback(() => {
+    void sheetRef.current?.print();
+  }, []);
+
+  const exportBusy = exportStlJob.busy || exportJob.busy || export3mfJob.busy;
 
   return (
     <div className="space-y-4">
@@ -144,15 +236,70 @@ export default function ReviewPage() {
         icon={ClipboardCheck}
         accent
         title="Review"
-        description="Validate parts, edit quantities, and export before shop-floor checkoff."
+        description="Validate parts, edit quantities, track printing, and export."
         actions={
           <PageHeaderActions>
+            <Button
+              variant="ghost"
+              className="min-h-10 w-full sm:w-auto"
+              onClick={onPrint}
+              disabled={selectedProfileId == null || !hasIncludedParts}
+            >
+              <Printer className="mr-1 h-4 w-4" />
+              Print
+            </Button>
+            <Button
+              variant="secondary"
+              className="min-h-10 w-full sm:w-auto"
+              onClick={onExportChecklist}
+              disabled={selectedProfileId == null || exportBusy || !review || hasBlockers}
+            >
+              Export checklist
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   className="min-h-10 w-full sm:w-auto"
                   disabled={
-                    selectedProfileId == null || hasBlockers || exportStlJob.busy || !health
+                    selectedProfileId == null ||
+                    hasBlockers ||
+                    exportBusy ||
+                    !health ||
+                    missingCount === 0
+                  }
+                >
+                  {exportJob.busy ? "Exporting…" : "Export missing STLs"}
+                  <ChevronDown className="ml-1 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel>Group exported files by</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => onExportMissing("color_dir")}>
+                  <div className="flex flex-col">
+                    <span>Color + directory</span>
+                    <span className="text-xs text-muted-foreground">
+                      Keep source folders (e.g. Primary/partsDir/file.stl)
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onExportMissing("color")}>
+                  <div className="flex flex-col">
+                    <span>Color only</span>
+                    <span className="text-xs text-muted-foreground">
+                      Flatten all directories (e.g. Primary/file.stl)
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="secondary"
+                  className="min-h-10 w-full sm:w-auto"
+                  disabled={
+                    selectedProfileId == null || hasBlockers || exportBusy || !health
                   }
                 >
                   {exportStlJob.busy ? "Exporting…" : "Export STLs"}
@@ -177,6 +324,46 @@ export default function ReviewPage() {
                       Flatten all directories (e.g. Primary/file.stl)
                     </span>
                   </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="secondary"
+                  className="min-h-10 w-full sm:w-auto"
+                  disabled={
+                    selectedProfileId == null || hasBlockers || exportBusy || !health
+                  }
+                >
+                  {export3mfJob.busy ? "Exporting…" : "Export 3MF"}
+                  <ChevronDown className="ml-1 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <DropdownMenuLabel>3MF layout</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => onExport3mf("per_plate")}>
+                  <div className="flex flex-col">
+                    <span>One file per plate</span>
+                    <span className="text-xs text-muted-foreground">
+                      Best for Prusa / Bambu / Orca (default)
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onExport3mf("zip")}>
+                  <div className="flex flex-col">
+                    <span>Zip all plates</span>
+                    <span className="text-xs text-muted-foreground">
+                      Plate 3MFs plus print_plan.json
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild>
+                  <Link to={settingsRoute()} className="cursor-pointer">
+                    Manage printers in Settings…
+                  </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -394,6 +581,7 @@ export default function ReviewPage() {
           )}
 
           <ReviewPartsSheet
+            ref={sheetRef}
             review={review}
             planName={planName}
             disabled={!health || loading}
@@ -402,9 +590,6 @@ export default function ReviewPage() {
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
               <Link to={buildRoute(selectedProfileId)}>Back to Build</Link>
-            </Button>
-            <Button className="min-h-10 w-full sm:w-auto" asChild>
-              <Link to={checkoffRoute(selectedProfileId)}>Continue to Checkoff</Link>
             </Button>
           </div>
         </>

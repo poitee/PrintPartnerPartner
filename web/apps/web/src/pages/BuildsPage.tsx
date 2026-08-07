@@ -21,7 +21,7 @@ export default function BuildsPage() {
         icon={Layers}
         accent
         title="Builds"
-        description="Create, rename, duplicate, and delete build plans. The header dropdown switches which plan Build, Review, and Checkoff use."
+        description="Create, rename, duplicate, and delete build plans. The header dropdown switches which plan Build and Review use."
         actions={
           selectedProfileId != null ? (
             <Button className="min-h-10 w-full sm:w-auto" asChild>

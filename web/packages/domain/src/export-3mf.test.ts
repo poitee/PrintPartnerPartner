@@ -35,6 +35,23 @@ describe("export 3mf", () => {
     expect(objectDisplayName("bracket.stl", 2, used)).toBe("bracket.stl (2)");
   });
 
+  it("does not hang when sanitized names exceed 200 chars", () => {
+    const used = new Set<string>();
+    const long = `${"a".repeat(220)}.stl`;
+    const first = objectDisplayName(long, 1, used);
+    expect(first.length).toBeLessThanOrEqual(200);
+    const second = objectDisplayName(long, 1, used);
+    expect(second).not.toBe(first);
+    expect(second.length).toBeLessThanOrEqual(200);
+    expect(second).toMatch(/\(\d+\)/);
+    // Many collisions must still finish quickly.
+    const t0 = Date.now();
+    for (let i = 0; i < 50; i += 1) {
+      objectDisplayName(long, 1, used);
+    }
+    expect(Date.now() - t0).toBeLessThan(500);
+  });
+
   it("writes valid 3MF zip with model XML", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-3mf-"));
     const exportsDir = join(dir, "exports");
@@ -83,6 +100,9 @@ describe("export 3mf", () => {
     expect(xml).toContain("<model");
     expect(xml).toContain("<vertex");
     expect(xml).toContain("<triangle");
+    // Prusa/Orca object list reads object@name — must be the STL basename.
+    expect(xml).toContain('name="bracket.stl"');
+    expect(xml).toContain('partnumber="bracket.stl"');
     rmSync(dir, { recursive: true, force: true });
   });
 });

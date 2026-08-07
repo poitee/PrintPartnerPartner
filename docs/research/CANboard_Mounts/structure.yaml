@@ -1,0 +1,16 @@
+schema: print-partner/structure@1
+source_name: CANboard_Mounts
+ref_documented: main
+stl_root: STLs/
+folders:
+  - {path: STLs/BTT_EBB36_1.0_Mounts, note: "EBB36 v1.0 ONLY (rear buttons); subvariants: plain / with_strain_relief / with_overmold_strain_relief"}
+  - {path: STLs/Mellow_SHT36_BTT_EBB36_1.1_1.2_Mounts, note: "shared mounts for SHT-36 (+2.0) and EBB36 v1.1/v1.2; same 3 strain-relief subvariants"}
+  - {path: STLs/motor_standoff_posts, note: "universal spacers by height (14.0–17.5mm) x profile (oct/round/teardrop)"}
+  - {path: Usermods/, note: "Reapola, mk-maddin"}
+option_groups:
+  - {id: board, choose_one: [BTT_EBB36_1.0_Mounts, Mellow_SHT36_BTT_EBB36_1.1_1.2_Mounts]}
+  - {id: strain_relief, choose_one: [plain, with_strain_relief, with_overmold_strain_relief]}
+  - {id: standoff, choose_one: ["one height+profile from motor_standoff_posts"], note: "height depends on extruder/motor stack"}
+naming_quirks: ["mount orientation variants per extruder (Sherpa Mini etc.) inside board folders"]
+known_overlaps:
+  - {with: Voron-Hardware Stealthburner_Toolhead_PCB / umbilical solutions, note: "CAN board replaces toolhead-PCB+umbilical wiring approach"}

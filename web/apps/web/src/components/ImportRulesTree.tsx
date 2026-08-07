@@ -37,6 +37,10 @@ type Props = {
   onFileSelect?: (path: string | null) => void;
   onSelectionStats?: (selected: number, total: number, duplicateBasenames: string[]) => void;
   className?: string;
+  /** Seed / override the tree filter (copilot deep-link). */
+  initialFilter?: string | null;
+  /** Bump to re-apply initialFilter + focus the search field. */
+  filterFocusSeq?: number;
 };
 
 function TreeRows({
@@ -237,11 +241,13 @@ export default function ImportRulesTree({
   onFileSelect,
   onSelectionStats,
   className,
+  initialFilter = null,
+  filterFocusSeq = 0,
 }: Props) {
   const [nodes, setNodes] = useState<StlTreeNode[]>([]);
   const [total, setTotal] = useState(0);
   const [legacyAll, setLegacyAll] = useState(false);
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useState(() => initialFilter?.trim() ?? "");
   const [sortBy, setSortBy] = useState<ImportRulesSort>("path");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -251,6 +257,17 @@ export default function ImportRulesTree({
   const onRulesChangeRef = useRef(onRulesChange);
   onRulesChangeRef.current = onRulesChange;
   const inline = variant === "inline";
+  const appliedFilterSeqRef = useRef(0);
+
+  useEffect(() => {
+    if (!filterFocusSeq || filterFocusSeq === appliedFilterSeqRef.current) return;
+    appliedFilterSeqRef.current = filterFocusSeq;
+    if (initialFilter != null) setFilter(initialFilter);
+    requestAnimationFrame(() => {
+      searchRef.current?.focus();
+      searchRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }, [filterFocusSeq, initialFilter]);
 
   const reload = useCallback(async () => {
     setLoading(true);

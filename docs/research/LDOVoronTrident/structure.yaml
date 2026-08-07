@@ -1,0 +1,17 @@
+schema: print-partner/structure@1
+source_name: LDOVoronTrident
+ref_documented: master
+stl_root: STLs/
+parts:
+  - {stl: STLs/power_inlet_1.2mm.stl, replaces: "Trident power inlet (README cites 'power_inlet_adamstech'; current Trident main names it STLs/Skirt/rear_skirt_power_adamstech.stl)"}
+  - {stl: STLs/ldo_z_cable_anchor.stl, note: "LDO deck panel's Z cable opening position differs from stock"}
+  - {stl: STLs/ldo_deck_wire_cover_right.stl, replaces: "Trident wire_cover_right.stl (LDO deck has larger opening)"}
+  - {stl: STLs/bed_wago_mount.stl}
+subfolders: [STLs/Angled Exhaust Cover, "STLs/BTT Pi TFT4.3 Mount", "STLs/BTT Pi TFT4.3 Flip Mount", STLs/LDOSBCW2MountCover]
+firmware: [printer-octopus-rev-a.cfg, printer-octopus-rev-c.cfg, printer-leviathan-rev-d.cfg]
+option_groups:
+  - {id: controller, choose_one: [octopus rev A/C, leviathan rev D]}
+  - {id: tft_mount, choose_one: ["BTT Pi TFT4.3 Mount", "BTT Pi TFT4.3 Flip Mount"], optional: true}
+naming_quirks: ["spaces in subfolder names; .f3d alongside .stl; default branch is master (unlike LDOVoron2's main)"]
+known_overlaps:
+  - {with: Voron-Trident, note: "power inlet + right deck wire cover replacements"}

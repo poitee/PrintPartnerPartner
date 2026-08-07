@@ -1,6 +1,19 @@
-import type { DeployMode } from "@print-partner/contracts";
+import type { AiProviderId, DeployMode, SearchProviderId } from "@print-partner/contracts";
 
-export type { DeployMode };
+export type { DeployMode, AiProviderId, SearchProviderId };
+
+const SEARCH_PROVIDER_IDS: SearchProviderId[] = [
+  "anthropic-native",
+  "openai-native",
+  "brave",
+  "exa",
+  "duckduckgo",
+  "none",
+];
+
+function isSearchProviderId(raw: string): raw is SearchProviderId {
+  return (SEARCH_PROVIDER_IDS as string[]).includes(raw);
+}
 
 export type ServerConfig = {
   deployMode: DeployMode;
@@ -52,6 +65,47 @@ export type ServerConfig = {
   latestVersionOverride: string | null;
   /** In-memory cache TTL for update checks (hours) */
   updateCheckCacheHours: number;
+  /** Opt-in AI advisor (Phase 1: read-only chat). Requires AI_ENABLED=1. */
+  aiEnabled: boolean;
+  aiProvider: AiProviderId;
+  anthropicApiKey: string | null;
+  openaiApiKey: string | null;
+  openaiBaseUrl: string | null;
+  aiModel: string | null;
+  ollamaUrl: string;
+  aiMaxTokens: number;
+  /**
+   * Soft per-tenant daily chat request cap (`0` = unlimited).
+   * Overridable via Settings `daily_request_budget`.
+   */
+  aiDailyRequestBudget: number;
+  /**
+   * Soft per-tenant daily estimated-token cap (`0` = unlimited).
+   * Overridable via Settings `daily_token_budget`.
+   */
+  aiDailyTokenBudget: number;
+  /**
+   * Per-source budget for synced markdown/PDF docs (bytes). Default ~1 GiB.
+   * Operator escape hatch: `SOURCE_DOCS_MAX_BYTES`.
+   */
+  sourceDocsMaxBytes: number;
+  /**
+   * When false, `ingest_guide_url` is disabled. Default true.
+   * `ASSISTANT_ALLOW_URL_INGEST=0` to disable.
+   */
+  assistantAllowUrlIngest: boolean;
+  /** Max bytes for a single guide URL fetch. Default 512 KiB. */
+  assistantGuideIngestMaxBytes: number;
+  /**
+   * Explicit web search backend (`null` = auto-resolve).
+   * Env: `SEARCH_PROVIDER`.
+   */
+  searchProvider: SearchProviderId | null;
+  /**
+   * API key for Brave / Exa search backends.
+   * Env: `SEARCH_API_KEY`, with `BRAVE_API_KEY` / `EXA_API_KEY` as fallbacks.
+   */
+  searchApiKey: string | null;
 };
 
 const DEFAULT_DATA_DIR = process.env.PRINT_PARTNER_DATA_DIR ?? "./data";
@@ -93,6 +147,48 @@ function parseCorsOrigin(raw: string | undefined): string | boolean | string[] {
   if (origins.length === 1) return origins[0]!;
   if (origins.length > 1) return origins;
   return true;
+}
+
+function parseAiProvider(raw: string | undefined): AiProviderId {
+  if (raw === "anthropic" || raw === "openai" || raw === "ollama" || raw === "none") {
+    return raw;
+  }
+  return "none";
+}
+
+function parseSearchProvider(raw: string | undefined): SearchProviderId | null {
+  const trimmed = raw?.trim().toLowerCase();
+  if (!trimmed) return null;
+  if (isSearchProviderId(trimmed)) return trimmed;
+  return null;
+}
+
+function resolveSearchApiKey(): string | null {
+  return (
+    process.env.SEARCH_API_KEY?.trim() ||
+    process.env.BRAVE_API_KEY?.trim() ||
+    process.env.EXA_API_KEY?.trim() ||
+    null
+  );
+}
+
+function defaultAiModel(provider: AiProviderId, explicit: string | null): string | null {
+  if (explicit) return explicit;
+  if (provider === "anthropic") return "claude-sonnet-4-20250514";
+  if (provider === "openai") return "gpt-4o-mini";
+  if (provider === "ollama") return "llama3.1";
+  return null;
+}
+
+function aiCredentialsPresent(
+  provider: AiProviderId,
+  anthropicApiKey: string | null,
+  openaiApiKey: string | null,
+): boolean {
+  if (provider === "anthropic") return Boolean(anthropicApiKey);
+  if (provider === "openai") return Boolean(openaiApiKey);
+  if (provider === "ollama") return true;
+  return false;
 }
 
 export function loadConfig(): ServerConfig {
@@ -137,6 +233,19 @@ export function loadConfig(): ServerConfig {
     process.env.PASSWORD_RESET_DEV_EXPOSE === "1" ||
     (!isProd && process.env.PASSWORD_RESET_DEV_EXPOSE !== "0");
 
+  const aiProvider = parseAiProvider(process.env.AI_PROVIDER);
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY?.trim() || null;
+  const openaiApiKey = process.env.OPENAI_API_KEY?.trim() || null;
+  const openaiBaseUrl = process.env.OPENAI_BASE_URL?.trim() || null;
+  const aiModel = defaultAiModel(aiProvider, process.env.AI_MODEL?.trim() || null);
+  const ollamaUrl = (process.env.OLLAMA_URL?.trim() || "http://127.0.0.1:11434").replace(/\/$/, "");
+  const aiMaxTokens = Number(process.env.AI_MAX_TOKENS ?? 2048);
+  const aiDailyRequestBudget = Number(process.env.AI_DAILY_REQUEST_BUDGET ?? 0);
+  const aiDailyTokenBudget = Number(process.env.AI_DAILY_TOKEN_BUDGET ?? 0);
+  const aiOptIn = process.env.AI_ENABLED === "1";
+  const aiEnabled =
+    aiOptIn && aiProvider !== "none" && aiCredentialsPresent(aiProvider, anthropicApiKey, openaiApiKey);
+
   return {
     deployMode,
     host,
@@ -179,5 +288,32 @@ export function loadConfig(): ServerConfig {
     smtpSecure,
     smtpConfigured,
     passwordResetDevExpose,
+    aiEnabled,
+    aiProvider,
+    anthropicApiKey,
+    openaiApiKey,
+    openaiBaseUrl,
+    aiModel,
+    ollamaUrl,
+    aiMaxTokens: Number.isFinite(aiMaxTokens) && aiMaxTokens > 0 ? aiMaxTokens : 2048,
+    aiDailyRequestBudget:
+      Number.isFinite(aiDailyRequestBudget) && aiDailyRequestBudget > 0
+        ? Math.trunc(aiDailyRequestBudget)
+        : 0,
+    aiDailyTokenBudget:
+      Number.isFinite(aiDailyTokenBudget) && aiDailyTokenBudget > 0
+        ? Math.trunc(aiDailyTokenBudget)
+        : 0,
+    sourceDocsMaxBytes: (() => {
+      const raw = Number(process.env.SOURCE_DOCS_MAX_BYTES ?? 1024 * 1024 * 1024);
+      return Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 1024 * 1024 * 1024;
+    })(),
+    assistantAllowUrlIngest: process.env.ASSISTANT_ALLOW_URL_INGEST !== "0",
+    assistantGuideIngestMaxBytes: (() => {
+      const raw = Number(process.env.ASSISTANT_GUIDE_INGEST_MAX_BYTES ?? 512 * 1024);
+      return Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : 512 * 1024;
+    })(),
+    searchProvider: parseSearchProvider(process.env.SEARCH_PROVIDER),
+    searchApiKey: resolveSearchApiKey(),
   };
 }

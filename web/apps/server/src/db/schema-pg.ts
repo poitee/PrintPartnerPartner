@@ -160,5 +160,74 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
   createdAt: text("created_at").notNull(),
 });
 
+/** Synced markdown/PDF docs under a source repo tree. */
+export const sourceDocs = pgTable(
+  "source_docs",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    kind: text("kind").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    contentHash: text("content_hash"),
+    extractStatus: text("extract_status").notNull().default("pending"),
+    extractError: text("extract_error"),
+    pageCount: integer("page_count"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_source_docs_project_path").on(t.projectId, t.path)],
+);
+
+/** User-contributed markdown notes for a source (optionally plan-scoped). */
+export const sourceNotes = pgTable("source_notes", {
+  id: serial("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  profileId: integer("profile_id").references(() => buildProfiles.id, {
+    onDelete: "set null",
+  }),
+  title: text("title").notNull().default(""),
+  bodyMarkdown: text("body_markdown").notNull().default(""),
+  authorUserId: text("author_user_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/** Durable per-plan assistant/user decision trail (Apply / Dismiss / notes). */
+export const planDecisions = pgTable("plan_decisions", {
+  id: serial("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  profileId: integer("profile_id")
+    .notNull()
+    .references(() => buildProfiles.id, { onDelete: "cascade" }),
+  createdAt: text("created_at").notNull(),
+  actor: text("actor").notNull().default("assistant"),
+  kind: text("kind").notNull(),
+  actionType: text("action_type"),
+  paramsJson: text("params_json").notNull().default("{}"),
+  label: text("label").notNull().default(""),
+  summary: text("summary").notNull().default(""),
+  rationale: text("rationale"),
+  resultJson: text("result_json"),
+});
+
+/** Point-in-time plan configuration snapshots (layers + kit + refs). */
+export const planSnapshots = pgTable("plan_snapshots", {
+  id: serial("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  profileId: integer("profile_id")
+    .notNull()
+    .references(() => buildProfiles.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+  source: text("source").notNull().default("user"),
+  payloadJson: text("payload_json").notNull().default("{}"),
+});
+
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 5;
+export const currentSchemaVersion = 7;

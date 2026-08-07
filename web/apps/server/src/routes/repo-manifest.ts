@@ -79,26 +79,4 @@ export async function registerRepoManifestRoutes(
       })),
     };
   });
-
-  app.get("/sources/:id/docs", async (request, reply) => {
-    const id = Number((request.params as { id: string }).id);
-    const row = deps.repo.getProjectRow(id);
-    if (!row) return reply.status(404).send({ detail: "Source not found" });
-    const docsUrl = row.docsUrl ?? row.url;
-    return { source_id: id, docs_url: docsUrl, entries: [] };
-  });
-
-  app.get("/sources/:id/docs/*", async (request, reply) => {
-    const id = Number((request.params as { id: string }).id);
-    const row = requireLocalPath(deps.repo, id);
-    const docPath = (request.params as { "*": string })["*"] ?? "";
-    const safe = docPath.replace(/\.\./g, "");
-    const full = join(row.localPath!, safe);
-    try {
-      const text = readFileSync(full, "utf8");
-      return reply.type("text/plain; charset=utf-8").send(text);
-    } catch {
-      return reply.status(404).send({ detail: "Document not found" });
-    }
-  });
 }

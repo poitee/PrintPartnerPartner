@@ -19,6 +19,7 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
         destructive:
           "bg-destructive/20 text-destructive hover:bg-destructive/30",
+        info: "bg-info text-info-foreground shadow-sm hover:bg-info/90 hover:shadow-md",
         sheetRemove:
           "border border-[var(--paper-destructive-border)] bg-[var(--paper-bg)] text-[var(--paper-destructive)] shadow-none hover:border-[var(--paper-destructive-border-hover)] hover:bg-[var(--paper-destructive-bg-hover)] hover:text-[var(--paper-destructive-hover)]",
         sheetRestore:
@@ -53,8 +54,9 @@ export function Button({
   loading = false,
   disabled,
   children,
+  ref,
   ...props
-}: ButtonProps) {
+}: ButtonProps & { ref?: React.Ref<HTMLButtonElement> }) {
   const classes = cn(buttonVariants({ variant, size }), className);
 
   if (asChild) {
@@ -71,6 +73,7 @@ export function Button({
 
   return (
     <button
+      ref={ref}
       className={classes}
       disabled={disabled || loading}
       aria-busy={loading || undefined}

@@ -14,22 +14,12 @@ export function buildsRoute(profileId?: number | null): string {
   return withProfile("/builds", profileId ?? null);
 }
 
-/** @deprecated use buildRoute */
-export function planRoute(profileId?: number | null): string {
-  return buildRoute(profileId);
-}
-
 export function reviewRoute(profileId?: number | null): string {
   return withProfile("/review", profileId ?? null);
 }
 
 export function sourcesRoute(): string {
   return "/sources";
-}
-
-/** @deprecated Plate step removed — use reviewRoute */
-export function plateRoute(profileId?: number | null): string {
-  return reviewRoute(profileId);
 }
 
 export function settingsRoute(): string {
@@ -58,15 +48,17 @@ export function isBuildsPath(pathname: string): boolean {
 }
 
 export function isReviewPath(pathname: string): boolean {
-  return pathname === "/review";
+  return pathname === "/review" || pathname === "/checkoff";
 }
 
+/** Legacy path matcher — `/checkoff` redirects to Review. */
 export function isCheckoffPath(pathname: string): boolean {
   return pathname === "/checkoff";
 }
 
+/** Alias for deep links — Checkoff is folded into Review. */
 export function checkoffRoute(profileId?: number | null): string {
-  return withProfile("/checkoff", profileId ?? null);
+  return reviewRoute(profileId);
 }
 
 export function isPlanWorkflowPath(pathname: string): boolean {
@@ -74,7 +66,6 @@ export function isPlanWorkflowPath(pathname: string): boolean {
     isBuildPath(pathname) ||
     isBuildsPath(pathname) ||
     isReviewPath(pathname) ||
-    isCheckoffPath(pathname) ||
     isKitStudioPath(pathname)
   );
 }

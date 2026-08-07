@@ -2,7 +2,6 @@ import { type ComponentType, type MouseEvent, type ReactNode, useEffect, useStat
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   BookOpen,
-  CheckSquare,
   ClipboardCheck,
   FolderGit2,
   Hammer,
@@ -11,8 +10,10 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  Sparkles,
 } from "lucide-react";
 import CommandPalette from "../components/CommandPalette";
+import AssistantChatSheet from "../components/AssistantChatSheet";
 import ErrorBoundary from "../components/ErrorBoundary";
 import JobTray from "../components/JobTray";
 import SupportCta from "../components/SupportCta";
@@ -41,16 +42,15 @@ import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import {
   buildRoute,
   buildsRoute,
-  checkoffRoute,
   isBuildPath,
   isBuildsPath,
-  isCheckoffPath,
   isReviewPath,
   reviewRoute,
   sourcesRoute,
 } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { useProfileSelection } from "../context/ProfileContext";
+import { CopilotUiProvider } from "../context/CopilotUiContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
 import ThemePreferenceControl from "../components/ThemePreferenceControl";
@@ -80,8 +80,7 @@ const secondaryNav: Omit<NavEntry, "hint">[] = [
 const NAV_HINTS: Record<string, string> = {
   Sources: "Register repos and set import folders",
   Build: "Attach sources, pick files, set colors and quantities",
-  Review: "Validate parts, edit quantities, and export",
-  Checkoff: "Track what you've printed on the shop floor",
+  Review: "Validate, edit quantities, track printing, and export",
 };
 
 function BrandMark({ className }: { className?: string }) {
@@ -195,6 +194,23 @@ export default function AppLayout() {
   const { updateCheck } = useAppUpdateCheck(Boolean(health));
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed());
+  const [assistantOpen, setAssistantOpen] = useState(() => {
+    try {
+      return sessionStorage.getItem("pp-assistant-open") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const setAssistantOpenPersisted = (open: boolean) => {
+    setAssistantOpen(open);
+    try {
+      sessionStorage.setItem("pp-assistant-open", open ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  };
+  const aiAssistantEnabled = Boolean(health?.capabilities?.includes("ai_assistant"));
 
   const toggleSidebar = () => {
     setSidebarCollapsed((prev) => {
@@ -237,9 +253,7 @@ export default function AppLayout() {
 
   const showPlanInHeader =
     activePlanName &&
-    (isBuildPath(location.pathname) ||
-      isReviewPath(location.pathname) ||
-      isCheckoffPath(location.pathname));
+    (isBuildPath(location.pathname) || isReviewPath(location.pathname));
 
   const pipelineNav: NavEntry[] = [
     { to: sourcesRoute(), label: "Sources", hint: NAV_HINTS.Sources, icon: FolderGit2 },
@@ -257,17 +271,11 @@ export default function AppLayout() {
       icon: ClipboardCheck,
       isActive: (pathname) => isReviewPath(pathname),
     },
-    {
-      to: checkoffRoute(selectedProfileId),
-      label: "Checkoff",
-      hint: NAV_HINTS.Checkoff,
-      icon: CheckSquare,
-      isActive: (pathname) => isCheckoffPath(pathname),
-    },
   ];
 
   return (
     <TooltipProvider delayDuration={300}>
+    <CopilotUiProvider>
     <div className="flex min-h-screen min-w-0 bg-background">
       <aside
         className={cn(
@@ -287,7 +295,7 @@ export default function AppLayout() {
               <div className="min-w-0">
                 <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
                 <p className="text-xs text-muted-foreground">
-                  Sources → Build → Review → Checkoff
+                  Sources → Build → Review
                 </p>
               </div>
             )}
@@ -386,6 +394,20 @@ export default function AppLayout() {
           </div>
           <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:justify-end">
             <SaveStatusIndicator />
+            {aiAssistantEnabled && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0 gap-1.5"
+                onClick={() => setAssistantOpenPersisted(!assistantOpen)}
+                aria-label={assistantOpen ? "Close kit advisor" : "Open kit advisor"}
+                aria-pressed={assistantOpen}
+              >
+                <Sparkles className="h-4 w-4" />
+                <span className="hidden sm:inline">Advisor</span>
+              </Button>
+            )}
             <SupportCta variant="secondary" size="sm" className="hidden shrink-0 sm:inline-flex" />
             <ThemePreferenceControl compact className="hidden shrink-0 md:inline-flex" />
             <UserMenu />
@@ -405,6 +427,15 @@ export default function AppLayout() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
+                {aiAssistantEnabled && (
+                  <DropdownMenuItem
+                    className="lg:hidden"
+                    onClick={() => setAssistantOpenPersisted(true)}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Kit advisor
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   className="sm:hidden"
                   onClick={() => openSponsor()}
@@ -451,7 +482,12 @@ export default function AppLayout() {
           <WorkflowProgress compact className="mx-1" />
         </nav>
 
-        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 pb-20 sm:p-5 sm:pb-16 lg:pb-14 print:overflow-visible print:p-0">
+        <main
+          className={cn(
+            "flex-1 overflow-x-hidden overflow-y-auto p-3 pb-20 sm:p-5 sm:pb-16 lg:pb-14 print:overflow-visible print:p-0",
+            assistantOpen && "lg:pr-[28rem]",
+          )}
+        >
           <ErrorBoundary key={location.pathname}>
             <Outlet />
           </ErrorBoundary>
@@ -467,9 +503,11 @@ export default function AppLayout() {
       </div>
 
       <JobTray />
-      <CommandPalette />
+      <CommandPalette onOpenAssistant={() => setAssistantOpenPersisted(true)} />
+      <AssistantChatSheet open={assistantOpen} onOpenChange={setAssistantOpenPersisted} />
       <Toaster position="bottom-right" richColors closeButton />
     </div>
+    </CopilotUiProvider>
     </TooltipProvider>
   );
 }
