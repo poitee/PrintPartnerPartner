@@ -7,6 +7,9 @@ node_modules
 data
 *.md
 !web/DEPLOY.md
+!LICENSE-SUMMARY.md
+!ATTRIBUTION.md
+!THIRD_PARTY_NOTICES.md
 .env
 .env.*
 .DS_Store
