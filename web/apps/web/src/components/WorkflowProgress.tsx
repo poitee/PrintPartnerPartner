@@ -63,7 +63,6 @@ export default function WorkflowProgress({ compact, className }: Props) {
       label: "Review",
       state: !hasParts ? "pending" : buildStale ? "attention" : "done",
     },
-    { label: "Checkoff", state: hasParts && !buildStale ? "done" : "pending" },
   ];
 
   if (!hasPlan && !hasSources) return null;

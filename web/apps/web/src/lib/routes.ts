@@ -48,15 +48,17 @@ export function isBuildsPath(pathname: string): boolean {
 }
 
 export function isReviewPath(pathname: string): boolean {
-  return pathname === "/review";
+  return pathname === "/review" || pathname === "/checkoff";
 }
 
+/** Legacy path matcher — `/checkoff` redirects to Review. */
 export function isCheckoffPath(pathname: string): boolean {
   return pathname === "/checkoff";
 }
 
+/** Alias for deep links — Checkoff is folded into Review. */
 export function checkoffRoute(profileId?: number | null): string {
-  return withProfile("/checkoff", profileId ?? null);
+  return reviewRoute(profileId);
 }
 
 export function isPlanWorkflowPath(pathname: string): boolean {
@@ -64,7 +66,6 @@ export function isPlanWorkflowPath(pathname: string): boolean {
     isBuildPath(pathname) ||
     isBuildsPath(pathname) ||
     isReviewPath(pathname) ||
-    isCheckoffPath(pathname) ||
     isKitStudioPath(pathname)
   );
 }

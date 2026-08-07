@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import {
-  CheckSquare,
   ClipboardCheck,
   FolderGit2,
   Hammer,
@@ -38,13 +37,8 @@ const STEPS = [
   {
     icon: ClipboardCheck,
     title: "Update & review",
-    description: "Click Update build, then validate parts and export on Review.",
-    to: buildRoute(null),
-  },
-  {
-    icon: CheckSquare,
-    title: "Track on the shop floor",
-    description: "Mark printed units and export missing STLs from Checkoff.",
+    description:
+      "Click Update build, then validate parts, track printing, and export on Review.",
     to: buildRoute(null),
   },
 ] as const;
@@ -80,7 +74,7 @@ export default function WelcomePage() {
       <header className="space-y-1 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">Welcome to Print Partner</h1>
         <p className="text-sm text-muted-foreground">
-          Self-hosted workflow for layered STL kits — Sources → Build → Review → Checkoff.
+          Self-hosted workflow for layered STL kits — Sources → Build → Review.
         </p>
       </header>
 

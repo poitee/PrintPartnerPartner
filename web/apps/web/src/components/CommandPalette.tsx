@@ -16,10 +16,8 @@ import { useJobRunner } from "../hooks/useJobRunner";
 import {
   buildRoute,
   buildsRoute,
-  checkoffRoute,
   helpRoute,
   isBuildPath,
-  isCheckoffPath,
   isReviewPath,
   reviewRoute,
   settingsRoute,
@@ -76,7 +74,6 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
 
   const onBuild = isBuildPath(location.pathname);
   const onReview = isReviewPath(location.pathname);
-  const onCheckoff = isCheckoffPath(location.pathname);
   const onSources = location.pathname === "/sources";
 
   const actions: Action[] = useMemo(() => {
@@ -129,18 +126,6 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
         run: () => {
           leaveBuildThen(() => {
             navigate(reviewRoute(selectedProfileId));
-            setOpen(false);
-          });
-        },
-      },
-      {
-        id: "nav-checkoff",
-        label: "Go to Checkoff",
-        hint: onCheckoff ? "current" : undefined,
-        group: "Navigate",
-        run: () => {
-          leaveBuildThen(() => {
-            navigate(checkoffRoute(selectedProfileId));
             setOpen(false);
           });
         },
@@ -237,7 +222,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
                     });
                   },
                 );
-                if (!onBuild && !onReview && !onCheckoff) {
+                if (!onBuild && !onReview) {
                   navigate(reviewRoute(selectedProfileId));
                 }
                 setOpen(false);
@@ -246,11 +231,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
             {
               id: `export-missing-stl-${groupBy}`,
               label: `Export missing STLs (${groupHint})`,
-              hint: onCheckoff
-                ? "Checkoff"
-                : onReview
-                  ? "Review"
-                  : `Plan #${selectedProfileId}`,
+              hint: onReview ? "Review" : `Plan #${selectedProfileId}`,
               group: "Actions" as const,
               disabled: stlExportJob.busy,
               run: () => {
@@ -266,8 +247,8 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
                     });
                   },
                 );
-                if (!onReview && !onCheckoff) {
-                  navigate(checkoffRoute(selectedProfileId));
+                if (!onReview) {
+                  navigate(reviewRoute(selectedProfileId));
                 }
                 setOpen(false);
               },
@@ -347,7 +328,6 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
     kitExportJob,
     onBuild,
     onReview,
-    onCheckoff,
     onSources,
     flushBuildSaves,
     importSharedBuild,
