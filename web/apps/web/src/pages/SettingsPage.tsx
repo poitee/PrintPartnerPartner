@@ -29,6 +29,7 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { StlNamingSettingsCard } from "../components/settings/StlNamingEditor";
 import AiAssistantSettingsCard from "../components/settings/AiAssistantSettingsCard";
 import IntegrationsSettingsCard from "../components/settings/IntegrationsSettingsCard";
+import PrinterFleetCard from "../components/settings/PrinterFleetCard";
 import AboutUpdatesCard from "../components/settings/AboutUpdatesCard";
 import AccountPasswordCard from "../components/settings/AccountPasswordCard";
 import ThemePreferenceControl from "../components/ThemePreferenceControl";
@@ -356,6 +357,8 @@ export default function SettingsPage() {
       </div>
 
       <StlNamingSettingsCard engineReady={Boolean(health)} />
+
+      <PrinterFleetCard engineReady={Boolean(health)} />
 
       <AiAssistantSettingsCard engineReady={Boolean(health)} />
 

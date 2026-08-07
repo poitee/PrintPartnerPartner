@@ -117,7 +117,10 @@ function buildModelXml(objects: MeshObjectSpec[], materials: Map<string, { id: n
     parts.push(`    </basematerials>\n`);
   }
   for (const obj of objects) {
-    parts.push(`    <object id="${obj.id}" type="model">\n`);
+    const nameAttr = escapeXml(obj.name);
+    parts.push(
+      `    <object id="${obj.id}" name="${nameAttr}" partnumber="${nameAttr}" type="model">\n`,
+    );
     parts.push(`      <mesh>\n        <vertices>\n`);
     for (const [x, y, z] of obj.mesh.vertices) {
       parts.push(`          <vertex x="${x}" y="${y}" z="${z}"/>\n`);
@@ -132,7 +135,8 @@ function buildModelXml(objects: MeshObjectSpec[], materials: Map<string, { id: n
   const buildItems: string[] = [];
   for (const obj of objects) {
     const pid = obj.materialId;
-    buildItems.push(`    <item objectid="${obj.id}"`);
+    const nameAttr = escapeXml(obj.name);
+    buildItems.push(`    <item objectid="${obj.id}" partnumber="${nameAttr}"`);
     if (pid) buildItems.push(` pid="${pid}" pindex="1"`);
     buildItems.push(`/>\n`);
   }
