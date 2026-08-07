@@ -15,12 +15,10 @@ import { useProfileSelection } from "./ProfileContext";
 import {
   buildRoute,
   buildsRoute,
-  checkoffRoute,
   helpRoute,
   reviewRoute,
   settingsRoute,
   sourcesRoute,
-  withProfile,
 } from "../lib/routes";
 
 /** Real SourceDetailSheet tabs — map legacy `overview` to `docs`. */
@@ -71,7 +69,7 @@ function routePath(route: string, profileId: number | null | undefined): string 
     case "review":
       return reviewRoute(profileId);
     case "checkoff":
-      return checkoffRoute(profileId);
+      return reviewRoute(profileId);
     case "builds":
       return buildsRoute(profileId);
     case "settings":
@@ -156,20 +154,16 @@ export function CopilotUiProvider({ children }: { children: ReactNode }) {
           const partId =
             typeof params.part_id === "number" ? params.part_id : Number(params.part_id);
           const planId = profileFromParams ?? action.plan_id;
-          const surface = params.surface === "checkoff" ? "checkoff" : "review";
+          // Checkoff is folded into Review; keep accepting the legacy surface name.
           if (!Number.isFinite(partId) || planId <= 0) return null;
-          const path =
-            surface === "checkoff"
-              ? withProfile(checkoffRoute(planId), planId)
-              : withProfile(reviewRoute(planId), planId);
-          navigate(path, { state: { previewPartId: partId } });
+          navigate(reviewRoute(planId), { state: { previewPartId: partId } });
           requestIntent({
             kind: "highlight_part",
             planId,
             partId,
-            surface,
+            surface: "review",
           });
-          note = `Opened ${surface} preview for part #${partId}`;
+          note = `Opened review preview for part #${partId}`;
           break;
         }
         case "ui_focus_kit_option": {

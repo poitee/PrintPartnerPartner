@@ -718,7 +718,7 @@ function BuildPageContent() {
           <h3 className="mb-1 mt-4 text-sm font-semibold">Colors by role</h3>
           <p className="mb-3 text-xs text-muted-foreground">
             Pick a filament color for each role — it applies to every included part with that role.
-            Review and Checkoff previews update automatically when you change a color.
+            Review previews update automatically when you change a color.
           </p>
           {selectedProfileId == null ? (
             <p className="text-sm text-muted-foreground">Select a build plan in the header first.</p>
