@@ -1,33 +1,74 @@
 # Third-party notices
 
-Print Partner includes open-source software and optional external tools. This file summarizes licenses for **direct runtime dependencies** (as declared in `pyproject.toml`). Transitive dependencies are also bundled in release builds; run `pip-licenses` in the project virtual environment for a full list.
+Print Partner includes open-source software. This file summarizes licenses for **direct runtime dependencies** of the web monorepo (`web/`, as declared in workspace `package.json` files and resolved via `package-lock.json`). Transitive dependencies are also installed; inspect `node_modules` or run a license scanner for a full list.
 
 ## Inspiration
 
 Print Partner’s workflow builds on work shared by the 3D Printing Community and by [ThunderKeys' STL Manifest Generator](https://github.com/thunderkeys/stl-manifest-generator). See [ATTRIBUTION.md](ATTRIBUTION.md). Print Partner itself is licensed under the [Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)](LICENSE).
 
-## Python packages (direct dependencies)
+## npm packages (direct dependencies)
 
 | Package | Version | License | URL |
 |---------|---------|---------|-----|
-| GitPython | 3.1.50 | BSD-3-Clause | https://github.com/gitpython-developers/GitPython |
-| Jinja2 | 3.1.6 | BSD-3-Clause | https://github.com/pallets/jinja/ |
-| Markdown | 3.10.2 | BSD-3-Clause | https://Python-Markdown.github.io/ |
-| Pillow | 12.2.0 | MIT-CMU | https://python-pillow.github.io/ |
-| SQLAlchemy | 2.0.49 | MIT | https://www.sqlalchemy.org |
-| httpx | 0.28.1 | BSD-3-Clause | https://github.com/encode/httpx |
-| lib3mf | 2.5.0 | BSD-3-Clause | (3MF Consortium lib3mf) |
-| numpy | 1.26.4 | BSD-3-Clause | https://numpy.org |
-| pydantic-settings | 2.14.1 | MIT | https://github.com/pydantic/pydantic-settings |
-| pyvista | 0.48.4 | MIT | https://github.com/pyvista/pyvista |
-| RapidFuzz | 3.14.5 | MIT | https://github.com/rapidfuzz/RapidFuzz |
-| trimesh | 4.12.2 | MIT | https://github.com/mikedh/trimesh |
+| @aws-sdk/client-s3 | 3.1075.0 | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3/tree/main/clients/client-s3 |
+| @dnd-kit/core | 6.3.1 | MIT | https://github.com/clauderic/dnd-kit |
+| @dnd-kit/sortable | 10.0.0 | MIT | https://github.com/clauderic/dnd-kit |
+| @dnd-kit/utilities | 3.2.2 | MIT | https://github.com/clauderic/dnd-kit |
+| @fastify/cookie | 11.0.2 | MIT | https://github.com/fastify/fastify-cookie#readme |
+| @fastify/cors | 11.2.0 | MIT | https://github.com/fastify/fastify-cors#readme |
+| @fastify/multipart | 10.0.0 | MIT | https://github.com/fastify/fastify-multipart#readme |
+| @fastify/oauth2 | 8.2.0 | MIT | https://github.com/fastify/fastify-oauth2#readme |
+| @fastify/rate-limit | 11.0.0 | MIT | https://github.com/fastify/fastify-rate-limit#readme |
+| @fastify/secure-session | 8.3.0 | MIT | https://github.com/fastify/fastify-secure-session#readme |
+| @fastify/static | 9.1.3 | MIT | https://github.com/fastify/fastify-static |
+| @fastify/swagger | 9.7.0 | MIT | https://github.com/fastify/fastify-swagger#readme |
+| @fastify/swagger-ui | 6.0.0 | MIT | https://github.com/fastify/fastify-swagger-ui#readme |
+| @fastify/websocket | 11.2.0 | MIT | https://github.com/fastify/fastify-websocket#readme |
+| @modelcontextprotocol/sdk | 1.30.0 | undefined |  |
+| @octokit/rest | 22.0.1 | SEE PACKAGE |  |
+| @print-partner/contracts | * | SEE PACKAGE |  |
+| @print-partner/domain | * | SEE PACKAGE |  |
+| @radix-ui/react-dialog | 1.1.17 | SEE PACKAGE |  |
+| @radix-ui/react-dropdown-menu | 2.1.18 | SEE PACKAGE |  |
+| @radix-ui/react-label | 2.1.10 | SEE PACKAGE |  |
+| @radix-ui/react-popover | 1.1.17 | SEE PACKAGE |  |
+| @radix-ui/react-scroll-area | 1.2.12 | SEE PACKAGE |  |
+| @radix-ui/react-select | 2.3.1 | SEE PACKAGE |  |
+| @radix-ui/react-separator | 1.1.10 | SEE PACKAGE |  |
+| @radix-ui/react-slot | 1.3.0 | SEE PACKAGE |  |
+| @radix-ui/react-switch | 1.3.1 | SEE PACKAGE |  |
+| @radix-ui/react-tabs | 1.1.15 | SEE PACKAGE |  |
+| @radix-ui/react-tooltip | 1.2.10 | SEE PACKAGE |  |
+| @tailwindcss/vite | 4.3.1 | SEE PACKAGE |  |
+| @tanstack/react-query | 5.101.2 | MIT | https://tanstack.com/query |
+| @types/nodemailer | 8.0.1 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/nodemailer |
+| adm-zip | 0.5.17 | MIT | https://github.com/cthackers/adm-zip |
+| better-sqlite3 | 12.11.1 | MIT | http://github.com/WiseLibs/better-sqlite3 |
+| class-variance-authority | 0.7.1 | SEE PACKAGE |  |
+| clsx | 2.1.1 | SEE PACKAGE |  |
+| cmdk | 1.1.1 | SEE PACKAGE |  |
+| drizzle-orm | 0.45.2 | SEE PACKAGE |  |
+| fastify | 5.8.5 | MIT | https://fastify.dev/ |
+| fflate | 0.8.3 | MIT | https://101arrowz.github.io/fflate |
+| js-yaml | 5.2.0 | MIT | nodeca/js-yaml |
+| jszip | 3.10.1 | (MIT OR GPL-3.0-or-later) | https://github.com/Stuk/jszip |
+| lucide-react | 1.21.0 | ISC | https://lucide.dev |
+| nodemailer | 9.0.3 | MIT-0 | https://nodemailer.com/ |
+| pdf-parse | 2.4.5 | SEE PACKAGE |  |
+| pg | 8.22.0 | MIT | https://github.com/brianc/node-postgres |
+| react | 19.2.7 | MIT | https://react.dev/ |
+| react-dom | 19.2.7 | MIT | https://react.dev/ |
+| react-resizable-panels | 4.11.2 | MIT | https://react-resizable-panels.vercel.app/ |
+| react-router-dom | 7.18.0 | MIT | https://github.com/remix-run/react-router |
+| sonner | 2.0.7 | SEE PACKAGE |  |
+| tailwind-merge | 3.6.0 | SEE PACKAGE |  |
+| three | 0.184.0 | SEE PACKAGE |  |
 
-Versions reflect a typical release build environment; exact versions may vary slightly by platform wheel.
+Versions reflect the lockfile at generation time; exact versions may vary slightly by install.
 
-## PyVista and VTK
+## 3MF export
 
-Thumbnails and 3D preview use **PyVista**, which depends on **VTK**. See PyVista and VTK project repositories for their license terms (BSD-style).
+Print Partner writes 3MF archives using **fflate** (ZIP) and hand-authored Core + Materials XML. It does **not** bundle native **lib3mf**.
 
 ## Optional external tool: stl-thumb
 
@@ -48,4 +89,4 @@ Built-in printer presets use common printer model names for bed-size hints only.
 
 ## Print Partner license
 
-Print Partner is licensed under the **Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)**. See [LICENSE](LICENSE) (legal text), [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md) (explanation), and [ATTRIBUTION.md](ATTRIBUTION.md) (community and ThunderKeys credit).
+See [LICENSE](LICENSE) and [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md).

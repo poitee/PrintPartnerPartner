@@ -28,7 +28,10 @@ terms.
 
 Under the following terms:
 
-
+- **Attribution** — You must give appropriate credit, provide a link to the
+  license, and indicate if changes were made. See [ATTRIBUTION.md](ATTRIBUTION.md).
+- **NonCommercial** — You may not use the material for commercial purposes
+  without separate permission.
 
 ---
 
@@ -47,6 +50,20 @@ You may **not**, without separate permission:
 - Use Print Partner primarily for commercial advantage or monetary
   compensation (for example, selling the software, bundling it in a paid
   product, or offering it as a paid hosted/managed service).
+
+---
+
+## Self-host vs hosted / SaaS
+
+Print Partner ships as a **web application + API** (Docker self-host by
+default; optional multi-tenant SaaS compose for operators who hold rights).
+
+| Mode | What it means under this license |
+|------|----------------------------------|
+| **Self-host** | You run the container (or `npm run dev`) for your own shop, farm, or personal use. The `DEPLOY_MODE=self-host` path (SQLite + local disk) is the intended community deployment. |
+| **SaaS / paid hosted** | Offering Print Partner as a paid managed service, multi-tenant hosting, or commercial API to others is **NonCommercial-restricted**. The repo’s `docker-compose.saas.yml` is a reference for operators who already have permission (for example the copyright holders), not a grant for third parties to run a commercial hosted product. |
+
+When in doubt about whether your use is “commercial,” seek your own advice.
 
 ---
 
