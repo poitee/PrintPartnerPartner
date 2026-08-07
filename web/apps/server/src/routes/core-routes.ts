@@ -10,6 +10,7 @@ import { registerPlanRoutes } from "./plans.js";
 import { registerPrintPlanRoutes } from "./print-plan.js";
 import { registerPrinterRoutes } from "./printers.js";
 import { registerRepoManifestRoutes } from "./repo-manifest.js";
+import { registerSourceDocsRoutes } from "./source-docs.js";
 import {
   registerSettingsRoutes,
   registerSourceNamingRoutes,
@@ -21,6 +22,7 @@ import { registerApiV1ExtensionRoutes } from "./api-v1-extensions.js";
 import { registerIntegrationRoutes } from "./integrations.js";
 import { registerWebhookRoutes } from "./webhooks.js";
 import { registerShareRoutes } from "./shares.js";
+import { registerAssistantRoutes } from "./assistant.js";
 import type { AuthStore } from "../services/auth-store.js";
 import { createIntegrationPort } from "../integrations/store.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
@@ -70,6 +72,7 @@ export async function registerCoreRoutes(
   await registerStubRoutes(app, { repo: deps.repo, dataDir: deps.dataDir });
   await registerLegalRoutes(app);
   await registerRepoManifestRoutes(app, { repo: deps.repo });
+  await registerSourceDocsRoutes(app, { repo: deps.repo });
   await registerPrinterRoutes(app, { repo: deps.repo });
   await registerPrintPlanRoutes(app, { repo: deps.repo });
   await registerManifestRoutes(app, { repo: deps.repo });
@@ -93,4 +96,9 @@ export async function registerCoreRoutes(
   }
 
   await registerJobRoutes(app, deps.jobs, deps.config);
+  await registerAssistantRoutes(app, {
+    repo: deps.repo,
+    config: deps.config,
+    jobs: deps.jobs,
+  });
 }

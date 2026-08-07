@@ -127,7 +127,8 @@ export type IntegrationType =
   | "prusalink"
   | "bambu"
   | "spoolman"
-  | "slicer_folder";
+  | "slicer_folder"
+  | "ai_assistant";
 
 export type IntegrationConfig = Record<string, unknown>;
 
@@ -225,6 +226,8 @@ export type SourceSummary = {
   naming_use_defaults?: boolean;
   update_status?: "up_to_date" | "updates_available" | "unknown" | null;
   update_checked_at?: string | null;
+  /** Count of synced markdown/PDF docs indexed for this source. */
+  doc_count?: number;
 };
 
 export type PartRow = {
@@ -270,4 +273,254 @@ export type JobSnapshot = JobEvent & {
   job_id: string;
   kind: string;
   finished_at?: string | null;
+};
+
+/** AI assistant provider id (server config / status). */
+export type AiProviderId = "anthropic" | "openai" | "ollama" | "none";
+
+/** Web search backend for assistant research tools. */
+export type SearchProviderId =
+  | "anthropic-native"
+  | "openai-native"
+  | "brave"
+  | "exa"
+  | "duckduckgo"
+  | "none";
+
+export type SearchSetupOption = {
+  id: SearchProviderId;
+  label: string;
+  summary: string;
+  setup: string;
+};
+
+export type AssistantStatus = {
+  enabled: boolean;
+  provider: AiProviderId;
+  model: string | null;
+  /** When true, other accessible plans are summarized as few-shot examples (not model training). */
+  use_other_builds_as_examples: boolean;
+  /** Whether the active provider adapter exposes native tool calling. */
+  tools_supported: boolean;
+  /** Where active AI provider settings came from (`settings` = UI integration). */
+  source?: "settings" | "env" | "none";
+  /** Soft daily request cap (`null` / omitted = unlimited). */
+  daily_request_budget?: number | null;
+  /** Soft daily estimated-token cap (`null` / omitted = unlimited). */
+  daily_token_budget?: number | null;
+  /** Requests used today (UTC) for this tenant. */
+  daily_requests_used?: number;
+  /** Estimated tokens used today (UTC) for this tenant. */
+  daily_tokens_used?: number;
+  /**
+   * Active web search backend + setup guidance for all options.
+   * `configured` is true when the resolved provider has what it needs (e.g. Brave/Exa key)
+   * without exposing secrets.
+   */
+  search?: {
+    provider: SearchProviderId;
+    configured: boolean;
+    options: SearchSetupOption[];
+  };
+};
+
+/**
+ * Documented `ai_assistant` integration config keys (stored as IntegrationConfig bag).
+ * Secrets (`api_key`, `search_api_key`) are redacted in list/get responses.
+ *
+ * - provider, model, api_key, base_url / ollama_url
+ * - max_tokens, use_other_builds_as_examples, daily_*_budget, enabled
+ * - search_provider (`SearchProviderId` | null/auto), search_api_key
+ * - allow_url_ingest, guide_ingest_max_bytes, ollama_num_ctx
+ */
+
+export type AssistantChatRole = "user" | "assistant" | "system";
+
+export type AssistantChatMessage = {
+  role: AssistantChatRole;
+  content: string;
+};
+
+/** Mutating assistant action — never applied until POST /assistant/actions/apply. */
+export type AssistantActionType =
+  | "apply_stack_preset"
+  | "set_base"
+  | "add_addon"
+  | "remove_layer"
+  | "update_kit_selections"
+  | "start_recompute"
+  | "start_sync"
+  | "propose_source_mapping"
+  | "set_source_git_ref"
+  | "apply_build_recipe"
+  | "restore_plan_snapshot"
+  | "create_plan_snapshot"
+  | "propose_add_source"
+  | "import_guide_notes"
+  | "propose_exclude_replaced_parts"
+  /** Client-executed UI opens — auto-run; do not require Apply. */
+  | "ui_navigate"
+  | "ui_open_source"
+  | "ui_open_docs"
+  | "ui_highlight_part"
+  | "ui_focus_stl_search"
+  | "ui_focus_kit_option";
+
+export const ASSISTANT_UI_ACTION_TYPES = [
+  "ui_navigate",
+  "ui_open_source",
+  "ui_open_docs",
+  "ui_highlight_part",
+  "ui_focus_stl_search",
+  "ui_focus_kit_option",
+] as const satisfies readonly AssistantActionType[];
+
+export function isAssistantUiAction(type: string): boolean {
+  return (ASSISTANT_UI_ACTION_TYPES as readonly string[]).includes(type);
+}
+
+export type AssistantProposedAction = {
+  id: string;
+  type: AssistantActionType;
+  plan_id: number;
+  label: string;
+  summary: string;
+  params: Record<string, unknown>;
+};
+
+export type PlanDecisionKind =
+  | "applied_action"
+  | "dismissed_action"
+  | "user_note"
+  | "choice";
+
+export type PlanDecisionActor = "assistant" | "user";
+
+export type PlanDecision = {
+  id: number;
+  plan_id: number;
+  created_at: string;
+  actor: PlanDecisionActor;
+  kind: PlanDecisionKind;
+  action_type: string | null;
+  params: Record<string, unknown>;
+  label: string;
+  summary: string;
+  rationale: string | null;
+  result: Record<string, unknown> | null;
+};
+
+export type PlanDecisionsResponse = {
+  decisions: PlanDecision[];
+};
+
+export type PlanDecisionCreateRequest = {
+  kind?: PlanDecisionKind;
+  actor?: PlanDecisionActor;
+  action_type?: string | null;
+  params?: Record<string, unknown>;
+  label?: string;
+  summary?: string;
+  rationale?: string | null;
+  result?: Record<string, unknown> | null;
+};
+
+export type BuildRecipe = {
+  plan_id: number;
+  plan_name: string;
+  base: { source_name: string | null; project_id: number | null; tag: string | null; branch: string | null };
+  addons: Array<{ source_name: string; project_id: number; tag: string | null; branch: string | null }>;
+  stack_preset: string | null;
+  kit_selections: Record<string, string>;
+  include: string[];
+  exclude: string[];
+  decision_count: number;
+  markdown: string;
+};
+
+export type PlanSnapshotSource = "user" | "assistant" | "pre_apply";
+
+export type PlanSnapshotSummary = {
+  id: number;
+  plan_id: number;
+  name: string;
+  created_at: string;
+  source: PlanSnapshotSource;
+};
+
+export type PlanSnapshot = PlanSnapshotSummary & {
+  payload: Record<string, unknown>;
+};
+
+export type PlanSnapshotsResponse = {
+  snapshots: PlanSnapshotSummary[];
+};
+
+export type PlanSnapshotCreateRequest = {
+  name?: string;
+  source?: PlanSnapshotSource;
+};
+
+export type AssistantActionDismissRequest = {
+  action: AssistantProposedAction;
+};
+
+export type AssistantChatRequest = {
+  messages: AssistantChatMessage[];
+  plan_id?: number;
+  /** When true (default), response is SSE. When false, JSON `{ message }`. */
+  stream?: boolean;
+  /**
+   * Override Settings flag for this request. When omitted, uses integration/env
+   * `use_other_builds_as_examples` (default true). Examples are context only — not training.
+   */
+  use_other_builds_as_examples?: boolean;
+};
+
+export type AssistantChatResponse = {
+  message: AssistantChatMessage;
+  /** Proposed mutations; apply only via POST /assistant/actions/apply after user confirm. */
+  proposed_actions?: AssistantProposedAction[];
+  /** True when tools were unavailable and context stuffing was used instead. */
+  tools_degraded?: boolean;
+};
+
+export type AssistantActionApplyRequest = {
+  action: AssistantProposedAction;
+};
+
+export type AssistantActionApplyResponse = {
+  ok: boolean;
+  detail?: string;
+  job_id?: string;
+  result?: Record<string, unknown>;
+};
+
+export type AssistantFeedbackRating = "up" | "down";
+
+export type AssistantFeedbackRequest = {
+  rating: AssistantFeedbackRating;
+  /** Short excerpt of the assistant message being rated (no full transcript required). */
+  message_excerpt?: string;
+  plan_id?: number;
+  comment?: string;
+};
+
+export type AssistantFeedbackResponse = {
+  ok: boolean;
+  id: string;
+};
+
+export type AssistantHistoryMessage = AssistantChatMessage & {
+  id: string;
+  created_at: string;
+  /**
+   * Pending confirm-to-apply cards for this assistant turn.
+   * Persisted so reopen does not lose Apply/Dismiss UI.
+   */
+  proposed_actions?: AssistantProposedAction[];
+};
+
+export type AssistantHistoryResponse = {
+  messages: AssistantHistoryMessage[];
 };

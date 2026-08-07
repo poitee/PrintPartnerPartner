@@ -71,6 +71,42 @@ option_groups:
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("falls back to sibling-folder option groups when no manifest or path-hints match", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-kit-fallback-"));
+    process.env.PRINT_PARTNER_DATA_DIR = dir;
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const repo = ports.repository!;
+
+    // EMU-like repo: no print-partner.manifest.yaml, folders imply choices.
+    const source = repo.createSource({ name: "EMU", url: "https://github.com/DW-Tas/emu" });
+    const repoPath = join(dir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "STL", "Base", "Optional"), { recursive: true });
+    mkdirSync(join(repoPath, "User_Mods", "EMU_Lite", "STL"), { recursive: true });
+    mkdirSync(join(repoPath, "User_Mods", "TPU_feet", "STLs"), { recursive: true });
+    writeFileSync(join(repoPath, "STL", "Base", "base_frame.stl"), "solid a");
+    writeFileSync(join(repoPath, "STL", "Base", "Optional", "foot.stl"), "solid b");
+    writeFileSync(join(repoPath, "User_Mods", "EMU_Lite", "STL", "lite.stl"), "solid c");
+    writeFileSync(join(repoPath, "User_Mods", "TPU_feet", "STLs", "foot.stl"), "solid d");
+    repo.updateSource(source.id, { local_path: repoPath });
+
+    const plan = repo.createProfile("EMU plan", source.id);
+    const builder = buildPlanManifestBuilder(repo, plan.id);
+    const groups = builder.merged_option_groups;
+
+    // Optional folder → include/skip toggle.
+    expect(groups["stl_base_optional"]?.variants.map((v) => v.id).sort()).toEqual([
+      "include",
+      "skip",
+    ]);
+    // Each user mod → its own include/skip group so Build pickers appear.
+    expect(groups["user_mods_emu_lite"]?.rule).toBe("pick_one");
+    expect(groups["user_mods_tpu_feet"]?.rule).toBe("pick_one");
+
+    await ports.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("selectionIncludesPart matches variant globs", () => {
     const doc = loadManifestYaml(`option_groups:
   toolhead:

@@ -1,0 +1,20 @@
+schema: print-partner/structure@1
+source_name: Voron-Hardware
+ref_documented: master
+stl_root: null   # per-project STL folders, no single root
+projects:   # top-level dirs observed
+  [Afterburner_Toolhead_PCB, Daylight, Hall_Effect_XY_Endstop, Klipper_Expander,
+   Microswitch_Endstop, Microswitch_Z_Endstop, Nano_Display, PT100Stick,
+   SKR-Mini_Screen_Adaptor, SKR-Mini_TFT_Thermistor_Board, STM32_Mini12864,
+   Stealthburner_Toolhead_PCB, Taco_Raven, V0-Umbilical, V0_Display,
+   V0_Display_RP2040, V0_Micro_Display, V0_Simple_Display, V0_PCB_Mod]
+folders:
+  - {path: "<Project>/STLs or <Project>/STL", required: false, note: "only some projects ship printables (e.g. Afterburner_Toolhead_PCB/STLs, Daylight/STL)"}
+  - {path: "<Project>/Production Files|Production_Files", required: false, note: "gerbers; inconsistent space vs underscore"}
+option_groups: []
+naming_quirks:
+  - "monorepo of independent PCB projects; treat each subdir as its own selectable unit"
+  - "'Production Files' with a space in some projects, 'Production_Files' in others"
+known_overlaps:
+  - {with: LDO-Picobilical, note: "Picobilical derives from V0-Umbilical — pick one umbilical solution"}
+  - {with: Voron-Stealthburner, note: "Stealthburner_Toolhead_PCB pairs with SB cable_door_for_pcb.stl / [a]_pcb_spacer.stl"}

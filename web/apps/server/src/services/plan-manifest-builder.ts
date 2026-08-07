@@ -9,6 +9,7 @@ import {
   type ManifestOptionGroup,
 } from "./manifest-apply.js";
 import { inferOptionGroupsFromPaths } from "./path-hints.js";
+import { inferSiblingFolderOptionGroups } from "./repo-tree-summary.js";
 
 const CANONICAL_REPO_FILENAME = "print-partner.manifest.yaml";
 
@@ -73,6 +74,14 @@ export function buildPlanManifestBuilder(repo: AppRepository, profileId: number)
     mergeOptionGroups(layerGroups, doc.option_groups ?? {});
     if (!Object.keys(doc.option_groups ?? {}).length) {
       mergeOptionGroups(layerGroups, inferOptionGroupsFromPaths(scanned.map((p) => p.relative_path)));
+    }
+    // Sibling-folder fallback: repos without manifest YAML or path-hint matches
+    // (e.g. EMU) still get Build pickers derived from variant-looking folders.
+    if (!Object.keys(layerGroups).length) {
+      mergeOptionGroups(
+        layerGroups,
+        inferSiblingFolderOptionGroups(scanned.map((p) => p.relative_path)),
+      );
     }
     mergeOptionGroups(mergedGroups, layerGroups);
     trackVariantSources(variantSources, layerGroups, proj.id, proj.name, scanned);

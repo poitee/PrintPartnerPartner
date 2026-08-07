@@ -39,6 +39,7 @@ const SETTINGS_KEY = "integrations";
 
 const SECRET_KEYS = new Set([
   "api_key",
+  "search_api_key",
   "token",
   "password",
   "secret",
@@ -167,4 +168,14 @@ export function createIntegrationPort(deps: IntegrationStoreDeps): IntegrationPo
 /** Internal: full config for adapter calls (not redacted). */
 export function getIntegrationConfig(repo: AppRepository, id: string): IntegrationSummary | null {
   return loadRaw(repo).find((x) => x.id === id) ?? null;
+}
+
+/** Internal: unredacted integrations of a given type (newest first). */
+export function listIntegrationsByType(
+  repo: AppRepository,
+  type: IntegrationType,
+): IntegrationSummary[] {
+  return loadRaw(repo)
+    .filter((x) => x.type === type)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 }

@@ -1,6 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useLocation } from "react-router-dom";
+import { toast } from "sonner";
 import type { PlanReview, ReviewPart, RoleFilamentRow, SpoolmanSpoolRow } from "../../api/engine";
 import { fetchRoleFilaments, fetchSpoolmanSpools } from "../../api/engine";
+import { useCopilotUiOptional } from "../../context/CopilotUiContext";
 import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
 import { useSpoolmanEnabled } from "../../hooks/useSpoolmanEnabled";
 import { groupCheckoffParts } from "../../lib/checkoffGroups";
@@ -17,9 +28,11 @@ import {
   loadPersistedReviewPartsUi,
   savePersistedReviewPartsUi,
   type PersistedReviewPartsUi,
+  type ReviewViewMode,
 } from "../../lib/persistedReviewPartsUi";
 import { useProfileSelection } from "../../context/ProfileContext";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { waitForSheetThumbnails } from "../../lib/waitForSheetThumbnails";
 import PartPreviewDialog from "../parts/PartPreviewDialog";
 import PartThumbExpandButton from "../parts/PartThumbExpandButton";
 import FilterSelect, { filterSelectOut, filterSelectValue } from "./FilterSelect";
@@ -39,6 +52,10 @@ type Props = {
   review: PlanReview;
   planName: string;
   disabled?: boolean;
+};
+
+export type ReviewPartsSheetHandle = {
+  print: () => Promise<void>;
 };
 
 function QuantityStepper({
@@ -97,6 +114,7 @@ function QuantityStepper({
 
 function ReviewSheetRow({
   part,
+  viewMode,
   busy,
   compact,
   spoolmanConfigured,
@@ -107,9 +125,11 @@ function ReviewSheetRow({
   onRemove,
   onRestore,
   onSpoolChange,
+  onToggleUnit,
   onPreview,
 }: {
   part: ReviewPart;
+  viewMode: ReviewViewMode;
   busy: boolean;
   compact: boolean;
   spoolmanConfigured: boolean;
@@ -120,8 +140,69 @@ function ReviewSheetRow({
   onRemove: (part: ReviewPart) => void;
   onRestore: (part: ReviewPart) => void;
   onSpoolChange: (partId: number, spoolman_spool_id: string | null) => void;
+  onToggleUnit: (part: ReviewPart, unitIndex: number) => void;
   onPreview: (part: ReviewPart) => void;
 }) {
+  const printDone =
+    part.printed_count >= part.quantity_effective && part.quantity_effective > 0;
+
+  if (viewMode === "print") {
+    return (
+      <tr className={cn("sheet-row", printDone && "sheet-row-done", !part.included && "opacity-70")}>
+        <td className="sheet-cell-part">
+          <div className="sheet-part">
+            <PartThumbExpandButton part={part} compact={compact} onExpand={onPreview} />
+            <div className="sheet-part-meta">
+              <span className="sheet-filename" title={part.relative_path || part.filename}>
+                {part.filename}
+              </span>
+              <span className="sheet-part-tags">
+                {part.filament_hex && (
+                  <span className="sheet-swatch" style={{ background: part.filament_hex }} />
+                )}
+                {part.filament_display && <span>{part.filament_display}</span>}
+                <SpoolRemainingBadge part={part} />
+                {part.role && <span className="sheet-role">{part.role}</span>}
+                {!part.included && <span className="sheet-role">excluded</span>}
+              </span>
+            </div>
+          </div>
+        </td>
+        <td className="sheet-cell-qty sheet-cell-qty-readonly">{part.quantity_effective}</td>
+        <td className="sheet-cell-printed">
+          <div className="sheet-units">
+            {part.print_units.map((unitDone, idx) => (
+              <label
+                key={idx}
+                className={cn("sheet-unit", unitDone && "sheet-unit-done")}
+                title={`Unit #${idx + 1}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={unitDone}
+                  onChange={() => onToggleUnit(part, idx)}
+                  disabled={busy || !part.included}
+                />
+                <span>{idx + 1}</span>
+              </label>
+            ))}
+            <span className={cn("sheet-printed-count", printDone && "sheet-printed-done")}>
+              <span className="sheet-printed-screen">
+                {part.printed_count}/{part.quantity_effective}
+              </span>
+              <span className="sheet-printed-label" aria-hidden>
+                {part.printed_count} of {part.quantity_effective}
+              </span>
+            </span>
+          </div>
+        </td>
+        <td className="sheet-cell-notes">
+          <span className="sheet-notes-line" aria-hidden />
+        </td>
+      </tr>
+    );
+  }
+
   return (
     <tr className={cn("sheet-row", !part.included && "opacity-70")}>
       <td className="sheet-cell-part">
@@ -193,10 +274,20 @@ function ReviewSheetRow({
   );
 }
 
-export default function ReviewPartsSheet({ review, planName, disabled }: Props) {
+const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function ReviewPartsSheet(
+  { review, planName, disabled },
+  ref,
+) {
   const { profiles } = useProfileSelection();
-  const { setQuantity, setIncluded, setSpoolmanSpool, reload, busyPartId, loadedRevision } =
-    usePlanWorkspace();
+  const {
+    setQuantity,
+    setIncluded,
+    setSpoolmanSpool,
+    toggleUnit,
+    reload,
+    busyPartId,
+    loadedRevision,
+  } = usePlanWorkspace();
   const { configured: spoolmanConfigured, integrationId } = useSpoolmanEnabled();
   const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
   const [spools, setSpools] = useState<SpoolmanSpoolRow[]>([]);
@@ -205,7 +296,81 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
   const [ui, setUi] = useState<PersistedReviewPartsUi>(persisted);
   const [removeTarget, setRemoveTarget] = useState<ReviewPart | null>(null);
   const [previewPart, setPreviewPart] = useState<ReviewPart | null>(null);
+  const [printPrep, setPrintPrep] = useState(false);
+  const sheetArticleRef = useRef<HTMLElement>(null);
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
+  const location = useLocation();
+  const copilot = useCopilotUiOptional();
+  const [pendingPreviewId, setPendingPreviewId] = useState<number | null>(null);
+  const appliedIntentSeqRef = useRef(0);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      print: async () => {
+        setPrintPrep(true);
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+        const sheet = sheetArticleRef.current;
+        if (sheet) await waitForSheetThumbnails(sheet);
+        window.print();
+        setPrintPrep(false);
+      },
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    const onBeforePrint = () => setPrintPrep(true);
+    const onAfterPrint = () => setPrintPrep(false);
+    window.addEventListener("beforeprint", onBeforePrint);
+    window.addEventListener("afterprint", onAfterPrint);
+    return () => {
+      window.removeEventListener("beforeprint", onBeforePrint);
+      window.removeEventListener("afterprint", onAfterPrint);
+    };
+  }, []);
+
+  // Bootstrap from navigate state — keep pending until the part exists.
+  useEffect(() => {
+    const state = location.state as { previewPartId?: number } | null;
+    const partId = state?.previewPartId;
+    if (partId == null) return;
+    setPendingPreviewId(partId);
+  }, [location.state]);
+
+  useEffect(() => {
+    if (!copilot || copilot.intentSeq === 0) return;
+    if (copilot.intentSeq === appliedIntentSeqRef.current) return;
+    const intent = copilot.lastIntent;
+    if (intent?.kind !== "highlight_part") return;
+    if (intent.surface !== "review" && intent.surface !== "checkoff") return;
+    if (intent.planId !== review.profile_id) return;
+    appliedIntentSeqRef.current = copilot.intentSeq;
+    setPendingPreviewId(intent.partId);
+  }, [copilot, copilot?.intentSeq, review.profile_id]);
+
+  useEffect(() => {
+    if (pendingPreviewId == null) return;
+    const part = flattenReviewParts(review.part_groups).find((p) => p.id === pendingPreviewId);
+    if (!part) return;
+    setPreviewPart(part);
+    setPendingPreviewId(null);
+    window.history.replaceState({}, document.title);
+  }, [pendingPreviewId, review]);
+
+  useEffect(() => {
+    if (pendingPreviewId == null) return;
+    const timer = window.setTimeout(() => {
+      setPendingPreviewId(null);
+      window.history.replaceState({}, document.title);
+      toast.message(
+        `Part #${pendingPreviewId} not found yet — Update build or search by name in the kit advisor.`,
+      );
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [pendingPreviewId]);
 
   useEffect(() => {
     savePersistedReviewPartsUi(ui);
@@ -291,13 +456,42 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
     void setSpoolmanSpool(partId, spoolman_spool_id);
   };
 
+  const onToggleUnit = useCallback(
+    (part: ReviewPart, unitIndex: number) => {
+      const next = !part.print_units[unitIndex];
+      void toggleUnit(part.id, unitIndex, next);
+    },
+    [toggleUnit],
+  );
+
   const displayName = planName || profiles.find((p) => p.id === review.profile_id)?.name || "Review";
+  const viewMode = ui.viewMode;
 
   return (
     <section className="space-y-3">
       <div className="no-print checkoff-sticky flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
-        <h3 className="text-sm font-semibold">Parts</h3>
-        {spoolmanConfigured && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">Parts</h3>
+          <div className="flex gap-1" role="group" aria-label="View mode">
+            <Button
+              size="sm"
+              variant={viewMode === "edit" ? "secondary" : "ghost"}
+              onClick={() => patchUi({ viewMode: "edit" })}
+              disabled={disabled}
+            >
+              Edit
+            </Button>
+            <Button
+              size="sm"
+              variant={viewMode === "print" ? "secondary" : "ghost"}
+              onClick={() => patchUi({ viewMode: "print" })}
+              disabled={disabled}
+            >
+              Print
+            </Button>
+          </div>
+        </div>
+        {spoolmanConfigured && viewMode === "edit" && (
           <p className="text-xs text-muted-foreground">
             Spool column: optional override per part
           </p>
@@ -423,10 +617,12 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
         <p className="text-sm text-muted-foreground">No parts match the current filters.</p>
       ) : (
         <article
+          ref={sheetArticleRef}
           className={cn(
             "checkoff-sheet",
             ui.compactMode && !isMobileLayout && "compact",
             isMobileLayout && "checkoff-sheet-mobile",
+            printPrep && "checkoff-sheet-print-continuous",
           )}
         >
           <header className="sheet-header">
@@ -451,6 +647,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                         <ReviewSheetMobileCard
                           key={part.id}
                           part={part}
+                          viewMode={viewMode}
                           busy={busyPartId === part.id || Boolean(disabled)}
                           spoolmanConfigured={spoolmanConfigured}
                           roleFilaments={roleFilaments}
@@ -460,6 +657,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                           onRemove={() => onRemove(part)}
                           onRestore={() => onRestore(part)}
                           onSpoolChange={onSpoolChange}
+                          onToggleUnit={onToggleUnit}
                           onPreview={setPreviewPart}
                         />
                       ))}
@@ -475,9 +673,15 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                       <thead>
                         <tr>
                           <th className="sheet-cell-part">Part</th>
-                          {spoolmanConfigured && <th className="sheet-cell-spool">Spool</th>}
+                          {viewMode === "edit" && spoolmanConfigured && (
+                            <th className="sheet-cell-spool">Spool</th>
+                          )}
                           <th className="sheet-cell-qty">Qty</th>
-                          <th className="sheet-cell-actions">Actions</th>
+                          {viewMode === "edit" ? (
+                            <th className="sheet-cell-actions">Actions</th>
+                          ) : (
+                            <th className="sheet-cell-printed">Printed</th>
+                          )}
                           <th className="sheet-cell-notes">Notes</th>
                         </tr>
                       </thead>
@@ -486,6 +690,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                           <ReviewSheetRow
                             key={part.id}
                             part={part}
+                            viewMode={viewMode}
                             busy={busyPartId === part.id || Boolean(disabled)}
                             compact={isMobileLayout || ui.compactMode}
                             spoolmanConfigured={spoolmanConfigured}
@@ -496,6 +701,7 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
                             onRemove={onRemove}
                             onRestore={onRestore}
                             onSpoolChange={onSpoolChange}
+                            onToggleUnit={onToggleUnit}
                             onPreview={setPreviewPart}
                           />
                         ))}
@@ -533,4 +739,6 @@ export default function ReviewPartsSheet({ review, planName, disabled }: Props) 
       <PartPreviewDialog part={previewPart} onClose={() => setPreviewPart(null)} />
     </section>
   );
-}
+});
+
+export default ReviewPartsSheet;

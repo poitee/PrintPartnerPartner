@@ -21,14 +21,22 @@ SheetOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    /** When false, no dimming overlay (for docked panels that stay open while navigating). */
+    showOverlay?: boolean;
+    /** Dock edge. Default right. */
+    side?: "left" | "right";
+  }
+>(({ className, children, showOverlay = true, side = "right", ...props }, ref) => (
   <SheetPortal>
-    <SheetOverlay />
+    {showOverlay ? <SheetOverlay /> : null}
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-xl flex-col border-l bg-card shadow-xl duration-200",
+        "fixed inset-y-0 z-50 flex h-full w-full max-w-xl flex-col bg-card shadow-xl duration-200",
+        side === "left"
+          ? "left-0 border-r"
+          : "right-0 border-l",
         className,
       )}
       {...props}

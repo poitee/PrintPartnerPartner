@@ -1,0 +1,14 @@
+schema: print-partner/structure@1
+source_name: Voron-Extras
+ref_documented: main
+stl_root: null
+folders:
+  - {path: Bed_Models/SuperSlicer, required: false, note: "slicer bed textures per printer (Legacy, SW, Trident, V0, V2) — not print parts"}
+  - {path: Fidget_Toy/STLs, required: false}
+  - {path: Holiday_Items, required: false, note: "yearly subfolders (2023/, 2024/)"}
+  - {path: Font, required: false, note: "Play font TTFs"}
+  - {path: Test_Prints, required: false}
+  - {path: Utilities, required: false}
+option_groups: []
+naming_quirks: ["[a]_ accents inside Fidget_Toy STLs", "Font/README.MD uppercase extension"]
+known_overlaps: []

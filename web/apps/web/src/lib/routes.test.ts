@@ -9,9 +9,7 @@ import {
   isKitStudioPath,
   isPlanWorkflowPath,
   isReviewPath,
-  planRoute,
   planStudioRoute,
-  plateRoute,
   reviewRoute,
   withProfile,
 } from "./routes";
@@ -37,13 +35,15 @@ describe("planStudioRoute", () => {
 });
 
 describe("workflow routes", () => {
-  it("build, builds, review, and plate include profile when provided", () => {
+  it("build, builds, and review include profile when provided", () => {
     expect(buildRoute(5)).toBe("/build?profile=5");
     expect(buildsRoute(5)).toBe("/builds?profile=5");
-    expect(planRoute(5)).toBe("/build?profile=5");
     expect(reviewRoute(5)).toBe("/review?profile=5");
-    expect(plateRoute(5)).toBe("/review?profile=5");
-    expect(checkoffRoute(5)).toBe("/checkoff?profile=5");
+  });
+
+  it("checkoffRoute aliases to review (Checkoff folded into Review)", () => {
+    expect(checkoffRoute(5)).toBe("/review?profile=5");
+    expect(checkoffRoute(null)).toBe("/review");
   });
 });
 
@@ -58,8 +58,9 @@ describe("path matchers", () => {
     expect(isBuildPath("/plan")).toBe(true);
     expect(isBuildsPath("/builds")).toBe(true);
     expect(isReviewPath("/review")).toBe(true);
-    expect(isReviewPath("/checkoff")).toBe(false);
+    expect(isReviewPath("/checkoff")).toBe(true);
     expect(isCheckoffPath("/checkoff")).toBe(true);
+    expect(isCheckoffPath("/review")).toBe(false);
   });
 
   it("detects plan workflow paths", () => {

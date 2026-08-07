@@ -160,8 +160,77 @@ export const passwordResetTokens = sqliteTable("password_reset_tokens", {
   createdAt: text("created_at").notNull(),
 });
 
+/** Synced markdown/PDF docs under a source repo tree. */
+export const sourceDocs = sqliteTable(
+  "source_docs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    kind: text("kind").notNull(),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    contentHash: text("content_hash"),
+    extractStatus: text("extract_status").notNull().default("pending"),
+    extractError: text("extract_error"),
+    pageCount: integer("page_count"),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_source_docs_project_path").on(t.projectId, t.path)],
+);
+
+/** User-contributed markdown notes for a source (optionally plan-scoped). */
+export const sourceNotes = sqliteTable("source_notes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  profileId: integer("profile_id").references(() => buildProfiles.id, {
+    onDelete: "set null",
+  }),
+  title: text("title").notNull().default(""),
+  bodyMarkdown: text("body_markdown").notNull().default(""),
+  authorUserId: text("author_user_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/** Durable per-plan assistant/user decision trail (Apply / Dismiss / notes). */
+export const planDecisions = sqliteTable("plan_decisions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  profileId: integer("profile_id")
+    .notNull()
+    .references(() => buildProfiles.id, { onDelete: "cascade" }),
+  createdAt: text("created_at").notNull(),
+  actor: text("actor").notNull().default("assistant"),
+  kind: text("kind").notNull(),
+  actionType: text("action_type"),
+  paramsJson: text("params_json").notNull().default("{}"),
+  label: text("label").notNull().default(""),
+  summary: text("summary").notNull().default(""),
+  rationale: text("rationale"),
+  resultJson: text("result_json"),
+});
+
+/** Point-in-time plan configuration snapshots (layers + kit + refs). */
+export const planSnapshots = sqliteTable("plan_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  profileId: integer("profile_id")
+    .notNull()
+    .references(() => buildProfiles.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+  source: text("source").notNull().default("user"),
+  payloadJson: text("payload_json").notNull().default("{}"),
+});
+
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 5;
+export const currentSchemaVersion = 7;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -272,4 +341,54 @@ export const schemaMigrations: string[] = [
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS source_docs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    content_hash TEXT,
+    extract_status TEXT NOT NULL DEFAULT 'pending',
+    extract_error TEXT,
+    page_count INTEGER,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_source_docs_project_path ON source_docs (project_id, path)`,
+  `CREATE TABLE IF NOT EXISTS source_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    profile_id INTEGER REFERENCES build_profiles(id) ON DELETE SET NULL,
+    title TEXT NOT NULL DEFAULT '',
+    body_markdown TEXT NOT NULL DEFAULT '',
+    author_user_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS plan_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    actor TEXT NOT NULL DEFAULT 'assistant',
+    kind TEXT NOT NULL,
+    action_type TEXT,
+    params_json TEXT NOT NULL DEFAULT '{}',
+    label TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    rationale TEXT,
+    result_json TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_decisions_profile ON plan_decisions (profile_id, created_at)`,
+  `CREATE TABLE IF NOT EXISTS plan_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    payload_json TEXT NOT NULL DEFAULT '{}'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_snapshots_profile ON plan_snapshots (profile_id, created_at)`,
 ];

@@ -16,10 +16,8 @@ import { useJobRunner } from "../hooks/useJobRunner";
 import {
   buildRoute,
   buildsRoute,
-  checkoffRoute,
   helpRoute,
   isBuildPath,
-  isCheckoffPath,
   isReviewPath,
   reviewRoute,
   settingsRoute,
@@ -46,7 +44,11 @@ type Action = {
   run: () => void;
 };
 
-export default function CommandPalette() {
+type Props = {
+  onOpenAssistant?: () => void;
+};
+
+export default function CommandPalette({ onOpenAssistant }: Props) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -72,7 +74,6 @@ export default function CommandPalette() {
 
   const onBuild = isBuildPath(location.pathname);
   const onReview = isReviewPath(location.pathname);
-  const onCheckoff = isCheckoffPath(location.pathname);
   const onSources = location.pathname === "/sources";
 
   const actions: Action[] = useMemo(() => {
@@ -125,18 +126,6 @@ export default function CommandPalette() {
         run: () => {
           leaveBuildThen(() => {
             navigate(reviewRoute(selectedProfileId));
-            setOpen(false);
-          });
-        },
-      },
-      {
-        id: "nav-checkoff",
-        label: "Go to Checkoff",
-        hint: onCheckoff ? "current" : undefined,
-        group: "Navigate",
-        run: () => {
-          leaveBuildThen(() => {
-            navigate(checkoffRoute(selectedProfileId));
             setOpen(false);
           });
         },
@@ -233,7 +222,7 @@ export default function CommandPalette() {
                     });
                   },
                 );
-                if (!onBuild && !onReview && !onCheckoff) {
+                if (!onBuild && !onReview) {
                   navigate(reviewRoute(selectedProfileId));
                 }
                 setOpen(false);
@@ -242,11 +231,7 @@ export default function CommandPalette() {
             {
               id: `export-missing-stl-${groupBy}`,
               label: `Export missing STLs (${groupHint})`,
-              hint: onCheckoff
-                ? "Checkoff"
-                : onReview
-                  ? "Review"
-                  : `Plan #${selectedProfileId}`,
+              hint: onReview ? "Review" : `Plan #${selectedProfileId}`,
               group: "Actions" as const,
               disabled: stlExportJob.busy,
               run: () => {
@@ -262,8 +247,8 @@ export default function CommandPalette() {
                     });
                   },
                 );
-                if (!onReview && !onCheckoff) {
-                  navigate(checkoffRoute(selectedProfileId));
+                if (!onReview) {
+                  navigate(reviewRoute(selectedProfileId));
                 }
                 setOpen(false);
               },
@@ -318,6 +303,18 @@ export default function CommandPalette() {
           },
         },
       );
+      if (health.capabilities?.includes("ai_assistant") && onOpenAssistant) {
+        list.push({
+          id: "open-assistant",
+          label: "Open kit advisor",
+          hint: "AI guidance",
+          group: "Actions",
+          run: () => {
+            onOpenAssistant();
+            setOpen(false);
+          },
+        });
+      }
     }
 
     return list;
@@ -331,10 +328,10 @@ export default function CommandPalette() {
     kitExportJob,
     onBuild,
     onReview,
-    onCheckoff,
     onSources,
     flushBuildSaves,
     importSharedBuild,
+    onOpenAssistant,
   ]);
 
   const groups = ["Navigate", "Workflow", "Actions"] as const;

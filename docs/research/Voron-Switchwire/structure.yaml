@@ -1,0 +1,19 @@
+schema: print-partner/structure@1
+source_name: Voron-Switchwire
+ref_documented: master
+stl_root: STL/    # SINGULAR — not STLs/
+folders:
+  - {path: STL/Gantry, required: true, note: "XZ_Axis, Y_Axis subfolders + MGN12 guides"}
+  - {path: STL/Electronics, required: true, note: "einsy_rambo_mount, skr mounts, LCD subfolder"}
+  - {path: STL/Grills, required: true, note: "filtered vs non-filtered rear grills"}
+option_groups:
+  - id: rear_grill
+    choose_one: [STL/Grills/grill_rear_left.stl, STL/Grills/grill_rear_left_filtered.stl]
+  - id: controller_mount
+    choose_one: [einsy_rambo_mount.stl, skr_mini_e3_mount.stl, skr_mount.stl, skr_mount_rotated.stl]
+naming_quirks:
+  - "STL/ (singular) root — glob patterns written for STLs/ will miss everything"
+  - "Manuals/ (plural) vs other repos' Manual/"
+  - "[a]_ accent, _xN quantity"
+known_overlaps:
+  - {with: Voron-Stealthburner, note: "SB chain_anchor_*_SW variants are the Switchwire-specific parts"}

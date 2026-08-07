@@ -168,6 +168,7 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped: compare against this version instead of GitHub |
+| `AI_ENABLED` / `AI_PROVIDER` / keys | unset | Kit advisor env fallback — prefer **Settings → Optional integrations**; see [`web/DEPLOY.md`](web/DEPLOY.md) |
 
 The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker upgrade: `docker compose pull && docker compose up -d`.
 

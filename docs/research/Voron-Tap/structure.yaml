@@ -1,0 +1,19 @@
+schema: print-partner/structure@1
+source_name: Voron-Tap
+ref_documented: main
+stl_root: STLs/
+folders:
+  - {path: STLs/, required: true, note: "flat: Tap_Front_r8.stl, [a]_Tap_Center_r8.stl, Tap_Center_left_r8.stl, Tap_Center_right_r8.stl, [a]_Tap_Belt_Cover_r8_x2.stl, upper variants"}
+  - {path: OptoTap/, required: false, note: "sensor PCB project (v1/v2) + solder jig STLs"}
+  - {path: config/, required: false, note: "tap_klipper_instructions.md"}
+option_groups:
+  - id: tap_upper_sensor
+    choose_one: [STLs/Tap_Upper_PCB_r8.stl, STLs/Tap_Upper_D2HW_r8.stl, STLs/Tap_Upper_Wired_r8.stl]
+    note: "OptoTap PCB vs Omron D2HW microswitch-style vs hand-wired optical"
+naming_quirks:
+  - "_r8 revision suffix on every part"
+  - "changelog.md lives INSIDE STLs/"
+  - "[a]_ accent prefix, _xN quantity"
+known_overlaps:
+  - {with: Klicky-Probe and Boop, note: "same functional slot (Z probe); Boop reuses Tap RC8 hardware at V0 scale"}
+  - {with: Voron-2/Voron-Trident, note: "replaces stock z endstop / nozzle_probe parts and the printers' X carriage parts (Tap IS the carriage)"}

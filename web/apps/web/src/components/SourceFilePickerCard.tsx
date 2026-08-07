@@ -37,6 +37,12 @@ type Props = {
   expandedExtra?: ReactNode;
   /** Resolve mesh color from the selected STL path (role filament defaults). */
   meshColorForPath?: (relativePath: string) => string | undefined;
+  /** Force expand (copilot deep-link). */
+  forceExpanded?: boolean;
+  /** STL tree filter from copilot. */
+  stlFilter?: string | null;
+  /** Bump when copilot re-applies filter/focus. */
+  stlFilterFocusSeq?: number;
 };
 
 function syncLabel(
@@ -60,6 +66,9 @@ export default function SourceFilePickerCard({
   onRemove,
   expandedExtra,
   meshColorForPath,
+  forceExpanded = false,
+  stlFilter = null,
+  stlFilterFocusSeq = 0,
 }: Props) {
   const { formatDate } = useDateFormat();
   const expandedKey = `pp-build-source-${sourceId}-expanded`;
@@ -168,6 +177,10 @@ export default function SourceFilePickerCard({
   }, [expanded]);
 
   useEffect(() => {
+    if (forceExpanded) setExpanded(true);
+  }, [forceExpanded, stlFilterFocusSeq]);
+
+  useEffect(() => {
     try {
       sessionStorage.setItem(expandedKey, expanded ? "1" : "0");
     } catch {
@@ -234,7 +247,7 @@ export default function SourceFilePickerCard({
             </div>
           </button>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
-            {source?.local_path && (
+            {(source?.local_path || source?.source_kind === "github") && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -248,6 +261,7 @@ export default function SourceFilePickerCard({
               >
                 <BookOpen className="h-3.5 w-3.5" />
                 Docs
+                {(source.doc_count ?? 0) > 0 ? ` (${source.doc_count})` : ""}
               </Button>
             )}
             {allSources && onChangeSource && (
@@ -332,6 +346,8 @@ export default function SourceFilePickerCard({
               selectedFilePath={selectedFilePath}
               onFileSelect={setSelectedFilePath}
               onRulesChange={onPendingRulesChange}
+              initialFilter={stlFilter}
+              filterFocusSeq={stlFilterFocusSeq}
               onSelectionStats={(selected, total, duplicates) => {
                 setSelectedCount(selected);
                 setTotalFiles(total);

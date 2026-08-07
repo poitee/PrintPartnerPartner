@@ -322,4 +322,119 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
     if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
     return buildPlanManifestBuilder(deps.repo, id);
   });
+
+  app.get("/plans/:id/decisions", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    return { decisions: deps.repo.listPlanDecisions(id) };
+  });
+
+  app.post("/plans/:id/decisions", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    const body = (request.body ?? {}) as {
+      kind?: string;
+      actor?: string;
+      action_type?: string | null;
+      params?: Record<string, unknown>;
+      label?: string;
+      summary?: string;
+      rationale?: string | null;
+      result?: Record<string, unknown> | null;
+    };
+    const kind = body.kind ?? "user_note";
+    const allowed = new Set(["applied_action", "dismissed_action", "user_note", "choice"]);
+    if (!allowed.has(kind)) {
+      return reply.status(400).send({ detail: "Invalid kind" });
+    }
+    try {
+      const { appendPlanDecision } = await import("../services/plan-decisions.js");
+      const decision = appendPlanDecision(deps.repo, {
+        planId: id,
+        actor: body.actor === "assistant" ? "assistant" : "user",
+        kind: kind as "applied_action" | "dismissed_action" | "user_note" | "choice",
+        actionType: body.action_type ?? null,
+        params: body.params ?? {},
+        label: body.label ?? "",
+        summary: body.summary ?? "",
+        rationale: body.rationale ?? null,
+        result: body.result ?? null,
+      });
+      return decision;
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.get("/plans/:id/recipe", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    const { deriveBuildRecipe } = await import("../services/build-recipe.js");
+    const recipe = deriveBuildRecipe(deps.repo, id);
+    if (!recipe) return reply.status(404).send({ detail: "Profile not found" });
+    return recipe;
+  });
+
+  app.get("/plans/:id/snapshots", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    const { listPlanSnapshots } = await import("../services/plan-snapshots.js");
+    return { snapshots: listPlanSnapshots(deps.repo, id) };
+  });
+
+  app.post("/plans/:id/snapshots", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    const body = (request.body ?? {}) as { name?: string; source?: string };
+    const { createPlanSnapshot } = await import("../services/plan-snapshots.js");
+    try {
+      return createPlanSnapshot(deps.repo, id, {
+        name: body.name,
+        source:
+          body.source === "assistant" || body.source === "pre_apply" ? body.source : "user",
+      });
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.get("/plans/:id/snapshots/:sid", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    const sid = Number((request.params as { sid: string }).sid);
+    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    const { getPlanSnapshot } = await import("../services/plan-snapshots.js");
+    const snap = getPlanSnapshot(deps.repo, sid);
+    if (!snap || snap.plan_id !== id) return reply.status(404).send({ detail: "Snapshot not found" });
+    return snap;
+  });
+
+  app.post("/plans/:id/snapshots/:sid/restore", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    const sid = Number((request.params as { sid: string }).sid);
+    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    const { getPlanSnapshot, restorePlanSnapshotPayload } = await import(
+      "../services/plan-snapshots.js"
+    );
+    const snap = getPlanSnapshot(deps.repo, sid);
+    if (!snap || snap.plan_id !== id) return reply.status(404).send({ detail: "Snapshot not found" });
+    const restored = restorePlanSnapshotPayload(deps.repo, id, snap.payload);
+    if (!restored.ok) {
+      return reply.status(400).send({ detail: restored.detail, needs_sync: restored.needs_sync });
+    }
+    try {
+      const { appendPlanDecision } = await import("../services/plan-decisions.js");
+      appendPlanDecision(deps.repo, {
+        planId: id,
+        actor: "user",
+        kind: "applied_action",
+        actionType: "restore_plan_snapshot",
+        params: { snapshot_id: sid, name: snap.name },
+        label: `Restored snapshot “${snap.name}”`,
+        summary: `Restored configuration from snapshot #${sid}`,
+        result: { needs_sync: restored.needs_sync },
+      });
+    } catch {
+      /* best-effort */
+    }
+    return { ok: true, needs_sync: restored.needs_sync, layers: restored.layers, snapshot: snap };
+  });
 }

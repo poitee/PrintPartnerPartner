@@ -3,6 +3,13 @@ import {
   DATE_FORMAT_PRESETS,
   formatTimestamp,
   type AppUpdateCheckResponse,
+  type AssistantActionApplyResponse,
+  type AssistantChatMessage,
+  type AssistantChatResponse,
+  type AssistantFeedbackRating,
+  type AssistantHistoryResponse,
+  type AssistantProposedAction,
+  type AssistantStatus,
   type DateFormatId,
   type HealthResponse,
   type JobEvent,
@@ -38,9 +45,6 @@ function resolveEngineUrl(path: string): string {
   }
   return withPrefix;
 }
-
-/** @deprecated use SourceSummary */
-export type ProjectSummary = SourceSummary;
 
 export type SourceUpdateCheckSettings = {
   interval_hours: number;
@@ -196,25 +200,6 @@ export async function fetchPlanManifestBuilder(
   profileId: number,
 ): Promise<PlanManifestBuilderBootstrap> {
   return engineFetch(`/plans/${profileId}/plan-manifest-builder`);
-}
-
-export type ApplyStackPresetResult = {
-  profile_id: number;
-  preset_id: string;
-  missing_sources: string[];
-  layers: ProfileLayer[];
-  selections: Record<string, string>;
-};
-
-/** Apply kit-catalog stack preset (base + addons + default selections). */
-export async function applyStackPresetApi(
-  profileId: number,
-  presetId: string,
-): Promise<ApplyStackPresetResult> {
-  return engineFetch(`/plans/${profileId}/apply-stack-preset`, {
-    method: "POST",
-    body: JSON.stringify({ preset_id: presetId }),
-  });
 }
 
 export type ManifestWarning = {
@@ -1485,23 +1470,6 @@ export async function saveSourceNaming(
   });
 }
 
-export type ReportIssueResult = {
-  created: boolean;
-  issue_url?: string;
-  prefilled_url?: string;
-};
-
-export async function reportManifestIssue(body: {
-  profile_id: number;
-  title?: string;
-  details?: string;
-}): Promise<ReportIssueResult> {
-  return engineFetch<ReportIssueResult>("/community/report-issue", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
 export type ManifestRegistryEntry = {
   slug: string;
   target_repo: string;
@@ -2189,10 +2157,10 @@ export async function importSourceFiles(
 
 export async function fetchSourceDocs(
   sourceId: number,
-): Promise<Array<{ path: string; title: string }>> {
-  const body = await engineFetch<{ docs: Array<{ path: string; title: string }> }>(
-    `/sources/${sourceId}/docs`,
-  );
+): Promise<Array<{ path: string; title: string; kind?: string; extract_status?: string }>> {
+  const body = await engineFetch<{
+    docs: Array<{ path: string; title: string; kind?: string; extract_status?: string }>;
+  }>(`/sources/${sourceId}/docs`);
   return body.docs;
 }
 
@@ -2204,6 +2172,272 @@ export async function fetchSourceDocMarkdown(
     `/sources/${sourceId}/docs/${docPath}`,
   );
   return body.markdown;
+}
+
+export async function fetchSourceReadme(
+  sourceId: number,
+  live = false,
+): Promise<{ markdown: string; source: string; cached: boolean }> {
+  return engineFetch(`/sources/${sourceId}/readme${live ? "?live=1" : ""}`);
+}
+
+export type SourceNote = {
+  id: number;
+  project_id: number;
+  profile_id: number | null;
+  title: string;
+  body_markdown: string;
+  author_user_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function fetchSourceNotes(
+  sourceId: number,
+  profileId?: number | null,
+): Promise<SourceNote[]> {
+  const q =
+    profileId != null && profileId > 0 ? `?profile_id=${profileId}` : "";
+  const body = await engineFetch<{ notes: SourceNote[] }>(
+    `/sources/${sourceId}/notes${q}`,
+  );
+  return body.notes;
+}
+
+export async function createSourceNote(
+  sourceId: number,
+  input: { title?: string; body_markdown: string; profile_id?: number | null },
+): Promise<SourceNote> {
+  return engineFetch(`/sources/${sourceId}/notes`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateSourceNote(
+  sourceId: number,
+  noteId: number,
+  input: { title?: string; body_markdown?: string; profile_id?: number | null },
+): Promise<SourceNote> {
+  return engineFetch(`/sources/${sourceId}/notes/${noteId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteSourceNote(
+  sourceId: number,
+  noteId: number,
+): Promise<void> {
+  await engineFetch(`/sources/${sourceId}/notes/${noteId}`, { method: "DELETE" });
+}
+
+export async function fetchAssistantStatus(): Promise<AssistantStatus> {
+  return engineFetch<AssistantStatus>("/assistant/status");
+}
+
+export async function fetchAssistantHistory(): Promise<AssistantHistoryResponse> {
+  return engineFetch<AssistantHistoryResponse>("/assistant/history");
+}
+
+export async function clearAssistantHistory(): Promise<{ ok: boolean }> {
+  return engineFetch<{ ok: boolean }>("/assistant/history", { method: "DELETE" });
+}
+
+/** Clear Apply/Dismiss decision memory for one plan or the whole tenant. */
+export async function clearAssistantDecisions(input: {
+  planId?: number;
+  all?: boolean;
+}): Promise<{ ok: boolean; scope: "plan" | "tenant"; plan_id: number | null; deleted: number }> {
+  const params = new URLSearchParams();
+  if (input.all) params.set("all", "true");
+  else if (input.planId != null) params.set("plan_id", String(input.planId));
+  const q = params.toString();
+  return engineFetch(`/assistant/decisions${q ? `?${q}` : ""}`, { method: "DELETE" });
+}
+
+/** Clear thumbs ratings (ranking only — not chat or decisions). */
+export async function clearAssistantFeedback(): Promise<{ ok: boolean; deleted: number }> {
+  return engineFetch<{ ok: boolean; deleted: number }>("/assistant/feedback", {
+    method: "DELETE",
+  });
+}
+
+export async function postAssistantFeedback(input: {
+  rating: AssistantFeedbackRating;
+  message_excerpt?: string;
+  plan_id?: number;
+  comment?: string;
+}): Promise<{ ok: boolean; id: string }> {
+  return engineFetch<{ ok: boolean; id: string }>("/assistant/feedback", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function fetchAssistantFeedback(): Promise<{
+  entries: Array<{
+    id: string;
+    rating: "up" | "down";
+    plan_id: number | null;
+    excerpt_key: string;
+    message_excerpt: string | null;
+    created_at: string;
+  }>;
+}> {
+  return engineFetch("/assistant/feedback");
+}
+
+export async function applyAssistantAction(
+  action: AssistantProposedAction,
+): Promise<AssistantActionApplyResponse> {
+  return engineFetch<AssistantActionApplyResponse>("/assistant/actions/apply", {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
+
+export async function dismissAssistantAction(
+  action: AssistantProposedAction,
+): Promise<{ ok: boolean; decision?: unknown }> {
+  return engineFetch<{ ok: boolean; decision?: unknown }>("/assistant/actions/dismiss", {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
+
+export async function fetchPlanDecisions(planId: number): Promise<{ decisions: import("@print-partner/contracts").PlanDecision[] }> {
+  return engineFetch(`/plans/${planId}/decisions`);
+}
+
+export async function fetchPlanRecipe(planId: number): Promise<import("@print-partner/contracts").BuildRecipe> {
+  return engineFetch(`/plans/${planId}/recipe`);
+}
+
+export async function fetchPlanSnapshots(planId: number): Promise<{ snapshots: import("@print-partner/contracts").PlanSnapshotSummary[] }> {
+  return engineFetch(`/plans/${planId}/snapshots`);
+}
+
+export async function createPlanSnapshotApi(
+  planId: number,
+  body: { name?: string; source?: string } = {},
+): Promise<import("@print-partner/contracts").PlanSnapshot> {
+  return engineFetch(`/plans/${planId}/snapshots`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function restorePlanSnapshotApi(
+  planId: number,
+  snapshotId: number,
+): Promise<{ ok: boolean; needs_sync?: boolean; detail?: string }> {
+  return engineFetch(`/plans/${planId}/snapshots/${snapshotId}/restore`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function postAssistantChat(input: {
+  messages: AssistantChatMessage[];
+  plan_id?: number;
+  use_other_builds_as_examples?: boolean;
+}): Promise<AssistantChatResponse> {
+  return engineFetch<AssistantChatResponse>("/assistant/chat", {
+    method: "POST",
+    body: JSON.stringify({ ...input, stream: false }),
+  });
+}
+
+export type AssistantStreamHandlers = {
+  onToken: (text: string) => void;
+  onDone: (data?: {
+    final_content?: string;
+    proposed_actions?: AssistantProposedAction[];
+  }) => void;
+  onError: (message: string) => void;
+  onAction?: (action: AssistantProposedAction) => void;
+  onMeta?: (meta: { tools_degraded?: boolean; note?: string }) => void;
+};
+
+/** Streams SSE from POST /assistant/chat (default stream mode). */
+export async function streamAssistantChat(
+  input: {
+    messages: AssistantChatMessage[];
+    plan_id?: number;
+    use_other_builds_as_examples?: boolean;
+  },
+  handlers: AssistantStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(resolveEngineUrl("/assistant/chat"), {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...input, stream: true }),
+    signal,
+  });
+  if (res.status === 401) {
+    unauthorizedHandler?.();
+    handlers.onError("Authentication required");
+    return;
+  }
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => null)) as { detail?: string } | null;
+    handlers.onError(detail?.detail ?? `Assistant chat failed: ${res.status}`);
+    return;
+  }
+  if (!res.body) {
+    handlers.onError("Empty assistant response");
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventName = "message";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+        continue;
+      }
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload) continue;
+      try {
+        const data = JSON.parse(payload) as {
+          text?: string;
+          detail?: string;
+          ok?: boolean;
+          action?: AssistantProposedAction;
+          tools_degraded?: boolean;
+          note?: string;
+          final_content?: string;
+          proposed_actions?: AssistantProposedAction[];
+        };
+        if (eventName === "token" && data.text) handlers.onToken(data.text);
+        else if (eventName === "action" && data.action) handlers.onAction?.(data.action);
+        else if (eventName === "meta") handlers.onMeta?.(data);
+        else if (eventName === "error") handlers.onError(data.detail ?? "Assistant error");
+        else if (eventName === "done") {
+          handlers.onDone({
+            final_content: data.final_content,
+            proposed_actions: data.proposed_actions,
+          });
+        }
+      } catch {
+        /* ignore malformed chunk */
+      }
+      eventName = "message";
+    }
+  }
 }
 
 export async function pickZipArchive(): Promise<File | null> {

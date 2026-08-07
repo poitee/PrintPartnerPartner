@@ -5,6 +5,7 @@ import {
   DEFAULT_STL_SEARCH_LIMIT,
   searchSourceStls,
 } from "@print-partner/domain";
+import type { JobSnapshot } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import {
   createReadStreamUnderRoot,
@@ -20,10 +21,16 @@ import {
   ensureSourceCover,
   type SourceCoverProject,
 } from "../lib/source-cover.js";
+import {
+  extractPendingPdfsForSource,
+  indexSourceDocsFromDisk,
+} from "../services/source-docs-index.js";
+import { PDF_BG_EXTRACT_BYTES } from "../services/pdf-text-extract.js";
 
 const GITHUB_PAT_KEY = "github_pat";
 
 const MESH_MAX_BYTES = 15 * 1024 * 1024;
+const DEFAULT_SOURCE_DOCS_MAX_BYTES = 1024 * 1024 * 1024;
 
 type RouteDeps = {
   repo: AppRepository;
@@ -210,6 +217,7 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
       last_synced_at: new Date().toISOString(),
       last_commit_sha: null,
     });
+    indexSourceDocsFromDisk(deps.repo, id, extractDir);
     void prefetchSourceCover(deps, id);
     return {
       ...updated,
@@ -285,6 +293,7 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
       last_synced_at: new Date().toISOString(),
       last_commit_sha: null,
     });
+    indexSourceDocsFromDisk(deps.repo, id, result.extractDir);
     void prefetchSourceCover(deps, id);
     return {
       ...updated,
@@ -421,17 +430,40 @@ export async function syncProjectById(
   reposDir: string,
   projectId: number,
   coversDir = join(dirname(reposDir), "covers"),
-): Promise<{ stl_count: number; downloaded: number }> {
+  options?: {
+    maxDocsBytes?: number;
+    onProgress?: (event: Partial<JobSnapshot>) => void;
+    /** When set, enqueue PDF extraction as a follow-up job instead of inline. */
+    enqueuePdfExtract?: (projectId: number) => Promise<string | void>;
+  },
+): Promise<{
+  stl_count: number;
+  downloaded: number;
+  doc_count: number;
+  docs_downloaded: number;
+  pdf_extract_job_id?: string;
+}> {
   const row = repo.getProjectRow(projectId);
   if (!row) throw new Error("Source not found");
   const localPath = row.localPath ?? `${reposDir}/${projectId}`;
   const token = repo.getSetting(GITHUB_PAT_KEY);
+  const maxDocsBytes = options?.maxDocsBytes ?? DEFAULT_SOURCE_DOCS_MAX_BYTES;
 
   if (row.sourceKind === "github" || row.sourceType === "git") {
     const result = await syncGithubSource(row.url, row.branch ?? "main", localPath, token, {
       download: true,
       maxDownloads: 500,
       tag: row.tag,
+      maxDocsBytes,
+      onProgress: (p) => {
+        const base = p.phase === "docs" ? 55 : 15;
+        const span = p.phase === "docs" ? 35 : 40;
+        const frac = p.total > 0 ? p.current / p.total : 0;
+        options?.onProgress?.({
+          message: p.message ?? `Syncing ${p.phase}`,
+          progress: Math.min(95, Math.round(base + span * frac)),
+        });
+      },
     });
     repo.updateSource(projectId, {
       localPath: localPath,
@@ -439,6 +471,38 @@ export async function syncProjectById(
       last_commit_sha: result.commitSha,
     });
     repo.markSourceSynced(projectId, result.commitSha);
+    const indexed = indexSourceDocsFromDisk(repo, projectId, localPath, result.docPaths);
+
+    // Eagerly extract small PDFs; large ones go to a background job.
+    const docs = repo.listSourceDocs(projectId);
+    const smallPdfs = docs.filter(
+      (d) => d.kind === "pdf" && d.size_bytes < PDF_BG_EXTRACT_BYTES && d.extract_status !== "ready",
+    );
+    const largePdfs = docs.filter(
+      (d) => d.kind === "pdf" && d.size_bytes >= PDF_BG_EXTRACT_BYTES,
+    );
+    if (smallPdfs.length > 0) {
+      options?.onProgress?.({ message: "Extracting PDF text…", progress: 92 });
+      await extractPendingPdfsForSource(repo, projectId, localPath, {
+        maxSizeBytes: PDF_BG_EXTRACT_BYTES - 1,
+        onProgress: (msg, progress) =>
+          options?.onProgress?.({ message: msg, progress: 90 + Math.round(progress * 0.08) }),
+      });
+    }
+
+    let pdf_extract_job_id: string | undefined;
+    if (largePdfs.length > 0 && options?.enqueuePdfExtract) {
+      const jobId = await options.enqueuePdfExtract(projectId);
+      if (jobId) pdf_extract_job_id = jobId;
+    } else if (largePdfs.length > 0) {
+      options?.onProgress?.({ message: "Extracting large PDF manuals…", progress: 93 });
+      await extractPendingPdfsForSource(repo, projectId, localPath, {
+        minSizeBytes: PDF_BG_EXTRACT_BYTES,
+        onProgress: (msg, progress) =>
+          options?.onProgress?.({ message: msg, progress: 90 + Math.round(progress * 0.08) }),
+      });
+    }
+
     const syncedRow = repo.getProjectRow(projectId);
     if (syncedRow) {
       try {
@@ -447,9 +511,27 @@ export async function syncProjectById(
         /* cover is best-effort */
       }
     }
-    return { stl_count: result.stlPaths.length, downloaded: result.downloaded };
+    return {
+      stl_count: result.stlPaths.length,
+      downloaded: result.downloaded,
+      doc_count: indexed.doc_count,
+      docs_downloaded: result.docsDownloaded,
+      pdf_extract_job_id,
+    };
+  }
+
+  // Zip/local: index whatever docs already landed on disk.
+  if (row.localPath) {
+    const indexed = indexSourceDocsFromDisk(repo, projectId, row.localPath);
+    repo.markSourceSynced(projectId, row.lastCommitSha);
+    return {
+      stl_count: 0,
+      downloaded: 0,
+      doc_count: indexed.doc_count,
+      docs_downloaded: 0,
+    };
   }
 
   repo.markSourceSynced(projectId, row.lastCommitSha);
-  return { stl_count: 0, downloaded: 0 };
+  return { stl_count: 0, downloaded: 0, doc_count: 0, docs_downloaded: 0 };
 }
