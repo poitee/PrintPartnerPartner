@@ -1,6 +1,6 @@
 export const WORKFLOW_ONBOARDING_STORAGE_KEY = "print-partner.workflow.onboarding.v1";
 
-/** True after the user completes Sources → Build → Review once. */
+/** True after the user completes Sources → Build → Review → Checkoff once. */
 export function isWorkflowOnboardingComplete(): boolean {
   if (typeof localStorage === "undefined") return false;
   return localStorage.getItem(WORKFLOW_ONBOARDING_STORAGE_KEY) === "1";
