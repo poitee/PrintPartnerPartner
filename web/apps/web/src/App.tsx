@@ -16,6 +16,7 @@ import LoginPage from "./pages/LoginPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import ReviewPage from "./pages/ReviewPage";
+import CheckoffPage from "./pages/CheckoffPage";
 import SettingsPage from "./pages/SettingsPage";
 import SourcesPage from "./pages/SourcesPage";
 import WelcomePage from "./pages/WelcomePage";
@@ -30,11 +31,6 @@ function LegacyStudioRedirect() {
 }
 
 function PlateRedirect() {
-  const location = useLocation();
-  return <Navigate to={`/review${location.search}`} replace />;
-}
-
-function CheckoffRedirect() {
   const location = useLocation();
   return <Navigate to={`/review${location.search}`} replace />;
 }
@@ -68,7 +64,7 @@ export default function App() {
                           <Route path="plans/:planId/studio" element={<LegacyStudioRedirect />} />
                           <Route path="plate" element={<PlateRedirect />} />
                           <Route path="print" element={<PlateRedirect />} />
-                          <Route path="checkoff" element={<CheckoffRedirect />} />
+                          <Route path="checkoff" element={<CheckoffPage />} />
                           <Route path="settings" element={<SettingsPage />} />
                           <Route path="help" element={<HelpPage />} />
                         </Route>
