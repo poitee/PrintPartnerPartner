@@ -2,6 +2,7 @@ import { type ComponentType, type MouseEvent, type ReactNode, useEffect, useStat
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   BookOpen,
+  CheckSquare,
   ClipboardCheck,
   FolderGit2,
   Hammer,
@@ -42,8 +43,10 @@ import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import {
   buildRoute,
   buildsRoute,
+  checkoffRoute,
   isBuildPath,
   isBuildsPath,
+  isCheckoffPath,
   isReviewPath,
   reviewRoute,
   sourcesRoute,
@@ -80,7 +83,8 @@ const secondaryNav: Omit<NavEntry, "hint">[] = [
 const NAV_HINTS: Record<string, string> = {
   Sources: "Register repos and set import folders",
   Build: "Attach sources, pick files, set colors and quantities",
-  Review: "Validate, edit quantities, track printing, and export",
+  Review: "Validate parts, edit quantities, and export",
+  Checkoff: "Track what you've printed on the shop floor",
 };
 
 function BrandMark({ className }: { className?: string }) {
@@ -253,7 +257,9 @@ export default function AppLayout() {
 
   const showPlanInHeader =
     activePlanName &&
-    (isBuildPath(location.pathname) || isReviewPath(location.pathname));
+    (isBuildPath(location.pathname) ||
+      isReviewPath(location.pathname) ||
+      isCheckoffPath(location.pathname));
 
   const pipelineNav: NavEntry[] = [
     { to: sourcesRoute(), label: "Sources", hint: NAV_HINTS.Sources, icon: FolderGit2 },
@@ -270,6 +276,13 @@ export default function AppLayout() {
       hint: NAV_HINTS.Review,
       icon: ClipboardCheck,
       isActive: (pathname) => isReviewPath(pathname),
+    },
+    {
+      to: checkoffRoute(selectedProfileId),
+      label: "Checkoff",
+      hint: NAV_HINTS.Checkoff,
+      icon: CheckSquare,
+      isActive: (pathname) => isCheckoffPath(pathname),
     },
   ];
 
@@ -295,7 +308,7 @@ export default function AppLayout() {
               <div className="min-w-0">
                 <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
                 <p className="text-xs text-muted-foreground">
-                  Sources → Build → Review
+                  Sources → Build → Review → Checkoff
                 </p>
               </div>
             )}

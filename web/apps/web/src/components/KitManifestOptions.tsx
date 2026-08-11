@@ -227,7 +227,7 @@ export default function KitManifestOptions({
   const staleHint = buildStale ? (
     <p className="text-xs text-amber-700 dark:text-amber-300">
       Run <strong className="font-medium text-foreground">Update build</strong> to apply variant
-      parts to Review.
+      parts to Review and Checkoff.
     </p>
   ) : null;
 
