@@ -41,9 +41,9 @@ describe("workflow routes", () => {
     expect(reviewRoute(5)).toBe("/review?profile=5");
   });
 
-  it("checkoffRoute aliases to review (Checkoff folded into Review)", () => {
-    expect(checkoffRoute(5)).toBe("/review?profile=5");
-    expect(checkoffRoute(null)).toBe("/review");
+  it("checkoffRoute builds the /checkoff path", () => {
+    expect(checkoffRoute(5)).toBe("/checkoff?profile=5");
+    expect(checkoffRoute(null)).toBe("/checkoff");
   });
 });
 
@@ -58,7 +58,7 @@ describe("path matchers", () => {
     expect(isBuildPath("/plan")).toBe(true);
     expect(isBuildsPath("/builds")).toBe(true);
     expect(isReviewPath("/review")).toBe(true);
-    expect(isReviewPath("/checkoff")).toBe(true);
+    expect(isReviewPath("/checkoff")).toBe(false);
     expect(isCheckoffPath("/checkoff")).toBe(true);
     expect(isCheckoffPath("/review")).toBe(false);
   });

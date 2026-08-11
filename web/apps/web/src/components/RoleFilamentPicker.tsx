@@ -653,7 +653,7 @@ export default function RoleFilamentPicker({
       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
         <span className="mr-auto text-xs text-muted-foreground">
           Pick a color per role — it applies to every included part with that role. Review and
-          Review previews update automatically.
+          Checkoff previews update automatically.
         </span>
         <Button variant="outline" size="sm" disabled={disabled} onClick={onSaveColors}>
           <Download className="h-4 w-4" aria-hidden />
