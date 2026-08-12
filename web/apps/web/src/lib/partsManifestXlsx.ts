@@ -25,6 +25,8 @@ function colLetter(index: number): string {
 
 function xmlEscape(value: string): string {
   return value
+    // XML 1.0 illegal control chars (keep tab/LF/CR).
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

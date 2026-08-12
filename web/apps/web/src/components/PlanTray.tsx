@@ -114,8 +114,8 @@ export default function PlanTray() {
   return (
     <footer
       className={cn(
-        "plan-tray fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-card shadow-[0_-2px_12px_rgba(89,115,166,0.09)] print:hidden",
-        "lg:left-[var(--app-sidebar-width,14rem)]",
+        "plan-tray fixed bottom-[var(--mobile-stage-height,0px)] left-0 right-0 z-40 border-t border-border bg-card shadow-[0_-2px_12px_rgba(89,115,166,0.09)] print:hidden",
+        "lg:bottom-0 lg:left-[var(--app-sidebar-width,14rem)]",
       )}
       style={{ height: trayHeight }}
       aria-label="Plan tray"

@@ -231,11 +231,16 @@ export default function ExportActionCards({ onShare }: Props) {
       chips: ["Progress sheet", "browser print"] as const,
       highlight: false,
       primary: false,
-      body: (
-        <Button size="sm" variant="outline" asChild disabled={includedCount === 0}>
-          <Link to={progressRoute(selectedProfileId)}>Open Progress to print</Link>
-        </Button>
-      ),
+      body:
+        includedCount === 0 ? (
+          <Button size="sm" variant="outline" disabled>
+            Open Progress to print
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" asChild>
+            <Link to={progressRoute(selectedProfileId)}>Open Progress to print</Link>
+          </Button>
+        ),
     },
     {
       key: "html",

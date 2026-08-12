@@ -2,9 +2,9 @@
 
 Print Partner is a self-hostable web workflow for **layered STL kits** — a base repo plus add-ons, role filament colors, exports by folder, and shop-floor checkoff. This folder holds user guides, examples, and technical references.
 
-**Pipeline:** **Sources** → **Build** → **Review** (print checkoff lives on Review; legacy `/checkoff` redirects there)
+**Pipeline:** **Library** → **Plan** → **Parts** → **Progress** (print checkoff lives on Progress; legacy `/checkoff` redirects there)
 
-Plan management (create, rename, duplicate, delete) is separate from that pipeline — use the header **Create build** button, **Manage builds** on Build, or the **Builds** page in the sidebar.
+Plan management (create, rename, duplicate, delete) is separate from that pipeline — use the header **Create build** button, **Manage builds** on Plan, or the **Builds** page in the sidebar.
 
 **Optional kit advisor:** research kits with web search / URL paste, walk decisions, and propose **Apply** cards — configure under **Settings → AI assistant** (Anthropic, OpenAI, or local Ollama). See [Kit advisor](KIT_ADVISOR.md).
 
@@ -27,9 +27,10 @@ After the app is running, open **Help** in the sidebar for the in-app workflow g
 
 | Step | What you do |
 |------|-------------|
-| **Sources** | Register GitHub repos, local folders, or zips; categories; import rules; sync; global STL search; update-available badges |
-| **Build** | Manage builds, attach base/add-on sources, pick STL files, set role filament colors (live previews), **Update build** when stale, kit/manifest options, export or share plan |
-| **Review** | Validation summary by role and filament, 3D previews, quantity edits, **Export STLs** / 3MF, **print checkoff**, **Export missing STLs** |
+| **Library** | Register GitHub repos, local folders, or zips; categories; import rules; sync; global STL search; update-available badges |
+| **Plan** | Manage builds, attach base/add-on sources, pick STL files, set role filament colors (live previews), **Update build** when stale, kit/manifest options, export or share plan |
+| **Parts** | Validation summary by role and filament, 3D previews, quantity edits, **Export STLs** / 3MF, **Export missing STLs** |
+| **Progress** | Print checkoff — per-unit progress, filters, printable checklist |
 
 **Tips:** **⌘K / Ctrl+K** command palette · collapsible sidebar · header **Advisor** when AI is enabled · first-run **Progress** widget hides after one full pipeline pass
 

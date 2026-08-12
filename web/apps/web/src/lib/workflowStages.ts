@@ -51,9 +51,15 @@ function printedProgress(review: PlanReview | null | undefined): {
   const parts = review.part_groups.flatMap((g) => g.parts).filter((p) => p.included);
   const totalUnits = parts.reduce((sum, p) => sum + Math.max(1, p.quantity_effective), 0);
   const printedUnits = parts.reduce((sum, p) => sum + p.printed_count, 0);
-  const pct = totalUnits > 0 ? Math.round((printedUnits / totalUnits) * 100) : 0;
-  const warnCount =
-    (review.issues?.length ?? 0) + parts.filter((p) => p.missing).length;
+  const pct =
+    totalUnits > 0
+      ? Math.min(100, Math.round((printedUnits / totalUnits) * 100))
+      : 0;
+  const issueWarnCount =
+    review.issues?.filter(
+      (i) => i.severity === "warning" || i.severity === "blocker",
+    ).length ?? 0;
+  const warnCount = issueWarnCount + parts.filter((p) => p.missing).length;
   return {
     pct,
     printedUnits,

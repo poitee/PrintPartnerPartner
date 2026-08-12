@@ -35,6 +35,22 @@ export function pickCountsBySourceId(review: PlanReview | null | undefined): Map
 
   const resolveSourceId = (sourceLayer: string | null): number | null => {
     if (!sourceLayer) return null;
+    const label = sourceLayer.includes(":")
+      ? sourceLayer.split(":").slice(1).join(":").trim()
+      : sourceLayer.trim();
+
+    // Prefer exact project_name / `type:Name` label matches before substring.
+    for (const layer of review.layers) {
+      if (layer.project_id == null || !layer.project_name) continue;
+      if (
+        sourceLayer === layer.project_name ||
+        label === layer.project_name ||
+        sourceLayer === `${layer.layer_type}:${layer.project_name}`
+      ) {
+        return layer.project_id;
+      }
+    }
+
     for (const layer of review.layers) {
       if (layer.project_id == null) continue;
       if (!layer.project_name) {

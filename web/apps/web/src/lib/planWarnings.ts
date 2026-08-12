@@ -59,9 +59,7 @@ export function buildPlanWarningLines(input: {
       lines.push(issue.message);
       continue;
     }
-    if (issue.severity === "warning") {
-      lines.push(issue.message);
-    }
+    lines.push(issue.message);
   }
 
   // Dedupe while preserving order

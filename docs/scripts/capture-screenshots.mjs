@@ -128,6 +128,19 @@ const captures = [
     },
   },
   {
+    label: "Progress",
+    path: "/progress",
+    file: "progress.png",
+    nav: "sidebar",
+    waitMs: 1200,
+    ready: async (page) => {
+      await page.getByRole("heading", { name: "Progress", level: 2 }).waitFor({
+        state: "visible",
+        timeout: 60_000,
+      });
+    },
+  },
+  {
     label: "Settings AI",
     path: "/settings",
     file: "settings-ai.png",

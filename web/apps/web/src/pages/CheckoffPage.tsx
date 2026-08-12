@@ -506,6 +506,7 @@ export default function CheckoffPage() {
                   filter !== mode && isMobileLayout && "border border-border bg-background text-muted-foreground",
                 )}
                 variant={filter === mode ? "secondary" : "ghost"}
+                aria-pressed={filter === mode}
                 onClick={() => setFilter(mode)}
                 disabled={toggleBusy}
               >

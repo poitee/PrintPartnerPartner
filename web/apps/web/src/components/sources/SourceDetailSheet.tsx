@@ -329,11 +329,18 @@ export default function SourceDetailSheet({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={UNCategorized_FILTER}>Uncategorised</SelectItem>
-                      {categories.map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c}
-                        </SelectItem>
-                      ))}
+                      {(() => {
+                        const current = source.category?.trim() || "";
+                        const options =
+                          current && !categories.includes(current)
+                            ? [current, ...categories]
+                            : categories;
+                        return options.map((c) => (
+                          <SelectItem key={c} value={c}>
+                            {c}
+                          </SelectItem>
+                        ));
+                      })()}
                     </SelectContent>
                   </Select>
                 </div>

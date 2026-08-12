@@ -36,9 +36,9 @@ export default function PlanWarningsCard({ warnings, onAskAssistant, className }
         ) : null}
       </div>
       <ul className="space-y-1.5">
-        {warnings.map((line) => (
+        {warnings.map((line, idx) => (
           <li
-            key={line}
+            key={`${idx}-${line}`}
             className="flex items-baseline gap-1.5 text-xs leading-snug text-amber-950/90 dark:text-amber-100/90"
           >
             <span
