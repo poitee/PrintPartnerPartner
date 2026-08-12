@@ -23,10 +23,19 @@ function colLetter(index: number): string {
   return s;
 }
 
+/** Strip XML 1.0 illegal control chars (keep tab/LF/CR). */
+function stripXmlIllegalControls(value: string): string {
+  let out = "";
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f && code !== 0x9 && code !== 0xa && code !== 0xd) continue;
+    out += value[i];
+  }
+  return out;
+}
+
 function xmlEscape(value: string): string {
-  return value
-    // XML 1.0 illegal control chars (keep tab/LF/CR).
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
+  return stripXmlIllegalControls(value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
