@@ -4,21 +4,31 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ProfileSummary } from "../api/engine";
 import { useEngineHealth } from "../hooks/useEngineHealth";
+import { reconcileSelectedProfileId } from "../hooks/profileSelection";
 import { queryKeys } from "../queries/keys";
 import { useProfilesQuery } from "../queries/profiles";
 
 const STORAGE_KEY = "pp-selected-profile-id";
 
+type SetSelectedProfileOptions = {
+  /** When true, selection came from `?profile=` — do not mark URL sync as pending. */
+  fromUrl?: boolean;
+};
+
 type ProfileContextValue = {
   profiles: ProfileSummary[];
   selectedProfileId: number | null;
-  setSelectedProfileId: (id: number | null) => void;
+  setSelectedProfileId: (id: number | null, options?: SetSelectedProfileOptions) => void;
+  /** Local selection not yet reflected in `?profile=` — used by URL sync. */
+  pendingSelectionId: number | null;
+  clearPendingSelection: (matchedUrlId?: number | null) => void;
   reloadProfiles: () => Promise<void>;
   loading: boolean;
   error: string | null;
@@ -48,25 +58,40 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   } = useProfilesQuery(Boolean(health?.ok));
 
   const [selectedProfileId, setSelectedProfileIdState] = useState<number | null>(readStoredId);
+  const [pendingSelectionId, setPendingSelectionId] = useState<number | null>(null);
+  const previousProfileIdsRef = useRef<number[]>([]);
 
-  const setSelectedProfileId = useCallback((id: number | null) => {
-    setSelectedProfileIdState(id);
-    try {
-      if (id == null) sessionStorage.removeItem(STORAGE_KEY);
-      else sessionStorage.setItem(STORAGE_KEY, String(id));
-    } catch {
-      /* ignore */
-    }
+  const setSelectedProfileId = useCallback(
+    (id: number | null, options?: SetSelectedProfileOptions) => {
+      if (options?.fromUrl) setPendingSelectionId(null);
+      else setPendingSelectionId(id);
+      setSelectedProfileIdState(id);
+      try {
+        if (id == null) sessionStorage.removeItem(STORAGE_KEY);
+        else sessionStorage.setItem(STORAGE_KEY, String(id));
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  );
+
+  const clearPendingSelection = useCallback((matchedUrlId?: number | null) => {
+    setPendingSelectionId((pending) => {
+      if (pending == null) return null;
+      if (matchedUrlId !== undefined && matchedUrlId !== pending) return pending;
+      return null;
+    });
   }, []);
 
   useEffect(() => {
-    if (profiles.length === 0) {
-      if (selectedProfileId != null) setSelectedProfileId(null);
-    } else if (
-      selectedProfileId == null ||
-      !profiles.some((p) => p.id === selectedProfileId)
-    ) {
-      setSelectedProfileId(profiles[0].id);
+    const previousIds = previousProfileIdsRef.current;
+    const nextIds = profiles.map((p) => p.id);
+    previousProfileIdsRef.current = nextIds;
+
+    const next = reconcileSelectedProfileId(nextIds, selectedProfileId, previousIds);
+    if (next !== undefined) {
+      setSelectedProfileId(next);
     }
   }, [profiles, selectedProfileId, setSelectedProfileId]);
 
@@ -81,6 +106,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       profiles,
       selectedProfileId,
       setSelectedProfileId,
+      pendingSelectionId,
+      clearPendingSelection,
       reloadProfiles,
       loading: isLoading,
       error:
@@ -94,6 +121,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       profiles,
       selectedProfileId,
       setSelectedProfileId,
+      pendingSelectionId,
+      clearPendingSelection,
       reloadProfiles,
       isLoading,
       queryError,

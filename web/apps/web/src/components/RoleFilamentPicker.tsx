@@ -64,6 +64,8 @@ type Props = {
   onUpdated?: () => void | Promise<void>;
   /** Called whenever role color rows change (load, save, import). */
   onRolesChange?: (rows: RoleFilamentRow[]) => void;
+  /** Plan mock density: tighter rows, mono part counts. */
+  density?: "default" | "compact";
 };
 
 function normalizeHex(hex: string): string | null {
@@ -130,6 +132,7 @@ type RoleColorRowProps = {
   roleSpools: SpoolmanSpoolRow[];
   selectedSpoolId?: number;
   saveStatus?: RoleColorSaveStatus;
+  density?: "default" | "compact";
   onPickCatalog: (colorId: string) => void | Promise<void>;
   onPickCustomHex: (hex: string) => void | Promise<void>;
   onPickSpool: (spoolId: string) => void | Promise<void>;
@@ -145,6 +148,7 @@ function RoleColorRow({
   roleSpools,
   selectedSpoolId,
   saveStatus = "idle",
+  density = "default",
   onPickCatalog,
   onPickCustomHex,
   onPickSpool,
@@ -182,42 +186,88 @@ function RoleColorRow({
     void onPickCustomHex(normalized);
   };
 
+  const compact = density === "compact";
+
   return (
-    <li className="flex items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5">
+    <li
+      className={cn(
+        "flex items-center",
+        compact ? "gap-2.5 py-0.5" : "gap-3 rounded-lg border border-border bg-background px-3 py-2.5",
+      )}
+    >
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
             disabled={busy}
-            className="flex flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            className={cn(
+              "flex flex-1 items-center rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
+              compact ? "gap-2.5" : "gap-3",
+            )}
             aria-label={`Change ${label} color`}
           >
-            <ColorThumb hex={rowThumbHex} imageUrl={swatchImageUrl} className="h-9 w-9" />
+            <ColorThumb
+              hex={rowThumbHex}
+              imageUrl={swatchImageUrl}
+              className={compact ? "h-7 w-7 rounded-md border-black/20" : "h-9 w-9"}
+            />
             <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-2">
-                <span className="text-sm font-medium">{label}</span>
-                <span className="text-xs text-muted-foreground">
-                  {row.part_count} part{row.part_count === 1 ? "" : "s"}
-                </span>
-                {saveLabel && (
-                  <span
-                    className={cn(
-                      "text-[10px] font-medium",
-                      saveStatus === "saved" && "text-emerald-600 dark:text-emerald-400",
-                      saveStatus === "error" && "text-destructive",
-                      saveStatus === "saving" && "text-muted-foreground",
+              {compact ? (
+                <>
+                  <span className="flex items-center gap-2">
+                    <span className="text-[12.5px] font-semibold">{label}</span>
+                    {saveLabel && (
+                      <span
+                        className={cn(
+                          "text-[10px] font-medium",
+                          saveStatus === "saved" && "text-emerald-600 dark:text-emerald-400",
+                          saveStatus === "error" && "text-destructive",
+                          saveStatus === "saving" && "text-muted-foreground",
+                        )}
+                        aria-live="polite"
+                      >
+                        {saveLabel}
+                      </span>
                     )}
-                    aria-live="polite"
-                  >
-                    {saveLabel}
                   </span>
-                )}
-              </span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {row.filament_display || (hasColor ? row.filament_hex : "No color set")}
-              </span>
+                  <span className="block truncate font-mono text-[10.5px] font-normal text-muted-foreground">
+                    {row.filament_display || (hasColor ? row.filament_hex : "No color set")}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{label}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {row.part_count} part{row.part_count === 1 ? "" : "s"}
+                    </span>
+                    {saveLabel && (
+                      <span
+                        className={cn(
+                          "text-[10px] font-medium",
+                          saveStatus === "saved" && "text-emerald-600 dark:text-emerald-400",
+                          saveStatus === "error" && "text-destructive",
+                          saveStatus === "saving" && "text-muted-foreground",
+                        )}
+                        aria-live="polite"
+                      >
+                        {saveLabel}
+                      </span>
+                    )}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {row.filament_display || (hasColor ? row.filament_hex : "No color set")}
+                  </span>
+                </>
+              )}
             </span>
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            {compact ? (
+              <span className="ml-auto shrink-0 font-mono text-[11.5px] font-medium text-foreground">
+                {row.part_count}
+              </span>
+            ) : (
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            )}
           </button>
         </PopoverTrigger>
         <PopoverContent className="w-80">
@@ -355,6 +405,7 @@ export default function RoleFilamentPicker({
   refreshKey = 0,
   onUpdated,
   onRolesChange,
+  density = "default",
 }: Props) {
   const [rows, setRows] = useState<RoleFilamentRow[]>([]);
   const [catalog, setCatalog] = useState<FilamentCatalog | null>(null);
@@ -405,34 +456,46 @@ export default function RoleFilamentPicker({
     [markRoleSaved, onUpdated],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: { cancelled: () => boolean }) => {
     setLoadError(null);
     try {
       const [roleRows, cat] = await Promise.all([
         fetchRoleFilaments(profileId),
         fetchFilamentCatalog(),
       ]);
+      if (signal?.cancelled()) return;
       setRows(roleRows);
       setCatalog(cat);
       const integrationId = cat.default_spoolman_integration_id?.trim();
       if (integrationId && isSpoolmanIntegrationConfigured(cat)) {
         try {
-          setSpools(await fetchSpoolmanSpools(integrationId));
+          const nextSpools = await fetchSpoolmanSpools(integrationId);
+          if (signal?.cancelled()) return;
+          setSpools(nextSpools);
         } catch {
-          setSpools([]);
+          if (!signal?.cancelled()) setSpools([]);
         }
       } else {
         setSpools([]);
       }
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
+      if (!signal?.cancelled()) {
+        setLoadError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
-      setLoaded(true);
+      if (!signal?.cancelled()) setLoaded(true);
     }
   }, [profileId]);
 
   useEffect(() => {
-    void load();
+    setRows([]);
+    setLoaded(false);
+    setLoadError(null);
+    let cancelled = false;
+    void load({ cancelled: () => cancelled });
+    return () => {
+      cancelled = true;
+    };
   }, [load, refreshKey]);
 
   useEffect(() => {
@@ -610,12 +673,14 @@ export default function RoleFilamentPicker({
     );
   }
 
+  const compact = density === "compact";
+
   return (
-    <div className="role-filament-picker space-y-3">
+    <div className={cn("role-filament-picker", compact ? "space-y-2.5" : "space-y-3")}>
       {spoolmanHint && <p className="text-sm text-muted-foreground">{spoolmanHint}</p>}
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
 
-      <ul className="space-y-2">
+      <ul className={cn(compact ? "space-y-2.5" : "space-y-2")}>
         {rows.map((row) => {
           const label = ROLE_LABELS[row.role as StlNamingRoleId] ?? row.role;
           const filamentParsed = parseSpoolmanFilamentId(row.filament_color_id ?? "");
@@ -637,6 +702,7 @@ export default function RoleFilamentPicker({
               spoolmanConfigured={spoolmanConfigured}
               roleSpools={roleSpools}
               selectedSpoolId={selectedSpoolId}
+              density={density}
               saveStatus={
                 savingRole === row.role
                   ? "saving"
@@ -650,11 +716,18 @@ export default function RoleFilamentPicker({
         })}
       </ul>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-        <span className="mr-auto text-xs text-muted-foreground">
-          Pick a color per role — it applies to every included part with that role. Review and
-          Review previews update automatically.
-        </span>
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-2 border-t border-border",
+          compact ? "pt-2.5" : "pt-3",
+        )}
+      >
+        {!compact && (
+          <span className="mr-auto text-xs text-muted-foreground">
+            Pick a color per role — it applies to every included part with that role. Review
+            previews update automatically.
+          </span>
+        )}
         <Button variant="outline" size="sm" disabled={disabled} onClick={onSaveColors}>
           <Download className="h-4 w-4" aria-hidden />
           Save colors

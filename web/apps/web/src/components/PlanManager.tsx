@@ -36,6 +36,8 @@ type PlanManagerProps = {
   collapsible?: boolean;
   /** When collapsible, start expanded (Build page). */
   defaultOpen?: boolean;
+  /** Bump to open the Duplicate plan dialog (Plan page header). */
+  duplicateTrigger?: number;
 };
 
 /** Full plan CRUD — use on Build; workflow pages use header PlanPicker for switching. */
@@ -50,6 +52,7 @@ export default function PlanManager({
   hideSelector,
   collapsible,
   defaultOpen,
+  duplicateTrigger = 0,
 }: PlanManagerProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -71,6 +74,14 @@ export default function PlanManager({
   const [switchPrompt, setSwitchPrompt] = useState<SwitchPrompt | null>(null);
 
   const selected = profiles.find((p) => p.id === selectedProfileId);
+
+  useEffect(() => {
+    if (duplicateTrigger <= 0 || selectedProfileId == null) return;
+    const base = profiles.find((p) => p.id === selectedProfileId)?.name?.trim() || "Plan";
+    setDuplicateName(`${base} (copy)`);
+    setDuplicateClearCheckoff(false);
+    setDuplicateOpen(true);
+  }, [duplicateTrigger, selectedProfileId, profiles]);
 
   const shouldAskToSwitch = () => {
     if (selectedProfileId == null) return false;

@@ -208,10 +208,11 @@
     <header class="hero">
       <img class="hero-logo" src="logo.png" alt="Print Partner logo" width="88" height="88">
       <h1>Print Partner</h1>
-      <p class="tagline">Self-hostable web workflow for layered STL kits — sync repos, compose builds, export by role, track prints.</p>
+      <p class="tagline">Self-hostable web workflow for layered STL kits — sync repos, compose builds, export by role, track prints. Optional kit advisor with your Anthropic/OpenAI key or local Ollama.</p>
       <nav class="hero-nav" aria-label="Site links">
         <a href="https://github.com/poitee/PrintPartnerPartner">GitHub</a>
         <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/INSTALL.md">Install guide</a>
+        <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/KIT_ADVISOR.md">Kit advisor</a>
         <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/README.md">README</a>
         <a href="https://github.com/sponsors/poitee">Sponsor</a>
       </nav>
@@ -221,10 +222,8 @@
         <span class="pipeline-step">Build</span>
         <span class="pipeline-arrow" aria-hidden="true">→</span>
         <span class="pipeline-step">Review</span>
-        <span class="pipeline-arrow" aria-hidden="true">→</span>
-        <span class="pipeline-step">Checkoff</span>
       </div>
-      <p class="pipeline-note">Plan management — <strong>Create build</strong>, <strong>Manage builds</strong> on Build, or sidebar <strong>Builds</strong></p>
+      <p class="pipeline-note">Plan management — <strong>Create build</strong>, <strong>Manage builds</strong> on Build, or sidebar <strong>Builds</strong>. Print checkoff lives on <strong>Review</strong>.</p>
     </header>
 
     <section>
@@ -237,6 +236,7 @@ docker compose pull && docker compose up -d</code></pre>
       <div class="cta-row">
         <a class="cta" href="https://github.com/poitee/PrintPartnerPartner">View on GitHub</a>
         <a class="cta cta-secondary" href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/INSTALL.md">Install guide</a>
+        <a class="cta cta-secondary" href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/KIT_ADVISOR.md">Kit advisor</a>
       </div>
     </section>
 
@@ -245,9 +245,14 @@ docker compose pull && docker compose up -d</code></pre>
       <ul>
         <li><strong>Sources</strong> — GitHub, local folders, or zips; categories; import rules; STL search; update badges.</li>
         <li><strong>Build</strong> — attach layers, pick files, role filament colors (live previews), Update build, share or export.</li>
-        <li><strong>Review</strong> — validation by role and filament, 3D previews, quantity edits, Export STLs.</li>
-        <li><strong>Checkoff</strong> — per-unit progress, printable checklist, export missing STLs.</li>
+        <li><strong>Review</strong> — validation by role and filament, 3D previews, quantity edits, Export STLs/3MF, print checkoff, export missing STLs.</li>
       </ul>
+    </section>
+
+    <section>
+      <h2>Optional kit advisor</h2>
+      <p>Bring your own <strong>Anthropic</strong> or <strong>OpenAI</strong> API key, or run <strong>Ollama</strong> fully local — configure under <strong>Settings → AI assistant</strong>. The advisor researches kits, can search the web, and proposes plan changes as Apply cards (nothing writes until you confirm). The app works fully without AI.</p>
+      <p><a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/KIT_ADVISOR.md">Kit advisor guide →</a></p>
     </section>
 
     <section>
@@ -301,7 +306,7 @@ docker compose pull && docker compose up -d</code></pre>
 
       <div class="shot-block">
         <p class="shot-title">Review</p>
-        <p class="shot-desc">Validation summary, parts list with 3D previews, Export STLs.</p>
+        <p class="shot-desc">Validation summary, parts list with 3D previews, exports, and print checkoff.</p>
         <div class="theme-pair">
           <figure>
             <img src="screenshots/light/review.png" alt="Review — light theme" loading="lazy">
@@ -315,15 +320,30 @@ docker compose pull && docker compose up -d</code></pre>
       </div>
 
       <div class="shot-block">
-        <p class="shot-title">Checkoff</p>
-        <p class="shot-desc">Per-unit print progress with on-scroll 3D thumbnails and export actions.</p>
+        <p class="shot-title">AI assistant (Settings)</p>
+        <p class="shot-desc">Provider (Anthropic / OpenAI / Ollama), search, URL research, and budgets.</p>
         <div class="theme-pair">
           <figure>
-            <img src="screenshots/light/checkoff.png" alt="Checkoff — light theme" loading="lazy">
+            <img src="screenshots/light/settings-ai.png" alt="AI assistant settings — light theme" loading="lazy">
             <figcaption>Light</figcaption>
           </figure>
           <figure>
-            <img src="screenshots/dark/checkoff.png" alt="Checkoff — dark theme" loading="lazy">
+            <img src="screenshots/dark/settings-ai.png" alt="AI assistant settings — dark theme" loading="lazy">
+            <figcaption>Dark</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="shot-block">
+        <p class="shot-title">Kit advisor</p>
+        <p class="shot-desc">Header Advisor sheet — chat, research tools, Apply / Dismiss cards.</p>
+        <div class="theme-pair">
+          <figure>
+            <img src="screenshots/light/advisor.png" alt="Kit advisor — light theme" loading="lazy">
+            <figcaption>Light</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/dark/advisor.png" alt="Kit advisor — dark theme" loading="lazy">
             <figcaption>Dark</figcaption>
           </figure>
         </div>

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   applyStackToggle,
+  checkoffUnitTotals,
   formatCheckoffSummary,
+  formatPrintedUnitsLine,
+  lastCompletedUnit,
+  nextUnitToComplete,
+  partProgressPercent,
+  partProgressTone,
   printedCountFromUnits,
 } from "./checkoffProgress";
 
@@ -22,6 +28,42 @@ describe("printedCountFromUnits", () => {
   });
 });
 
+describe("checkoffUnitTotals", () => {
+  it("sums units and percent", () => {
+    expect(
+      checkoffUnitTotals([
+        { quantity_effective: 2, printed_count: 1, missing: true },
+        { quantity_effective: 1, printed_count: 1, missing: false },
+      ]),
+    ).toEqual({
+      printedUnits: 2,
+      totalUnits: 3,
+      remainingUnits: 1,
+      percent: 66,
+    });
+  });
+
+  it("handles empty", () => {
+    expect(checkoffUnitTotals([])).toEqual({
+      printedUnits: 0,
+      totalUnits: 0,
+      remainingUnits: 0,
+      percent: 0,
+    });
+  });
+});
+
+describe("formatPrintedUnitsLine", () => {
+  it("matches mock phrasing", () => {
+    expect(
+      formatPrintedUnitsLine([
+        { quantity_effective: 2, printed_count: 1, missing: true },
+        { quantity_effective: 1, printed_count: 1, missing: false },
+      ]),
+    ).toBe("2 of 3 printed");
+  });
+});
+
 describe("formatCheckoffSummary", () => {
   it("sums only visible parts", () => {
     const text = formatCheckoffSummary([
@@ -35,5 +77,24 @@ describe("formatCheckoffSummary", () => {
     expect(formatCheckoffSummary([])).toBe(
       "0/0 parts fully printed · 0/0 units",
     );
+  });
+});
+
+describe("partProgressTone / percent", () => {
+  it("classifies empty / partial / done", () => {
+    expect(partProgressTone(0, 2)).toBe("empty");
+    expect(partProgressTone(1, 2)).toBe("partial");
+    expect(partProgressTone(2, 2)).toBe("done");
+    expect(partProgressPercent(1, 2)).toBe(50);
+    expect(partProgressPercent(0, 0)).toBe(0);
+  });
+});
+
+describe("unit steppers", () => {
+  it("finds next and last completed indices", () => {
+    expect(nextUnitToComplete([true, false, false])).toBe(1);
+    expect(nextUnitToComplete([true, true])).toBe(-1);
+    expect(lastCompletedUnit([true, true, false])).toBe(1);
+    expect(lastCompletedUnit([false, false])).toBe(-1);
   });
 });

@@ -18,6 +18,8 @@
   ·
   <a href="#quick-start--docker-self-host">Quick start</a>
   ·
+  <a href="#ai-kit-advisor-optional">AI kit advisor</a>
+  ·
   <a href="#screenshots">Screenshots</a>
   ·
   <a href="docs/ARCHITECTURE.md">Architecture</a>
@@ -26,12 +28,13 @@
 </p>
 
 <p align="center">
-  <code>Sources</code> → <code>Build</code> → <code>Review</code> → <code>Checkoff</code>
+  <code>Sources</code> → <code>Build</code> → <code>Review</code>
 </p>
 
 <p align="center">
   <sub>
     Plan management — header <strong>Create build</strong>, <strong>Manage builds</strong> on Build, or the sidebar <strong>Builds</strong> page.
+    Print checkoff lives on <strong>Review</strong> (legacy <code>/checkoff</code> redirects there).
   </sub>
 </p>
 
@@ -39,6 +42,7 @@
   <sub>
     Ships as a single Docker container — <strong>Fastify</strong> API + <strong>React</strong> SPA on one port.
     Warm UI with <strong>light</strong>, <strong>dark</strong>, or <strong>system</strong> theme. Data stays in a volume you control.
+    Optional <strong>kit advisor</strong> (bring your own Anthropic / OpenAI key, or run <strong>Ollama</strong> fully local).
     Multi-tenant <strong>SaaS</strong> mode (Postgres + S3 + OAuth) is available for hosted deployments.
   </sub>
 </p>
@@ -51,14 +55,50 @@
 |------|--------------------|
 | **Sources** | Add GitHub repos, local folders, or zips; assign categories; search STLs across every synced repo; see **update available** badges; sync and set import rules. |
 | **Build** | **Manage builds** (create/switch plans), attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), **Update build** when stale, kit/manifest options, inline repo **Docs**, export STLs or share a plan bundle. |
-| **Review** | Confirm a validation summary grouped by role and filament, browse the full included-parts list with 3D STL previews, edit quantities, and **Export STLs** by role and folder. |
-| **Checkoff** | Track per-unit print progress (saved per plan), filter missing/done, print the checklist, and **Export missing STLs** for the next batch. |
+| **Review** | Confirm validation by role and filament, browse included parts with 3D previews, edit quantities, **Export STLs** / **3MF**, and track **print checkoff** (per-unit progress, printable checklist, **Export missing STLs**). |
 
-**Managing builds** (not a pipeline step): use the header **Create build** button and plan picker, the collapsible **Manage builds** panel on Build, or the **Builds** page in the sidebar to create, rename, duplicate, and delete plans. The active plan is shared across Build, Review, and Checkoff.
+**Managing builds** (not a pipeline step): use the header **Create build** button and plan picker, the collapsible **Manage builds** panel on Build, or the **Builds** page in the sidebar to create, rename, duplicate, and delete plans. The active plan is shared across Build and Review.
 
-**Tips:** **⌘K / Ctrl+K** opens the command palette (sync, recompute, exports, navigation). Collapse the left sidebar to an icon rail; the first-run **Progress** widget hides after you complete Sources through Checkoff once. Open **Help** in the sidebar for the full workflow guide.
+**Kit advisor (optional AI):** research kits and mods with web search, paste a product/guide URL, walk decisions with you, and propose changes as **Apply** cards — nothing mutates until you confirm. Configure under **Settings → AI assistant**. Full guide: [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md).
 
-Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Spoolman instance in Settings to pick filaments from your inventory on Build and see read-only spool remaining weights in Review / Checkoff.
+**Tips:** **⌘K / Ctrl+K** opens the command palette (sync, recompute, exports, navigation). Collapse the left sidebar to an icon rail; the first-run **Progress** widget hides after you complete Sources → Build → Review once. Open **Help** in the sidebar for the full workflow guide.
+
+Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Spoolman instance in Settings to pick filaments from your inventory on Build and see read-only spool remaining weights in Review.
+
+---
+
+## AI kit advisor (optional)
+
+The app works fully **without** AI. When you want help researching kits, comparing mods, or walking a build, turn on the **kit advisor**.
+
+Configure it in the UI: **Settings → AI assistant**. Env vars are only an operator fallback when no Settings integration is saved (see [`web/DEPLOY.md`](web/DEPLOY.md)).
+
+### Bring your own AI account
+
+| Provider | What you need |
+|----------|----------------|
+| **Anthropic** | An Anthropic API key + model (default Claude Sonnet). |
+| **OpenAI** | An OpenAI API key + model (default `gpt-4o-mini`), or any **OpenAI-compatible** base URL. |
+
+Paste the key in Settings (write-only; never shown again). Keys stay on your server / tenant — not in the browser after save.
+
+### Run fully local with Ollama
+
+Use **[Ollama](https://ollama.com/)** on the same machine (or LAN) for a free, offline-capable advisor:
+
+1. Install Ollama and pull a model (`ollama pull llama3.1`).
+2. In **Settings → AI assistant**, set provider **Ollama**, URL (e.g. `http://127.0.0.1:11434` for local Node, or `http://host.docker.internal:11434` when Print Partner runs in Docker), and the exact model name from `ollama list`.
+3. Click **Test connection**, then open **Advisor** in the header.
+
+Docker + host Ollama needs Ollama listening beyond loopback (`OLLAMA_HOST=0.0.0.0`) — details in [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) and [`web/DEPLOY.md`](web/DEPLOY.md).
+
+### Optional web search & URL research
+
+- **Search:** Auto / DuckDuckGo (free) / Brave / Exa (API key) / Disabled — all in Settings.
+- **URL research:** paste a guide or product page; the advisor fetches text (SSRF-guarded) and proposes Apply cards — never silent writes.
+- Soft **daily request/token budgets** are optional.
+
+More: [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) · operator env table in [`web/DEPLOY.md`](web/DEPLOY.md).
 
 ---
 
@@ -101,20 +141,30 @@ Sidebar **Builds** page plus the same controls in **Manage builds** on Build and
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/review.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/review.png">
-  <img src="docs/screenshots/light/review.png" alt="Review — validation summary by role and filament with 3D STL previews and Export STLs.">
+  <img src="docs/screenshots/light/review.png" alt="Review — validation, parts with 3D previews, exports, and print checkoff.">
 </picture>
 
-Validation summary by role and filament, full parts list with **3D previews**, quantity edits, **Export STLs**.
+Validation by role and filament, parts list with **3D previews**, quantity edits, STL/3MF export, and **print checkoff**.
 
-### Checkoff
+### AI assistant (Settings)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/checkoff.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/checkoff.png">
-  <img src="docs/screenshots/light/checkoff.png" alt="Checkoff — per-unit print progress with 3D thumbnails, Print, Export checklist, and Export missing STLs.">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/settings-ai.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/settings-ai.png">
+  <img src="docs/screenshots/light/settings-ai.png" alt="Settings — AI assistant card with provider, model, search, and budgets.">
 </picture>
 
-Per-unit progress, on-scroll **3D thumbnails**, printable checklist, **Export missing STLs** for the next batch.
+**Settings → AI assistant** — Anthropic, OpenAI, or Ollama; web search; URL research; budgets.
+
+### Kit advisor
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/advisor.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/advisor.png">
+  <img src="docs/screenshots/light/advisor.png" alt="Kit advisor sheet open beside the build workflow.">
+</picture>
+
+Header **Advisor** opens the kit advisor sheet — chat, research tools, and Apply / Dismiss cards.
 
 ---
 
@@ -143,6 +193,7 @@ docker compose up --build
 3. Run `docker compose pull && docker compose up -d` (or `docker compose up --build` to build from source).
 4. Open [http://localhost:8080](http://localhost:8080).
 5. Add a **Source** on the Sources page, then create a build with **Create build** in the header or **Manage builds** on Build (or open **Builds** in the sidebar).
+6. Optional: open **Settings → AI assistant** to connect Anthropic, OpenAI, or local Ollama — see [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md).
 
 ### Environment variables (self-host)
 
@@ -168,11 +219,11 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped: compare against this version instead of GitHub |
-| `AI_ENABLED` / `AI_PROVIDER` / keys | unset | Kit advisor env fallback — prefer **Settings → Optional integrations**; see [`web/DEPLOY.md`](web/DEPLOY.md) |
+| Kit advisor (`AI_*`, `SEARCH_*`, Ollama, …) | unset | **Prefer Settings → AI assistant.** Env is operator/SaaS fallback only — full table in [`web/DEPLOY.md`](web/DEPLOY.md) |
 
 The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker upgrade: `docker compose pull && docker compose up -d`.
 
-See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables and desktop-data migration.
+See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables, kit-advisor env, search backends, and desktop-data migration.
 
 ---
 
@@ -265,7 +316,9 @@ Print Partner builds on work shared by the **3D Printing Community** and by **[T
 
 - [Project site (GitHub Pages)](https://poitee.github.io/PrintPartnerPartner/) — landing page with workflow screenshots
 - [`docs/INSTALL.md`](docs/INSTALL.md) — beginner Docker install and first run
-- [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, and desktop-data migration
+- [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) — kit advisor: Anthropic, OpenAI, or local Ollama
+- [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, kit-advisor operator reference
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design
+- [`docs/API.md`](docs/API.md) — HTTP API overview (including `/assistant/*`)
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
 - [`LICENSE`](LICENSE) — full license text

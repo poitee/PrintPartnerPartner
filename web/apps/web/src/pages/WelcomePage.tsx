@@ -57,9 +57,9 @@ export default function WelcomePage() {
         <EmptyState
           icon={Hammer}
           title="You're set up"
-          description="Continue on Build to pick files and update your plan."
+          description="Continue on Plan to pick files and update your kit."
           action={{
-            label: "Open Build",
+            label: "Open Plan",
             onClick: () => {
               window.location.href = buildRoute(profiles[0]?.id ?? null);
             },
@@ -74,7 +74,7 @@ export default function WelcomePage() {
       <header className="space-y-1 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">Welcome to Print Partner</h1>
         <p className="text-sm text-muted-foreground">
-          Self-hosted workflow for layered STL kits — Sources → Build → Review.
+          Self-hosted workflow for layered STL kits — Library → Plan → Parts → Progress.
         </p>
       </header>
 

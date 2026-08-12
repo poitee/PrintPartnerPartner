@@ -12,13 +12,24 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: "text-muted-foreground",
 };
 
-export default function JobTray() {
+type Props = {
+  /** When true, rail is icon-width; keeps tray aligned with main column. */
+  sidebarCollapsed?: boolean;
+};
+
+/** Async job status strip — stacks above PlanTray via --plan-tray-height. */
+export default function JobTray({ sidebarCollapsed = false }: Props) {
   const { activeJobs, clearJob } = useJobContext();
   if (activeJobs.length === 0) return null;
 
   return (
     <footer
-      className="job-tray fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-sm lg:left-56"
+      className={cn(
+        "job-tray fixed left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-sm",
+        "bottom-[calc(var(--plan-tray-height,0px)+var(--mobile-stage-height,0px))]",
+        "lg:left-[var(--app-sidebar-width,14rem)]",
+        sidebarCollapsed && "lg:left-[4.25rem]",
+      )}
       role="status"
       aria-live="polite"
     >
@@ -33,7 +44,10 @@ export default function JobTray() {
           const canDismiss = !isActive;
 
           return (
-            <div key={job.jobId || job.kind} className="flex items-center gap-3 px-5 py-2.5 text-sm">
+            <div
+              key={job.jobId || job.kind}
+              className="relative flex items-center gap-3 px-5 py-2.5 text-sm"
+            >
               {isActive ? (
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" aria-hidden />
               ) : null}

@@ -3,13 +3,23 @@ import {
   buildRoute,
   buildsRoute,
   checkoffRoute,
+  exportRoute,
   isBuildPath,
   isBuildsPath,
   isCheckoffPath,
+  isExportPath,
   isKitStudioPath,
+  isLibraryPath,
+  isPartsPath,
+  isPlanPath,
   isPlanWorkflowPath,
+  isProgressPath,
   isReviewPath,
+  libraryRoute,
+  partsRoute,
+  planRoute,
   planStudioRoute,
+  progressRoute,
   reviewRoute,
   withProfile,
 } from "./routes";
@@ -29,21 +39,26 @@ describe("withProfile", () => {
 });
 
 describe("planStudioRoute", () => {
-  it("redirects legacy studio links to build", () => {
-    expect(planStudioRoute(7)).toBe("/build?profile=7");
+  it("redirects legacy studio links to plan", () => {
+    expect(planStudioRoute(7)).toBe("/plan?profile=7");
   });
 });
 
 describe("workflow routes", () => {
-  it("build, builds, and review include profile when provided", () => {
-    expect(buildRoute(5)).toBe("/build?profile=5");
+  it("canonical helpers include profile when provided", () => {
+    expect(libraryRoute()).toBe("/library");
+    expect(planRoute(5)).toBe("/plan?profile=5");
+    expect(partsRoute(5)).toBe("/parts?profile=5");
+    expect(progressRoute(5)).toBe("/progress?profile=5");
+    expect(exportRoute(5)).toBe("/export?profile=5");
     expect(buildsRoute(5)).toBe("/builds?profile=5");
-    expect(reviewRoute(5)).toBe("/review?profile=5");
   });
 
-  it("checkoffRoute aliases to review (Checkoff folded into Review)", () => {
-    expect(checkoffRoute(5)).toBe("/review?profile=5");
-    expect(checkoffRoute(null)).toBe("/review");
+  it("legacy aliases point at canonical paths", () => {
+    expect(buildRoute(5)).toBe("/plan?profile=5");
+    expect(reviewRoute(5)).toBe("/parts?profile=5");
+    expect(checkoffRoute(5)).toBe("/progress?profile=5");
+    expect(checkoffRoute(null)).toBe("/progress");
   });
 });
 
@@ -53,20 +68,35 @@ describe("path matchers", () => {
     expect(isKitStudioPath("/build")).toBe(false);
   });
 
-  it("detects build paths", () => {
+  it("detects stage paths including legacy aliases", () => {
+    expect(isLibraryPath("/library")).toBe(true);
+    expect(isLibraryPath("/sources")).toBe(true);
     expect(isBuildPath("/build")).toBe(true);
     expect(isBuildPath("/plan")).toBe(true);
+    expect(isPlanPath("/plan")).toBe(true);
     expect(isBuildsPath("/builds")).toBe(true);
+    expect(isPartsPath("/parts")).toBe(true);
+    expect(isPartsPath("/review")).toBe(true);
+    expect(isProgressPath("/progress")).toBe(true);
+    expect(isProgressPath("/checkoff")).toBe(true);
+    expect(isExportPath("/export")).toBe(true);
     expect(isReviewPath("/review")).toBe(true);
+    expect(isReviewPath("/parts")).toBe(true);
     expect(isReviewPath("/checkoff")).toBe(true);
+    expect(isReviewPath("/progress")).toBe(true);
     expect(isCheckoffPath("/checkoff")).toBe(true);
+    expect(isCheckoffPath("/progress")).toBe(true);
     expect(isCheckoffPath("/review")).toBe(false);
   });
 
   it("detects plan workflow paths", () => {
+    expect(isPlanWorkflowPath("/library")).toBe(true);
     expect(isPlanWorkflowPath("/build")).toBe(true);
     expect(isPlanWorkflowPath("/builds")).toBe(true);
     expect(isPlanWorkflowPath("/plan")).toBe(true);
+    expect(isPlanWorkflowPath("/parts")).toBe(true);
+    expect(isPlanWorkflowPath("/progress")).toBe(true);
+    expect(isPlanWorkflowPath("/export")).toBe(true);
     expect(isPlanWorkflowPath("/review")).toBe(true);
     expect(isPlanWorkflowPath("/checkoff")).toBe(true);
     expect(isPlanWorkflowPath("/plans/3/studio")).toBe(true);

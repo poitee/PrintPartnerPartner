@@ -26,7 +26,7 @@ export default function BuildsPage() {
           selectedProfileId != null ? (
             <Button className="min-h-10 w-full sm:w-auto" asChild>
               <Link to={buildRoute(selectedProfileId)}>
-                Open Build{activeName ? `: ${activeName}` : ""}
+                Open Plan{activeName ? `: ${activeName}` : ""}
               </Link>
             </Button>
           ) : undefined

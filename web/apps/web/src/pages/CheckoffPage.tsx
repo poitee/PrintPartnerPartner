@@ -1,43 +1,55 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ClipboardCheck, CheckSquare, ChevronDown, Printer } from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  type DragEndEvent,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { ClipboardCheck, CheckSquare, Printer } from "lucide-react";
 import { toast } from "sonner";
 import StaleBuildBanner from "../components/StaleBuildBanner";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import EmptyState from "../components/layout/EmptyState";
-import CheckoffMobilePartCard from "../components/checkoff/CheckoffMobilePartCard";
+import SortableProgressPart from "../components/checkoff/SortableProgressPart";
 import PartPreviewDialog from "../components/parts/PartPreviewDialog";
 import PartThumbExpandButton from "../components/parts/PartThumbExpandButton";
 import SpoolRemainingBadge from "../components/SpoolRemainingBadge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "../components/ui/dropdown-menu";
-import {
-  startExportChecklistHtml,
-  startExportStlPack,
   startRecompute,
   type ReviewPart,
-  type StlPackGroupBy,
 } from "../api/engine";
-import { buildRoute, reviewRoute } from "../lib/routes";
-import { completeExportDownload } from "../lib/exportActions";
-import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
+import { exportRoute, partsRoute, planRoute } from "../lib/routes";
 import { groupCheckoffParts } from "../lib/checkoffGroups";
-import { formatCheckoffSummary } from "../lib/checkoffProgress";
+import {
+  checkoffUnitTotals,
+  formatPrintedUnitsLine,
+  lastCompletedUnit,
+  nextUnitToComplete,
+} from "../lib/checkoffProgress";
 import {
   loadPersistedCheckoffUi,
   savePersistedCheckoffUi,
   type CheckoffFilterMode,
 } from "../lib/persistedCheckoffUi";
+import {
+  mergeVisibleReorder,
+  moveItemById,
+  reconcileOrder,
+  sortByPreferredOrder,
+} from "../lib/reorderList";
 import { flattenReviewParts } from "../lib/reviewParts";
 import { useCopilotUiOptional } from "../context/CopilotUiContext";
 import { useProfileSelection } from "../context/ProfileContext";
@@ -124,6 +136,12 @@ function CheckoffSheetRow({
   );
 }
 
+const FILTER_MODES: { mode: CheckoffFilterMode; label: string }[] = [
+  { mode: "missing", label: "Missing" },
+  { mode: "done", label: "Done" },
+  { mode: "all", label: "All" },
+];
+
 export default function CheckoffPage() {
   const navigate = useNavigate();
   const { health, error: engineError } = useEngineHealth();
@@ -135,11 +153,9 @@ export default function CheckoffPage() {
     reload,
     revision,
     loadedRevision,
-    progressSummary,
     toggleUnit,
     busyPartId,
   } = usePlanWorkspace();
-  const { busy: exportBusy, message, runJob } = useJobRunner("export");
   const recomputeJob = useJobRunner("recompute");
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
   const persistedUi = useMemo(() => loadPersistedCheckoffUi(), []);
@@ -149,6 +165,9 @@ export default function CheckoffPage() {
   const [continuousPrintLayout, setContinuousPrintLayout] = useState(
     persistedUi.continuousPrintLayout,
   );
+  const [partOrderByPlanId, setPartOrderByPlanId] = useState(
+    () => persistedUi.partOrderByPlanId,
+  );
   const [previewPart, setPreviewPart] = useState<ReviewPart | null>(null);
   const [printPrep, setPrintPrep] = useState(false);
   const sheetRef = useRef<HTMLElement>(null);
@@ -156,6 +175,11 @@ export default function CheckoffPage() {
   const copilot = useCopilotUiOptional();
   const [pendingPreviewId, setPendingPreviewId] = useState<number | null>(null);
   const appliedIntentSeqRef = useRef(0);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   useEffect(() => {
     const state = location.state as { previewPartId?: number } | null;
@@ -224,13 +248,18 @@ export default function CheckoffPage() {
   }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
 
   useEffect(() => {
-    savePersistedCheckoffUi({ filter, compactMode, continuousPrintLayout });
-  }, [filter, compactMode, continuousPrintLayout]);
+    savePersistedCheckoffUi({
+      filter,
+      compactMode,
+      continuousPrintLayout,
+      partOrderByPlanId,
+    });
+  }, [filter, compactMode, continuousPrintLayout, partOrderByPlanId]);
 
   const planName =
     profiles.find((p) => p.id === selectedProfileId)?.name ??
     review?.plan_name ??
-    "Checkoff";
+    "Progress";
   const buildStale = profiles.find((p) => p.id === selectedProfileId)?.build_stale ?? false;
 
   const onUpdateBuild = () => {
@@ -253,6 +282,17 @@ export default function CheckoffPage() {
     return flattenReviewParts(review.part_groups).filter((p) => p.included);
   }, [review]);
 
+  const planPartOrder = useMemo(() => {
+    const preferred =
+      selectedProfileId == null
+        ? []
+        : (partOrderByPlanId[String(selectedProfileId)] ?? []);
+    return reconcileOrder(
+      preferred,
+      includedParts.map((p) => p.id),
+    );
+  }, [includedParts, partOrderByPlanId, selectedProfileId]);
+
   const filtered = useMemo(() => {
     let rows = includedParts;
     if (filter === "missing") rows = rows.filter((p) => p.missing);
@@ -266,14 +306,35 @@ export default function CheckoffPage() {
           (p.filament_display || "").toLowerCase().includes(q),
       );
     }
-    return rows;
-  }, [includedParts, filter, search]);
+    return sortByPreferredOrder(rows, planPartOrder, (p) => p.id);
+  }, [includedParts, filter, search, planPartOrder]);
+
+  const onProgressDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (selectedProfileId == null) return;
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const visibleBefore = filtered.map((p) => p.id);
+      const visibleAfter = moveItemById(
+        visibleBefore,
+        Number(active.id),
+        Number(over.id),
+      );
+      if (visibleAfter === visibleBefore) return;
+      const nextOrder = mergeVisibleReorder(planPartOrder, visibleBefore, visibleAfter);
+      setPartOrderByPlanId((prev) => ({
+        ...prev,
+        [String(selectedProfileId)]: nextOrder,
+      }));
+    },
+    [filtered, planPartOrder, selectedProfileId],
+  );
 
   const grouped = useMemo(() => groupCheckoffParts(filtered), [filtered]);
-  const summary = progressSummary || formatCheckoffSummary(includedParts);
-  const missingCount = useMemo(() => includedParts.filter((p) => p.missing).length, [includedParts]);
+  const totals = useMemo(() => checkoffUnitTotals(includedParts), [includedParts]);
+  const printedLine = useMemo(() => formatPrintedUnitsLine(includedParts), [includedParts]);
   const loadError = workspaceError;
-  const toggleBusy = exportBusy || busyPartId != null;
+  const toggleBusy = busyPartId != null;
 
   const onToggleUnit = useCallback(
     (part: ReviewPart, unitIndex: number) => {
@@ -283,36 +344,21 @@ export default function CheckoffPage() {
     [toggleUnit],
   );
 
-  const onExportChecklist = () => {
-    if (selectedProfileId == null) return;
-    void runJob(
-      () => startExportChecklistHtml(selectedProfileId),
-      (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "Checklist export failed");
-          return;
-        }
-        completeExportDownload("Checklist HTML", snap.result);
-      },
-    );
-  };
+  const onIncrement = useCallback(
+    (part: ReviewPart) => {
+      const idx = nextUnitToComplete(part.print_units);
+      if (idx >= 0) void toggleUnit(part.id, idx, true);
+    },
+    [toggleUnit],
+  );
 
-  const onExportMissing = (groupBy: StlPackGroupBy) => {
-    if (selectedProfileId == null) return;
-    void runJob(
-      () =>
-        startExportStlPack(selectedProfileId, {
-          missing_only: true,
-          group_by: groupBy,
-        }),
-      (snap) => {
-        handleStlPackExportJobDone("Missing-parts STL", snap, {
-          pathField: "root_path",
-        });
-        if (snap.status === "done" && selectedProfileId != null) void reload(selectedProfileId);
-      },
-    );
-  };
+  const onDecrement = useCallback(
+    (part: ReviewPart) => {
+      const idx = lastCompletedUnit(part.print_units);
+      if (idx >= 0) void toggleUnit(part.id, idx, false);
+    },
+    [toggleUnit],
+  );
 
   const renderEmpty = () => {
     if (selectedProfileId == null) {
@@ -322,8 +368,8 @@ export default function CheckoffPage() {
           title="No plan selected"
           description="Choose a build plan to track print progress on the shop floor."
           action={{
-            label: "Open Build",
-            onClick: () => navigate(buildRoute(null)),
+            label: "Open Plan",
+            onClick: () => navigate(planRoute(null)),
           }}
         />
       );
@@ -333,10 +379,10 @@ export default function CheckoffPage() {
         <EmptyState
           icon={ClipboardCheck}
           title="No parts yet"
-          description="Update build on the Build page, then review parts before checkoff."
+          description="Update the plan, then review parts before tracking progress."
           action={{
-            label: "Open Build",
-            onClick: () => navigate(buildRoute(selectedProfileId)),
+            label: "Open Plan",
+            onClick: () => navigate(planRoute(selectedProfileId)),
           }}
         />
       );
@@ -362,16 +408,20 @@ export default function CheckoffPage() {
       <div className="no-print space-y-4">
         <RouteBreadcrumbs
           items={[
-            { label: "Build", to: buildRoute(selectedProfileId) },
-            { label: "Review", to: reviewRoute(selectedProfileId) },
-            { label: "Checkoff" },
+            { label: "Plan", to: planRoute(selectedProfileId) },
+            { label: "Parts", to: partsRoute(selectedProfileId) },
+            { label: "Progress" },
           ]}
         />
         <PageHeader
           icon={CheckSquare}
           accent
-          title="Checkoff"
-          description="Print this sheet and mark each unit as you finish it on the shop floor."
+          title="Progress"
+          description={
+            includedParts.length > 0
+              ? `${printedLine} · saved to this plan`
+              : "Mark each unit as you finish it on the shop floor."
+          }
           actions={
             <PageHeaderActions>
               <Button
@@ -383,45 +433,9 @@ export default function CheckoffPage() {
                 <Printer className="mr-1 h-4 w-4" />
                 Print
               </Button>
-              <Button
-                variant="secondary"
-                className="min-h-10 w-full sm:w-auto"
-                onClick={onExportChecklist}
-                disabled={selectedProfileId == null || exportBusy || !review}
-              >
-                Export checklist
+              <Button className="min-h-10 w-full sm:w-auto" asChild>
+                <Link to={exportRoute(selectedProfileId)}>Export hub</Link>
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    className="col-span-2 min-h-10 w-full sm:col-span-1 sm:w-auto"
-                    disabled={selectedProfileId == null || exportBusy || missingCount === 0}
-                  >
-                    {exportBusy ? "Exporting…" : "Export missing STLs"}
-                    <ChevronDown className="ml-1 h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuLabel>Group exported files by</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => onExportMissing("color_dir")}>
-                    <div className="flex flex-col">
-                      <span>Color + directory</span>
-                      <span className="text-xs text-muted-foreground">
-                        Keep source folders (e.g. Primary/partsDir/file.stl)
-                      </span>
-                    </div>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => onExportMissing("color")}>
-                    <div className="flex flex-col">
-                      <span>Color only</span>
-                      <span className="text-xs text-muted-foreground">
-                        Flatten all directories (e.g. Primary/file.stl)
-                      </span>
-                    </div>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
             </PageHeaderActions>
           }
         />
@@ -432,14 +446,35 @@ export default function CheckoffPage() {
           onUpdate={onUpdateBuild}
         />
 
-        <p className="hidden text-sm text-muted-foreground md:block">
-          <strong className="font-medium text-foreground">Export checklist</strong> downloads a
-          printable HTML; <strong className="font-medium text-foreground">Export missing STLs</strong>{" "}
-          downloads a ZIP of every still-unprinted unit, grouped by color and optionally source
-          folder.
-        </p>
+        {includedParts.length > 0 && (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-4">
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:max-w-xs">
+              <span
+                className="h-1.5 overflow-hidden rounded-full bg-muted"
+                role="progressbar"
+                aria-valuenow={totals.percent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`${totals.percent}% of print units completed`}
+              >
+                <span
+                  className="block h-full rounded-full bg-success transition-[width]"
+                  style={{ width: `${totals.percent}%` }}
+                />
+              </span>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {totals.percent}% · {totals.remainingUnits} remaining
+              </span>
+            </div>
+            {isMobileLayout && (
+              <span className="ml-auto font-mono text-sm tabular-nums text-muted-foreground">
+                {totals.printedUnits} / {totals.totalUnits}
+              </span>
+            )}
+          </div>
+        )}
 
-        <div className="checkoff-sticky no-print section-card flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+        <div className="checkoff-sticky flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <input
             type="search"
             className="checkoff-search w-full min-w-0 rounded-md border border-input bg-background px-3 py-2.5 text-base sm:flex-1 sm:py-1.5 sm:text-sm"
@@ -449,20 +484,32 @@ export default function CheckoffPage() {
             disabled={toggleBusy}
           />
           <div
-            className="checkoff-filter-group grid w-full grid-cols-3 gap-1 sm:flex sm:w-auto"
+            className={cn(
+              "checkoff-filter-group",
+              isMobileLayout
+                ? "flex w-full flex-wrap gap-2"
+                : "inline-flex overflow-hidden rounded-md border border-border",
+            )}
             role="group"
             aria-label="Filter"
           >
-            {(["all", "missing", "done"] as const).map((mode) => (
+            {FILTER_MODES.map(({ mode, label }) => (
               <Button
                 key={mode}
                 size="sm"
-                className="min-h-10 sm:min-h-8"
+                className={cn(
+                  isMobileLayout
+                    ? "min-h-10 rounded-full px-3.5"
+                    : "min-h-8 rounded-none border-0 px-3 shadow-none",
+                  filter === mode && isMobileLayout && "border-primary/40 bg-primary/10 text-primary",
+                  filter === mode && !isMobileLayout && "bg-primary/10 text-primary",
+                  filter !== mode && isMobileLayout && "border border-border bg-background text-muted-foreground",
+                )}
                 variant={filter === mode ? "secondary" : "ghost"}
                 onClick={() => setFilter(mode)}
                 disabled={toggleBusy}
               >
-                {mode === "all" ? "All" : mode === "missing" ? "Missing" : "Done"}
+                {label}
               </Button>
             ))}
           </div>
@@ -474,7 +521,7 @@ export default function CheckoffPage() {
                   checked={compactMode}
                   onChange={(e) => setCompactMode(e.target.checked)}
                 />
-                Compact rows
+                Compact print rows
               </label>
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
                 <input
@@ -488,111 +535,131 @@ export default function CheckoffPage() {
           )}
         </div>
 
-        <div className="no-print">
-          {summary && <p className="text-sm text-muted-foreground">{summary}</p>}
+        <div>
           {loadError && <p className="text-sm text-destructive">{loadError}</p>}
-          {message && <p className="text-sm text-muted-foreground">{message}</p>}
         </div>
       </div>
 
       {!health ? (
-        <Card>
+        <Card className="no-print">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
               {engineError
-                ? "Engine offline — start the print-partner engine to use checkoff."
+                ? "Engine offline — start the print-partner engine to use Progress."
                 : "Connecting to the engine…"}
             </p>
           </CardContent>
         </Card>
       ) : loading && !review ? (
-        <Card>
+        <Card className="no-print">
           <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Loading checkoff sheet…</p>
+            <p className="text-sm text-muted-foreground">Loading progress…</p>
           </CardContent>
         </Card>
       ) : filtered.length === 0 ? (
-        renderEmpty()
+        <div className="no-print">{renderEmpty()}</div>
       ) : (
-        <article
-          ref={sheetRef}
-          className={cn(
-            "checkoff-sheet",
-            compactMode && !isMobileLayout && "compact",
-            isMobileLayout && "checkoff-sheet-mobile",
-            printPrep && continuousPrintLayout && "checkoff-sheet-print-continuous",
-          )}
-        >
-          <header className="sheet-header">
-            <h1 className="sheet-title">{planName}</h1>
-            <p className="sheet-subtitle">
-              {filtered.length} part{filtered.length === 1 ? "" : "s"} · {summary}
-            </p>
-          </header>
+        <>
+          {/* Screen Progress list (mock Progress / phone checkoff). */}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={onProgressDragEnd}
+          >
+            <SortableContext
+              items={filtered.map((p) => p.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div
+                className="no-print flex flex-col gap-2 sm:gap-2"
+                aria-label="Reorderable progress parts"
+              >
+                {filtered.map((part) => (
+                  <SortableProgressPart
+                    key={part.id}
+                    part={part}
+                    mobile={isMobileLayout}
+                    busy={busyPartId === part.id || toggleBusy}
+                    disabled={toggleBusy}
+                    onToggleUnit={onToggleUnit}
+                    onIncrement={onIncrement}
+                    onDecrement={onDecrement}
+                    onPreview={setPreviewPart}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
 
-          {grouped.map((repo) => (
-            <section key={repo.repoLayer} className="sheet-repo">
-              <h2 className="sheet-repo-title">
-                {repo.repoLabel}
-                <span className="sheet-repo-count">{repo.partCount}</span>
-              </h2>
-              {repo.folders.map((group) => (
-                <div key={group.folder} className="sheet-folder">
-                  <h3 className="sheet-folder-title">{group.folder}</h3>
-                  {isMobileLayout && (
-                    <div className="checkoff-mobile-list no-print">
-                      {group.parts.map((part) => (
-                        <CheckoffMobilePartCard
-                          key={part.id}
-                          part={part}
-                          busy={busyPartId === part.id || toggleBusy}
-                          onToggleUnit={onToggleUnit}
-                          onPreview={setPreviewPart}
-                        />
-                      ))}
+          {/* Printable sheet — paper tokens; off-screen until print (thumbs still load). */}
+          <article
+            ref={sheetRef}
+            aria-hidden={!printPrep}
+            className={cn(
+              "checkoff-sheet",
+              compactMode && "compact",
+              printPrep && continuousPrintLayout && "checkoff-sheet-print-continuous",
+              printPrep
+                ? "pointer-events-none absolute top-0 -left-[9999px] w-[880px] print:pointer-events-auto print:static print:left-auto print:w-auto"
+                : "hidden print:block",
+            )}
+          >
+            <header className="sheet-header">
+              <h1 className="sheet-title">{planName}</h1>
+              <p className="sheet-subtitle">
+                {filtered.length} part{filtered.length === 1 ? "" : "s"} · {printedLine}
+              </p>
+            </header>
+
+            {grouped.map((repo) => (
+              <section key={repo.repoLayer} className="sheet-repo">
+                <h2 className="sheet-repo-title">
+                  {repo.repoLabel}
+                  <span className="sheet-repo-count">{repo.partCount}</span>
+                </h2>
+                {repo.folders.map((group) => (
+                  <div key={group.folder} className="sheet-folder">
+                    <h3 className="sheet-folder-title">{group.folder}</h3>
+                    <div className="sheet-table-wrap">
+                      <table className="sheet-table">
+                        <thead>
+                          <tr>
+                            <th className="sheet-cell-part">Part</th>
+                            <th className="sheet-cell-qty">Qty</th>
+                            <th className="sheet-cell-printed">Printed</th>
+                            <th className="sheet-cell-notes">Notes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.parts.map((part) => (
+                            <CheckoffSheetRow
+                              key={part.id}
+                              part={part}
+                              busy={busyPartId === part.id || toggleBusy}
+                              compact={compactMode}
+                              eagerThumbs={printPrep}
+                              onToggleUnit={onToggleUnit}
+                              onPreview={setPreviewPart}
+                            />
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                  )}
-                  <div
-                    className={cn(
-                      "sheet-table-wrap",
-                      isMobileLayout && "checkoff-print-table hidden print:block",
-                    )}
-                  >
-                    <table className="sheet-table">
-                      <thead>
-                        <tr>
-                          <th className="sheet-cell-part">Part</th>
-                          <th className="sheet-cell-qty">Qty</th>
-                          <th className="sheet-cell-printed">Printed</th>
-                          <th className="sheet-cell-notes">Notes</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.parts.map((part) => (
-                          <CheckoffSheetRow
-                            key={part.id}
-                            part={part}
-                            busy={busyPartId === part.id || toggleBusy}
-                            compact={isMobileLayout || compactMode}
-                            eagerThumbs={printPrep}
-                            onToggleUnit={onToggleUnit}
-                            onPreview={setPreviewPart}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
                   </div>
-                </div>
-              ))}
-            </section>
-          ))}
-        </article>
+                ))}
+              </section>
+            ))}
+          </article>
+        </>
       )}
 
       {review && (
         <div className="no-print flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
-            <Link to={reviewRoute(selectedProfileId)}>Back to Review</Link>
+            <Link to={partsRoute(selectedProfileId)}>Back to Parts</Link>
+          </Button>
+          <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
+            <Link to={exportRoute(selectedProfileId)}>Open Export hub</Link>
           </Button>
         </div>
       )}

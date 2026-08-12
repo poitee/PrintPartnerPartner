@@ -18,8 +18,9 @@ export default function PartThumb({
   partId,
   tintHex,
   compact,
-  sizePx = DEFAULT_THUMB_PX,
+  sizePx,
   eager = false,
+  fallbackLabel,
 }: {
   partId: number;
   tintHex?: string | null;
@@ -27,6 +28,8 @@ export default function PartThumb({
   sizePx?: number;
   /** Load immediately (e.g. before printing) instead of waiting for scroll into view. */
   eager?: boolean;
+  /** Shown while the image is loading / unavailable (e.g. filename initials). */
+  fallbackLabel?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [src, setSrc] = useState<string | null>(null);
@@ -106,11 +109,20 @@ export default function PartThumb({
     };
   }, [visible, partId, tintHex, cacheVersion]);
 
-  const px = compact ? 56 : sizePx;
+  const px = sizePx ?? (compact ? 56 : DEFAULT_THUMB_PX);
+  const label = fallbackLabel?.trim().slice(0, 3) || null;
   return (
     <div ref={ref} className="sheet-thumb" style={{ width: px, height: px }}>
       {src ? (
         <img className="sheet-thumb-img" src={src} alt="" />
+      ) : label ? (
+        <span
+          className="sheet-thumb-fallback"
+          style={tintHex ? { color: tintHex } : undefined}
+          aria-hidden
+        >
+          {label}
+        </span>
       ) : (
         <div
           className="sheet-thumb-ph"
