@@ -40,7 +40,12 @@ type JobContextValue = {
     options?: RunJobOptions,
   ) => Promise<void>;
   clearJob: (jobId?: string) => void;
-  isJobKindRunning: (kind: string) => boolean;
+  /**
+   * True when a job of `kind` is pending/running.
+   * When `sourceId` is set, only matches jobs that include that source
+   * (or jobs with no sourceIds, which mean "all sources").
+   */
+  isJobKindRunning: (kind: string, sourceId?: number) => boolean;
 };
 
 const JobContext = createContext<JobContextValue | null>(null);
@@ -101,12 +106,15 @@ export function JobProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isJobKindRunning = useCallback(
-    (kind: string) =>
-      activeJobs.some(
-        (j) =>
-          j.kind === kind &&
-          (j.status === "pending" || j.status === "running"),
-      ),
+    (kind: string, sourceId?: number) =>
+      activeJobs.some((j) => {
+        if (j.kind !== kind) return false;
+        if (j.status !== "pending" && j.status !== "running") return false;
+        if (sourceId == null) return true;
+        // Omit/empty sourceIds = unscoped busy (affects every source).
+        if (j.sourceIds == null || j.sourceIds.length === 0) return true;
+        return j.sourceIds.includes(sourceId);
+      }),
     [activeJobs],
   );
 

@@ -14,6 +14,11 @@ export function useJobRunner(kind = "job") {
     localMessage ||
     (jobForKind ? `${jobForKind.status}` : "");
 
+  const isBusyForSource = useCallback(
+    (sourceId: number) => isJobKindRunning(kind, sourceId),
+    [isJobKindRunning, kind],
+  );
+
   const runJob = useCallback(
     async (
       start: () => Promise<string>,
@@ -26,5 +31,5 @@ export function useJobRunner(kind = "job") {
     [kind, runContextJob],
   );
 
-  return { busy, message, runJob };
+  return { busy, isBusyForSource, message, runJob };
 }
