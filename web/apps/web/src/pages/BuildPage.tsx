@@ -22,13 +22,7 @@ import ShareImportSetupPanel, {
 } from "../components/share/ShareImportSetupPanel";
 import type { KitImportJobResult } from "../api/engine";
 import { Badge } from "../components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../components/ui/select";
+import { Combobox } from "../components/ui/combobox";
 import { Button } from "../components/ui/button";
 import {
   DropdownMenu,
@@ -307,6 +301,16 @@ function BuildPageContent() {
   const addonSourceOptions = useMemo(
     () => sources.filter((s) => !attachedSourceIds.has(s.id)),
     [sources, attachedSourceIds],
+  );
+
+  const baseSourceOptions = useMemo(
+    () => sources.map((s) => ({ value: String(s.id), label: s.name })),
+    [sources],
+  );
+
+  const addonComboboxOptions = useMemo(
+    () => addonSourceOptions.map((s) => ({ value: String(s.id), label: s.name })),
+    [addonSourceOptions],
   );
 
   useEffect(() => {
@@ -692,22 +696,15 @@ function BuildPageContent() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-2 p-4 pt-0">
-                  <Select
-                    value={pendingBaseSourceId || undefined}
+                  <Combobox
+                    value={pendingBaseSourceId || null}
                     onValueChange={setPendingBaseSourceId}
                     disabled={!health || selectedProfileId == null}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose base source…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {sources.map((s) => (
-                        <SelectItem key={s.id} value={String(s.id)}>
-                          {s.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Choose base source…"
+                    searchPlaceholder="Search sources…"
+                    emptyText="No sources match."
+                    options={baseSourceOptions}
+                  />
                   <Button
                     size="sm"
                     onClick={() => void onSetBaseSource()}
@@ -770,28 +767,26 @@ function BuildPageContent() {
 
             {(attachOpen || addonSourceId) && (
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                <Select
-                  value={addonSourceId || undefined}
+                <Combobox
+                  value={addonSourceId || null}
                   onValueChange={setAddonSourceId}
-                  disabled={!health || selectedProfileId == null || needsBaseSource}
-                >
-                  <SelectTrigger className="min-h-10 w-full min-w-0 flex-1 sm:w-auto">
-                    <SelectValue placeholder="Attach another source…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {addonSourceOptions.length === 0 ? (
-                      <SelectItem value="__none" disabled>
-                        All sources already attached
-                      </SelectItem>
-                    ) : (
-                      addonSourceOptions.map((s) => (
-                        <SelectItem key={s.id} value={String(s.id)}>
-                          {s.name}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+                  disabled={
+                    !health ||
+                    selectedProfileId == null ||
+                    needsBaseSource ||
+                    addonSourceOptions.length === 0
+                  }
+                  placeholder={
+                    addonSourceOptions.length === 0
+                      ? "All sources already attached"
+                      : "Attach another source…"
+                  }
+                  searchPlaceholder="Search sources…"
+                  emptyText="No sources match."
+                  options={addonComboboxOptions}
+                  className="min-h-10 w-full min-w-0 flex-1 sm:w-auto"
+                  contentClassName="min-w-[16rem]"
+                />
                 <Button
                   size="sm"
                   className="min-h-10 w-full sm:w-auto"

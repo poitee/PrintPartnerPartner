@@ -724,7 +724,7 @@ export default function RoleFilamentPicker({
       >
         {!compact && (
           <span className="mr-auto text-xs text-muted-foreground">
-            Pick a color per role — it applies to every included part with that role. Review
+            Pick a color per role — it applies to every included part with that role. Parts
             previews update automatically.
           </span>
         )}
