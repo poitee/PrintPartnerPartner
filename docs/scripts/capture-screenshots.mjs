@@ -38,6 +38,7 @@ const outDir = resolve(
 /**
  * @typedef {{
  *   label: string;
+ *   path: string;
  *   file: string;
  *   nav?: "sidebar" | "settings" | "advisor";
  *   waitMs?: number;
@@ -48,11 +49,12 @@ const outDir = resolve(
 /** @type {Capture[]} */
 const captures = [
   {
-    label: "Sources",
+    label: "Library",
+    path: "/library",
     file: "sources.png",
     nav: "sidebar",
     ready: async (page) => {
-      await page.getByRole("heading", { name: "Sources", level: 2 }).waitFor({
+      await page.getByRole("heading", { name: "Library", level: 1 }).waitFor({
         state: "visible",
         timeout: 60_000,
       });
@@ -60,6 +62,7 @@ const captures = [
   },
   {
     label: "Builds",
+    path: "/builds",
     file: "builds.png",
     nav: "sidebar",
     ready: async (page) => {
@@ -78,11 +81,12 @@ const captures = [
     },
   },
   {
-    label: "Build",
+    label: "Plan",
+    path: "/plan",
     file: "build.png",
     nav: "sidebar",
     ready: async (page) => {
-      await page.getByRole("heading", { name: "Build", level: 2 }).waitFor({
+      await page.getByRole("heading", { name: "Plan", level: 2 }).waitFor({
         state: "visible",
         timeout: 60_000,
       });
@@ -103,12 +107,13 @@ const captures = [
     },
   },
   {
-    label: "Review",
+    label: "Parts",
+    path: "/parts",
     file: "review.png",
     nav: "sidebar",
     waitMs: 2500,
     ready: async (page) => {
-      await page.getByRole("heading", { name: "Review", level: 2 }).waitFor({
+      await page.getByRole("heading", { name: "Parts", level: 2 }).waitFor({
         state: "visible",
         timeout: 60_000,
       });
@@ -124,6 +129,7 @@ const captures = [
   },
   {
     label: "Settings AI",
+    path: "/settings",
     file: "settings-ai.png",
     nav: "settings",
     waitMs: 800,
@@ -148,6 +154,7 @@ const captures = [
   },
   {
     label: "Kit advisor",
+    path: "/plan",
     file: "advisor.png",
     nav: "advisor",
     waitMs: 1200,
@@ -177,8 +184,10 @@ async function waitForApp(page) {
 }
 
 async function clickSidebar(page, label) {
+  // Use `aside` (not `aside nav`): workflow stages live in `<nav>`, but Builds /
+  // Settings are sibling links outside that nav.
   const link = page
-    .locator("aside nav")
+    .locator("aside")
     .getByRole("link", { name: label, exact: true });
   await link.waitFor({ state: "visible", timeout: 30_000 });
   await link.click();
@@ -258,15 +267,15 @@ async function main() {
       );
     } else if (shot.nav === "advisor") {
       // Ensure we are on a workflow page so the sheet docks beside content.
-      await clickSidebar(page, "Build").catch(() => clickSidebar(page, "Sources"));
+      await clickSidebar(page, "Plan").catch(() => clickSidebar(page, "Library"));
       await openAdvisor(page);
     } else {
       await clickSidebar(page, shot.label);
       await page.waitForURL(
         (url) => {
           const path = url.pathname.replace(/\/$/, "");
-          const expected = shot.label.toLowerCase();
-          return path === `/${expected}` || path.endsWith(`/${expected}`);
+          const expected = shot.path.replace(/\/$/, "");
+          return path === expected || path.endsWith(expected);
         },
         { timeout: 30_000 },
       );

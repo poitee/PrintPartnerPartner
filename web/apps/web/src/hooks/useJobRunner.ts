@@ -18,7 +18,7 @@ export function useJobRunner(kind = "job") {
     async (
       start: () => Promise<string>,
       onDone?: (snapshot: JobSnapshot) => void,
-      options?: { profileId?: number | null },
+      options?: { profileId?: number | null; sourceIds?: number[] },
     ) => {
       setLocalMessage("");
       await runContextJob(kind, start, onDone, options);

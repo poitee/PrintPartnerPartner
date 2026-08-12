@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
@@ -72,16 +72,9 @@ export default function PlanManager({
   const [duplicateName, setDuplicateName] = useState("");
   const [duplicateClearCheckoff, setDuplicateClearCheckoff] = useState(false);
   const [switchPrompt, setSwitchPrompt] = useState<SwitchPrompt | null>(null);
+  const lastDuplicateTriggerRef = useRef(0);
 
   const selected = profiles.find((p) => p.id === selectedProfileId);
-
-  useEffect(() => {
-    if (duplicateTrigger <= 0 || selectedProfileId == null) return;
-    const base = profiles.find((p) => p.id === selectedProfileId)?.name?.trim() || "Plan";
-    setDuplicateName(`${base} (copy)`);
-    setDuplicateClearCheckoff(false);
-    setDuplicateOpen(true);
-  }, [duplicateTrigger, selectedProfileId, profiles]);
 
   const shouldAskToSwitch = () => {
     if (selectedProfileId == null) return false;
@@ -163,6 +156,13 @@ export default function PlanManager({
     setDuplicateClearCheckoff(false);
     setDuplicateOpen(true);
   };
+
+  useEffect(() => {
+    if (duplicateTrigger <= 0 || duplicateTrigger === lastDuplicateTriggerRef.current) return;
+    if (selectedProfileId == null) return;
+    lastDuplicateTriggerRef.current = duplicateTrigger;
+    openDuplicateDialog();
+  }, [duplicateTrigger, selectedProfileId, selected?.name]);
 
   const confirmDuplicate = () => {
     if (selectedProfileId == null) return;

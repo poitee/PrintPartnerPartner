@@ -121,15 +121,13 @@ export default function SourceFilePickerCard({
   const [rulesOpen, setRulesOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  const syncingJobs = activeJobs.filter(
-    (j) => j.kind === "sync" && (j.status === "pending" || j.status === "running"),
+  const activeSync = activeJobs.find(
+    (j) =>
+      j.kind === "sync" &&
+      (j.status === "pending" || j.status === "running") &&
+      (j.sourceIds == null || j.sourceIds.includes(sourceId)),
   );
-  const namedSync = syncingJobs.find((j) =>
-    j.message.toLowerCase().includes(sourceName.toLowerCase()),
-  );
-  const syncBusy =
-    Boolean(namedSync) || (syncingJobs.length === 1 && syncingJobs[0] != null);
-  const activeSync = namedSync ?? (syncingJobs.length === 1 ? syncingJobs[0] : null);
+  const syncBusy = Boolean(activeSync);
   const syncProgress =
     typeof activeSync?.progress === "number" && activeSync.progress >= 0
       ? Math.min(100, Math.round(activeSync.progress * (activeSync.progress <= 1 ? 100 : 1)))
@@ -412,22 +410,24 @@ export default function SourceFilePickerCard({
             </p>
           )}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]">
-            <ImportRulesTree
-              key={sourceId}
-              projectId={sourceId}
-              variant="inline"
-              disabled={disabled}
-              selectedFilePath={selectedFilePath}
-              onFileSelect={setSelectedFilePath}
-              onRulesChange={onPendingRulesChange}
-              initialFilter={stlFilter}
-              filterFocusSeq={stlFilterFocusSeq}
-              onSelectionStats={(selected, total, duplicates) => {
-                setSelectedCount(selected);
-                setTotalFiles(total);
-                setDuplicateBasenames(duplicates);
-              }}
-            />
+            {!rulesOpen && (
+              <ImportRulesTree
+                key={sourceId}
+                projectId={sourceId}
+                variant="inline"
+                disabled={disabled}
+                selectedFilePath={selectedFilePath}
+                onFileSelect={setSelectedFilePath}
+                onRulesChange={onPendingRulesChange}
+                initialFilter={stlFilter}
+                filterFocusSeq={stlFilterFocusSeq}
+                onSelectionStats={(selected, total, duplicates) => {
+                  setSelectedCount(selected);
+                  setTotalFiles(total);
+                  setDuplicateBasenames(duplicates);
+                }}
+              />
+            )}
             <aside className="relative rounded-md border border-border bg-muted/20 p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h4 className="text-xs font-semibold text-muted-foreground">STL preview</h4>

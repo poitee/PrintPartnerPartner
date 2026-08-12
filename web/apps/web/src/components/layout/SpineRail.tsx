@@ -127,9 +127,16 @@ export default function SpineRail({
           </div>
         ) : (
           <SidebarTooltip label="Switch plan" collapsed>
-            <div className="flex justify-center py-1" aria-hidden>
-              <Layers className="h-4 w-4 text-muted-foreground" />
-            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="mx-auto text-muted-foreground"
+              onClick={onToggleCollapsed}
+              aria-label="Switch plan"
+            >
+              <Layers className="h-4 w-4" />
+            </Button>
           </SidebarTooltip>
         )}
 

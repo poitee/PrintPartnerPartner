@@ -169,6 +169,7 @@ export default function PartsManifestTransfer({ review, sources, onApplied }: Pr
       await runImport(parsed.rows, parsed.errors);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
       setBusy(false);
     }
   };
@@ -202,6 +203,7 @@ export default function PartsManifestTransfer({ review, sources, onApplied }: Pr
       await runImport(parsed.rows, parsed.errors);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
       setBusy(false);
     }
   };

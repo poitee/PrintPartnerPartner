@@ -112,6 +112,20 @@ describe("partsManifest CSV", () => {
     expect(parsed.rows[0]!.quantity).toBe("3");
     expect(parsed.rows[0]!.source_link).toBe("https://example.com");
   });
+
+  it("neutralizes formula-injection prefixes in CSV cells", () => {
+    const empty = Object.fromEntries(PARTS_MANIFEST_HEADERS.map((h) => [h, ""])) as PartsManifestRow;
+    empty.file_name = "=HYPERLINK(\"http://evil\")";
+    empty.notes = "+cmd";
+    empty.source_name = "-1+1";
+    empty.filament_role = "@SUM(A1)";
+    empty.quantity = "1";
+    const csv = rowsToCsv([empty]);
+    expect(csv).toContain("'=HYPERLINK");
+    expect(csv).toContain("'+cmd");
+    expect(csv).toContain("'-1+1");
+    expect(csv).toContain("'@SUM(A1)");
+  });
 });
 
 describe("partsManifest XLSX", () => {
@@ -130,5 +144,69 @@ describe("partsManifest XLSX", () => {
     empty.file_name = "a.stl";
     empty.quantity = "1";
     expect(empty.notes).toBe("");
+  });
+
+  it("does not let self-closing cells swallow later cells", async () => {
+    const JSZip = (await import("jszip")).default;
+    const headerCells = PARTS_MANIFEST_HEADERS.map(
+      (h, i) =>
+        `<c r="${String.fromCharCode(65 + i)}1" t="inlineStr"><is><t>${h}</t></is></c>`,
+    ).join("");
+    // value, self-closing empty, value — old regex swallowed the third cell.
+    const dataCells = [
+      `<c r="A2" t="inlineStr"><is><t>https://example.com</t></is></c>`,
+      `<c r="B2" t="inlineStr"><is><t>part.stl</t></is></c>`,
+      `<c r="C2"/>`,
+      `<c r="D2" t="inlineStr"><is><t>1</t></is></c>`,
+    ].join("");
+    const sheetXml =
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+      `<sheetData>` +
+      `<row r="1">${headerCells}</row>` +
+      `<row r="2">${dataCells}</row>` +
+      `</sheetData></worksheet>`;
+    const zip = new JSZip();
+    zip.file(
+      "[Content_Types].xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+        `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+        `<Default Extension="xml" ContentType="application/xml"/>` +
+        `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+        `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
+        `</Types>`,
+    );
+    zip.folder("_rels")!.file(
+      ".rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+        `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>` +
+        `</Relationships>`,
+    );
+    const xl = zip.folder("xl")!;
+    xl.file(
+      "workbook.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ` +
+        `xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+        `<sheets><sheet name="Parts" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    );
+    xl.folder("_rels")!.file(
+      "workbook.xml.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+        `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+        `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>` +
+        `</Relationships>`,
+    );
+    xl.folder("worksheets")!.file("sheet1.xml", sheetXml);
+    const buf = await zip.generateAsync({ type: "arraybuffer" });
+    const parsed = await parsePartsManifestXlsx(buf);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]!.source_link).toBe("https://example.com");
+    expect(parsed.rows[0]!.file_name).toBe("part.stl");
+    expect(parsed.rows[0]!.quantity).toBe("");
+    expect(parsed.rows[0]!.printed_count).toBe("1");
   });
 });

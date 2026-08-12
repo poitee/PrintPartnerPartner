@@ -61,10 +61,12 @@ export type ManifestApplyResult = {
 };
 
 function escapeCsvCell(value: string): string {
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
+  // Neutralize spreadsheet formula injection (=, +, -, @, tab, CR).
+  const cell = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  if (/[",\r\n]/.test(cell)) {
+    return `"${cell.replace(/"/g, '""')}"`;
   }
-  return value;
+  return cell;
 }
 
 /** RFC-style CSV split that respects quoted fields. */

@@ -53,6 +53,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const {
     data: profiles = [],
     isLoading,
+    isFetched,
     error: queryError,
     refetch,
   } = useProfilesQuery(Boolean(health?.ok));
@@ -85,6 +86,8 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!isFetched) return;
+
     const previousIds = previousProfileIdsRef.current;
     const nextIds = profiles.map((p) => p.id);
     previousProfileIdsRef.current = nextIds;
@@ -93,7 +96,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (next !== undefined) {
       setSelectedProfileId(next);
     }
-  }, [profiles, selectedProfileId, setSelectedProfileId]);
+  }, [isFetched, profiles, selectedProfileId, setSelectedProfileId]);
 
   const reloadProfiles = useCallback(async () => {
     if (!health?.ok) return;

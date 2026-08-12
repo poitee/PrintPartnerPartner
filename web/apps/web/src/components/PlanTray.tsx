@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import PartThumb from "./parts/PartThumb";
 import { Button } from "./ui/button";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../context/ProfileContext";
-import { exportRoute, isExportPath, planRoute } from "../lib/routes";
+import { useFlushBuildPageSaves } from "../hooks/useFlushBuildPageSaves";
+import { exportRoute, isExportPath, isPlanPath, planRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { planPrintTotals } from "../lib/workflowStages";
 
@@ -45,6 +46,8 @@ export function partFilenameInitials(filename: string): string {
  */
 export default function PlanTray() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const flushBuildSaves = useFlushBuildPageSaves();
   const { profiles, selectedProfileId } = useProfileSelection();
   const { review, loading } = usePlanWorkspace();
   const [expanded, setExpanded] = useState(readExpanded);
@@ -187,8 +190,26 @@ export default function PlanTray() {
               {totals.printedUnits} / {totals.totalUnits} printed
             </span>
           ) : null}
-          <Button variant="outline" size="sm" className="hidden h-8 sm:inline-flex" asChild>
-            <Link to={exportRoute(selectedProfileId)}>Export hub</Link>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="hidden h-8 sm:inline-flex"
+            onClick={() => {
+              const to = exportRoute(selectedProfileId);
+              const destPath = to.split("?")[0] ?? to;
+              const leavingPlan =
+                isPlanPath(location.pathname) && !isPlanPath(destPath);
+              if (leavingPlan) {
+                void flushBuildSaves().then(() => {
+                  navigate(to);
+                });
+                return;
+              }
+              navigate(to);
+            }}
+          >
+            Export hub
           </Button>
           <Button size="sm" className="h-8" asChild>
             <Link to={planRoute(selectedProfileId)}>Open plan →</Link>

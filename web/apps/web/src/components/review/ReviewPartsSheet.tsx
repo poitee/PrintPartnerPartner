@@ -120,6 +120,7 @@ function ReviewSheetRow({
   viewMode,
   busy,
   compact,
+  eager,
   note,
   noteWarn,
   spoolmanConfigured,
@@ -137,6 +138,7 @@ function ReviewSheetRow({
   viewMode: ReviewViewMode;
   busy: boolean;
   compact: boolean;
+  eager?: boolean;
   note: string;
   noteWarn: boolean;
   spoolmanConfigured: boolean;
@@ -158,7 +160,12 @@ function ReviewSheetRow({
       <tr className={cn("sheet-row", printDone && "sheet-row-done", !part.included && "opacity-70")}>
         <td className="sheet-cell-part">
           <div className="sheet-part">
-            <PartThumbExpandButton part={part} compact={compact} onExpand={onPreview} />
+            <PartThumbExpandButton
+              part={part}
+              compact={compact}
+              eager={eager}
+              onExpand={onPreview}
+            />
             <div className="sheet-part-meta">
               <span className="sheet-filename" title={part.relative_path || part.filename}>
                 {part.filename}
@@ -216,7 +223,12 @@ function ReviewSheetRow({
     <tr className={cn("sheet-row", !part.included && "opacity-70")}>
       <td className="sheet-cell-part">
         <div className="sheet-part">
-          <PartThumbExpandButton part={part} compact={compact} onExpand={onPreview} />
+          <PartThumbExpandButton
+            part={part}
+            compact={compact}
+            eager={eager}
+            onExpand={onPreview}
+          />
           <div className="sheet-part-meta">
             <span className="sheet-filename" title={part.relative_path || part.filename}>
               {part.filename}
@@ -553,6 +565,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
                   viewMode={viewMode}
                   busy={busyPartId === part.id || Boolean(disabled)}
                   compact={isMobileLayout || ui.compactMode}
+                  eager={printPrep}
                   note={note}
                   noteWarn={noteWarn}
                   spoolmanConfigured={spoolmanConfigured}
@@ -595,12 +608,13 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div
             className="flex flex-wrap gap-1 border-b border-transparent"
-            role="tablist"
+            role="group"
             aria-label="Part grouping"
           >
             <Button
               size="sm"
               variant={groupMode === "role" && !ui.issuesOnly ? "secondary" : "ghost"}
+              aria-pressed={groupMode === "role" && !ui.issuesOnly}
               onClick={() => patchUi({ groupMode: "role", issuesOnly: false })}
               disabled={disabled}
             >
@@ -609,6 +623,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
             <Button
               size="sm"
               variant={groupMode === "source" && !ui.issuesOnly ? "secondary" : "ghost"}
+              aria-pressed={groupMode === "source" && !ui.issuesOnly}
               onClick={() => patchUi({ groupMode: "source", issuesOnly: false })}
               disabled={disabled}
             >
@@ -617,6 +632,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
             <Button
               size="sm"
               variant={ui.issuesOnly ? "secondary" : "ghost"}
+              aria-pressed={ui.issuesOnly}
               onClick={() => patchUi({ issuesOnly: true })}
               disabled={disabled}
             >
@@ -632,6 +648,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
                 size="sm"
                 className="rounded-none border-0"
                 variant={layoutMode === "grid" ? "secondary" : "ghost"}
+                aria-pressed={layoutMode === "grid"}
                 onClick={() => patchUi({ layoutMode: "grid", viewMode: "edit" })}
                 disabled={disabled}
               >
@@ -641,6 +658,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
                 size="sm"
                 className="rounded-none border-0"
                 variant={layoutMode === "table" ? "secondary" : "ghost"}
+                aria-pressed={layoutMode === "table"}
                 onClick={() => patchUi({ layoutMode: "table" })}
                 disabled={disabled}
               >
@@ -652,6 +670,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
                 <Button
                   size="sm"
                   variant={viewMode === "edit" ? "secondary" : "ghost"}
+                  aria-pressed={viewMode === "edit"}
                   onClick={() => patchUi({ viewMode: "edit" })}
                   disabled={disabled}
                 >
@@ -660,6 +679,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
                 <Button
                   size="sm"
                   variant={viewMode === "print" ? "secondary" : "ghost"}
+                  aria-pressed={viewMode === "print"}
                   onClick={() => patchUi({ viewMode: "print" })}
                   disabled={disabled}
                 >

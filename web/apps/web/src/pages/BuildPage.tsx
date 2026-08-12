@@ -115,6 +115,7 @@ function BuildPageContent() {
   const copilot = useCopilotUiOptional();
   const pendingConflictCheckRef = useRef(false);
   const appliedIntentSeqRef = useRef(0);
+  const previousSelectedProfileIdRef = useRef<number | null | undefined>(undefined);
 
   const [layers, setLayers] = useState<ProfileLayer[]>([]);
   const [sources, setSources] = useState<SourceSummary[]>([]);
@@ -242,6 +243,10 @@ function BuildPageContent() {
   }, []);
 
   useEffect(() => {
+    const previousId = previousSelectedProfileIdRef.current;
+    const profileChanged = previousId !== undefined && previousId !== selectedProfileId;
+    previousSelectedProfileIdRef.current = selectedProfileId;
+
     if (selectedProfileId == null) {
       setLayers([]);
       setAddonSourceId("");
@@ -250,14 +255,16 @@ function BuildPageContent() {
       setRoleFilaments([]);
       return;
     }
-    // Drop previous plan's attached sources / kit UI immediately so a create/switch
-    // never paints the old plan's settings under the new plan id.
-    setLayers([]);
-    setAddonSourceId("");
-    setPendingBaseSourceId("");
-    setKitFocus(null);
-    setRoleFilaments([]);
-    setLoadError(null);
+    // Reset kit/layer UI only when the profile id actually changes (not on first mount),
+    // so nav/intent kitFocus set earlier in the same commit is preserved.
+    if (profileChanged) {
+      setLayers([]);
+      setAddonSourceId("");
+      setPendingBaseSourceId("");
+      setKitFocus(null);
+      setRoleFilaments([]);
+      setLoadError(null);
+    }
 
     let cancelled = false;
     void (async () => {
