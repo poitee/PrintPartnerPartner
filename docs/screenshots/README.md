@@ -11,22 +11,24 @@ docs/screenshots/
   README.md
 ```
 
-Older `checkoff.png` files (if present) are leftover from when Checkoff was a separate sidebar page; print checkoff now lives on **Review**.
+Filenames are stable for README / GitHub Pages embeds. Sidebar labels and routes are **Library** (`/library`), **Plan** (`/plan`), **Parts** (`/parts`), plus **Builds** (`/builds`) outside the workflow `<nav>`.
+
+Older `checkoff.png` files (if present) are leftover from when Checkoff was a separate sidebar page; print checkoff now lives on **Progress**.
 
 The root README embeds **light** PNGs (readable on GitHub’s default UI). GitHub Pages uses `<picture>` elements to swap in **dark** PNGs when the visitor prefers dark mode.
 
-| File | Route / UI | Shows |
-|------|------------|-------|
-| `sources.png` | `/sources` | Source library: categories, sync status, update-available badges, global STL search |
-| `builds.png` | `/builds` | **Builds** page: active-build dropdown, create, rename, duplicate, delete |
-| `build.png` | `/build` | **Manage builds** panel expanded, role filament colors, source file pickers with STL preview |
-| `review.png` | `/review` | Validation, parts with 3D previews, exports, print checkoff |
-| `settings-ai.png` | `/settings` | **AI assistant** card (provider, search, budgets) |
-| `advisor.png` | Header **Advisor** | Kit advisor sheet open beside the workflow |
+| File | Sidebar label | Route / UI | Shows |
+|------|---------------|------------|-------|
+| `sources.png` | Library | `/library` | Source library: categories, sync status, update-available badges, global STL search |
+| `builds.png` | Builds | `/builds` | **Builds** page: active-build dropdown, create, rename, duplicate, delete |
+| `build.png` | Plan | `/plan` | **Manage builds** panel expanded, role filament colors, source file pickers with STL preview |
+| `review.png` | Parts | `/parts` | Validation, parts with 3D previews, exports, print checkoff |
+| `settings-ai.png` | Settings | `/settings` | **AI assistant** card (provider, search, budgets) |
+| `advisor.png` | Header **Advisor** | Kit advisor sheet | Kit advisor sheet open beside the workflow |
 
 ## Prerequisites (representative data)
 
-Before capturing, run the app with a populated plan so Review shows 3D previews:
+Before capturing, run the app with a populated plan so Parts shows 3D previews:
 
 1. Start the app (`docker compose up --build` or local single-port run on `:8080`). Prefer **building from this checkout** so Settings includes the current AI assistant card.
 2. Add and sync at least one source with STLs.
@@ -63,14 +65,14 @@ The script sets `localStorage` before load:
 - `print-partner.sidebar.ui.v1` — `0` (sidebar expanded)
 - `print-partner.workflow.onboarding.v1` — `1` (hide first-run Progress widget)
 
-It opens `/`, navigates via the sidebar (Sources / Builds / Build / Review / Settings), opens the header **Advisor** for the kit advisor shot, expands **Manage builds** on Build, and waits for Three.js canvases on Review.
+It opens `/`, navigates via the sidebar (Library / Builds / Plan / Parts / Settings), opens the header **Advisor** for the kit advisor shot, expands **Manage builds** on Plan, and waits for Three.js canvases on Parts. Builds is clicked from `aside` (outside the workflow `<nav>`).
 
 ## Manual capture
 
 1. Run the app (Docker or dev).
 2. In a browser at **1440×900**, set theme via **Settings** or the sidebar/header theme control.
-3. Open the app **home** (`/`), then use the sidebar to open **Sources**, **Builds**, **Build**, **Review**, and **Settings** (scroll to **AI assistant**). Open **Advisor** from the header. Save PNGs into `light/` or `dark/` as appropriate.
+3. Open the app **home** (`/`), then use the sidebar to open **Library**, **Builds**, **Plan**, **Parts**, and **Settings** (scroll to **AI assistant**). Open **Advisor** from the header. Save PNGs into `light/` or `dark/` as appropriate (keep the filenames above).
 
-**Important:** Do not paste `/sources` (or `/build`, `/builds`, `/review`, `/settings`) into the address bar on a cold load in Docker single-port mode — some paths are also API routes, so a full navigation can return raw JSON instead of the React UI. Client-side navigation from `/` avoids that.
+**Important:** Do not paste `/library` (or `/plan`, `/parts`, `/builds`, `/settings`) into the address bar on a cold load in Docker single-port mode — some paths are also API routes, so a full navigation can return raw JSON instead of the React UI. Client-side navigation from `/` avoids that.
 
-Three.js renders STL previews client-side; allow a moment for previews to load before capturing Review.
+Three.js renders STL previews client-side; allow a moment for previews to load before capturing Parts.

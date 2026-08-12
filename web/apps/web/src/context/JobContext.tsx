@@ -21,6 +21,13 @@ export type ActiveJob = {
   status: string;
   message: string;
   progress: number | null;
+  /** When set, scopes busy UI to these source IDs; omit = all sources. */
+  sourceIds?: number[];
+};
+
+type RunJobOptions = {
+  profileId?: number | null;
+  sourceIds?: number[];
 };
 
 type JobContextValue = {
@@ -30,7 +37,7 @@ type JobContextValue = {
     kind: string,
     start: () => Promise<string>,
     onDone?: (snapshot: JobSnapshot) => void,
-    options?: { profileId?: number | null },
+    options?: RunJobOptions,
   ) => Promise<void>;
   clearJob: (jobId?: string) => void;
   isJobKindRunning: (kind: string) => boolean;
@@ -108,10 +115,11 @@ export function JobProvider({ children }: { children: ReactNode }) {
       kind: string,
       start: () => Promise<string>,
       onDone?: (snapshot: JobSnapshot) => void,
-      options?: { profileId?: number | null },
+      options?: RunJobOptions,
     ) => {
       let disconnect: (() => void) | null = null;
       let finished = false;
+      const sourceIds = options?.sourceIds;
       try {
         const jobId = await start();
         const initial: ActiveJob = {
@@ -120,6 +128,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
           status: "pending",
           message: "Starting…",
           progress: null,
+          sourceIds,
         };
         setActiveJobs((prev) => upsertJob(prev, initial));
 
@@ -136,6 +145,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
               status: snap.status,
               message: snap.message,
               progress: snap.progress,
+              sourceIds,
             }),
           );
           setTimeout(() => {
@@ -151,6 +161,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
               status: ev.status,
               message: ev.message,
               progress: ev.progress,
+              sourceIds,
             }),
           );
           if (JOB_TERMINAL.has(ev.status)) {
@@ -177,6 +188,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
               status: "error",
               message: e instanceof Error ? e.message : String(e),
               progress: null,
+              sourceIds,
             }),
           );
         });
@@ -188,6 +200,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
             status: "error",
             message: e instanceof Error ? e.message : String(e),
             progress: null,
+            sourceIds,
           }),
         );
       }

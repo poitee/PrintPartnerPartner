@@ -75,6 +75,7 @@ export default function BuildSourcesPanel({
           void refetch();
         }
       },
+      { sourceIds: [sourceId] },
     );
   };
 

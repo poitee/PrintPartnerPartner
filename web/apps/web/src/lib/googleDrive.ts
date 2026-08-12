@@ -15,6 +15,7 @@ const GIS_SRC = "https://accounts.google.com/gsi/client";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 const DRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
+const GIS_LOAD_TIMEOUT_MS = 15_000;
 
 type TokenClient = {
   requestAccessToken: (opts?: { prompt?: string }) => void;
@@ -28,6 +29,7 @@ type GisWindow = Window & {
           client_id: string;
           scope: string;
           callback: (resp: { access_token?: string; error?: string }) => void;
+          error_callback?: (err: { type?: string; message?: string }) => void;
         }) => TokenClient;
       };
     };
@@ -37,23 +39,78 @@ type GisWindow = Window & {
 let gisLoad: Promise<void> | null = null;
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
+export function clearGoogleDriveTokenCache(): void {
+  cachedToken = null;
+}
+
+function isTokenRelated403(detail: string): boolean {
+  const d = detail.toLowerCase();
+  return (
+    d.includes("autherror") ||
+    d.includes("invalid_token") ||
+    d.includes("invalid credentials") ||
+    d.includes("login required") ||
+    d.includes("access_token") ||
+    d.includes("expired")
+  );
+}
+
+async function throwDriveHttpError(action: string, res: Response): Promise<never> {
+  const detail = await res.text().catch(() => "");
+  if (res.status === 401 || (res.status === 403 && isTokenRelated403(detail))) {
+    clearGoogleDriveTokenCache();
+  }
+  throw new Error(`Drive ${action} failed (${res.status}): ${detail.slice(0, 200)}`);
+}
+
 function loadGis(): Promise<void> {
   if (typeof window === "undefined") return Promise.reject(new Error("No window"));
   const w = window as GisWindow;
   if (w.google?.accounts?.oauth2) return Promise.resolve();
   if (gisLoad) return gisLoad;
   gisLoad = new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      fn();
+    };
+    const succeed = () => {
+      finish(() => {
+        if (w.google?.accounts?.oauth2) {
+          resolve();
+        } else {
+          gisLoad = null;
+          reject(new Error("Google Identity Services unavailable"));
+        }
+      });
+    };
+    const fail = (err: Error) => {
+      finish(() => {
+        gisLoad = null;
+        reject(err);
+      });
+    };
+    const timeoutId = window.setTimeout(() => {
+      fail(new Error("Timed out loading Google Identity"));
+    }, GIS_LOAD_TIMEOUT_MS);
+
     const existing = document.querySelector(`script[src="${GIS_SRC}"]`);
     if (existing) {
-      existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => reject(new Error("Failed to load Google Identity")));
+      if (w.google?.accounts?.oauth2) {
+        succeed();
+        return;
+      }
+      existing.addEventListener("load", () => succeed());
+      existing.addEventListener("error", () => fail(new Error("Failed to load Google Identity")));
       return;
     }
     const script = document.createElement("script");
     script.src = GIS_SRC;
     script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Failed to load Google Identity"));
+    script.onload = () => succeed();
+    script.onerror = () => fail(new Error("Failed to load Google Identity"));
     document.head.appendChild(script);
   });
   return gisLoad;
@@ -90,6 +147,9 @@ export async function requestGoogleDriveToken(clientId: string): Promise<string>
           expiresAt: Date.now() + 50 * 60 * 1000,
         };
         resolve(resp.access_token);
+      },
+      error_callback: (err) => {
+        reject(new Error(err.message || err.type || "Google authorization failed"));
       },
     });
     client.requestAccessToken({ prompt: "" });
@@ -134,8 +194,7 @@ export async function uploadBlobToGoogleDrive(
     body,
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Drive upload failed (${res.status}): ${detail.slice(0, 200)}`);
+    await throwDriveHttpError("upload", res);
   }
   const json = (await res.json()) as { id: string; name: string; mimeType?: string };
   return { id: json.id, name: json.name, mimeType: json.mimeType || mimeType };
@@ -152,8 +211,7 @@ export async function listGoogleDriveManifestFiles(
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Drive list failed (${res.status}): ${detail.slice(0, 200)}`);
+    await throwDriveHttpError("list", res);
   }
   const json = (await res.json()) as { files?: DriveFileRef[] };
   return json.files ?? [];
@@ -172,8 +230,7 @@ export async function downloadGoogleDriveFile(
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(`Drive download failed (${res.status}): ${detail.slice(0, 200)}`);
+    await throwDriveHttpError("download", res);
   }
   const bytes = await res.arrayBuffer();
   const lower = file.name.toLowerCase();

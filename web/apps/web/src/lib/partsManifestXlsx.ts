@@ -151,11 +151,13 @@ function readSheetMatrix(sheetXmlText: string, shared: string[]): string[][] {
   const matrix: string[][] = [];
   for (const rowMatch of rows) {
     const rowInner = rowMatch[1] ?? "";
-    const cells = [...rowInner.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*)\/>/gi)];
+    // Self-closing `<c …/>` must come first: otherwise `[^>]*` can consume the `/`
+    // and the non-greedy body then swallows later cells until the next `</c>`.
+    const cells = [...rowInner.matchAll(/<c\b([^>]*)\/>|<c\b([^>]*)>([\s\S]*?)<\/c>/gi)];
     const line: string[] = [];
     for (const cellMatch of cells) {
-      const attrs = cellMatch[1] ?? cellMatch[3] ?? "";
-      const body = cellMatch[2] ?? "";
+      const attrs = cellMatch[1] ?? cellMatch[2] ?? "";
+      const body = cellMatch[3] ?? "";
       const ref = /\br="([^"]+)"/.exec(attrs)?.[1] ?? "";
       const col = cellRefCol(ref);
       while (line.length < col) line.push("");
