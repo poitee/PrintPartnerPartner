@@ -156,6 +156,7 @@ ${build}  </build>
     if (/invalid string length|cannot create.*string/i.test(msg)) {
       throw new Error(
         "3MF model is too large to encode in memory. Try fewer parts per plate, enable missing-only, or export an STL pack instead.",
+        { cause: e },
       );
     }
     throw e;
@@ -171,6 +172,7 @@ function write3mfZip(outPath: string, modelXml: string): void {
     if (/invalid string length|cannot create.*string/i.test(msg)) {
       throw new Error(
         "3MF model is too large to encode in memory. Try fewer parts per plate, enable missing-only, or export an STL pack instead.",
+        { cause: e },
       );
     }
     throw e;

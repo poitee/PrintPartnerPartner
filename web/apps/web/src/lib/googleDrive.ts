@@ -1,0 +1,184 @@
+/**
+ * Google Drive open/save for parts manifests via Google Identity Services (token
+ * client) + Drive REST. Requires a public OAuth Web client id — never a secret.
+ *
+ * Configure either:
+ *   GOOGLE_CLIENT_ID on the API (exposed via GET /health → google_drive.client_id)
+ *   or VITE_GOOGLE_CLIENT_ID at SPA build time (dev fallback)
+ *
+ * Create an OAuth 2.0 Web client in Google Cloud Console, enable the Google Drive
+ * API, and add your app origin to Authorized JavaScript origins. Scope used:
+ * drive.file (only files the app creates/opens).
+ */
+
+const GIS_SRC = "https://accounts.google.com/gsi/client";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
+const DRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
+
+type TokenClient = {
+  requestAccessToken: (opts?: { prompt?: string }) => void;
+};
+
+type GisWindow = Window & {
+  google?: {
+    accounts: {
+      oauth2: {
+        initTokenClient: (cfg: {
+          client_id: string;
+          scope: string;
+          callback: (resp: { access_token?: string; error?: string }) => void;
+        }) => TokenClient;
+      };
+    };
+  };
+};
+
+let gisLoad: Promise<void> | null = null;
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+function loadGis(): Promise<void> {
+  if (typeof window === "undefined") return Promise.reject(new Error("No window"));
+  const w = window as GisWindow;
+  if (w.google?.accounts?.oauth2) return Promise.resolve();
+  if (gisLoad) return gisLoad;
+  gisLoad = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${GIS_SRC}"]`);
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error("Failed to load Google Identity")));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = GIS_SRC;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Google Identity"));
+    document.head.appendChild(script);
+  });
+  return gisLoad;
+}
+
+export function resolveGoogleClientId(healthClientId?: string | null): string | null {
+  const fromHealth = healthClientId?.trim() || null;
+  if (fromHealth) return fromHealth;
+  const fromVite = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() || null;
+  return fromVite;
+}
+
+export async function requestGoogleDriveToken(clientId: string): Promise<string> {
+  if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) {
+    return cachedToken.token;
+  }
+  await loadGis();
+  const w = window as GisWindow;
+  if (!w.google?.accounts?.oauth2) {
+    throw new Error("Google Identity Services unavailable");
+  }
+  return new Promise((resolve, reject) => {
+    const client = w.google!.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: DRIVE_SCOPE,
+      callback: (resp) => {
+        if (resp.error || !resp.access_token) {
+          reject(new Error(resp.error || "Google authorization failed"));
+          return;
+        }
+        cachedToken = {
+          token: resp.access_token,
+          // GIS tokens are typically ~1h; we don't get expires_in on all paths
+          expiresAt: Date.now() + 50 * 60 * 1000,
+        };
+        resolve(resp.access_token);
+      },
+    });
+    client.requestAccessToken({ prompt: "" });
+  });
+}
+
+export type DriveFileRef = {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime?: string;
+};
+
+export async function uploadBlobToGoogleDrive(
+  accessToken: string,
+  blob: Blob,
+  filename: string,
+  mimeType: string,
+): Promise<DriveFileRef> {
+  const meta = {
+    name: filename,
+    mimeType,
+  };
+  const boundary = `pp_${Date.now().toString(36)}`;
+  const metaPart =
+    `--${boundary}\r\n` +
+    `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+    `${JSON.stringify(meta)}\r\n`;
+  const fileHeader =
+    `--${boundary}\r\n` + `Content-Type: ${mimeType}\r\n\r\n`;
+  const footer = `\r\n--${boundary}--`;
+
+  const body = new Blob([metaPart, fileHeader, blob, footer], {
+    type: `multipart/related; boundary=${boundary}`,
+  });
+
+  const res = await fetch(DRIVE_UPLOAD, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body,
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Drive upload failed (${res.status}): ${detail.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as { id: string; name: string; mimeType?: string };
+  return { id: json.id, name: json.name, mimeType: json.mimeType || mimeType };
+}
+
+export async function listGoogleDriveManifestFiles(
+  accessToken: string,
+): Promise<DriveFileRef[]> {
+  const q = encodeURIComponent(
+    "(mimeType='text/csv' or mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or mimeType='application/vnd.google-apps.spreadsheet' or name contains '_parts_manifest') and trashed=false",
+  );
+  const fields = encodeURIComponent("files(id,name,mimeType,modifiedTime)");
+  const res = await fetch(`${DRIVE_FILES}?q=${q}&pageSize=25&fields=${fields}&orderBy=modifiedTime desc`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Drive list failed (${res.status}): ${detail.slice(0, 200)}`);
+  }
+  const json = (await res.json()) as { files?: DriveFileRef[] };
+  return json.files ?? [];
+}
+
+export async function downloadGoogleDriveFile(
+  accessToken: string,
+  file: DriveFileRef,
+): Promise<{ bytes: ArrayBuffer; name: string; kind: "csv" | "xlsx" }> {
+  const isGoogleSheet = file.mimeType === "application/vnd.google-apps.spreadsheet";
+  const url = isGoogleSheet
+    ? `${DRIVE_FILES}/${encodeURIComponent(file.id)}/export?mimeType=${encodeURIComponent("text/csv")}`
+    : `${DRIVE_FILES}/${encodeURIComponent(file.id)}?alt=media`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Drive download failed (${res.status}): ${detail.slice(0, 200)}`);
+  }
+  const bytes = await res.arrayBuffer();
+  const lower = file.name.toLowerCase();
+  const kind: "csv" | "xlsx" =
+    isGoogleSheet || lower.endsWith(".csv") || file.mimeType === "text/csv" ? "csv" : "xlsx";
+  const name = isGoogleSheet && !lower.endsWith(".csv") ? `${file.name}.csv` : file.name;
+  return { bytes, name, kind };
+}

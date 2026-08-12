@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Kit advisor (optional AI)** — research kits/mods with tools (web search, URL ingest, plan/catalog helpers); propose changes as Apply cards. Configure under **Settings → AI assistant** (Anthropic, OpenAI, or local Ollama). Per-tenant integration overrides env; soft daily budgets; decision memory and chat history. User guide: `docs/KIT_ADVISOR.md`.
+- **AI settings UI** — dedicated Settings card for provider, model, keys, budgets, search backend (Auto / DuckDuckGo / Brave / Exa), URL research limits, and Ollama `num_ctx`. `GET /assistant/status` reports `source` (`settings` \| `env` \| `none`).
+- **Unified Review workspace** — print checkoff folded into Review (legacy `/checkoff` redirects); STL/3MF export and missing-STL export from one place.
 - **Published Docker images** — releases now push multi-arch (`linux/amd64` + `linux/arm64`) images to `ghcr.io/poitee/print-partner` with `latest` and version tags, so `docker compose pull && docker compose up -d` works without building from source.
 - **Release workflow** — pushing a `vX.Y.Z` tag builds and publishes the image (with the version baked into `PP_VERSION`) and creates a GitHub Release with auto-generated notes (`.github/workflows/release.yml`).
 - **Container healthcheck** — the app service in `docker-compose.yml` and `docker-compose.saas.yml` now polls `GET /health` via Node's built-in `fetch`.
@@ -35,7 +38,7 @@ Print Partner is now a **single web platform**. The **Sources → Build → Revi
 ### Added
 
 - **Docker self-host** — `docker compose up --build` serves the API + SPA on port 8080; data persists in the `print-partner-data` volume at `/data` (SQLite, synced repos, exports, thumbnails). Config via `PRINT_PARTNER_DATA_DIR`, `HOST`, `PORT`, `STATIC_DIR`, `DEPLOY_MODE`, `CORS_ORIGIN`/`ALLOWED_ORIGINS`, `BASIC_AUTH_USER`/`PASS`, `UPLOAD_MAX_BYTES`, `PP_VERSION`.
-- **SaaS mode** (`DEPLOY_MODE=saas`) — multi-tenant hosting with Postgres app data (`DATABASE_URL`), S3-compatible blob storage (`S3_BUCKET`), GitHub OAuth, and an optional Redis/BullMQ job queue. Ready-to-run `docker-compose.saas.yml` stack (Postgres 16 + MinIO).
+- **SaaS mode** (`DEPLOY_MODE=saas`) — multi-tenant hosting with Postgres app data (`DATABASE_URL`), S3-compatible blob storage (`S3_BUCKET`), GitHub OAuth, and an optional Redis/BullMQ job queue. Ready-to-run `docker-compose.saas.yml` stack (Postgres 16 + RustFS/S3-compatible).
 - **Ports/adapters architecture** — `self-host` (SQLite + local disk) and `saas` (Postgres + S3) adapters behind shared ports; Drizzle ORM with SQLite or Postgres; client-side Three.js STL rendering; background job runner with `/ws/jobs/:id` progress.
 - **Desktop-data migration** — import an existing `~/.print-partner` SQLite DB and repos into the web data dir (see `web/DEPLOY.md`).
 

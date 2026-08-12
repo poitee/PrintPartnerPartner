@@ -16,9 +16,11 @@ import { useJobRunner } from "../hooks/useJobRunner";
 import {
   buildRoute,
   buildsRoute,
+  checkoffRoute,
+  exportRoute,
   helpRoute,
   isBuildPath,
-  isReviewPath,
+  isPartsPath,
   reviewRoute,
   settingsRoute,
   sourcesRoute,
@@ -73,8 +75,8 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
   }, []);
 
   const onBuild = isBuildPath(location.pathname);
-  const onReview = isReviewPath(location.pathname);
-  const onSources = location.pathname === "/sources";
+  const onReview = isPartsPath(location.pathname);
+  const onSources = location.pathname === "/library" || location.pathname === "/sources";
 
   const actions: Action[] = useMemo(() => {
     const leaveBuildThen = (go: () => void) => {
@@ -85,7 +87,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
     const list: Action[] = [
       {
         id: "nav-sources",
-        label: "Go to Sources",
+        label: "Go to Library",
         hint: onSources ? "current" : undefined,
         group: "Navigate",
         run: () => {
@@ -98,7 +100,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
       {
         id: "search-stl",
         label: "Search all repos for part…",
-        hint: "Sources · cross-repo STL",
+        hint: "Library · cross-repo STL",
         group: "Navigate",
         disabled: !health,
         run: () => {
@@ -110,7 +112,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
       },
       {
         id: "nav-build",
-        label: "Go to Build",
+        label: "Go to Plan",
         hint: onBuild ? "current" : undefined,
         group: "Navigate",
         run: () => {
@@ -120,12 +122,39 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
       },
       {
         id: "nav-review",
-        label: "Go to Review",
+        label: "Go to Parts",
         hint: onReview ? "current" : undefined,
         group: "Navigate",
         run: () => {
           leaveBuildThen(() => {
             navigate(reviewRoute(selectedProfileId));
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "nav-progress",
+        label: "Go to Progress",
+        hint:
+          location.pathname === "/progress" || location.pathname === "/checkoff"
+            ? "current"
+            : undefined,
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(checkoffRoute(selectedProfileId));
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "nav-export",
+        label: "Go to Export hub",
+        hint: location.pathname === "/export" ? "current" : undefined,
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(exportRoute(selectedProfileId));
             setOpen(false);
           });
         },
@@ -231,7 +260,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
             {
               id: `export-missing-stl-${groupBy}`,
               label: `Export missing STLs (${groupHint})`,
-              hint: onReview ? "Review" : `Plan #${selectedProfileId}`,
+              hint: onReview ? "Parts" : `Plan #${selectedProfileId}`,
               group: "Actions" as const,
               disabled: stlExportJob.busy,
               run: () => {
@@ -329,6 +358,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
     onBuild,
     onReview,
     onSources,
+    location.pathname,
     flushBuildSaves,
     importSharedBuild,
     onOpenAssistant,

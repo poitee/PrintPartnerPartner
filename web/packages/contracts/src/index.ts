@@ -183,6 +183,13 @@ export type HealthResponse = {
     driver: string;
     postgres: boolean | null;
   };
+  /**
+   * Optional Google Drive (GIS) client id for parts-manifest open/save.
+   * Public OAuth Web client id only — never a client secret.
+   */
+  google_drive?: {
+    client_id: string | null;
+  };
 };
 
 /** Response from GET /settings/update-check — app release availability. */

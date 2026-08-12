@@ -31,6 +31,8 @@ type Props = {
   viewMode: SourceViewMode;
   onViewModeChange: (mode: SourceViewMode) => void;
   onManageCategories?: () => void;
+  /** When true, hide category pills (Library uses the side category rail). */
+  hideCategoryPills?: boolean;
 };
 
 export default function SourcesToolbar({
@@ -47,6 +49,7 @@ export default function SourcesToolbar({
   viewMode,
   onViewModeChange,
   onManageCategories,
+  hideCategoryPills = false,
 }: Props) {
   const platforms = Array.from(
     new Set(sources.map((s) => s.source_kind).filter(Boolean)),
@@ -191,41 +194,43 @@ export default function SourcesToolbar({
         </div>
       )}
 
-      {/* Category pills — always visible, separated by a top border */}
-      <div className="border-t border-border px-3 py-2">
-        <div className="flex gap-1.5 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
-          <Button
-            type="button"
-            size="sm"
-            className="shrink-0"
-            variant={categoryFilter === "all" ? "secondary" : "ghost"}
-            onClick={() => onCategoryFilterChange("all")}
-          >
-            All
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            className="shrink-0"
-            variant={categoryFilter === UNCategorized_FILTER ? "secondary" : "ghost"}
-            onClick={() => onCategoryFilterChange(UNCategorized_FILTER)}
-          >
-            Uncategorized
-          </Button>
-          {categories.map((c) => (
+      {/* Category pills — mobile fallback when the side rail is hidden */}
+      {!hideCategoryPills ? (
+        <div className="border-t border-border px-3 py-2">
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 [-webkit-overflow-scrolling:touch]">
             <Button
-              key={c}
               type="button"
               size="sm"
               className="shrink-0"
-              variant={categoryFilter === c ? "secondary" : "ghost"}
-              onClick={() => onCategoryFilterChange(c)}
+              variant={categoryFilter === "all" ? "secondary" : "ghost"}
+              onClick={() => onCategoryFilterChange("all")}
             >
-              {c}
+              All
             </Button>
-          ))}
+            <Button
+              type="button"
+              size="sm"
+              className="shrink-0"
+              variant={categoryFilter === UNCategorized_FILTER ? "secondary" : "ghost"}
+              onClick={() => onCategoryFilterChange(UNCategorized_FILTER)}
+            >
+              Uncategorized
+            </Button>
+            {categories.map((c) => (
+              <Button
+                key={c}
+                type="button"
+                size="sm"
+                className="shrink-0"
+                variant={categoryFilter === c ? "secondary" : "ghost"}
+                onClick={() => onCategoryFilterChange(c)}
+              >
+                {c}
+              </Button>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

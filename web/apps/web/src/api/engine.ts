@@ -689,18 +689,18 @@ export async function deleteProfileLayer(
   });
 }
 
+/**
+ * Merge a single library category into source metadata.
+ * Empty/null persists as `""` so Uncategorised stays explicit (avoids role fallback).
+ */
 function mergeSourceMetadata(
   metadata: Record<string, unknown> | undefined,
   category: string | null | undefined,
 ): Record<string, unknown> | undefined {
   if (category === undefined) return metadata;
   const base = { ...(metadata ?? {}) };
-  if (category == null || category === "") {
-    delete base.category;
-  } else {
-    base.category = category;
-  }
-  return Object.keys(base).length > 0 ? base : undefined;
+  base.category = category == null || category === "" ? "" : category;
+  return base;
 }
 
 export async function fetchSourceCategories(): Promise<string[]> {

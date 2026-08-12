@@ -11,32 +11,29 @@ import AuthGate from "./components/AuthGate";
 import AppLayout from "./layout/AppLayout";
 import BuildPage from "./pages/BuildPage";
 import BuildsPage from "./pages/BuildsPage";
+import CheckoffPage from "./pages/CheckoffPage";
+import ExportPage from "./pages/ExportPage";
 import HelpPage from "./pages/HelpPage";
 import LoginPage from "./pages/LoginPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
-import ReviewPage from "./pages/ReviewPage";
+import PartsPage from "./pages/PartsPage";
 import SettingsPage from "./pages/SettingsPage";
 import SourcesPage from "./pages/SourcesPage";
 import WelcomePage from "./pages/WelcomePage";
-import { buildRoute } from "./lib/routes";
+import { planRoute } from "./lib/routes";
 
 function LegacyStudioRedirect() {
   const { planId } = useParams();
   const id = Number(planId);
   return (
-    <Navigate to={buildRoute(Number.isFinite(id) && id > 0 ? id : null)} replace />
+    <Navigate to={planRoute(Number.isFinite(id) && id > 0 ? id : null)} replace />
   );
 }
 
-function PlateRedirect() {
+function PreserveSearchRedirect({ to }: { to: string }) {
   const location = useLocation();
-  return <Navigate to={`/review${location.search}`} replace />;
-}
-
-function CheckoffRedirect() {
-  const location = useLocation();
-  return <Navigate to={`/review${location.search}`} replace />;
+  return <Navigate to={`${to}${location.search}`} replace />;
 }
 
 function IndexRedirect() {
@@ -60,15 +57,44 @@ export default function App() {
                       <Route element={<AuthGate />}>
                         <Route element={<AppLayout />}>
                           <Route index element={<IndexRedirect />} />
-                          <Route path="sources" element={<SourcesPage />} />
+
+                          <Route path="library" element={<SourcesPage />} />
+                          <Route
+                            path="sources"
+                            element={<PreserveSearchRedirect to="/library" />}
+                          />
+
                           <Route path="builds" element={<BuildsPage />} />
-                          <Route path="build" element={<BuildPage />} />
-                          <Route path="plan" element={<Navigate to="/build" replace />} />
-                          <Route path="review" element={<ReviewPage />} />
+                          <Route path="plan" element={<BuildPage />} />
+                          <Route
+                            path="build"
+                            element={<PreserveSearchRedirect to="/plan" />}
+                          />
+
+                          <Route path="parts" element={<PartsPage />} />
+                          <Route
+                            path="review"
+                            element={<PreserveSearchRedirect to="/parts" />}
+                          />
+
+                          <Route path="progress" element={<CheckoffPage />} />
+                          <Route
+                            path="checkoff"
+                            element={<PreserveSearchRedirect to="/progress" />}
+                          />
+
+                          <Route path="export" element={<ExportPage />} />
+
                           <Route path="plans/:planId/studio" element={<LegacyStudioRedirect />} />
-                          <Route path="plate" element={<PlateRedirect />} />
-                          <Route path="print" element={<PlateRedirect />} />
-                          <Route path="checkoff" element={<CheckoffRedirect />} />
+                          <Route
+                            path="plate"
+                            element={<PreserveSearchRedirect to="/parts" />}
+                          />
+                          <Route
+                            path="print"
+                            element={<PreserveSearchRedirect to="/parts" />}
+                          />
+
                           <Route path="settings" element={<SettingsPage />} />
                           <Route path="help" element={<HelpPage />} />
                         </Route>

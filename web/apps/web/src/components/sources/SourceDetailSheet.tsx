@@ -24,6 +24,13 @@ import { Button } from "../ui/button";
 import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
+import {
   Sheet,
   SheetClose,
   SheetContent,
@@ -31,6 +38,7 @@ import {
   SheetTitle,
 } from "../ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { UNCategorized_FILTER } from "./sourceLabels";
 
 type DetailTab = "docs" | "rules" | "naming";
 type DocsSubTab = "synced" | "notes";
@@ -44,8 +52,10 @@ type Props = {
   /** Optional keyword filter for Synced docs / Advisor notes lists (from copilot ui_open_docs). */
   docsQuery?: string | null;
   busy?: boolean;
+  categories?: string[];
   onEdit: (source: SourceSummary) => void;
   onDelete: (source: SourceSummary) => void;
+  onAssignCategory?: (source: SourceSummary, category: string | null) => void;
   onSaveRules: () => void;
   runImportScan: (sourceId: number) => void;
 };
@@ -63,8 +73,10 @@ export default function SourceDetailSheet({
   highlightPath = null,
   docsQuery = null,
   busy = false,
+  categories = [],
   onEdit,
   onDelete,
+  onAssignCategory,
   onSaveRules,
   runImportScan,
 }: Props) {
@@ -291,6 +303,41 @@ export default function SourceDetailSheet({
             <div className="min-w-0 flex-1">
               <SheetTitle className="truncate">{source.name}</SheetTitle>
               <p className="truncate text-xs text-muted-foreground">{source.url}</p>
+              {onAssignCategory ? (
+                <div className="mt-2 max-w-[220px] space-y-1">
+                  <Label
+                    htmlFor={`source-detail-category-${source.id}`}
+                    className="text-[11px] text-muted-foreground"
+                  >
+                    Category
+                  </Label>
+                  <Select
+                    value={source.category?.trim() || UNCategorized_FILTER}
+                    onValueChange={(v) =>
+                      onAssignCategory(
+                        source,
+                        v === UNCategorized_FILTER ? null : v,
+                      )
+                    }
+                    disabled={busy}
+                  >
+                    <SelectTrigger
+                      id={`source-detail-category-${source.id}`}
+                      className="h-8 text-xs"
+                    >
+                      <SelectValue placeholder="Uncategorised" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNCategorized_FILTER}>Uncategorised</SelectItem>
+                      {categories.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
             </div>
             <div className="flex shrink-0 gap-1">
               <Button size="sm" variant="secondary" onClick={() => onEdit(source)}>

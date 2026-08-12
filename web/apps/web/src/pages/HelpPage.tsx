@@ -48,21 +48,21 @@ const WORKFLOW_STEP_ICONS: LucideIcon[] = [FolderGit2, Hammer, ClipboardCheck];
 const WORKFLOW_STEPS = [
   {
     num: 1,
-    label: "Sources",
+    label: "Library",
     path: sourcesRoute(),
     description: "Register repos, sync, and set import rules; search STLs across repos",
   },
   {
     num: 2,
-    label: "Build",
+    label: "Plan",
     path: null as string | null,
-    description: "Manage builds, attach sources, pick STLs, set role colors, Update build",
+    description: "Manage plans, attach sources, pick STLs, set role colors, Update plan",
   },
   {
     num: 3,
-    label: "Review",
+    label: "Parts",
     path: null as string | null,
-    description: "Validate, edit quantities, track printing, export STLs and checklist",
+    description: "Validate, edit quantities, then continue to Progress and Export",
   },
 ] as const;
 
@@ -109,8 +109,8 @@ export default function HelpPage() {
 
   const stepPaths = WORKFLOW_STEPS.map((step) => {
     if (step.path) return step.path;
-    if (step.label === "Build") return buildRoute(selectedProfileId);
-    if (step.label === "Review") return reviewRoute(selectedProfileId);
+    if (step.label === "Plan") return buildRoute(selectedProfileId);
+    if (step.label === "Parts") return reviewRoute(selectedProfileId);
     return buildRoute(selectedProfileId);
   });
 

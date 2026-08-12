@@ -1,6 +1,7 @@
 import type { PlanReview, ReviewPart } from "../api/engine";
 import { folderKeyFromRelativePath } from "./checkoffGroups";
 import { isPartFullyPrinted } from "./checkoffProgress";
+import { hasPartWarning } from "./partWarnings";
 import type {
   ReviewIncludedFilter,
   ReviewPrintFilter,
@@ -62,19 +63,8 @@ export function filterReviewParts(
     rows = rows.filter((p) => (p.filament_display || "") === state.filament);
   }
 
-  if (state.issuesOnly && review) {
-    const issueFiles = new Set(
-      review.issues
-        .filter((i) => i.code === "missing_stl" || i.code === "merge_conflict")
-        .map((i) => {
-          const m = i.message.match(/:\s*(.+)$/);
-          return m?.[1]?.trim();
-        })
-        .filter(Boolean) as string[],
-    );
-    if (issueFiles.size > 0) {
-      rows = rows.filter((p) => issueFiles.has(p.filename));
-    }
+  if (state.issuesOnly) {
+    rows = rows.filter((p) => hasPartWarning(p, review));
   }
 
   const q = state.search.trim().toLowerCase();

@@ -16,6 +16,8 @@ import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
 import { useSpoolmanEnabled } from "../../hooks/useSpoolmanEnabled";
 import { groupCheckoffParts } from "../../lib/checkoffGroups";
 import { formatCheckoffSummary } from "../../lib/checkoffProgress";
+import { countPartWarnings, partWarningNote } from "../../lib/partWarnings";
+import { groupPartsByRole, partSourceNote } from "../../lib/partsGroups";
 import {
   collectReviewFacets,
   filterReviewParts,
@@ -38,6 +40,7 @@ import PartThumbExpandButton from "../parts/PartThumbExpandButton";
 import FilterSelect, { filterSelectOut, filterSelectValue } from "./FilterSelect";
 import PartSpoolPicker from "../PartSpoolPicker";
 import SpoolRemainingBadge from "../SpoolRemainingBadge";
+import PartsGridCard from "./PartsGridCard";
 import ReviewSheetMobileCard from "./ReviewSheetMobileCard";
 import { Button } from "../ui/button";
 import {
@@ -117,6 +120,8 @@ function ReviewSheetRow({
   viewMode,
   busy,
   compact,
+  note,
+  noteWarn,
   spoolmanConfigured,
   roleFilaments,
   spools,
@@ -132,6 +137,8 @@ function ReviewSheetRow({
   viewMode: ReviewViewMode;
   busy: boolean;
   compact: boolean;
+  note: string;
+  noteWarn: boolean;
   spoolmanConfigured: boolean;
   roleFilaments: RoleFilamentRow[];
   spools: SpoolmanSpoolRow[];
@@ -197,7 +204,9 @@ function ReviewSheetRow({
           </div>
         </td>
         <td className="sheet-cell-notes">
-          <span className="sheet-notes-line" aria-hidden />
+          <span className={cn("text-xs", noteWarn ? "text-warning" : "text-muted-foreground")}>
+            {note}
+          </span>
         </td>
       </tr>
     );
@@ -269,7 +278,11 @@ function ReviewSheetRow({
           </Button>
         )}
       </td>
-      <td className="sheet-cell-notes" aria-hidden />
+      <td className="sheet-cell-notes">
+        <span className={cn("text-xs", noteWarn ? "text-warning" : "text-muted-foreground")}>
+          {note}
+        </span>
+      </td>
     </tr>
   );
 }
@@ -418,7 +431,13 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
     [allParts, review, ui],
   );
 
-  const grouped = useMemo(() => groupCheckoffParts(filtered), [filtered]);
+  const warningCount = useMemo(
+    () => countPartWarnings(allParts.filter((p) => p.included), review),
+    [allParts, review],
+  );
+
+  const roleGroups = useMemo(() => groupPartsByRole(filtered), [filtered]);
+  const sourceGroups = useMemo(() => groupCheckoffParts(filtered), [filtered]);
 
   const summary = useMemo(
     () => formatCheckoffSummary(allParts.filter((p) => p.included)),
@@ -464,34 +483,193 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
     [toggleUnit],
   );
 
-  const displayName = planName || profiles.find((p) => p.id === review.profile_id)?.name || "Review";
+  const noteForPart = useCallback(
+    (part: ReviewPart) => {
+      const warn = partWarningNote(part, review);
+      return { note: warn ?? partSourceNote(part), noteWarn: warn != null };
+    },
+    [review],
+  );
+
+  const displayName = planName || profiles.find((p) => p.id === review.profile_id)?.name || "Parts";
   const viewMode = ui.viewMode;
+  const groupMode = ui.groupMode;
+  const layoutMode = ui.layoutMode;
+  const showGrid = layoutMode === "grid" && viewMode === "edit" && !printPrep;
+
+  const renderPartTable = (parts: ReviewPart[]) => (
+    <>
+      {isMobileLayout && (
+        <div className="checkoff-mobile-list no-print">
+          {parts.map((part) => (
+            <ReviewSheetMobileCard
+              key={part.id}
+              part={part}
+              viewMode={viewMode}
+              busy={busyPartId === part.id || Boolean(disabled)}
+              spoolmanConfigured={spoolmanConfigured}
+              roleFilaments={roleFilaments}
+              spools={spools}
+              spoolsLoading={spoolsLoading}
+              onQtyChange={onQtyChange}
+              onRemove={() => onRemove(part)}
+              onRestore={() => onRestore(part)}
+              onSpoolChange={onSpoolChange}
+              onToggleUnit={onToggleUnit}
+              onPreview={setPreviewPart}
+            />
+          ))}
+        </div>
+      )}
+      <div
+        className={cn(
+          "sheet-table-wrap",
+          isMobileLayout && "checkoff-print-table hidden print:block",
+        )}
+      >
+        <table className="sheet-table">
+          <thead>
+            <tr>
+              <th className="sheet-cell-part">Part</th>
+              {viewMode === "edit" && spoolmanConfigured && (
+                <th className="sheet-cell-spool">Spool</th>
+              )}
+              <th className="sheet-cell-qty">Qty</th>
+              {viewMode === "edit" ? (
+                <th className="sheet-cell-actions">Actions</th>
+              ) : (
+                <th className="sheet-cell-printed">Printed</th>
+              )}
+              <th className="sheet-cell-notes">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {parts.map((part) => {
+              const { note, noteWarn } = noteForPart(part);
+              return (
+                <ReviewSheetRow
+                  key={part.id}
+                  part={part}
+                  viewMode={viewMode}
+                  busy={busyPartId === part.id || Boolean(disabled)}
+                  compact={isMobileLayout || ui.compactMode}
+                  note={note}
+                  noteWarn={noteWarn}
+                  spoolmanConfigured={spoolmanConfigured}
+                  roleFilaments={roleFilaments}
+                  spools={spools}
+                  spoolsLoading={spoolsLoading}
+                  onQtyChange={onQtyChange}
+                  onRemove={onRemove}
+                  onRestore={onRestore}
+                  onSpoolChange={onSpoolChange}
+                  onToggleUnit={onToggleUnit}
+                  onPreview={setPreviewPart}
+                />
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+
+  const renderPartGrid = (parts: ReviewPart[]) => (
+    <div className="no-print grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+      {parts.map((part) => (
+        <PartsGridCard
+          key={part.id}
+          part={part}
+          review={review}
+          busy={busyPartId === part.id || Boolean(disabled)}
+          onQtyChange={onQtyChange}
+          onPreview={setPreviewPart}
+        />
+      ))}
+    </div>
+  );
 
   return (
     <section className="space-y-3">
       <div className="no-print checkoff-sticky flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">Parts</h3>
-          <div className="flex gap-1" role="group" aria-label="View mode">
+          <div
+            className="flex flex-wrap gap-1 border-b border-transparent"
+            role="tablist"
+            aria-label="Part grouping"
+          >
             <Button
               size="sm"
-              variant={viewMode === "edit" ? "secondary" : "ghost"}
-              onClick={() => patchUi({ viewMode: "edit" })}
+              variant={groupMode === "role" && !ui.issuesOnly ? "secondary" : "ghost"}
+              onClick={() => patchUi({ groupMode: "role", issuesOnly: false })}
               disabled={disabled}
             >
-              Edit
+              By role
             </Button>
             <Button
               size="sm"
-              variant={viewMode === "print" ? "secondary" : "ghost"}
-              onClick={() => patchUi({ viewMode: "print" })}
+              variant={groupMode === "source" && !ui.issuesOnly ? "secondary" : "ghost"}
+              onClick={() => patchUi({ groupMode: "source", issuesOnly: false })}
               disabled={disabled}
             >
-              Print
+              By source
+            </Button>
+            <Button
+              size="sm"
+              variant={ui.issuesOnly ? "secondary" : "ghost"}
+              onClick={() => patchUi({ issuesOnly: true })}
+              disabled={disabled}
+            >
+              Warnings only
+              {warningCount > 0 && (
+                <span className="ml-1 font-mono text-[11px] text-warning">{warningCount}</span>
+              )}
             </Button>
           </div>
+          <div className="flex flex-wrap items-center gap-1">
+            <div className="flex overflow-hidden rounded-md border border-border" role="group" aria-label="Layout">
+              <Button
+                size="sm"
+                className="rounded-none border-0"
+                variant={layoutMode === "grid" ? "secondary" : "ghost"}
+                onClick={() => patchUi({ layoutMode: "grid", viewMode: "edit" })}
+                disabled={disabled}
+              >
+                Grid
+              </Button>
+              <Button
+                size="sm"
+                className="rounded-none border-0"
+                variant={layoutMode === "table" ? "secondary" : "ghost"}
+                onClick={() => patchUi({ layoutMode: "table" })}
+                disabled={disabled}
+              >
+                Table
+              </Button>
+            </div>
+            {layoutMode === "table" && (
+              <div className="flex gap-1" role="group" aria-label="View mode">
+                <Button
+                  size="sm"
+                  variant={viewMode === "edit" ? "secondary" : "ghost"}
+                  onClick={() => patchUi({ viewMode: "edit" })}
+                  disabled={disabled}
+                >
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant={viewMode === "print" ? "secondary" : "ghost"}
+                  onClick={() => patchUi({ viewMode: "print" })}
+                  disabled={disabled}
+                >
+                  Print
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
-        {spoolmanConfigured && viewMode === "edit" && (
+        {spoolmanConfigured && viewMode === "edit" && layoutMode === "table" && (
           <p className="text-xs text-muted-foreground">
             Spool column: optional override per part
           </p>
@@ -591,15 +769,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <label className="flex items-center gap-2 text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={ui.issuesOnly}
-              onChange={(e) => patchUi({ issuesOnly: e.target.checked })}
-            />
-            Issues only
-          </label>
-          {!isMobileLayout && (
+          {!isMobileLayout && layoutMode === "table" && (
             <label className="flex items-center gap-2 text-muted-foreground">
               <input
                 type="checkbox"
@@ -632,86 +802,41 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
             </p>
           </header>
 
-          {grouped.map((repo) => (
-            <section key={repo.repoLayer} className="sheet-repo">
-              <h3 className="sheet-repo-title">
-                {repo.repoLabel}
-                <span className="sheet-repo-count">{repo.partCount}</span>
-              </h3>
-              {repo.folders.map((group) => (
-                <div key={group.folder} className="sheet-folder">
-                  <h4 className="sheet-folder-title">{group.folder}</h4>
-                  {isMobileLayout && (
-                    <div className="checkoff-mobile-list no-print">
-                      {group.parts.map((part) => (
-                        <ReviewSheetMobileCard
-                          key={part.id}
-                          part={part}
-                          viewMode={viewMode}
-                          busy={busyPartId === part.id || Boolean(disabled)}
-                          spoolmanConfigured={spoolmanConfigured}
-                          roleFilaments={roleFilaments}
-                          spools={spools}
-                          spoolsLoading={spoolsLoading}
-                          onQtyChange={onQtyChange}
-                          onRemove={() => onRemove(part)}
-                          onRestore={() => onRestore(part)}
-                          onSpoolChange={onSpoolChange}
-                          onToggleUnit={onToggleUnit}
-                          onPreview={setPreviewPart}
-                        />
-                      ))}
-                    </div>
-                  )}
-                  <div
-                    className={cn(
-                      "sheet-table-wrap",
-                      isMobileLayout && "checkoff-print-table hidden print:block",
-                    )}
-                  >
-                    <table className="sheet-table">
-                      <thead>
-                        <tr>
-                          <th className="sheet-cell-part">Part</th>
-                          {viewMode === "edit" && spoolmanConfigured && (
-                            <th className="sheet-cell-spool">Spool</th>
-                          )}
-                          <th className="sheet-cell-qty">Qty</th>
-                          {viewMode === "edit" ? (
-                            <th className="sheet-cell-actions">Actions</th>
-                          ) : (
-                            <th className="sheet-cell-printed">Printed</th>
-                          )}
-                          <th className="sheet-cell-notes">Notes</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {group.parts.map((part) => (
-                          <ReviewSheetRow
-                            key={part.id}
-                            part={part}
-                            viewMode={viewMode}
-                            busy={busyPartId === part.id || Boolean(disabled)}
-                            compact={isMobileLayout || ui.compactMode}
-                            spoolmanConfigured={spoolmanConfigured}
-                            roleFilaments={roleFilaments}
-                            spools={spools}
-                            spoolsLoading={spoolsLoading}
-                            onQtyChange={onQtyChange}
-                            onRemove={onRemove}
-                            onRestore={onRestore}
-                            onSpoolChange={onSpoolChange}
-                            onToggleUnit={onToggleUnit}
-                            onPreview={setPreviewPart}
-                          />
-                        ))}
-                      </tbody>
-                    </table>
+          {groupMode === "role" || ui.issuesOnly ? (
+            <div className="space-y-4">
+              {roleGroups.map((group) => (
+                <section key={group.roleKey} className="space-y-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className="inline-block h-4 w-4 shrink-0 rounded-sm border border-border"
+                      style={{ background: group.hex || "var(--muted)" }}
+                      aria-hidden
+                    />
+                    <h3 className="text-sm font-semibold">{group.title}</h3>
+                    <span className="font-mono text-[11.5px] text-muted-foreground">
+                      {group.meta}
+                    </span>
                   </div>
-                </div>
+                  {showGrid ? renderPartGrid(group.parts) : renderPartTable(group.parts)}
+                </section>
               ))}
-            </section>
-          ))}
+            </div>
+          ) : (
+            sourceGroups.map((repo) => (
+              <section key={repo.repoLayer} className="sheet-repo">
+                <h3 className="sheet-repo-title">
+                  {repo.repoLabel}
+                  <span className="sheet-repo-count">{repo.partCount}</span>
+                </h3>
+                {repo.folders.map((group) => (
+                  <div key={group.folder} className="sheet-folder space-y-2.5">
+                    <h4 className="sheet-folder-title">{group.folder}</h4>
+                    {showGrid ? renderPartGrid(group.parts) : renderPartTable(group.parts)}
+                  </div>
+                ))}
+              </section>
+            ))
+          )}
         </article>
       )}
 

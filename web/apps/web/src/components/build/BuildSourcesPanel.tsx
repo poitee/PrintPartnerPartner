@@ -144,7 +144,7 @@ export default function BuildSourcesPanel({
         <SheetHeader>
           <SheetTitle>Plan sources</SheetTitle>
           <SheetDescription>
-            Attach repos and sync without leaving Build.{" "}
+            Attach repos and sync without leaving Plan.{" "}
             <Link to={sourcesRoute()} className="text-primary underline">
               Full source manager
               <ExternalLink className="ml-0.5 inline h-3 w-3" />

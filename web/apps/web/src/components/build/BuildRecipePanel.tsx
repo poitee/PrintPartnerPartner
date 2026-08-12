@@ -25,7 +25,7 @@ export default function BuildRecipePanel({ profileId }: Props) {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (signal?: { cancelled: () => boolean }) => {
     setLoading(true);
     try {
       const [r, d, s] = await Promise.all([
@@ -33,18 +33,28 @@ export default function BuildRecipePanel({ profileId }: Props) {
         fetchPlanDecisions(profileId),
         fetchPlanSnapshots(profileId),
       ]);
+      if (signal?.cancelled()) return;
       setRecipe(r);
       setDecisions(d.decisions ?? []);
       setSnapshots(s.snapshots ?? []);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load recipe");
+      if (!signal?.cancelled()) {
+        toast.error(e instanceof Error ? e.message : "Failed to load recipe");
+      }
     } finally {
-      setLoading(false);
+      if (!signal?.cancelled()) setLoading(false);
     }
   }, [profileId]);
 
   useEffect(() => {
-    void reload();
+    setRecipe(null);
+    setDecisions([]);
+    setSnapshots([]);
+    let cancelled = false;
+    void reload({ cancelled: () => cancelled });
+    return () => {
+      cancelled = true;
+    };
   }, [reload, revision]);
 
   const copyRecipe = async () => {

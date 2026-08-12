@@ -58,6 +58,10 @@ type Props = {
   name: string;
   sourceKind: SourceKind;
   compact?: boolean;
+  /** Hide the kind chip overlaid on the cover (Library cards show kind elsewhere). */
+  hideKindBadge?: boolean;
+  /** Square 30px thumb for Plan attached-source rows. */
+  thumb?: boolean;
   className?: string;
 };
 
@@ -66,6 +70,8 @@ export default function SourceCardCover({
   name,
   sourceKind,
   compact,
+  hideKindBadge = false,
+  thumb = false,
   className,
 }: Props) {
   const [coverSrc, setCoverSrc] = useState<string | null>(null);
@@ -82,6 +88,43 @@ export default function SourceCardCover({
       cancelled = true;
     };
   }, [sourceId, name, sourceKind]);
+
+  if (thumb) {
+    const Icon = KIND_ICONS[sourceKind] ?? Globe;
+    const hue = hashHue(name);
+    if (failed || !coverSrc) {
+      return (
+        <div
+          className={cn(
+            "flex h-[30px] w-[30px] items-center justify-center overflow-hidden rounded-md border border-border",
+            className,
+          )}
+          style={{
+            background: `linear-gradient(135deg, hsl(${hue} 42% 22%) 0%, hsl(${(hue + 40) % 360} 35% 14%) 100%)`,
+          }}
+          aria-hidden
+        >
+          <Icon className="h-3.5 w-3.5 text-foreground/40" strokeWidth={1.5} />
+        </div>
+      );
+    }
+    return (
+      <div
+        className={cn(
+          "h-[30px] w-[30px] overflow-hidden rounded-md border border-border",
+          className,
+        )}
+      >
+        <img
+          src={coverSrc}
+          alt=""
+          className="h-full w-full object-cover"
+          loading="lazy"
+          onError={() => setFailed(true)}
+        />
+      </div>
+    );
+  }
 
   if (failed || !coverSrc) {
     return (
@@ -101,9 +144,11 @@ export default function SourceCardCover({
         onError={() => setFailed(true)}
       />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-card via-card/30 to-transparent" />
-      <div className="absolute bottom-2 left-2 rounded-md border border-border/60 bg-card/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm">
-        {sourceKind === "github" ? "GitHub" : sourceKind}
-      </div>
+      {!hideKindBadge ? (
+        <div className="absolute bottom-2 left-2 rounded-md border border-border/60 bg-card/80 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground backdrop-blur-sm">
+          {sourceKind === "github" ? "GitHub" : sourceKind}
+        </div>
+      ) : null}
     </div>
   );
 }

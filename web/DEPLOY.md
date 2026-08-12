@@ -244,6 +244,7 @@ Includes Postgres 16, [RustFS](https://rustfs.com) (S3-compatible), and the app 
 | `SAAS_BASIC_AUTH` | Optional | `user:password` for HTTP Basic dev auth |
 | `GITHUB_CLIENT_ID` / `SECRET` / `GITHUB_CALLBACK_URL` | OAuth | GitHub OAuth app |
 | `DISCORD_CLIENT_ID` / `SECRET` / `DISCORD_CALLBACK_URL` | OAuth | Discord OAuth app (`/auth/discord/callback`) |
+| `GOOGLE_CLIENT_ID` | Optional | Public Google OAuth **Web** client id for parts-manifest Drive open/save (SPA GIS + Drive API). Not a secret; exposed on `GET /health`. Enable Drive API and add your app origin to Authorized JavaScript origins. Dev SPA fallback: `VITE_GOOGLE_CLIENT_ID`. |
 | `SAAS_ALLOW_ANONYMOUS` | Optional | `1` to allow unauthenticated API (dev only) |
 | `REDIS_URL` | Optional | BullMQ-backed job queue for horizontal scaling |
 | `UPLOAD_MAX_BYTES` | Optional | Request body / upload size limit |
