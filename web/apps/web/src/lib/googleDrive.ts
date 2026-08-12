@@ -70,6 +70,12 @@ function loadGis(): Promise<void> {
   if (gisLoad) return gisLoad;
   gisLoad = new Promise((resolve, reject) => {
     let settled = false;
+    /** Script this attempt is waiting on; removed on failure so retries can recreate. */
+    let watchedScript: HTMLScriptElement | null = null;
+    const reset = () => {
+      watchedScript?.remove();
+      gisLoad = null;
+    };
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
@@ -81,14 +87,14 @@ function loadGis(): Promise<void> {
         if (w.google?.accounts?.oauth2) {
           resolve();
         } else {
-          gisLoad = null;
+          reset();
           reject(new Error("Google Identity Services unavailable"));
         }
       });
     };
     const fail = (err: Error) => {
       finish(() => {
-        gisLoad = null;
+        reset();
         reject(err);
       });
     };
@@ -97,16 +103,18 @@ function loadGis(): Promise<void> {
     }, GIS_LOAD_TIMEOUT_MS);
 
     const existing = document.querySelector(`script[src="${GIS_SRC}"]`);
-    if (existing) {
+    if (existing instanceof HTMLScriptElement) {
       if (w.google?.accounts?.oauth2) {
         succeed();
         return;
       }
+      watchedScript = existing;
       existing.addEventListener("load", () => succeed());
       existing.addEventListener("error", () => fail(new Error("Failed to load Google Identity")));
       return;
     }
     const script = document.createElement("script");
+    watchedScript = script;
     script.src = GIS_SRC;
     script.async = true;
     script.onload = () => succeed();
