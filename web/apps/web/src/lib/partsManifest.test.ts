@@ -139,6 +139,22 @@ describe("partsManifest XLSX", () => {
     expect(parsed.rows[0]!.quantity).toBe("2");
   });
 
+  it("strips XML 1.0-invalid code points from cell values", async () => {
+    const empty = Object.fromEntries(PARTS_MANIFEST_HEADERS.map((h) => [h, ""])) as PartsManifestRow;
+    // U+FFFE, U+FFFF, and an unpaired high surrogate are not XML 1.0 Char.
+    empty.file_name = `ok\uFFFE\uFFFFpart\uD800.stl`;
+    empty.quantity = "1";
+    empty.notes = "tab\tok\nline\rok";
+    const blob = await partsManifestToXlsxBlob([empty]);
+    const zip = await (await import("jszip")).default.loadAsync(await blob.arrayBuffer());
+    const sheet = await zip.file("xl/worksheets/sheet1.xml")!.async("string");
+    expect(sheet).not.toContain("\uFFFE");
+    expect(sheet).not.toContain("\uFFFF");
+    expect(sheet).not.toContain("\uD800");
+    expect(sheet).toContain("okpart.stl");
+    expect(sheet).toContain("tab\tok\nline\rok");
+  });
+
   it("preserves empty optional columns as strings", () => {
     const empty = Object.fromEntries(PARTS_MANIFEST_HEADERS.map((h) => [h, ""])) as PartsManifestRow;
     empty.file_name = "a.stl";
