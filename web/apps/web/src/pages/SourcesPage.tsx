@@ -1185,10 +1185,12 @@ export default function SourcesPage() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Uncategorized" />
+                  <SelectValue placeholder={sourceCategoryLabel(null)} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={UNCategorized_FILTER}>Uncategorized</SelectItem>
+                  <SelectItem value={UNCategorized_FILTER}>
+                    {sourceCategoryLabel(null)}
+                  </SelectItem>
                   {categories.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}

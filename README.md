@@ -28,13 +28,13 @@
 </p>
 
 <p align="center">
-  <code>Sources</code> → <code>Build</code> → <code>Review</code>
+  <code>Library</code> → <code>Plan</code> → <code>Parts</code> → <code>Progress</code>
 </p>
 
 <p align="center">
   <sub>
-    Plan management — header <strong>Create build</strong>, <strong>Manage builds</strong> on Build, or the sidebar <strong>Builds</strong> page.
-    Print checkoff lives on <strong>Review</strong> (legacy <code>/checkoff</code> redirects there).
+    Plan management — header <strong>Create build</strong>, <strong>Manage builds</strong> on Plan, or the sidebar <strong>Builds</strong> page.
+    Print checkoff lives on <strong>Progress</strong> (legacy <code>/checkoff</code> redirects there).
   </sub>
 </p>
 
@@ -53,17 +53,18 @@
 
 | Step | What you are doing |
 |------|--------------------|
-| **Sources** | Add GitHub repos, local folders, or zips; assign categories; search STLs across every synced repo; see **update available** badges; sync and set import rules. |
-| **Build** | **Manage builds** (create/switch plans), attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), **Update build** when stale, kit/manifest options, inline repo **Docs**, export STLs or share a plan bundle. |
-| **Review** | Confirm validation by role and filament, browse included parts with 3D previews, edit quantities, **Export STLs** / **3MF**, and track **print checkoff** (per-unit progress, printable checklist, **Export missing STLs**). |
+| **Library** | Add GitHub repos, local folders, or zips; assign categories; search STLs across every synced repo; see **update available** badges; sync and set import rules. |
+| **Plan** | **Manage builds** (create/switch plans), attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), **Update build** when stale, kit/manifest options, inline repo **Docs**, export STLs or share a plan bundle. |
+| **Parts** | Confirm validation by role and filament, browse included parts with 3D previews, edit quantities, **Export STLs** / **3MF**, and **Export missing STLs**. |
+| **Progress** | Track **print checkoff** (per-unit progress, filters, printable checklist). |
 
-**Managing builds** (not a pipeline step): use the header **Create build** button and plan picker, the collapsible **Manage builds** panel on Build, or the **Builds** page in the sidebar to create, rename, duplicate, and delete plans. The active plan is shared across Build and Review.
+**Managing builds** (not a pipeline step): use the header **Create build** button and plan picker, the collapsible **Manage builds** panel on Plan, or the **Builds** page in the sidebar to create, rename, duplicate, and delete plans. The active plan is shared across Plan, Parts, and Progress.
 
 **Kit advisor (optional AI):** research kits and mods with web search, paste a product/guide URL, walk decisions with you, and propose changes as **Apply** cards — nothing mutates until you confirm. Configure under **Settings → AI assistant**. Full guide: [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md).
 
-**Tips:** **⌘K / Ctrl+K** opens the command palette (sync, recompute, exports, navigation). Collapse the left sidebar to an icon rail; the first-run **Progress** widget hides after you complete Sources → Build → Review once. Open **Help** in the sidebar for the full workflow guide.
+**Tips:** **⌘K / Ctrl+K** opens the command palette (sync, recompute, exports, navigation). Collapse the left sidebar to an icon rail; the first-run **Progress** widget hides after you complete Library → Plan → Parts → Progress once. Open **Help** in the sidebar for the full workflow guide.
 
-Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Spoolman instance in Settings to pick filaments from your inventory on Build and see read-only spool remaining weights in Review.
+Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Spoolman instance in Settings to pick filaments from your inventory on Plan and see read-only spool remaining weights in Parts.
 
 ---
 
@@ -106,12 +107,12 @@ More: [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) · operator env table in [`we
 
 Screenshots switch with your GitHub **light / dark** theme (or see both on the [project site](https://poitee.github.io/PrintPartnerPartner/)).
 
-### Sources
+### Library
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/sources.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/sources.png">
-  <img src="docs/screenshots/light/sources.png" alt="Sources — source library with categories, sync status, update badges, and global STL search.">
+  <img src="docs/screenshots/light/sources.png" alt="Library — source library with categories, sync status, update badges, and global STL search.">
 </picture>
 
 Source library: categories, sync status, **update available** badges, global STL search, per-source import rules.
@@ -124,27 +125,37 @@ Source library: categories, sync status, **update available** badges, global STL
   <img src="docs/screenshots/light/builds.png" alt="Builds — plan manager with active-build dropdown, create, rename, duplicate, and delete.">
 </picture>
 
-Sidebar **Builds** page plus the same controls in **Manage builds** on Build and the header plan picker.
+Sidebar **Builds** page plus the same controls in **Manage builds** on Plan and the header plan picker.
 
-### Build
+### Plan
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/build.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/build.png">
-  <img src="docs/screenshots/light/build.png" alt="Build — Manage builds, role filament colors, STL pickers with live preview, and Update build.">
+  <img src="docs/screenshots/light/build.png" alt="Plan — Manage builds, role filament colors, STL pickers with live preview, and Update build.">
 </picture>
 
 **Manage builds**, role colors, attach sources, pick STLs (live 3D preview), **Update build** when stale, kit options, **Docs**, export and share.
 
-### Review
+### Parts
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/review.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/review.png">
-  <img src="docs/screenshots/light/review.png" alt="Review — validation, parts with 3D previews, exports, and print checkoff.">
+  <img src="docs/screenshots/light/review.png" alt="Parts — validation, parts with 3D previews, quantity edits, and exports.">
 </picture>
 
-Validation by role and filament, parts list with **3D previews**, quantity edits, STL/3MF export, and **print checkoff**.
+Validation by role and filament, parts list with **3D previews**, quantity edits, and STL/3MF export.
+
+### Progress
+
+Print checkoff — per-unit progress, filters, and printable checklist. Capture with `docs/scripts/capture-screenshots.mjs` (writes `progress.png`); re-run if the PNG is not yet in `docs/screenshots/{light,dark}/`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/progress.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/progress.png">
+  <img src="docs/screenshots/light/progress.png" alt="Progress — print checkoff with per-unit progress and filters.">
+</picture>
 
 ### AI assistant (Settings)
 

@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Kit advisor (optional AI)** — research kits/mods with tools (web search, URL ingest, plan/catalog helpers); propose changes as Apply cards. Configure under **Settings → AI assistant** (Anthropic, OpenAI, or local Ollama). Per-tenant integration overrides env; soft daily budgets; decision memory and chat history. User guide: `docs/KIT_ADVISOR.md`.
 - **AI settings UI** — dedicated Settings card for provider, model, keys, budgets, search backend (Auto / DuckDuckGo / Brave / Exa), URL research limits, and Ollama `num_ctx`. `GET /assistant/status` reports `source` (`settings` \| `env` \| `none`).
-- **Unified Review workspace** — print checkoff folded into Review (legacy `/checkoff` redirects); STL/3MF export and missing-STL export from one place.
+- **Unified Parts / Progress workspace** — print checkoff lives on **Progress** (legacy `/checkoff` redirects there); Parts covers validation and quantities; STL/3MF export and missing-STL export remain available from Parts / Export.
 - **Published Docker images** — releases now push multi-arch (`linux/amd64` + `linux/arm64`) images to `ghcr.io/poitee/print-partner` with `latest` and version tags, so `docker compose pull && docker compose up -d` works without building from source.
 - **Release workflow** — pushing a `vX.Y.Z` tag builds and publishes the image (with the version baked into `PP_VERSION`) and creates a GitHub Release with auto-generated notes (`.github/workflows/release.yml`).
 - **Container healthcheck** — the app service in `docker-compose.yml` and `docker-compose.saas.yml` now polls `GET /health` via Node's built-in `fetch`.

@@ -125,8 +125,8 @@ export default function WorkflowProgress({
               key={stage.id}
               to={stage.to}
               onClick={(e) => onNavigate?.(stage.to, e)}
-              title={`${stage.label}${stage.meta ? ` · ${stage.meta}` : ""}`}
-              aria-label={stage.label}
+              title={`${stage.label}${stage.meta ? ` · ${stage.meta}` : ""}${stage.warn ? " · warning" : ""}`}
+              aria-label={`${stage.label}${stage.warn ? ", warning" : ""}`}
               className={cn(
                 "relative flex items-center justify-center rounded-md p-2.5 transition-colors",
                 active

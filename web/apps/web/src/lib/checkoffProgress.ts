@@ -44,7 +44,10 @@ export function checkoffUnitTotals(parts: CheckoffSummaryPart[]): CheckoffUnitTo
   );
   const printedUnits = parts.reduce((sum, p) => sum + p.printed_count, 0);
   const remainingUnits = Math.max(0, totalUnits - printedUnits);
-  const percent = totalUnits === 0 ? 0 : Math.floor((printedUnits / totalUnits) * 100);
+  const percent =
+    totalUnits === 0
+      ? 0
+      : Math.min(100, Math.max(0, Math.floor((printedUnits / totalUnits) * 100)));
   return { printedUnits, totalUnits, remainingUnits, percent };
 }
 

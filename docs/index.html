@@ -217,13 +217,15 @@
         <a href="https://github.com/sponsors/poitee">Sponsor</a>
       </nav>
       <div class="pipeline" aria-label="Print Partner workflow">
-        <span class="pipeline-step">Sources</span>
+        <span class="pipeline-step">Library</span>
         <span class="pipeline-arrow" aria-hidden="true">→</span>
-        <span class="pipeline-step">Build</span>
+        <span class="pipeline-step">Plan</span>
         <span class="pipeline-arrow" aria-hidden="true">→</span>
-        <span class="pipeline-step">Review</span>
+        <span class="pipeline-step">Parts</span>
+        <span class="pipeline-arrow" aria-hidden="true">→</span>
+        <span class="pipeline-step">Progress</span>
       </div>
-      <p class="pipeline-note">Plan management — <strong>Create build</strong>, <strong>Manage builds</strong> on Build, or sidebar <strong>Builds</strong>. Print checkoff lives on <strong>Review</strong>.</p>
+      <p class="pipeline-note">Plan management — <strong>Create build</strong>, <strong>Manage builds</strong> on Plan, or sidebar <strong>Builds</strong>. Print checkoff lives on <strong>Progress</strong>.</p>
     </header>
 
     <section>
@@ -243,9 +245,10 @@ docker compose pull && docker compose up -d</code></pre>
     <section>
       <h2>Workflow</h2>
       <ul>
-        <li><strong>Sources</strong> — GitHub, local folders, or zips; categories; import rules; STL search; update badges.</li>
-        <li><strong>Build</strong> — attach layers, pick files, role filament colors (live previews), Update build, share or export.</li>
-        <li><strong>Review</strong> — validation by role and filament, 3D previews, quantity edits, Export STLs/3MF, print checkoff, export missing STLs.</li>
+        <li><strong>Library</strong> — GitHub, local folders, or zips; categories; import rules; STL search; update badges.</li>
+        <li><strong>Plan</strong> — attach layers, pick files, role filament colors (live previews), Update build, share or export.</li>
+        <li><strong>Parts</strong> — validation by role and filament, 3D previews, quantity edits, Export STLs/3MF, export missing STLs.</li>
+        <li><strong>Progress</strong> — print checkoff: per-unit progress, filters, printable checklist.</li>
       </ul>
     </section>
 
@@ -260,7 +263,7 @@ docker compose pull && docker compose up -d</code></pre>
       <p class="shots-intro">Light and dark themes from the current UI. The app also supports <strong>system</strong> theme and a collapsible sidebar.</p>
 
       <div class="shot-block">
-        <p class="shot-title">Sources</p>
+        <p class="shot-title">Library</p>
         <p class="shot-desc">Source library with categories, sync status, update badges, and global STL search.</p>
         <div class="theme-pair">
           <figure>
@@ -290,7 +293,7 @@ docker compose pull && docker compose up -d</code></pre>
       </div>
 
       <div class="shot-block">
-        <p class="shot-title">Build</p>
+        <p class="shot-title">Plan</p>
         <p class="shot-desc">Manage builds panel, role colors, STL pickers with live preview, Update build.</p>
         <div class="theme-pair">
           <figure>
@@ -305,15 +308,30 @@ docker compose pull && docker compose up -d</code></pre>
       </div>
 
       <div class="shot-block">
-        <p class="shot-title">Review</p>
-        <p class="shot-desc">Validation summary, parts list with 3D previews, exports, and print checkoff.</p>
+        <p class="shot-title">Parts</p>
+        <p class="shot-desc">Validation summary, parts list with 3D previews, quantity edits, and exports.</p>
         <div class="theme-pair">
           <figure>
-            <img src="screenshots/light/review.png" alt="Review — light theme" loading="lazy">
+            <img src="screenshots/light/review.png" alt="Parts — light theme" loading="lazy">
             <figcaption>Light</figcaption>
           </figure>
           <figure>
-            <img src="screenshots/dark/review.png" alt="Review — dark theme" loading="lazy">
+            <img src="screenshots/dark/review.png" alt="Parts — dark theme" loading="lazy">
+            <figcaption>Dark</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <div class="shot-block">
+        <p class="shot-title">Progress</p>
+        <p class="shot-desc">Print checkoff — per-unit progress, filters, and printable checklist. (Re-run <code>docs/scripts/capture-screenshots.mjs</code> if <code>progress.png</code> is missing.)</p>
+        <div class="theme-pair">
+          <figure>
+            <img src="screenshots/light/progress.png" alt="Progress — light theme" loading="lazy">
+            <figcaption>Light</figcaption>
+          </figure>
+          <figure>
+            <img src="screenshots/dark/progress.png" alt="Progress — dark theme" loading="lazy">
             <figcaption>Dark</figcaption>
           </figure>
         </div>

@@ -35,7 +35,7 @@ export default function ExportRecentPanel() {
         Recent
       </span>
       <ul className="flex flex-col gap-0">
-        {exportJobs.map((job) => {
+        {exportJobs.map((job, idx) => {
           const isActive = job.status === "pending" || job.status === "running";
           const pct =
             job.progress != null
@@ -43,7 +43,7 @@ export default function ExportRecentPanel() {
               : null;
           return (
             <li
-              key={job.jobId || `${job.kind}-${job.message}`}
+              key={job.jobId || `${job.kind}-${idx}`}
               className="flex flex-col gap-1 border-b border-border/60 py-2.5 last:border-b-0 last:pb-0 first:pt-0"
             >
               <span className="text-[12.5px] font-semibold leading-snug">

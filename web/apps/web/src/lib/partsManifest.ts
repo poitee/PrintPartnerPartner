@@ -344,6 +344,8 @@ async function syncPrintedCount(part: ReviewPart, target: number): Promise<void>
       units[i] = want;
     }
   }
+  part.print_units = units.slice(0, qty);
+  part.printed_count = desired;
 }
 
 /** Apply validated manifest rows to the current plan via existing part PATCH APIs. */
@@ -380,7 +382,7 @@ export async function applyPartsManifest(
           continue;
         }
         const next = Math.max(1, Math.floor(qty));
-        if (next !== part.quantity_effective || part.quantity_override !== next) {
+        if (next !== part.quantity_effective) {
           await patchPart(part.id, { quantity_override: next });
           part.quantity_effective = next;
           part.quantity_override = next;
@@ -433,5 +435,5 @@ export function triggerBrowserDownload(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }

@@ -173,7 +173,10 @@ export async function uploadBlobToGoogleDrive(
     name: filename,
     mimeType,
   };
-  const boundary = `pp_${Date.now().toString(36)}`;
+  const boundary =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? `pp_${crypto.randomUUID()}`
+      : `pp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
   const metaPart =
     `--${boundary}\r\n` +
     `Content-Type: application/json; charset=UTF-8\r\n\r\n` +

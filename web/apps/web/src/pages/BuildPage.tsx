@@ -380,11 +380,15 @@ function BuildPageContent() {
   }, [flushPendingSaves]);
 
   const onNavigateToParts = () => {
-    void flushPendingSaves().then(() => {
-      if (selectedProfileId != null) {
-        navigate(partsRoute(selectedProfileId));
-      }
-    });
+    void flushPendingSaves()
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (selectedProfileId != null) {
+          navigate(partsRoute(selectedProfileId));
+        }
+      });
   };
 
   const openAssistant = () => {
