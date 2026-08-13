@@ -92,10 +92,14 @@ export function loadPrinterSendQueue(repo: AppRepository): PrinterSendQueueItem[
   }
 }
 
-/** Cap terminal history only — never drop queued/sending items. */
+function isActiveSendQueueState(state: PrinterSendQueueState): boolean {
+  return state === "queued" || state === "sending" || state === "error";
+}
+
+/** Cap terminal history only — never drop queued/sending/error items. */
 export function trimPrinterSendQueue(items: PrinterSendQueueItem[]): PrinterSendQueueItem[] {
-  const active = items.filter((i) => i.state === "queued" || i.state === "sending");
-  const terminal = items.filter((i) => i.state !== "queued" && i.state !== "sending");
+  const active = items.filter((i) => isActiveSendQueueState(i.state));
+  const terminal = items.filter((i) => !isActiveSendQueueState(i.state));
   const keepTerminal = Math.max(0, MAX_ITEMS - active.length);
   if (keepTerminal === 0) return active;
   return [...active, ...terminal.slice(-keepTerminal)];
@@ -199,9 +203,7 @@ export function cancelPrinterSendQueueItem(
 }
 
 export function listActivePrinterSendQueue(repo: AppRepository): PrinterSendQueueItem[] {
-  return loadPrinterSendQueue(repo).filter(
-    (i) => i.state === "queued" || i.state === "sending" || i.state === "error",
-  );
+  return loadPrinterSendQueue(repo).filter((i) => isActiveSendQueueState(i.state));
 }
 
 /** Ensure artifact paths stay under exports/printer-uploads. */
