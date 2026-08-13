@@ -176,8 +176,24 @@ export function loadPrinterCheckoffLinks(repo: AppRepository): PrinterCheckoffLi
 }
 
 function savePrinterCheckoffLinks(repo: AppRepository, links: PrinterCheckoffLink[]): void {
-  const trimmed = links.slice(-MAX_LINKS);
-  repo.setSetting(SETTINGS_KEY, JSON.stringify(trimmed));
+  repo.setSetting(SETTINGS_KEY, JSON.stringify(trimPrinterCheckoffLinks(links)));
+}
+
+/** Keep active links; prefer dropping oldest terminal history when over cap. */
+export function trimPrinterCheckoffLinks(links: PrinterCheckoffLink[]): PrinterCheckoffLink[] {
+  if (links.length <= MAX_LINKS) return links;
+  const terminal = new Set(["verified", "dismissed", "host_failed", "applied"]);
+  const active: PrinterCheckoffLink[] = [];
+  const done: PrinterCheckoffLink[] = [];
+  for (const link of links) {
+    if (terminal.has(link.state)) done.push(link);
+    else active.push(link);
+  }
+  if (active.length >= MAX_LINKS) {
+    return active.slice(-MAX_LINKS);
+  }
+  const keepDone = MAX_LINKS - active.length;
+  return [...active, ...done.slice(-keepDone)];
 }
 
 export function createPrinterCheckoffLink(

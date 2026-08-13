@@ -158,7 +158,10 @@ describe("printer checkoff verify-first flow", () => {
       { part_id: bracket.id, unit_index: 0, result: "rejected" },
     ]);
     expect(bad).toEqual(
-      expect.objectContaining({ status: 400, error: expect.stringContaining("reason") }),
+      expect.objectContaining({
+        status: 400,
+        error: expect.stringMatching(/reason/i),
+      }),
     );
 
     sqlite.close();

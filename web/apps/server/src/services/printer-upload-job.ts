@@ -135,7 +135,7 @@ export async function runPrinterUploadJob(
     started: Boolean(result.started),
     message: result.message,
     checkoff_link_id: checkoffLinkId,
-    checkoff_units: checkoffUnits.length,
+    checkoff_units: checkoffLinkId ? checkoffUnits.length : 0,
   };
 }
 

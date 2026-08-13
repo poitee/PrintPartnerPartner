@@ -18,6 +18,25 @@ function md5(value: string): string {
   return createHash("md5").update(value).digest("hex");
 }
 
+/** Quote a Digest auth parameter; reject CR/LF that would break the header. */
+export function quoteDigestParam(value: string): string {
+  if (/[\r\n\0]/.test(value)) {
+    throw new Error("Invalid digest parameter");
+  }
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/** Prefer qop=auth when the challenge lists multiple options. */
+export function pickDigestQop(qopRaw: string): string | undefined {
+  const options = qopRaw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!options.length) return undefined;
+  if (options.includes("auth")) return "auth";
+  return options[0];
+}
+
 /** Build an Authorization: Digest … header for an HTTP Digest challenge (MD5 / auth). */
 export function buildDigestAuthorization(opts: {
   username: string;
@@ -30,8 +49,7 @@ export function buildDigestAuthorization(opts: {
   const { username, password, method, uri, challenge } = opts;
   const realm = challenge.realm ?? "";
   const nonce = challenge.nonce ?? "";
-  const qopRaw = challenge.qop ?? "";
-  const qop = qopRaw.split(",")[0]?.trim() || undefined;
+  const qop = pickDigestQop(challenge.qop ?? "");
   const opaque = challenge.opaque;
   const algorithm = (challenge.algorithm ?? "MD5").toUpperCase();
   if (algorithm !== "MD5" && algorithm !== "MD5-SESS") {
@@ -50,16 +68,16 @@ export function buildDigestAuthorization(opts: {
     : md5(`${ha1}:${nonce}:${ha2}`);
 
   const parts = [
-    `Digest username="${username}"`,
-    `realm="${realm}"`,
-    `nonce="${nonce}"`,
-    `uri="${uri}"`,
-    `response="${response}"`,
+    `Digest username=${quoteDigestParam(username)}`,
+    `realm=${quoteDigestParam(realm)}`,
+    `nonce=${quoteDigestParam(nonce)}`,
+    `uri=${quoteDigestParam(uri)}`,
+    `response=${quoteDigestParam(response)}`,
   ];
   if (qop) {
-    parts.push(`qop=${qop}`, `nc=${nc}`, `cnonce="${cnonce}"`);
+    parts.push(`qop=${qop}`, `nc=${nc}`, `cnonce=${quoteDigestParam(cnonce)}`);
   }
-  if (opaque) parts.push(`opaque="${opaque}"`);
+  if (opaque) parts.push(`opaque=${quoteDigestParam(opaque)}`);
   parts.push(`algorithm=${algorithm}`);
   return parts.join(", ");
 }
