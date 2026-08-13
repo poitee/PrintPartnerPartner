@@ -32,16 +32,25 @@ export function isSyncSqliteDrizzle(db: AppDrizzleDb): boolean {
   }
 }
 
-/** In-process serialization for settings RMW when sync DB transactions are unavailable (Postgres). */
-let settingsMutationChain: Promise<unknown> = Promise.resolve();
+/** In-process serialization for settings RMW when sync DB transactions are unavailable (Postgres).
+ * Must not use Promise chaining + syncAwait: Atomics.wait blocks the event loop, so `.then`
+ * never runs and the call hangs. A sync lock is enough — Node is single-threaded, and
+ * syncAwait (if used inside fn) also blocks the loop, so concurrent handlers cannot interleave
+ * mid-mutation.
+ */
+let settingsMutationLocked = false;
 
 export function runSerializedSettingsMutation<T>(fn: () => T): T {
-  const run = settingsMutationChain.then(() => fn());
-  settingsMutationChain = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return syncAwait(run);
+  if (settingsMutationLocked) {
+    // Nested call on the same stack (e.g. helper → transaction → helper → transaction).
+    return fn();
+  }
+  settingsMutationLocked = true;
+  try {
+    return fn();
+  } finally {
+    settingsMutationLocked = false;
+  }
 }
 
 function wrapBuilder(builder: unknown): unknown {

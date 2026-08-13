@@ -50,6 +50,14 @@ describe("trimPrinterSendQueue", () => {
     expect(trimmed.some((i) => i.state === "done")).toBe(false);
   });
 
+  it("preserves error items as active/retryable", () => {
+    const errors = Array.from({ length: 52 }, (_, i) => item(`e${i}`, "error"));
+    const done = Array.from({ length: 5 }, (_, i) => item(`d${i}`, "done"));
+    const trimmed = trimPrinterSendQueue([...errors, ...done]);
+    expect(trimmed.filter((i) => i.state === "error")).toHaveLength(52);
+    expect(trimmed.some((i) => i.state === "done")).toBe(false);
+  });
+
   it("keeps newest terminal history within remaining capacity", () => {
     const active = [item("a1", "sending")];
     const terminal = Array.from({ length: 60 }, (_, i) => item(`t${i}`, "done"));
