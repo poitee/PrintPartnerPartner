@@ -2,7 +2,7 @@
 
 Product and UX deep dive for live printer integration in Print Partner — how Moonraker / PrusaLink / Bambu bind into existing Settings, fleet, Export, Progress, and JobTray surfaces, what users see at each capability layer, and the concrete data/API seams.
 
-**Phases A–F implemented (desk-first self-host):** Settings printer hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip**; **verify-first Progress** when a host job completes (Phase D — confirm/reject + failure reasons); **Bambu LAN MQTT status** (Phase E — no default MQTT print-start); thin **farm send queue** (Phase F — Idle picker, Queue for idle, Send ready / Send now, drain on Idle). Setup walkthrough: [PRINTER_SETUP.md](PRINTER_SETUP.md). Vendor/API research: [PRINTER_APIS.md](PRINTER_APIS.md). Later: richer L4 farm matching; Bambu send via official Connect / Local Server.
+**Phases A–F implemented (desk-first self-host):** Settings printer hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip**; **verify-first Progress** when a host job completes (Phase D — confirm/reject + failure reasons); **Bambu LAN MQTT status** (Phase E — no default MQTT print-start); thin **farm send queue** (Phase F — Idle picker, Queue for idle, Send ready / Send now, drain on Idle); **compatible farm match** (**Any matching idle** — same bed + filament preference). Setup walkthrough: [PRINTER_SETUP.md](PRINTER_SETUP.md). Vendor/API research: [PRINTER_APIS.md](PRINTER_APIS.md). Later: official Bambu send via Connect / Local Server.
 
 **Persona default:** desk-first self-host (one Voron/Prusa + optional Bambu status). Thin farm queue ships; multi-criteria farm auto-assign remains stretch. Slice boundary stays **export → external slicer → Print Partner uploads** (no in-app slicing in v1).
 
@@ -153,6 +153,8 @@ Polls via reconcile (~5s while visible) for Moonraker/PrusaLink. **Bambu** linke
 
 **Phase F (thin farm queue):** Export **Queue for idle** when the selected printer is busy; Progress shows the same [`PrinterSendQueuePanel`](../../web/apps/web/src/components/export/PrinterSendQueuePanel.tsx) under the live strip (**Send ready** / **Send now** / Remove). Auto-drain runs when a host becomes Idle.
 
+**Richer L4 matching:** Export **Any matching idle** enqueues with `match: "compatible"`. Drain/dispatch may reassign to another idle linked Moonraker/PrusaLink with the **same bed size** as the preferred fleet machine, preferring hosts whose loaded filament overlaps tracked Progress parts.
+
 **Mapping at send time (Export → Send to printer):**
 
 - Optional checkbox **Track for Progress verify when this print finishes** (default on when the active plan has missing units).
@@ -204,8 +206,9 @@ Adapter implementations: [`moonraker.ts`](../../web/apps/server/src/integrations
 | **D** | Verify-first on job done | Progress verify panel + reject reasons (shipped) |
 | **E** | Bambu status (LAN MQTT) | Hosts form + fleet/Progress status (send deferred) |
 | **F** | Farm send queue (thin) | Export + Progress: Idle picker, **Queue for idle**, **Send ready** / **Send now**, auto-drain on Idle |
+| **L4+** | Compatible farm match | Export **Any matching idle** — same bed + filament preference on drain |
 
-Recommended ship order matches research in [PRINTER_APIS.md](PRINTER_APIS.md): **A → B → C → D → E → F** (thin), then richer L4 matching / official Bambu send. Phase mapping to the research ladder: **A** ≈ L1 (Settings status), **B** ≈ L3 (upload), **C** ≈ L1 on Progress, **D** ≈ L2 (verify-first, not blind auto-tick), **E** ≈ L1 Bambu, **F** ≈ thin L4 queue.
+Recommended ship order matches research in [PRINTER_APIS.md](PRINTER_APIS.md): **A → B → C → D → E → F** (thin), then richer L4 matching / official Bambu send. Phase mapping to the research ladder: **A** ≈ L1 (Settings status), **B** ≈ L3 (upload), **C** ≈ L1 on Progress, **D** ≈ L2 (verify-first, not blind auto-tick), **E** ≈ L1 Bambu, **F** ≈ thin L4 queue, **L4+** ≈ bed/filament farm match.
 
 ---
 

@@ -3,6 +3,7 @@ import { relative, resolve } from "node:path";
 import type {
   PrinterCheckoffUnit,
   PrinterSendQueueItem,
+  PrinterSendQueueMatch,
   PrinterSendQueueState,
 } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
@@ -77,6 +78,9 @@ function parseItem(raw: unknown): PrinterSendQueueItem | null {
   if (typeof row.host_name === "string" && row.host_name.trim()) {
     item.host_name = row.host_name.trim();
   }
+  if (row.match === "compatible" || row.match === "pinned") {
+    item.match = row.match;
+  }
   return item;
 }
 
@@ -115,6 +119,7 @@ export type EnqueuePrinterSendInput = {
   printer_id: string;
   start: boolean;
   wait_for_idle?: boolean;
+  match?: PrinterSendQueueMatch;
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
   host_name?: string;
@@ -128,6 +133,8 @@ export function enqueuePrinterSend(
   const artifactPath = input.artifact_path.trim();
   const printerId = input.printer_id.trim();
   if (!filename || !artifactPath || !printerId) return null;
+  const match: PrinterSendQueueMatch =
+    input.match === "compatible" ? "compatible" : "pinned";
   return repo.transaction(() => {
     const now = new Date().toISOString();
     const item: PrinterSendQueueItem = {
@@ -135,6 +142,7 @@ export function enqueuePrinterSend(
       filename,
       artifact_path: artifactPath,
       printer_id: printerId,
+      match,
       wait_for_idle: input.wait_for_idle !== false,
       start: Boolean(input.start),
       profile_id: input.profile_id,
@@ -164,7 +172,12 @@ export function updatePrinterSendQueueItem(
   patch: Partial<
     Pick<
       PrinterSendQueueItem,
-      "state" | "upload_job_id" | "error" | "updated_at" | "host_name"
+      | "state"
+      | "upload_job_id"
+      | "error"
+      | "updated_at"
+      | "host_name"
+      | "printer_id"
     >
   >,
   options?: { requireState?: PrinterSendQueueState | PrinterSendQueueState[] },

@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
 import type { PrinterHostStatus, PrinterSendQueueItem } from "@print-partner/contracts";
+import type { PrinterMachine } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
 import { getIntegrationConfig } from "../integrations/store.js";
+import { rankCompatibleSendPrinters } from "./printer-farm-match.js";
 import { loadFleet } from "./printer-fleet.js";
 import {
   assertPrinterUploadArtifactPath,
@@ -22,9 +24,82 @@ export type StartPrinterUploadJob = (payload: {
 
 export type GetHostStatus = (integrationId: string) => Promise<PrinterHostStatus>;
 
+function isIdleish(state: PrinterHostStatus["state"]): boolean {
+  return state === "idle" || state === "complete";
+}
+
+async function resolveDispatchTarget(
+  repo: AppRepository,
+  item: PrinterSendQueueItem,
+  preferred: PrinterMachine,
+  deps: {
+    getStatus: GetHostStatus;
+    force?: boolean;
+    excludePrinterIds?: Set<string>;
+  },
+): Promise<
+  | { printer: PrinterMachine; hostName: string; integrationId: string }
+  | { error: string; status: number }
+> {
+  const fleet = loadFleet(repo);
+
+  if (item.match === "compatible") {
+    const ranked = rankCompatibleSendPrinters(repo, item, preferred, fleet, {
+      excludePrinterIds: deps.excludePrinterIds,
+    });
+    for (const { printer } of ranked) {
+      const integrationId = printer.integration_id?.trim();
+      if (!integrationId) continue;
+      const integration = getIntegrationConfig(repo, integrationId);
+      if (!integration) continue;
+      if (item.wait_for_idle && !deps.force) {
+        try {
+          const status = await deps.getStatus(integrationId);
+          if (!isIdleish(status.state)) continue;
+        } catch {
+          continue;
+        }
+      }
+      return { printer, hostName: integration.name, integrationId };
+    }
+    if (!deps.force) {
+      return {
+        error: "No idle printer with matching bed size",
+        status: 409,
+      };
+    }
+    // Force: fall through to preferred even if busy / unmatched idle.
+  }
+
+  if (deps.excludePrinterIds?.has(preferred.id)) {
+    return { error: "Printer already claimed this drain pass", status: 409 };
+  }
+
+  const integrationId = preferred.integration_id?.trim();
+  if (!integrationId) {
+    return { error: "Printer is not linked to a host", status: 400 };
+  }
+  const integration = getIntegrationConfig(repo, integrationId);
+  if (!integration) return { error: "Linked host not found", status: 400 };
+  if (integration.type !== "moonraker" && integration.type !== "prusalink") {
+    return { error: `Upload is not supported for ${integration.type}`, status: 400 };
+  }
+  if (item.wait_for_idle && !deps.force) {
+    const status = await deps.getStatus(integrationId);
+    if (!isIdleish(status.state)) {
+      return {
+        error: `Printer is ${status.state} — wait for Idle or force dispatch`,
+        status: 409,
+      };
+    }
+  }
+  return { printer: preferred, hostName: integration.name, integrationId };
+}
+
 /**
  * Dispatch a queued send when the target host is idle (or force=true).
  * Claims the item as sending, starts printer-upload job, stores job id.
+ * Compatible-match items may reassign printer_id to another same-bed idle host.
  */
 export async function dispatchPrinterSendQueueItem(
   repo: AppRepository,
@@ -34,6 +109,7 @@ export async function dispatchPrinterSendQueueItem(
     startJob: StartPrinterUploadJob;
     getStatus: GetHostStatus;
     force?: boolean;
+    excludePrinterIds?: Set<string>;
   },
 ): Promise<
   | { item: PrinterSendQueueItem; job_id: string }
@@ -61,27 +137,11 @@ export async function dispatchPrinterSendQueueItem(
     return { error: "Artifact file missing on disk", status: 409 };
   }
 
-  const machine = loadFleet(repo).find((m) => m.id === item.printer_id);
-  if (!machine) return { error: "Fleet printer not found", status: 404 };
-  const integrationId = machine.integration_id?.trim();
-  if (!integrationId) {
-    return { error: "Printer is not linked to a host", status: 400 };
-  }
-  const integration = getIntegrationConfig(repo, integrationId);
-  if (!integration) return { error: "Linked host not found", status: 400 };
-  if (integration.type !== "moonraker" && integration.type !== "prusalink") {
-    return { error: `Upload is not supported for ${integration.type}`, status: 400 };
-  }
+  const preferred = loadFleet(repo).find((m) => m.id === item.printer_id);
+  if (!preferred) return { error: "Fleet printer not found", status: 404 };
 
-  if (item.wait_for_idle && !deps.force) {
-    const status = await deps.getStatus(integrationId);
-    if (status.state !== "idle" && status.state !== "complete") {
-      return {
-        error: `Printer is ${status.state} — wait for Idle or force dispatch`,
-        status: 409,
-      };
-    }
-  }
+  const target = await resolveDispatchTarget(repo, item, preferred, deps);
+  if ("error" in target) return target;
 
   const claimed = updatePrinterSendQueueItem(
     repo,
@@ -89,7 +149,8 @@ export async function dispatchPrinterSendQueueItem(
     {
       state: "sending",
       error: undefined,
-      host_name: integration.name,
+      printer_id: target.printer.id,
+      host_name: target.hostName,
     },
     { requireState: ["queued", "error"] },
   );
@@ -97,11 +158,11 @@ export async function dispatchPrinterSendQueueItem(
 
   try {
     const job_id = await deps.startJob({
-      printer_id: item.printer_id,
+      printer_id: target.printer.id,
       artifact_path: artifactPath,
       filename: item.filename,
       start: item.start,
-      host_name: integration.name,
+      host_name: target.hostName,
       profile_id: item.profile_id,
       checkoff_units: item.checkoff_units,
     });
@@ -120,8 +181,8 @@ export async function dispatchPrinterSendQueueItem(
 }
 
 /**
- * For each idle linked send host, dispatch at most one waiting queue item
- * targeting that printer.
+ * For each waiting queue item, dispatch when a compatible (or pinned) host is idle.
+ * At most one send per printer per drain pass.
  */
 export async function drainPrinterSendQueue(
   repo: AppRepository,
@@ -136,31 +197,18 @@ export async function drainPrinterSendQueue(
   const usedPrinters = new Set<string>();
 
   for (const item of queued) {
-    if (usedPrinters.has(item.printer_id)) continue;
-    const machine = loadFleet(repo).find((m) => m.id === item.printer_id);
-    const integrationId = machine?.integration_id?.trim();
-    if (!integrationId) continue;
-
-    if (item.wait_for_idle) {
-      try {
-        const status = await deps.getStatus(integrationId);
-        if (status.state !== "idle" && status.state !== "complete") continue;
-      } catch {
-        continue;
-      }
-    }
-
     const dispatched = await dispatchPrinterSendQueueItem(repo, exportsDir, item.id, {
       startJob: deps.startJob,
       getStatus: deps.getStatus,
       force: !item.wait_for_idle,
+      excludePrinterIds: usedPrinters,
     });
     if ("error" in dispatched) {
       if (dispatched.status === 409) continue;
       results.push({ item_id: item.id, error: dispatched.error });
       continue;
     }
-    usedPrinters.add(item.printer_id);
+    usedPrinters.add(dispatched.item.printer_id);
     results.push({ item_id: item.id, job_id: dispatched.job_id });
   }
 

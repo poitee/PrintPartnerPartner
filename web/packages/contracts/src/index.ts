@@ -286,13 +286,27 @@ export type PrinterSendQueueState =
   | "error"
   | "cancelled";
 
+/** How drain/dispatch picks a live host for a queued send. */
+export type PrinterSendQueueMatch = "pinned" | "compatible";
+
 /** Durable outbound send queue item (Phase F thin farm assist). */
 export type PrinterSendQueueItem = {
   id: string;
   filename: string;
   /** Absolute path under data/exports/printer-uploads/… */
   artifact_path: string;
+  /**
+   * Preferred fleet printer. For `match: "compatible"`, bed size (and optional
+   * Progress filament) are taken from this machine; drain may reassign to
+   * another idle host with the same bed.
+   */
   printer_id: string;
+  /**
+   * `pinned` (default): wait for this printer only.
+   * `compatible`: pick any idle linked Moonraker/PrusaLink with the same bed;
+   * prefer loaded-filament overlap with tracked Progress units.
+   */
+  match?: PrinterSendQueueMatch;
   /** When true, wait for host Idle before dispatch (default). */
   wait_for_idle: boolean;
   start: boolean;
