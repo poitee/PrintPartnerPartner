@@ -24,7 +24,15 @@ function credentials(config: IntegrationConfig): { username: string; password: s
 
 function storageRoot(config: IntegrationConfig): string {
   const raw = config.storage ?? config.storage_path;
-  if (typeof raw === "string" && raw.trim()) return raw.trim().replace(/^\/+|\/+$/g, "");
+  if (typeof raw === "string" && raw.trim()) {
+    const cleaned = raw
+      .trim()
+      .replace(/^\/+|\/+$/g, "")
+      .split("/")
+      .filter((seg) => seg && seg !== "." && seg !== "..")
+      .join("/");
+    if (cleaned) return cleaned;
+  }
   return "usb";
 }
 
@@ -174,7 +182,9 @@ async function readJobFileMeta(
         ? Math.round(Math.min(100, Math.max(0, progressRaw)))
         : undefined;
     const eta =
-      typeof body.time_remaining === "number" && Number.isFinite(body.time_remaining)
+      typeof body.time_remaining === "number" &&
+      Number.isFinite(body.time_remaining) &&
+      body.time_remaining >= 0
         ? body.time_remaining
         : undefined;
     return {
@@ -213,7 +223,9 @@ async function readStatus(config: IntegrationConfig): Promise<PrinterHostStatus>
       : undefined;
   let filename = filenameFromFile(body.job?.file);
   let eta =
-    typeof body.job?.time_remaining === "number" && Number.isFinite(body.job.time_remaining)
+    typeof body.job?.time_remaining === "number" &&
+    Number.isFinite(body.job.time_remaining) &&
+    body.job.time_remaining >= 0
       ? body.job.time_remaining
       : undefined;
 

@@ -34,8 +34,20 @@ function loadedFilamentOverlap(printer: PrinterMachine, wanted: Set<string>): nu
   return score;
 }
 
-function sameBed(a: PrinterMachine, b: PrinterMachine): boolean {
-  return a.bed_width_mm === b.bed_width_mm && a.bed_depth_mm === b.bed_depth_mm;
+function sameBed(preferred: PrinterMachine, candidate: PrinterMachine): boolean {
+  if (
+    preferred.bed_width_mm !== candidate.bed_width_mm ||
+    preferred.bed_depth_mm !== candidate.bed_depth_mm
+  ) {
+    return false;
+  }
+  // Prefer exact XY (G-code was sliced for that bed). Height/margin: candidate
+  // must be at least as tall and not use a larger margin that shrinks usable Z.
+  const prefH = preferred.bed_height_mm;
+  const candH = candidate.bed_height_mm;
+  if (prefH != null && candH != null && candH < prefH) return false;
+  if (candidate.margin_mm > preferred.margin_mm) return false;
+  return true;
 }
 
 /** Linked Moonraker/PrusaLink fleet machines with the preferred bed size. */
@@ -46,7 +58,7 @@ export function listCompatibleSendPrinters(
 ): PrinterMachine[] {
   const out: PrinterMachine[] = [];
   for (const printer of fleet) {
-    if (!sameBed(printer, preferred)) continue;
+    if (!sameBed(preferred, printer)) continue;
     const integrationId = printer.integration_id?.trim();
     if (!integrationId) continue;
     const integration = getIntegrationConfig(repo, integrationId);

@@ -34,7 +34,7 @@ export async function registerPrinterSendQueueRoutes(
   app: FastifyInstance,
   deps: RouteDeps,
 ): Promise<void> {
-  const startJob = async (payload: {
+  const makeStartJob = (tenantId: string) => async (payload: {
     printer_id: string;
     artifact_path: string;
     filename: string;
@@ -43,10 +43,14 @@ export async function registerPrinterSendQueueRoutes(
     profile_id?: number;
     checkoff_units?: ReturnType<typeof parseCheckoffUnits>;
   }) =>
-    deps.jobs.start("printer-upload", {
-      ...payload,
-      upload_job_id: undefined,
-    });
+    deps.jobs.start(
+      "printer-upload",
+      {
+        ...payload,
+        upload_job_id: undefined,
+      },
+      tenantId,
+    );
 
   const getStatus = (integrationId: string) => deps.integrations.getStatus(integrationId);
 
@@ -220,7 +224,7 @@ export async function registerPrinterSendQueueRoutes(
         deps.jobs.getExportsDir(),
         id,
         {
-          startJob,
+          startJob: makeStartJob(request.tenantId ?? "default"),
           getStatus,
           force: Boolean(body.force),
         },
@@ -246,9 +250,9 @@ export async function registerPrinterSendQueueRoutes(
   app.post(
     "/printer-send-queue/drain",
     { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
-    async () => {
+    async (request) => {
       const results = await drainPrinterSendQueue(deps.repo, deps.jobs.getExportsDir(), {
-        startJob,
+        startJob: makeStartJob(request.tenantId ?? "default"),
         getStatus,
       });
       return { results };
