@@ -81,7 +81,7 @@ After a fleet row is linked, open **Progress**. Above the search/filters sticky 
 - **Complete · filename** — successful finish (Phase D queues Progress verify for Moonraker/PrusaLink send mappings)
 - **Offline** / **Error** — host unreachable or adapter error (link back to Settings)
 
-The strip polls status about every 5 seconds while the tab is visible; manual −/+ checkoff still works. Bambu-linked hosts appear here for monitoring the same way.
+The strip polls status about every 5 seconds while the tab is visible; manual −/+ checkoff still works. **Bambu-linked hosts** appear here as **status only** (no Export send / verify mapping from Bambu yet).
 
 ## Verify-first Progress (Phase D)
 

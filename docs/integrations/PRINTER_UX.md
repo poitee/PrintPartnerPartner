@@ -146,7 +146,7 @@ Shop Voron · Idle
 Shop Voron · Offline
 ```
 
-Polls via reconcile (~5s while visible). Manual −/+ checkoff unchanged.
+Polls via reconcile (~5s while visible) for Moonraker/PrusaLink. **Bambu** linked hosts use status poll only (no verify queue from Bambu until send ships). Manual −/+ checkoff unchanged.
 
 **L2 (Phase D — verify-first):** host success ≠ part accepted. When a mapped job completes, the link moves to `awaiting_verify` (toast: “finished filename — verify N parts”). [`PrintVerifyPanel.tsx`](../../web/apps/web/src/components/checkoff/PrintVerifyPanel.tsx) lists pending units: **Confirm printed** (patches Progress) or **Reject…** (reason tag + optional note; unit stays unprinted). Outcomes append to `printer.print_outcomes` for failure learning / summary.
 
