@@ -2,9 +2,9 @@
 
 Product and UX deep dive for live printer integration in Print Partner — how Moonraker / PrusaLink / Bambu bind into existing Settings, fleet, Export, Progress, and JobTray surfaces, what users see at each capability layer, and the concrete data/API seams.
 
-**Phases A–E implemented (desk-first self-host):** Settings printer hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip**; **verify-first Progress** when a host job completes (Phase D — confirm/reject + failure reasons); **Bambu LAN MQTT status** (Phase E — no default MQTT print-start). Setup walkthrough: [PRINTER_SETUP.md](PRINTER_SETUP.md). Vendor/API research: [PRINTER_APIS.md](PRINTER_APIS.md). Later: farm queue (F); Bambu send via official Connect / Local Server.
+**Phases A–F implemented (desk-first self-host):** Settings printer hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip**; **verify-first Progress** when a host job completes (Phase D — confirm/reject + failure reasons); **Bambu LAN MQTT status** (Phase E — no default MQTT print-start); thin **farm send queue** (Phase F — Idle picker, Queue for idle, Send ready / Send now, drain on Idle). Setup walkthrough: [PRINTER_SETUP.md](PRINTER_SETUP.md). Vendor/API research: [PRINTER_APIS.md](PRINTER_APIS.md). Later: richer L4 farm matching; Bambu send via official Connect / Local Server.
 
-**Persona default:** desk-first self-host (one Voron/Prusa + optional Bambu status). Farm queue is stretch. Slice boundary stays **export → external slicer → Print Partner uploads** (no in-app slicing in v1).
+**Persona default:** desk-first self-host (one Voron/Prusa + optional Bambu status). Thin farm queue ships; multi-criteria farm auto-assign remains stretch. Slice boundary stays **export → external slicer → Print Partner uploads** (no in-app slicing in v1).
 
 Print Partner remains the **kit brain**; the printer host remains the **job runner**. We connect them at Export (push) and Progress (watch → user verify).
 
@@ -114,13 +114,14 @@ New card in [`ExportActionCards.tsx`](../../web/apps/web/src/components/export/E
 |--|--|
 | Title | **Send to printer** |
 | Description | Upload a sliced `.gcode` / `.bgcode` (or Bambu `.3mf` later) to a linked host |
-| Chips | linked printers · upload · optional start |
-| CTA | **Choose file…** → picker of **linked** fleet machines → Upload / Upload & start |
+| Chips | linked printers · upload · optional start · queue for idle |
+| CTA | **Choose file…** → picker prefers **Idle** linked machines → Upload / Upload & start / **Queue for idle** |
 
 Empty/disabled states:
 
 - No linked host → button disabled + link **Manage printers in Settings…** (same pattern as 3MF already uses)
 - File wrong type → toast
+- Selected printer **Busy** → **Upload & start** blocked; **Upload** and **Queue for idle** still work; copy: “Selected printer is busy. Upload or Queue for idle still work; start is blocked until Idle.”
 
 **Honest v1:** user still slices in Orca/PrusaSlicer; Print Partner is the LAN post office + status board. A follow-on “watch slicer folder” (`slicer_folder` stub in `IntegrationType`) can feed this card later.
 
@@ -149,6 +150,8 @@ Shop Voron · Offline
 Polls via reconcile (~5s while visible) for Moonraker/PrusaLink. **Bambu** linked hosts use status poll only (no verify queue from Bambu until send ships). Manual −/+ checkoff unchanged.
 
 **L2 (Phase D — verify-first):** host success ≠ part accepted. When a mapped job completes, the link moves to `awaiting_verify` (toast: “finished filename — verify N parts”). [`PrintVerifyPanel.tsx`](../../web/apps/web/src/components/checkoff/PrintVerifyPanel.tsx) lists pending units: **Confirm printed** (patches Progress) or **Reject…** (reason tag + optional note; unit stays unprinted). Outcomes append to `printer.print_outcomes` for failure learning / summary.
+
+**Phase F (thin farm queue):** Export **Queue for idle** when the selected printer is busy; Progress shows the same [`PrinterSendQueuePanel`](../../web/apps/web/src/components/export/PrinterSendQueuePanel.tsx) under the live strip (**Send ready** / **Send now** / Remove). Auto-drain runs when a host becomes Idle.
 
 **Mapping at send time (Export → Send to printer):**
 
@@ -200,9 +203,9 @@ Adapter implementations: [`moonraker.ts`](../../web/apps/server/src/integrations
 | **C** | Live strip on Progress | Progress header (shipped) |
 | **D** | Verify-first on job done | Progress verify panel + reject reasons (shipped) |
 | **E** | Bambu status (LAN MQTT) | Hosts form + fleet/Progress status (send deferred) |
-| **F** | Farm send queue | Export: Idle picker + **Queue for idle** / Send ready / Send now |
+| **F** | Farm send queue (thin) | Export + Progress: Idle picker, **Queue for idle**, **Send ready** / **Send now**, auto-drain on Idle |
 
-Recommended ship order matches research in [PRINTER_APIS.md](PRINTER_APIS.md): **A → B → C → D → E**, then F / official Bambu send. Phase mapping to the research ladder: **A** ≈ L1 (Settings status), **B** ≈ L3 (upload), **C** ≈ L1 on Progress, **D** ≈ L2 (verify-first, not blind auto-tick), **E** ≈ L1 Bambu.
+Recommended ship order matches research in [PRINTER_APIS.md](PRINTER_APIS.md): **A → B → C → D → E → F** (thin), then richer L4 matching / official Bambu send. Phase mapping to the research ladder: **A** ≈ L1 (Settings status), **B** ≈ L3 (upload), **C** ≈ L1 on Progress, **D** ≈ L2 (verify-first, not blind auto-tick), **E** ≈ L1 Bambu, **F** ≈ thin L4 queue.
 
 ---
 

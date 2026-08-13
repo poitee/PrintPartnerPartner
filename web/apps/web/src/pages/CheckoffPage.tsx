@@ -23,6 +23,7 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import EmptyState from "../components/layout/EmptyState";
 import PrinterLiveStrip from "../components/checkoff/PrinterLiveStrip";
 import PrintVerifyPanel from "../components/checkoff/PrintVerifyPanel";
+import PrinterSendQueuePanel from "../components/export/PrinterSendQueuePanel";
 import SortableProgressPart from "../components/checkoff/SortableProgressPart";
 import PartPreviewDialog from "../components/parts/PartPreviewDialog";
 import PartThumbExpandButton from "../components/parts/PartThumbExpandButton";
@@ -486,6 +487,7 @@ export default function CheckoffPage() {
               }
             }}
           />
+          <PrinterSendQueuePanel engineReady={Boolean(health?.ok)} />
           <PrintVerifyPanel
             engineReady={Boolean(health?.ok)}
             profileId={selectedProfileId}

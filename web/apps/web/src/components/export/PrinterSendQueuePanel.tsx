@@ -34,7 +34,8 @@ function stateLabel(item: PrinterSendQueueItem): string {
 }
 
 /**
- * Thin Phase F queue list on Export — dispatch when Idle or force now.
+ * Thin Phase F queue list — Export enqueue surface and Progress operator view.
+ * Hides when empty. Same actions everywhere: Send ready, Send now, Remove.
  */
 export default function PrinterSendQueuePanel({
   engineReady,
