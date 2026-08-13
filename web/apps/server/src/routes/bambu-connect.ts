@@ -158,7 +158,6 @@ export async function registerBambuConnectRoutes(
           );
         } catch (err) {
           discardHandoff(exportsDir, handoffId);
-          artifactPath = null;
           handoffId = "";
           const message = err instanceof Error ? err.message : String(err);
           if (/size limit/i.test(message)) {

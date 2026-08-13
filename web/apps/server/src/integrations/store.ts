@@ -49,12 +49,14 @@ const SETTINGS_KEY = "integrations";
 
 const SECRET_KEYS = new Set([
   "api_key",
+  "apikey",
   "search_api_key",
   "token",
   "password",
   "secret",
   "access_token",
   "access_code",
+  "accesscode",
 ]);
 
 const REDACTED = "****";
