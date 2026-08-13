@@ -242,7 +242,7 @@ export function reconcilePrinterCheckoff(
       if (decision.progress != null) {
         patch.last_progress = Math.max(link.last_progress ?? 0, decision.progress);
       }
-      updatePrinterCheckoffLink(repo, link.id, patch);
+      updatePrinterCheckoffLink(repo, link.id, patch, { requireState: "watching" });
       continue;
     }
 
