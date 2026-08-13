@@ -101,6 +101,11 @@ describe("printer-farm-match", () => {
       bed_width_mm: 180,
       bed_depth_mm: 180,
     });
+    const short = machine({
+      id: "short",
+      name: "Short Z",
+      bed_height_mm: 100,
+    });
     const bambu = machine({
       id: "bambu",
       name: "Bambu",
@@ -115,6 +120,7 @@ describe("printer-farm-match", () => {
       preferred,
       twin,
       mini,
+      short,
       bambu,
       unbound,
     ]);
