@@ -36,10 +36,16 @@ describe("bambu-connect", () => {
       expect(resolveBambuConnectHostPath("/data/exports/a.3mf")).toBe(
         "/Users/me/pp-data/exports/a.3mf",
       );
+      expect(resolveBambuConnectHostPath("/data")).toBe("/Users/me/pp-data");
+      expect(resolveBambuConnectHostPath("/database/a.3mf")).toBe("/database/a.3mf");
       expect(resolveBambuConnectHostPath("/other/a.3mf")).toBe("/other/a.3mf");
     } finally {
       if (prev == null) delete process.env.BAMBU_CONNECT_HOST_PATH_MAP;
       else process.env.BAMBU_CONNECT_HOST_PATH_MAP = prev;
     }
+  });
+
+  it("strips control characters from filenames", () => {
+    expect(sanitizeBambuConnectFilename("bad\nname.3mf")).toBe("badname.3mf");
   });
 });
