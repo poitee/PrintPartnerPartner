@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
@@ -149,20 +149,20 @@ export default function PlanManager({
     );
   };
 
-  const openDuplicateDialog = () => {
+  const openDuplicateDialog = useCallback(() => {
     if (selectedProfileId == null) return;
     const base = selected?.name ?? "Plan";
     setDuplicateName(`${base} (copy)`);
     setDuplicateClearCheckoff(false);
     setDuplicateOpen(true);
-  };
+  }, [selectedProfileId, selected?.name]);
 
   useEffect(() => {
     if (duplicateTrigger <= 0 || duplicateTrigger === lastDuplicateTriggerRef.current) return;
     if (selectedProfileId == null) return;
     lastDuplicateTriggerRef.current = duplicateTrigger;
     openDuplicateDialog();
-  }, [duplicateTrigger, selectedProfileId, selected?.name]);
+  }, [duplicateTrigger, selectedProfileId, openDuplicateDialog]);
 
   const confirmDuplicate = () => {
     if (selectedProfileId == null) return;
