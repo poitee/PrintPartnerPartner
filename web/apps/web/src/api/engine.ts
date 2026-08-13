@@ -1378,6 +1378,65 @@ export async function cancelPrinterSendQueueItem(id: string): Promise<{ item: Pr
   return engineFetch(`/printer-send-queue/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+export type BambuConnectHandoffResult = {
+  handoff_id: string;
+  filename: string;
+  absolute_path: string;
+  connect_url: string;
+  launched: boolean;
+  launch_error?: string;
+  in_container: boolean;
+  download_path: string;
+  checkoff_link_id?: string;
+  checkoff_units?: number;
+  message: string;
+};
+
+/** Stage a sliced 3MF/G-code and hand off via official bambu-connect:// URL scheme. */
+export async function startBambuConnectHandoff(options: {
+  file: File;
+  printer_id?: string;
+  launch?: boolean;
+  profile_id?: number;
+  checkoff_units?: PrinterCheckoffUnit[];
+}): Promise<BambuConnectHandoffResult> {
+  const form = new FormData();
+  form.append("file", options.file);
+  if (options.printer_id) form.append("printer_id", options.printer_id);
+  if (options.launch === false) form.append("launch", "0");
+  else if (options.launch === true) form.append("launch", "1");
+  if (options.profile_id != null) {
+    form.append("profile_id", String(options.profile_id));
+  }
+  if (options.checkoff_units && options.checkoff_units.length > 0) {
+    form.append("checkoff_units", JSON.stringify(options.checkoff_units));
+  }
+  const res = await fetch(resolveEngineUrl("/bambu-connect/handoff"), {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  if (res.status === 401) {
+    unauthorizedHandler?.();
+    throw new Error("Bambu Connect handoff failed: 401");
+  }
+  if (!res.ok) {
+    let detail = `Bambu Connect handoff failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<BambuConnectHandoffResult>;
+}
+
+export function bambuConnectDownloadUrl(downloadPath: string): string {
+  return resolveEngineUrl(downloadPath);
+}
+
 export async function startPrinterUpload(options: {
   file: File;
   printer_id: string;

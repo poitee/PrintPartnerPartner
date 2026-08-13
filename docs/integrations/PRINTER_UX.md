@@ -2,7 +2,7 @@
 
 Product and UX deep dive for live printer integration in Print Partner — how Moonraker / PrusaLink / Bambu bind into existing Settings, fleet, Export, Progress, and JobTray surfaces, what users see at each capability layer, and the concrete data/API seams.
 
-**Phases A–F implemented (desk-first self-host):** Settings printer hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip**; **verify-first Progress** when a host job completes (Phase D — confirm/reject + failure reasons); **Bambu LAN MQTT status** (Phase E — no default MQTT print-start); thin **farm send queue** (Phase F — Idle picker, Queue for idle, Send ready / Send now, drain on Idle); **compatible farm match** (**Any matching idle** — same bed + filament preference). Setup walkthrough: [PRINTER_SETUP.md](PRINTER_SETUP.md). Vendor/API research: [PRINTER_APIS.md](PRINTER_APIS.md). Later: official Bambu send via Connect / Local Server.
+**Phases A–F implemented (desk-first self-host):** Settings printer hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip**; **verify-first Progress** when a host job completes (Phase D — confirm/reject + failure reasons); **Bambu LAN MQTT status** (Phase E); thin **farm send queue** (Phase F); **compatible farm match**; **Bambu Connect handoff** (official URL scheme). Setup walkthrough: [PRINTER_SETUP.md](PRINTER_SETUP.md). Vendor/API research: [PRINTER_APIS.md](PRINTER_APIS.md). Later: Local Server / Fleet Hub SDK (gated); L5 AMS mapping.
 
 **Persona default:** desk-first self-host (one Voron/Prusa + optional Bambu status). Thin farm queue ships; multi-criteria farm auto-assign remains stretch. Slice boundary stays **export → external slicer → Print Partner uploads** (no in-app slicing in v1).
 
@@ -207,8 +207,9 @@ Adapter implementations: [`moonraker.ts`](../../web/apps/server/src/integrations
 | **E** | Bambu status (LAN MQTT) | Hosts form + fleet/Progress status (send deferred) |
 | **F** | Farm send queue (thin) | Export + Progress: Idle picker, **Queue for idle**, **Send ready** / **Send now**, auto-drain on Idle |
 | **L4+** | Compatible farm match | Export **Any matching idle** — same bed + filament preference on drain |
+| **Connect** | Bambu Connect handoff | Export **Open in Bambu Connect** — stage `.3mf`/`.gcode`, `bambu-connect://import-file` (no MQTT start) |
 
-Recommended ship order matches research in [PRINTER_APIS.md](PRINTER_APIS.md): **A → B → C → D → E → F** (thin), then richer L4 matching / official Bambu send. Phase mapping to the research ladder: **A** ≈ L1 (Settings status), **B** ≈ L3 (upload), **C** ≈ L1 on Progress, **D** ≈ L2 (verify-first, not blind auto-tick), **E** ≈ L1 Bambu, **F** ≈ thin L4 queue, **L4+** ≈ bed/filament farm match.
+Recommended ship order matches research in [PRINTER_APIS.md](PRINTER_APIS.md): **A → B → C → D → E → F** (thin), then richer L4 matching / official Bambu Connect handoff. Phase mapping to the research ladder: **A** ≈ L1 (Settings status), **B** ≈ L3 (upload), **C** ≈ L1 on Progress, **D** ≈ L2 (verify-first, not blind auto-tick), **E** ≈ L1 Bambu, **F** ≈ thin L4 queue, **L4+** ≈ bed/filament farm match, **Connect** ≈ official Bambu send path.
 
 ---
 

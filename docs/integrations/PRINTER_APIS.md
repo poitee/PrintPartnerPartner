@@ -114,11 +114,11 @@ Official OpenAPI (`1.0.0-draft`), commit-pinned: [`spec/openapi.yaml` @ `337fabb
 - Official third-party print start increasingly expects **Bambu Connect** or **Local Server SDK** packaging.
 - L5 role-filament → AMS slot mapping needs a **new export metadata contract** beyond today’s color-only 3MF before any adapter can apply it.
 
-**Stance (Phase E shipped)**
+**Stance (Phase E + Connect handoff)**
 
-- **Status-only** Bambu via local MQTT (`IP:8883`, user `bblp`, LAN access code + serial) is implemented; document Developer Mode / ACS for optional control and **do not** ship reverse-engineered print-start as the default product path.
-- Medium term: evaluate **Local Server / official SDK** (or Connect) if farm/SaaS customers need supported send-to-print.
-- Avoid reverse-engineered control as the primary path.
+- **Status** via local MQTT (`IP:8883`, user `bblp`, LAN access code + serial).
+- **Send** via official **Bambu Connect** URL scheme (`POST /bambu-connect/handoff`) — stage artifact, return/launch `bambu-connect://import-file`. Do **not** ship reverse-engineered MQTT print-start.
+- **Local Server / Fleet Hub SDK** remains gated (apply with Bambu); not implemented in desk-v1.
 
 ## Cross-cutting architecture
 
@@ -156,7 +156,7 @@ Concrete extension points already in-repo:
 
 ## Feature unlock matrix
 
-Vendor API *capability* (what the host/API can support). Print Partner ships Moonraker/PrusaLink status + upload, compatible farm match (same bed + filament preference), and Bambu status-only today; L5 AMS mapping and Bambu send remain open. Spoolman in Print Partner remains inventory-only ([SPOOLMAN.md](SPOOLMAN.md)).
+Vendor API *capability* (what the host/API can support). Print Partner ships Moonraker/PrusaLink status + upload, compatible farm match, Bambu MQTT status + **Connect URL handoff**, today; L5 AMS mapping and Local Server SDK remain open. Spoolman in Print Partner remains inventory-only ([SPOOLMAN.md](SPOOLMAN.md)).
 
 | Feature | Moonraker | PrusaLink | Bambu (dev MQTT) | Bambu (official) |
 |---------|-----------|-----------|------------------|------------------|
@@ -177,9 +177,9 @@ Vendor API *capability* (what the host/API can support). Print Partner ships Moo
 
 ## Recommended stance when building
 
-Shipped desk-v1: Moonraker/PrusaLink L1+L3+verify-first L2, Bambu L1 status-only, thin farm send-queue + **compatible L4 match** (same bed + filament preference). Still open:
+Shipped desk-v1: Moonraker/PrusaLink L1+L3+verify-first L2, Bambu L1 status + **Connect URL handoff**, thin farm send-queue + **compatible L4 match** (same bed + filament preference). Still open:
 
-1. **Official Bambu send** (Connect / Local Server) — not reverse-engineered MQTT print-start.
+1. **Local Server / Fleet Hub SDK** (gated Bambu access) for unattended farm upload APIs.
 2. **L5 AMS/MMU mapping**.
 3. **`startPrint` / pause / cancel / subscribe** beyond upload-with-start where hosts expose them.
 
