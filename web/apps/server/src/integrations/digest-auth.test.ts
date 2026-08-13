@@ -89,6 +89,24 @@ describe("digest-auth", () => {
     expect(authorization).not.toContain("nc=00000010");
   });
 
+  it("emits cnonce for MD5-SESS even without qop", () => {
+    const authorization = buildDigestAuthorization({
+      username: "maker",
+      password: "secret",
+      method: "GET",
+      uri: "/api/v1/status",
+      challenge: {
+        realm: "Printer API",
+        nonce: "n1",
+        algorithm: "MD5-SESS",
+      },
+    });
+    expect(authorization).toContain("cnonce=");
+    expect(authorization).not.toContain("qop=");
+    expect(authorization).not.toContain("nc=");
+    expect(authorization).toContain("algorithm=MD5-SESS");
+  });
+
   it("escapes quotes in username and rejects CR/LF", () => {
     const authorization = buildDigestAuthorization({
       username: 'ma"ker',
