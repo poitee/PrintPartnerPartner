@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { Hammer, Layers } from "lucide-react";
+import { Copy, Hammer, Layers, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import StaleBuildBanner from "../components/StaleBuildBanner";
 import MergeConflictBanner from "../components/MergeConflictBanner";
 import BuildSourcesPanel from "../components/build/BuildSourcesPanel";
@@ -11,12 +11,10 @@ import PlanWarningsCard from "../components/build/PlanWarningsCard";
 import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
-import PlanManager from "../components/PlanManager";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import KitManifestOptions from "../components/KitManifestOptions";
 import SourceCategorySheet from "../components/sources/SourceCategorySheet";
 import SourceFilePickerCard from "../components/SourceFilePickerCard";
-import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
 import ShareImportSetupPanel, {
   type UnmatchedSource,
 } from "../components/share/ShareImportSetupPanel";
@@ -28,11 +26,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { ChevronDown } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -49,17 +44,14 @@ import {
   fetchStlNaming,
   replaceProfileLayer,
   setProfileBaseLayer,
-  startExportStlPack,
   startRecompute,
   type ProfileLayer,
   type RoleFilamentRow,
   type SourceSummary,
-  type StlPackGroupBy,
   DEFAULT_STL_NAMING_PROFILE,
   type StlNamingProfile,
 } from "../api/engine";
-import { buildRoute, libraryRoute, partsRoute } from "../lib/routes";
-import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
+import { buildRoute, exportRoute, libraryRoute } from "../lib/routes";
 import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { takeKitImportResult } from "../lib/kitImportStash";
 import { buildPlanWarningLines, planHeaderSubtitle } from "../lib/planWarnings";
@@ -99,13 +91,12 @@ export default function BuildPage() {
 
 function BuildPageContent() {
   const location = useLocation();
-  const navigate = useNavigate();
   const { health } = useEngineHealth();
   const { selectedProfileId, reloadProfiles, profiles } = useProfileSelection();
-  const { openCreatePlan } = usePlanActions();
+  const { openCreatePlan, openRenamePlan, openDuplicatePlan, openDeletePlan } =
+    usePlanActions();
   const { invalidate: bumpPlanRevision, review, invalidate: reloadReview } = usePlanWorkspace();
   const { busy, runJob } = useJobRunner("recompute");
-  const exportStlJob = useJobRunner("stl-export");
   const copilot = useCopilotUiOptional();
   const pendingConflictCheckRef = useRef(false);
   const appliedIntentSeqRef = useRef(0);
@@ -116,7 +107,6 @@ function BuildPageContent() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [addonSourceId, setAddonSourceId] = useState("");
   const [pendingBaseSourceId, setPendingBaseSourceId] = useState("");
-  const [shareOpen, setShareOpen] = useState(false);
   const [kitImportSetup, setKitImportSetup] = useState<KitImportJobResult | null>(null);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
   const [filamentRefreshKey, setFilamentRefreshKey] = useState(0);
@@ -124,7 +114,6 @@ function BuildPageContent() {
   const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
   const [namingProfile, setNamingProfile] = useState<StlNamingProfile>(DEFAULT_STL_NAMING_PROFILE);
   const [kitFocus, setKitFocus] = useState<KitFocusState | null>(null);
-  const [duplicateTrigger, setDuplicateTrigger] = useState(0);
   const [attachOpen, setAttachOpen] = useState(false);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
@@ -383,18 +372,6 @@ function BuildPageContent() {
     };
   }, [flushPendingSaves]);
 
-  const onNavigateToParts = () => {
-    void flushPendingSaves()
-      .catch((e) => {
-        toast.error(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (selectedProfileId != null) {
-          navigate(partsRoute(selectedProfileId));
-        }
-      });
-  };
-
   const openAssistant = () => {
     window.dispatchEvent(new Event("pp-open-assistant"));
   };
@@ -446,16 +423,6 @@ function BuildPageContent() {
         void reloadReview();
       },
       { profileId: selectedProfileId },
-    );
-  };
-
-  const onExportStls = (groupBy: StlPackGroupBy) => {
-    if (selectedProfileId == null) return;
-    void exportStlJob.runJob(
-      () => startExportStlPack(selectedProfileId, { group_by: groupBy }),
-      (snap) => {
-        handleStlPackExportJobDone("STL export", snap, { pathField: "root_path" });
-      },
     );
   };
 
@@ -516,14 +483,6 @@ function BuildPageContent() {
         actions={
           <PageHeaderActions>
             <Button
-              variant="outline"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={() => setDuplicateTrigger((n) => n + 1)}
-              disabled={selectedProfileId == null || !health}
-            >
-              Duplicate
-            </Button>
-            <Button
               className="min-h-10 w-full sm:w-auto"
               onClick={() => void onUpdateBuild()}
               disabled={selectedProfileId == null || busy || !health}
@@ -534,59 +493,54 @@ function BuildPageContent() {
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="min-h-10 w-full sm:w-auto"
+                  size="icon"
+                  className="min-h-10 w-10"
                   disabled={selectedProfileId == null || !health}
+                  aria-label="Plan actions"
                 >
-                  More
-                  <ChevronDown className="ml-1 h-4 w-4" />
+                  <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuLabel>Export STLs</DropdownMenuLabel>
+              <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem
-                  disabled={exportStlJob.busy}
-                  onClick={() => onExportStls("color_dir")}
+                  onClick={openDuplicatePlan}
+                  disabled={selectedProfileId == null}
                 >
-                  <div className="flex flex-col">
-                    <span>Color + directory</span>
-                    <span className="text-xs text-muted-foreground">
-                      Keep source folders (e.g. Primary/partsDir/file.stl)
-                    </span>
-                  </div>
+                  <Copy className="mr-2 h-4 w-4" />
+                  Duplicate
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  disabled={exportStlJob.busy}
-                  onClick={() => onExportStls("color")}
+                  onClick={openRenamePlan}
+                  disabled={selectedProfileId == null}
                 >
-                  <div className="flex flex-col">
-                    <span>Color only</span>
-                    <span className="text-xs text-muted-foreground">
-                      Flatten all directories (e.g. Primary/file.stl)
-                    </span>
-                  </div>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Rename
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => setShareOpen(true)}
-                  disabled={selectedProfileId == null || !health}
+                  onClick={openDeletePlan}
+                  disabled={selectedProfileId == null}
                 >
-                  Share plan…
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
                 </DropdownMenuItem>
-                {selectedProfileId != null && (
-                  <DropdownMenuItem onClick={onNavigateToParts}>Parts →</DropdownMenuItem>
-                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </PageHeaderActions>
         }
       />
 
-      <PlanManager
-        disabled={!health}
-        collapsible
-        defaultOpen={profiles.length === 0 || selectedProfileId == null}
-        duplicateTrigger={duplicateTrigger}
-      />
+      {selectedProfileId != null && (
+        <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          Export STLs and Share live on{" "}
+          <Link
+            to={exportRoute(selectedProfileId)}
+            className="font-medium text-primary underline-offset-2 hover:underline"
+          >
+            Export
+          </Link>
+          .
+        </p>
+      )}
 
       <StaleBuildBanner stale={buildStale} busy={busy} onUpdate={() => void onUpdateBuild()} />
 
@@ -602,7 +556,7 @@ function BuildPageContent() {
         <EmptyState
           icon={Hammer}
           title="No plan yet"
-          description="Use Manage builds above to create a plan, then attach sources and pick STL files below."
+          description="Use Create plan in the sidebar (or the + button on mobile) to create a plan, then attach sources and pick STL files below."
           action={{
             label: "Create plan",
             onClick: openCreatePlan,
@@ -612,7 +566,7 @@ function BuildPageContent() {
         <EmptyState
           icon={Hammer}
           title="Select a plan"
-          description="Choose a plan in Manage builds above or the header dropdown."
+          description="Choose a plan in the sidebar plan picker (or the mobile plan switcher in the header)."
         />
       ) : null}
 
@@ -804,14 +758,6 @@ function BuildPageContent() {
 
           <BuildRecipePanel profileId={selectedProfileId} />
         </div>
-      )}
-
-      {selectedProfileId != null && (
-        <ShareBuildExportDialog
-          open={shareOpen}
-          onOpenChange={setShareOpen}
-          profileId={selectedProfileId}
-        />
       )}
 
       <SourceCategorySheet

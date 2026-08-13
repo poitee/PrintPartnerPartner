@@ -8,6 +8,7 @@ import {
   Settings,
   Sparkles,
 } from "lucide-react";
+import CreatePlanButton from "../CreatePlanButton";
 import PlanPicker from "../PlanPicker";
 import SupportCta from "../SupportCta";
 import ThemePreferenceControl from "../ThemePreferenceControl";
@@ -19,12 +20,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "../ui/tooltip";
-import {
-  buildsRoute,
-  helpRoute,
-  isBuildsPath,
-  settingsRoute,
-} from "../../lib/routes";
+import { helpRoute, settingsRoute } from "../../lib/routes";
 import { cn } from "../../lib/utils";
 import type { WorkflowStage, WorkflowStageId } from "../../lib/workflowStages";
 
@@ -33,7 +29,6 @@ type Props = {
   onToggleCollapsed: () => void;
   stages: WorkflowStage[];
   activeId: WorkflowStageId | null;
-  selectedProfileId: number | null;
   aiAssistantEnabled: boolean;
   assistantOpen: boolean;
   onAssistantOpenChange: (open: boolean) => void;
@@ -78,7 +73,6 @@ export default function SpineRail({
   onToggleCollapsed,
   stages,
   activeId,
-  selectedProfileId,
   aiAssistantEnabled,
   assistantOpen,
   onAssistantOpenChange,
@@ -122,22 +116,21 @@ export default function SpineRail({
 
       <div className={cn("flex flex-1 flex-col gap-3 overflow-y-auto", collapsed ? "p-2" : "p-3")}>
         {!collapsed ? (
-          <div className="rounded-md border border-border bg-muted/30 p-2">
+          <div className="space-y-2 rounded-md border border-border bg-muted/30 p-2">
             <PlanPicker className="w-full" />
+            <CreatePlanButton className="w-full" variant="outline" size="sm" />
           </div>
         ) : (
-          <SidebarTooltip label="Switch plan" collapsed>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="mx-auto text-muted-foreground"
-              onClick={onToggleCollapsed}
-              aria-label="Switch plan"
-            >
-              <Layers className="h-4 w-4" />
-            </Button>
-          </SidebarTooltip>
+          <div className="flex flex-col items-center gap-1">
+            <SidebarTooltip label="Switch plan" collapsed>
+              <div className="mx-auto">
+                <PlanPicker compact className="mx-auto" />
+              </div>
+            </SidebarTooltip>
+            <SidebarTooltip label="Create plan" collapsed>
+              <CreatePlanButton size="icon" showLabel={false} variant="ghost" className="mx-auto" />
+            </SidebarTooltip>
+          </div>
         )}
 
         <WorkflowProgress
@@ -148,23 +141,6 @@ export default function SpineRail({
         />
 
         <Separator className={cn(collapsed && "mx-1")} />
-
-        <SidebarTooltip label="Builds" collapsed={collapsed}>
-          <NavLink
-            to={buildsRoute(selectedProfileId)}
-            className={cn(
-              "flex items-center gap-2 rounded-md text-sm font-medium transition-colors",
-              collapsed ? "justify-center p-2.5" : "px-3 py-2",
-              isBuildsPath(location.pathname)
-                ? "bg-primary/12 text-primary"
-                : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
-            )}
-            aria-label={collapsed ? "Builds" : undefined}
-          >
-            <Layers className="h-4 w-4 shrink-0" />
-            {!collapsed && "Builds"}
-          </NavLink>
-        </SidebarTooltip>
       </div>
 
       <div className={cn("mt-auto space-y-2 border-t border-border", collapsed ? "p-2" : "p-3")}>

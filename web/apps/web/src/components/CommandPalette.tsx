@@ -15,7 +15,6 @@ import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 import {
   buildRoute,
-  buildsRoute,
   checkoffRoute,
   exportRoute,
   helpRoute,
@@ -27,6 +26,7 @@ import {
 } from "../lib/routes";
 import { completeExportDownload } from "../lib/exportActions";
 import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
+import { usePlanActions } from "../context/PlanActionsContext";
 import {
   CommandDialog,
   CommandEmpty,
@@ -56,6 +56,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
   const location = useLocation();
   const { health } = useEngineHealth();
   const { selectedProfileId } = useProfileSelection();
+  const { openCreatePlan } = usePlanActions();
   const flushBuildSaves = useFlushBuildPageSaves();
   const importSharedBuild = useImportSharedBuild();
   const recomputeJob = useJobRunner("recompute");
@@ -182,15 +183,13 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
         },
       },
       {
-        id: "manage-builds",
-        label: "Manage builds",
-        hint: "Builds → create, rename, duplicate, delete",
+        id: "create-plan",
+        label: "Create plan",
+        hint: "Open create-plan dialog",
         group: "Workflow",
         run: () => {
-          leaveBuildThen(() => {
-            navigate(buildsRoute(selectedProfileId));
-            setOpen(false);
-          });
+          openCreatePlan();
+          setOpen(false);
         },
       },
     ];
@@ -362,6 +361,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
     flushBuildSaves,
     importSharedBuild,
     onOpenAssistant,
+    openCreatePlan,
   ]);
 
   const groups = ["Navigate", "Workflow", "Actions"] as const;
