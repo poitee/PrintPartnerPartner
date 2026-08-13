@@ -259,11 +259,7 @@ async function main() {
   await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => {});
 
   for (const shot of captures) {
-    if (
-      (shot.nav === "advisor" || shot.nav === "settings") &&
-      !aiCapable &&
-      shot.nav === "advisor"
-    ) {
+    if ((shot.nav === "advisor" || shot.nav === "settings") && !aiCapable) {
       console.warn(
         `Skipping ${shot.label} — health.capabilities lacks ai_assistant (enable AI in Settings or env)`,
       );

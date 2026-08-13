@@ -108,16 +108,17 @@ export default function LibrarySourceCard({
             type="button"
             className="min-w-0 flex-1 text-left"
             onClick={onOpen}
+            aria-label={`Open ${source.name} (${meta.slug}, ${sourceCategoryLabel(source.category)})`}
           >
-            <p className="truncate text-[13px] font-semibold tracking-tight">
+            <span className="block truncate text-[13px] font-semibold tracking-tight">
               {source.name}
-            </p>
-            <p className="truncate font-mono text-[10.5px] text-muted-foreground">
+            </span>
+            <span className="block truncate font-mono text-[10.5px] text-muted-foreground">
               {meta.slug}
-            </p>
-            <p className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+            </span>
+            <span className="mt-0.5 block truncate text-[10.5px] text-muted-foreground">
               {sourceCategoryLabel(source.category)}
-            </p>
+            </span>
           </button>
           <Badge
             variant="muted"

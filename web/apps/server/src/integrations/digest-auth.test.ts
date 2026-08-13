@@ -14,6 +14,15 @@ describe("digest-auth", () => {
     });
   });
 
+  it("unescapes quoted Digest challenge parameters", () => {
+    const header = 'Digest realm="Print\\"er", nonce="a\\\\b", qop="auth"';
+    expect(parseWwwAuthenticate(header)).toEqual({
+      realm: 'Print"er',
+      nonce: "a\\b",
+      qop: "auth",
+    });
+  });
+
   it("builds a Digest Authorization header with qop=auth", () => {
     const authorization = buildDigestAuthorization({
       username: "maker",
