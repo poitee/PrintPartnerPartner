@@ -5,10 +5,12 @@ export function parseWwwAuthenticate(header: string): Record<string, string> {
   const params: Record<string, string> = {};
   const match = /^\s*Digest\s+(.+)$/i.exec(header.trim());
   if (!match) return params;
-  const re = /(\w+)=(?:"([^"]*)"|([^,\s]*))/g;
+  const re = /(\w+)=(?:"((?:\\.|[^"\\])*)"|([^,\s]*))/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(match[1]!)) !== null) {
-    params[m[1]!] = m[2] ?? m[3] ?? "";
+    const quoted = m[2];
+    const value = quoted ?? m[3] ?? "";
+    params[m[1]!] = quoted === undefined ? value : value.replace(/\\(.)/g, "$1");
   }
   return params;
 }

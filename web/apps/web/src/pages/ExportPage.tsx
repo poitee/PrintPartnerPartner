@@ -26,7 +26,7 @@ export default function ExportPage() {
   const navigate = useNavigate();
   const { health, error: engineError } = useEngineHealth();
   const { selectedProfileId, profiles } = useProfileSelection();
-  const { review, invalidate, loading, reload, revision, loadedRevision } =
+  const { review, invalidate, loading, reload, revision, loadedRevision, error: planError } =
     usePlanWorkspace();
   const { data: sources = [] } = useSourcesQuery();
   const { activeJobs } = useJobContext();
@@ -107,6 +107,23 @@ export default function ExportPage() {
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Loading plan…</p>
+          </CardContent>
+        </Card>
+      ) : planError && !review ? (
+        <Card>
+          <CardContent className="pt-6 space-y-3">
+            <p className="text-sm text-destructive">
+              Could not load this plan: {planError}
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (selectedProfileId != null) void reload(selectedProfileId);
+              }}
+            >
+              Retry
+            </Button>
           </CardContent>
         </Card>
       ) : (
