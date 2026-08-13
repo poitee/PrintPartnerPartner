@@ -24,22 +24,57 @@ function authHeaders(config: IntegrationConfig): Record<string, string> {
   return { "X-Api-Key": key };
 }
 
-/** Moonraker legitimately lives on LAN/private IPs; metadata endpoints stay blocked. */
+const MAX_REDIRECTS = 5;
+
+async function drainResponseBody(res: Response): Promise<void> {
+  try {
+    await res.arrayBuffer();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Moonraker legitimately lives on LAN/private IPs; metadata endpoints stay blocked.
+ * Follows redirects manually: each Location is SSRF-checked, and auth headers are
+ * not forwarded across cross-origin hops.
+ */
 async function moonrakerFetch(
   url: string,
   config: IntegrationConfig,
   init: RequestInit = {},
 ): Promise<Response> {
-  await assertSafeOutboundUrl(url, { allowPrivate: true });
-  const headers = new Headers(init.headers);
-  for (const [k, v] of Object.entries(authHeaders(config))) {
-    if (!headers.has(k)) headers.set(k, v);
+  const auth = authHeaders(config);
+  const originalOrigin = new URL(url).origin;
+  let current = url;
+  const signal = init.signal ?? AbortSignal.timeout(30_000);
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertSafeOutboundUrl(current, { allowPrivate: true });
+    const headers = new Headers(init.headers);
+    headers.delete("Authorization");
+    headers.delete("X-Api-Key");
+    if (new URL(current).origin === originalOrigin) {
+      for (const [k, v] of Object.entries(auth)) {
+        if (!headers.has(k)) headers.set(k, v);
+      }
+    }
+    const response = await fetch(current, {
+      ...init,
+      headers,
+      signal,
+      redirect: "manual",
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) return response;
+      await drainResponseBody(response);
+      current = new URL(location, current).toString();
+      continue;
+    }
+    return response;
   }
-  return fetch(url, {
-    ...init,
-    headers,
-    signal: init.signal ?? AbortSignal.timeout(30_000),
-  });
+  throw new Error(`Too many redirects fetching ${url}`);
 }
 
 function mapPrintState(raw: string | undefined): PrinterHostStatus["state"] {
@@ -51,7 +86,8 @@ function mapPrintState(raw: string | undefined): PrinterHostStatus["state"] {
   // cancelled / standby → idle (must not auto-checkoff)
   if (state === "standby" || state === "cancelled") return "idle";
   if (!state) return "unknown";
-  return "idle";
+  // Unrecognized non-empty states are not "ready to start"
+  return "unknown";
 }
 
 async function queryStatus(config: IntegrationConfig): Promise<PrinterHostStatus> {

@@ -11,6 +11,7 @@ import { loadFleet } from "../services/printer-fleet.js";
 import {
   cancelPrinterSendQueueItem,
   enqueuePrinterSend,
+  getPrinterSendQueueItem,
   listActivePrinterSendQueue,
   loadPrinterSendQueue,
 } from "../services/printer-send-queue-store.js";
@@ -262,6 +263,10 @@ export async function registerPrinterSendQueueRoutes(
   app.delete("/printer-send-queue/:id", async (request, reply) => {
     const id = String((request.params as { id: string }).id ?? "").trim();
     if (!id) return sendProblem(reply, 400, "Bad Request", "id is required");
+    const existing = getPrinterSendQueueItem(deps.repo, id);
+    if (!existing) {
+      return sendProblem(reply, 404, "Not Found", "Queue item not found");
+    }
     const item = cancelPrinterSendQueueItem(deps.repo, id);
     if (!item) {
       return sendProblem(reply, 409, "Conflict", "Item not cancellable");

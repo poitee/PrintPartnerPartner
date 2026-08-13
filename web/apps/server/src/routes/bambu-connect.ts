@@ -247,7 +247,7 @@ export async function registerBambuConnectRoutes(
           host_name: hostName,
           filename: baseName,
           units: checkoff_units,
-          started: true,
+          started: launched,
         });
         checkoff_link_id = link?.id;
       }

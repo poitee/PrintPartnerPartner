@@ -14,6 +14,28 @@ describe("digest-auth", () => {
     });
   });
 
+  it("lowercases mixed-case Digest parameter names", () => {
+    const header =
+      'Digest Realm="Printer API", Nonce="abc123", Qop="auth", Algorithm=MD5';
+    expect(parseWwwAuthenticate(header)).toEqual({
+      realm: "Printer API",
+      nonce: "abc123",
+      qop: "auth",
+      algorithm: "MD5",
+    });
+    const authorization = buildDigestAuthorization({
+      username: "maker",
+      password: "secret",
+      method: "GET",
+      uri: "/api/v1/status",
+      challenge: parseWwwAuthenticate(header),
+      nc: 1,
+    });
+    expect(authorization).toContain('realm="Printer API"');
+    expect(authorization).toContain('nonce="abc123"');
+    expect(authorization).toContain("qop=auth");
+  });
+
   it("unescapes quoted Digest challenge parameters", () => {
     const header = 'Digest realm="Print\\"er", nonce="a\\\\b", qop="auth"';
     expect(parseWwwAuthenticate(header)).toEqual({

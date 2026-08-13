@@ -48,7 +48,7 @@ export default function PrinterSendQueuePanel({
   const [items, setItems] = useState<PrinterSendQueueItem[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (opts?: { silent?: boolean }) => {
     if (!engineReady) {
       setItems([]);
       return;
@@ -57,7 +57,10 @@ export default function PrinterSendQueuePanel({
       const { items: next } = await fetchPrinterSendQueue({ active: true });
       setItems(next);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      if (opts?.silent) return;
+      toast.error(e instanceof Error ? e.message : String(e), {
+        id: "printer-send-queue-poll",
+      });
     }
   }, [engineReady]);
 
@@ -68,7 +71,7 @@ export default function PrinterSendQueuePanel({
   useEffect(() => {
     if (!engineReady) return;
     const timer = window.setInterval(() => {
-      if (!document.hidden) void reload();
+      if (!document.hidden) void reload({ silent: true });
     }, 8_000);
     return () => window.clearInterval(timer);
   }, [engineReady, reload]);

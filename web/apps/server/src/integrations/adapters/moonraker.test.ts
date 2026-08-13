@@ -78,6 +78,8 @@ describe("moonrakerAdapter", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
+        status: 200,
+        headers: new Headers(),
         json: async () => ({
           result: {
             status: {
@@ -92,6 +94,63 @@ describe("moonrakerAdapter", () => {
       base_url: "http://127.0.0.1:7125",
     });
     expect(status.state).toBe("idle");
+  });
+
+  it("getStatus maps unrecognized print states to unknown (not idle)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({
+          result: {
+            status: {
+              print_stats: { state: "klippy_shutdown", filename: "x.gcode" },
+            },
+          },
+        }),
+      }),
+    );
+
+    const status = await moonrakerAdapter.getStatus!({
+      base_url: "http://127.0.0.1:7125",
+    });
+    expect(status.state).toBe("unknown");
+  });
+
+  it("does not forward API key across cross-origin redirects", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 302,
+        headers: new Headers({ location: "http://192.168.1.50:7125/server/info" }),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => ({ result: { klippy_state: "ready" } }),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await moonrakerAdapter.testConnection({
+      base_url: "http://127.0.0.1:7125",
+      api_key: "secret-key",
+    });
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const firstHeaders = new Headers((fetchMock.mock.calls[0]![1] as RequestInit).headers);
+    expect(firstHeaders.get("X-Api-Key")).toBe("secret-key");
+
+    expect(String(fetchMock.mock.calls[1]![0])).toBe("http://192.168.1.50:7125/server/info");
+    const secondHeaders = new Headers((fetchMock.mock.calls[1]![1] as RequestInit).headers);
+    expect(secondHeaders.get("X-Api-Key")).toBeNull();
+    expect(secondHeaders.get("Authorization")).toBeNull();
   });
 
   it("uploadFile posts multipart then starts print when requested", async () => {
