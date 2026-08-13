@@ -23,6 +23,7 @@ import {
   persistPrinterUploadArtifact,
   runPrinterUploadJob,
 } from "../services/printer-upload-job.js";
+import { reconcileSendQueueJobResult } from "../services/printer-send-queue.js";
 import { parseCheckoffUnits } from "../services/printer-checkoff.js";
 import { sendProblem } from "../lib/api-error.js";
 import { getIntegrationConfig } from "../integrations/store.js";
@@ -235,15 +236,28 @@ export class InProcessJobRunner {
           error: null,
           finished_at: new Date().toISOString(),
         });
+        if (kind === "printer-upload") {
+          reconcileSendQueueJobResult(this.repo, jobId, {
+            ok: true,
+            message: doneMessage,
+          });
+        }
       } catch (e) {
+        const errMsg = e instanceof Error ? e.message : String(e);
         this.emit(jobId, {
           status: "error",
-          message: e instanceof Error ? e.message : String(e),
+          message: errMsg,
           progress: 100,
-          error: e instanceof Error ? e.message : String(e),
+          error: errMsg,
           result: null,
           finished_at: new Date().toISOString(),
         });
+        if (kind === "printer-upload") {
+          reconcileSendQueueJobResult(this.repo, jobId, {
+            ok: false,
+            message: errMsg,
+          });
+        }
       }
     });
   }

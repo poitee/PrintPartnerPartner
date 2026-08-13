@@ -200,7 +200,7 @@ Adapter stubs today: [`moonraker.ts`](../../web/apps/server/src/integrations/ada
 | **C** | Live strip on Progress | Progress header (shipped) |
 | **D** | Verify-first on job done | Progress verify panel + reject reasons (shipped) |
 | **E** | Bambu status (LAN MQTT) | Hosts form + fleet/Progress status (send deferred) |
-| **F** | Farm assist (thin) | Export send picker shows Idle/Busy and prefers Idle (queue UI later) |
+| **F** | Farm send queue | Export: Idle picker + **Queue for idle** / Send ready / Send now |
 
 Recommended ship order matches research in [PRINTER_APIS.md](PRINTER_APIS.md): **A → B → C → D → E**, then F / official Bambu send. Phase mapping to the research ladder: **A** ≈ L1 (Settings status), **B** ≈ L3 (upload), **C** ≈ L1 on Progress, **D** ≈ L2 (verify-first, not blind auto-tick), **E** ≈ L1 Bambu.
 

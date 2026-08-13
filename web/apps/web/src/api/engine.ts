@@ -202,6 +202,30 @@ export type PrinterCheckoffReconcileUpdate = {
   units_pending: number;
 };
 
+export type PrinterSendQueueState =
+  | "queued"
+  | "sending"
+  | "done"
+  | "error"
+  | "cancelled";
+
+export type PrinterSendQueueItem = {
+  id: string;
+  filename: string;
+  artifact_path: string;
+  printer_id: string;
+  wait_for_idle: boolean;
+  start: boolean;
+  profile_id?: number;
+  checkoff_units?: PrinterCheckoffUnit[];
+  state: PrinterSendQueueState;
+  created_at: string;
+  updated_at: string;
+  upload_job_id?: string;
+  error?: string;
+  host_name?: string;
+};
+
 /** @deprecated Prefer PrinterCheckoffReconcileUpdate */
 export type PrinterCheckoffApplied = {
   link_id: string;
@@ -1275,6 +1299,74 @@ export async function fetchPrintOutcomesSummary(
   profileId: number,
 ): Promise<PrintOutcomesSummary> {
   return v1Fetch(`/printer-outcomes/summary?profile_id=${encodeURIComponent(String(profileId))}`);
+}
+
+export async function fetchPrinterSendQueue(options?: {
+  active?: boolean;
+}): Promise<{ items: PrinterSendQueueItem[] }> {
+  const qs = options?.active ? "?active=1" : "";
+  return v1Fetch(`/printer-send-queue${qs}`);
+}
+
+export async function enqueuePrinterSend(options: {
+  file: File;
+  printer_id: string;
+  start?: boolean;
+  wait_for_idle?: boolean;
+  profile_id?: number;
+  checkoff_units?: PrinterCheckoffUnit[];
+}): Promise<{ item: PrinterSendQueueItem }> {
+  const form = new FormData();
+  form.append("file", options.file);
+  form.append("printer_id", options.printer_id);
+  form.append("start", options.start ? "1" : "0");
+  form.append("wait_for_idle", options.wait_for_idle === false ? "0" : "1");
+  if (options.profile_id != null) {
+    form.append("profile_id", String(options.profile_id));
+  }
+  if (options.checkoff_units && options.checkoff_units.length > 0) {
+    form.append("checkoff_units", JSON.stringify(options.checkoff_units));
+  }
+  const res = await fetch(resolveEngineUrl("/api/v1/printer-send-queue"), {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  if (res.status === 401) {
+    unauthorizedHandler?.();
+    throw new Error("Queue failed: 401");
+  }
+  if (!res.ok) {
+    let detail = `Queue failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<{ item: PrinterSendQueueItem }>;
+}
+
+export async function dispatchPrinterSendQueueItem(options: {
+  id: string;
+  force?: boolean;
+}): Promise<{ item: PrinterSendQueueItem; job_id: string }> {
+  return v1Fetch(`/printer-send-queue/${encodeURIComponent(options.id)}/dispatch`, {
+    method: "POST",
+    body: JSON.stringify({ force: Boolean(options.force) }),
+  });
+}
+
+export async function drainPrinterSendQueue(): Promise<{
+  results: Array<{ item_id: string; job_id?: string; error?: string }>;
+}> {
+  return v1Fetch(`/printer-send-queue/drain`, { method: "POST", body: "{}" });
+}
+
+export async function cancelPrinterSendQueueItem(id: string): Promise<{ item: PrinterSendQueueItem }> {
+  return v1Fetch(`/printer-send-queue/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function startPrinterUpload(options: {
