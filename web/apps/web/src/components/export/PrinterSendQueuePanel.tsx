@@ -19,6 +19,9 @@ type Props = {
 function stateLabel(item: PrinterSendQueueItem): string {
   switch (item.state) {
     case "queued":
+      if (item.match === "compatible") {
+        return item.wait_for_idle ? "Waiting for matching Idle" : "Queued (any match)";
+      }
       return item.wait_for_idle ? "Waiting for Idle" : "Queued";
     case "sending":
       return "Sending…";

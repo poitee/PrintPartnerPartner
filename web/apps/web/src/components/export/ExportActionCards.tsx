@@ -126,6 +126,7 @@ export default function ExportActionCards({ onShare }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingStartRef = useRef(false);
   const pendingModeRef = useRef<"send" | "queue">("send");
+  const pendingMatchRef = useRef<"pinned" | "compatible">("pinned");
 
   const hasBlockers = review?.has_blockers ?? false;
   const includedParts = review
@@ -359,6 +360,7 @@ export default function ExportActionCards({ onShare }: Props) {
   const openFilePicker = (
     startAfterUpload: boolean,
     mode: "send" | "queue" = "send",
+    match: "pinned" | "compatible" = "pinned",
   ) => {
     if (!hasLinked || !selectedPrinterId) {
       toast.error("No linked printer", {
@@ -380,6 +382,7 @@ export default function ExportActionCards({ onShare }: Props) {
     }
     pendingStartRef.current = startAfterUpload;
     pendingModeRef.current = mode;
+    pendingMatchRef.current = match;
     fileInputRef.current?.click();
   };
 
@@ -401,6 +404,7 @@ export default function ExportActionCards({ onShare }: Props) {
     }
     const start = pendingStartRef.current;
     const mode = pendingModeRef.current;
+    const match = pendingMatchRef.current;
     const printerName =
       linkedPrinters.find((p) => p.id === selectedPrinterId)?.name ?? "printer";
     const units =
@@ -422,13 +426,18 @@ export default function ExportActionCards({ onShare }: Props) {
             printer_id: selectedPrinterId,
             start,
             wait_for_idle: true,
+            match,
             profile_id: units ? selectedProfileId ?? undefined : undefined,
             checkoff_units: units,
           });
-          toast.success(`Queued ${item.filename} for ${printerName}`, {
+          const targetLabel =
+            match === "compatible"
+              ? `any idle ${printerName} bed match`
+              : printerName;
+          toast.success(`Queued ${item.filename} for ${targetLabel}`, {
             description: start
-              ? "Will upload & start when the printer is Idle."
-              : "Will upload when the printer is Idle (or tap Send ready).",
+              ? "Will upload & start when a matching printer is Idle."
+              : "Will upload when Idle (or tap Send ready).",
           });
           setQueueRefreshKey((k) => k + 1);
         } catch (e) {
@@ -773,15 +782,25 @@ export default function ExportActionCards({ onShare }: Props) {
                   size="sm"
                   variant="secondary"
                   disabled={exportBusy || queueBusy || !selectedPrinterId}
-                  onClick={() => openFilePicker(true, "queue")}
+                  onClick={() => openFilePicker(true, "queue", "pinned")}
                 >
                   {queueBusy ? "Queuing…" : "Queue for idle"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={exportBusy || queueBusy || !selectedPrinterId}
+                  title="Send to any idle Moonraker/PrusaLink with the same bed size; prefers loaded filament that matches tracked Progress parts"
+                  onClick={() => openFilePicker(true, "queue", "compatible")}
+                >
+                  Any matching idle
                 </Button>
               </div>
               {selectedPrinterBusy ? (
                 <p className="text-xs text-muted-foreground">
-                  Selected printer is busy. Use Upload or Queue for idle; Upload &amp; start
-                  stays blocked until Idle. Queued jobs also appear on Progress.
+                  Selected printer is busy. Use Upload, Queue for idle, or Any matching idle;
+                  Upload &amp; start stays blocked until Idle. Queued jobs also appear on
+                  Progress.
                 </p>
               ) : null}
               <PrinterSendQueuePanel

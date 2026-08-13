@@ -65,6 +65,7 @@ export async function registerPrinterSendQueueRoutes(
       let printerId = "";
       let start = false;
       let waitForIdle = true;
+      let match: "pinned" | "compatible" = "pinned";
       let filename = "print.gcode";
       let artifactPath: string | null = null;
       let profileId: number | undefined;
@@ -82,6 +83,11 @@ export async function registerPrinterSendQueueRoutes(
             if (part.fieldname === "wait_for_idle") {
               const raw = value.toLowerCase();
               waitForIdle = !(raw === "0" || raw === "false" || raw === "no");
+            }
+            if (part.fieldname === "match") {
+              const raw = value.trim().toLowerCase();
+              if (raw === "compatible") match = "compatible";
+              else if (raw === "pinned") match = "pinned";
             }
             if (part.fieldname === "profile_id") {
               const n = Number(value);
@@ -180,6 +186,7 @@ export async function registerPrinterSendQueueRoutes(
           printer_id: printerId,
           start,
           wait_for_idle: waitForIdle,
+          match,
           profile_id: profileId,
           checkoff_units,
           host_name: integration.name,

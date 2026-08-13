@@ -66,7 +66,7 @@ Deleting a host clears `integration_id` / `device_id` on any fleet rows that poi
 ## Send a sliced file
 
 1. Slice in Orca / PrusaSlicer / etc. → `.gcode` or `.bgcode`.
-2. **Export → Send to printer** → pick a linked **Moonraker or PrusaLink** fleet machine (status shows Idle/Busy; picker prefers Idle) → **Upload**, **Upload & start** (blocked while busy), or **Queue for idle** (stores the file and sends when Idle / via Send ready).
+2. **Export → Send to printer** → pick a linked **Moonraker or PrusaLink** fleet machine (status shows Idle/Busy; picker prefers Idle) → **Upload**, **Upload & start** (blocked while busy), **Queue for idle** (this machine), or **Any matching idle** (same bed size; prefers loaded filament that matches tracked Progress parts).
 3. Optional **Progress verify tracking:** when the active plan has missing Progress units, leave **Track for Progress verify when this print finishes** on and multi-select which missing parts this job covers (defaults to all missing). Incomplete unit indices are stored with the upload.
 4. JobTray shows kind **Send to printer** (`printer-upload`): uploading… → complete / error.
 
@@ -137,7 +137,7 @@ The strip polls status about every 5 seconds while the tab is visible; manual �
 - `POST /api/v1/integrations/:id/test`
 - `GET /api/v1/integrations/:id/status` — includes `complete` when the host finished successfully
 - `POST /jobs/printer-upload` (multipart: `file`, `printer_id`, `start=0|1`, optional `profile_id`, `checkoff_units`)
-- `POST /api/v1/printer-send-queue` — multipart enqueue (same fields as send; waits for Idle by default)
+- `POST /api/v1/printer-send-queue` — multipart enqueue (same fields as send; waits for Idle by default; optional `match=compatible` for any same-bed idle host)
 - `GET /api/v1/printer-send-queue?active=1` — queued / sending / error items
 - `POST /api/v1/printer-send-queue/:id/dispatch` — send now (`{ "force": true }` skips Idle wait)
 - `POST /api/v1/printer-send-queue/drain` — dispatch one queued job per idle printer

@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Live printer hosts (desk-first)** — Moonraker and PrusaLink: Settings hosts, fleet bind, Export **Send to printer** / **Queue for idle**, Progress live strip, and **verify-first** Progress (confirm/reject + failure-reason outcomes). Bambu LAN MQTT is **status-only**. Setup: `docs/integrations/PRINTER_SETUP.md`.
+- **Live printer hosts (desk-first)** — Moonraker and PrusaLink: Settings hosts, fleet bind, Export **Send to printer** / **Queue for idle** / **Any matching idle** (same bed + filament preference), Progress live strip, and **verify-first** Progress (confirm/reject + failure-reason outcomes). Bambu LAN MQTT is **status-only**. Setup: `docs/integrations/PRINTER_SETUP.md`.
 - **Kit advisor (optional AI)** — research kits/mods with tools (web search, URL ingest, plan/catalog helpers); propose changes as Apply cards. Configure under **Settings → AI assistant** (Anthropic, OpenAI, or local Ollama). Per-tenant integration overrides env; soft daily budgets; decision memory and chat history. User guide: `docs/KIT_ADVISOR.md`.
 - **AI settings UI** — dedicated Settings card for provider, model, keys, budgets, search backend (Auto / DuckDuckGo / Brave / Exa), URL research limits, and Ollama `num_ctx`. `GET /assistant/status` reports `source` (`settings` \| `env` \| `none`).
 - **Unified Parts / Progress workspace** — print checkoff lives on **Progress** (legacy `/checkoff` redirects there); Parts covers validation and quantities; STL/3MF export and missing-STL export remain available from Parts / Export.

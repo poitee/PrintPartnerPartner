@@ -209,11 +209,14 @@ export type PrinterSendQueueState =
   | "error"
   | "cancelled";
 
+export type PrinterSendQueueMatch = "pinned" | "compatible";
+
 export type PrinterSendQueueItem = {
   id: string;
   filename: string;
   artifact_path: string;
   printer_id: string;
+  match?: PrinterSendQueueMatch;
   wait_for_idle: boolean;
   start: boolean;
   profile_id?: number;
@@ -1315,6 +1318,7 @@ export async function enqueuePrinterSend(options: {
   printer_id: string;
   start?: boolean;
   wait_for_idle?: boolean;
+  match?: PrinterSendQueueMatch;
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
 }): Promise<{ item: PrinterSendQueueItem }> {
@@ -1323,6 +1327,9 @@ export async function enqueuePrinterSend(options: {
   form.append("printer_id", options.printer_id);
   form.append("start", options.start ? "1" : "0");
   form.append("wait_for_idle", options.wait_for_idle === false ? "0" : "1");
+  if (options.match === "compatible" || options.match === "pinned") {
+    form.append("match", options.match);
+  }
   if (options.profile_id != null) {
     form.append("profile_id", String(options.profile_id));
   }

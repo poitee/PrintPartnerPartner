@@ -105,7 +105,7 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
 | `POST` | `/api/v1/printer-checkoff/dismiss` | Dismiss a `host_failed` link |
 | `GET` | `/api/v1/printer-outcomes/summary` | Reject/confirm aggregates (`?profile_id=`) |
 | `GET` | `/api/v1/printer-send-queue` | List send queue (`?active=1`) |
-| `POST` | `/api/v1/printer-send-queue` | Enqueue G-code for Idle dispatch (multipart) |
+| `POST` | `/api/v1/printer-send-queue` | Enqueue G-code for Idle dispatch (multipart; optional `match=compatible`) |
 | `POST` | `/api/v1/printer-send-queue/:id/dispatch` | Dispatch one item (`force` skips Idle wait) |
 | `POST` | `/api/v1/printer-send-queue/drain` | Dispatch ready queued items to Idle printers |
 | `DELETE` | `/api/v1/printer-send-queue/:id` | Cancel a queued/error item |
