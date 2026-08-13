@@ -56,6 +56,16 @@ export function parsePrinterMachine(data: Record<string, unknown>): PrinterMachi
     max_filament_slots: Number(data.max_filament_slots ?? 1),
     loaded_filaments: loaded,
   };
+  if (data.integration_id != null && String(data.integration_id).trim()) {
+    machine.integration_id = String(data.integration_id).trim();
+  } else if (data.integration_id === null) {
+    machine.integration_id = null;
+  }
+  if (data.device_id != null && String(data.device_id).trim()) {
+    machine.device_id = String(data.device_id).trim();
+  } else if (data.device_id === null) {
+    machine.device_id = null;
+  }
   return ensureSlots(machine);
 }
 
@@ -91,6 +101,19 @@ export function loadFleet(repo: AppRepository): PrinterMachine[] {
 export function saveFleet(repo: AppRepository, fleet: PrinterMachine[]): void {
   const normalized = fleet.map(ensureSlots);
   repo.setSetting(FLEET_KEY, JSON.stringify(normalized, null, 2));
+}
+
+/** Clear fleet rows that linked a deleted integration host. */
+export function clearFleetIntegrationBinds(repo: AppRepository, integrationId: string): number {
+  const fleet = loadFleet(repo);
+  let cleared = 0;
+  const next = fleet.map((m) => {
+    if (m.integration_id !== integrationId) return m;
+    cleared += 1;
+    return { ...m, integration_id: null, device_id: null };
+  });
+  if (cleared > 0) saveFleet(repo, next);
+  return cleared;
 }
 
 export function newMachineFromPreset(preset: PrinterPreset, name?: string): PrinterMachine {

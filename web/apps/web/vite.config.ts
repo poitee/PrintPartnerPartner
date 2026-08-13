@@ -1,6 +1,7 @@
-import { defineConfig } from "vite";
+import { defineConfig, type ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import type { IncomingMessage } from "node:http";
 import path from "node:path";
 
 const API_TARGET = process.env.VITE_DEV_API_TARGET ?? "http://127.0.0.1:18765";
@@ -30,11 +31,34 @@ const API_PREFIXES = [
   "ws",
 ];
 
-const proxy = Object.fromEntries(
-  API_PREFIXES.map((prefix) => [
-    `/${prefix}`,
-    { target: API_TARGET, changeOrigin: true, ws: prefix === "ws" || prefix === "jobs" },
-  ]),
+/**
+ * SPA routes that share a prefix with API routes (`/settings` vs `/settings/*`).
+ * Exact document navigations must not be proxied — there is no GET API at these paths.
+ */
+const SPA_EXACT_PATHS = new Set(["/settings", "/help", "/parts"]);
+
+function spaExactBypass(req: IncomingMessage): string | undefined {
+  const raw = req.url ?? "";
+  let pathname = raw.split("?", 1)[0] ?? "";
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    pathname = pathname.slice(0, -1);
+  }
+  if (SPA_EXACT_PATHS.has(pathname)) return raw;
+  return undefined;
+}
+
+const proxy: Record<string, ProxyOptions> = Object.fromEntries(
+  API_PREFIXES.map((prefix) => {
+    const options: ProxyOptions = {
+      target: API_TARGET,
+      changeOrigin: true,
+      ws: prefix === "ws" || prefix === "jobs",
+    };
+    if (SPA_EXACT_PATHS.has(`/${prefix}`)) {
+      options.bypass = spaExactBypass;
+    }
+    return [`/${prefix}`, options];
+  }),
 );
 
 export default defineConfig({

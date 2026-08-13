@@ -21,6 +21,8 @@ import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import EmptyState from "../components/layout/EmptyState";
+import PrinterLiveStrip from "../components/checkoff/PrinterLiveStrip";
+import PrintVerifyPanel from "../components/checkoff/PrintVerifyPanel";
 import SortableProgressPart from "../components/checkoff/SortableProgressPart";
 import PartPreviewDialog from "../components/parts/PartPreviewDialog";
 import PartThumbExpandButton from "../components/parts/PartThumbExpandButton";
@@ -170,6 +172,7 @@ export default function CheckoffPage() {
   );
   const [previewPart, setPreviewPart] = useState<ReviewPart | null>(null);
   const [printPrep, setPrintPrep] = useState(false);
+  const [verifyRefreshKey, setVerifyRefreshKey] = useState(0);
   const sheetRef = useRef<HTMLElement>(null);
   const location = useLocation();
   const copilot = useCopilotUiOptional();
@@ -474,7 +477,25 @@ export default function CheckoffPage() {
           </div>
         )}
 
-        <div className="checkoff-sticky flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
+        <div className="checkoff-sticky flex flex-col gap-2">
+          <PrinterLiveStrip
+            engineReady={Boolean(health?.ok)}
+            onCheckoffUpdate={(profileId) => {
+              if (selectedProfileId != null && profileId === selectedProfileId) {
+                setVerifyRefreshKey((k) => k + 1);
+              }
+            }}
+          />
+          <PrintVerifyPanel
+            engineReady={Boolean(health?.ok)}
+            profileId={selectedProfileId}
+            parts={includedParts}
+            refreshKey={verifyRefreshKey}
+            onVerified={() => {
+              if (selectedProfileId != null) void reload(selectedProfileId);
+            }}
+          />
+          <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <input
             type="search"
             className="checkoff-search w-full min-w-0 rounded-md border border-input bg-background px-3 py-2.5 text-base sm:flex-1 sm:py-1.5 sm:text-sm"
@@ -534,6 +555,7 @@ export default function CheckoffPage() {
               </label>
             </>
           )}
+          </div>
         </div>
 
         <div>

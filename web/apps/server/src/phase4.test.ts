@@ -7,7 +7,7 @@ import { AppRepository } from "./db/repository.js";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
-import { loadFleet, saveFleet } from "./services/printer-fleet.js";
+import { loadFleet, saveFleet, clearFleetIntegrationBinds, parsePrinterMachine } from "./services/printer-fleet.js";
 
 const MINI_STL = `solid t
   facet normal 0 0 1
@@ -140,6 +140,65 @@ describe("Phase 4 APIs", () => {
       },
     ]);
     expect(loadFleet(repo)).toHaveLength(1);
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("printer fleet round-trips integration_id bind and clears on host delete", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-printer-bind-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+
+    const legacy = parsePrinterMachine({
+      id: "legacy",
+      name: "Legacy",
+      bed_width_mm: 250,
+      bed_depth_mm: 210,
+      bed_height_mm: null,
+      margin_mm: 4,
+      max_filament_slots: 1,
+      loaded_filaments: [],
+    });
+    expect(legacy.integration_id).toBeUndefined();
+
+    saveFleet(repo, [
+      {
+        id: "p1",
+        name: "Voron",
+        bed_width_mm: 350,
+        bed_depth_mm: 350,
+        bed_height_mm: 345,
+        margin_mm: 4,
+        max_filament_slots: 1,
+        loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+        integration_id: "int-moon",
+        device_id: "default",
+      },
+      {
+        id: "p2",
+        name: "Other",
+        bed_width_mm: 250,
+        bed_depth_mm: 210,
+        bed_height_mm: null,
+        margin_mm: 4,
+        max_filament_slots: 1,
+        loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+        integration_id: "int-other",
+        device_id: "default",
+      },
+    ]);
+
+    const loaded = loadFleet(repo);
+    expect(loaded.find((p) => p.id === "p1")?.integration_id).toBe("int-moon");
+    expect(loaded.find((p) => p.id === "p1")?.device_id).toBe("default");
+
+    expect(clearFleetIntegrationBinds(repo, "int-moon")).toBe(1);
+    const after = loadFleet(repo);
+    expect(after.find((p) => p.id === "p1")?.integration_id).toBeNull();
+    expect(after.find((p) => p.id === "p1")?.device_id).toBeNull();
+    expect(after.find((p) => p.id === "p2")?.integration_id).toBe("int-other");
+
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });

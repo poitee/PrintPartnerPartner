@@ -1,0 +1,155 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import type { PrinterCheckoffUnit } from "@print-partner/contracts";
+import type { AppRepository } from "../db/repository.js";
+import { getIntegrationAdapter } from "../integrations/registry.js";
+import { getIntegrationConfig } from "../integrations/store.js";
+import { createPrinterCheckoffLink } from "./printer-checkoff-store.js";
+import { loadFleet } from "./printer-fleet.js";
+
+const ALLOWED_EXTENSIONS = new Set([".gcode", ".bgcode", ".gco"]);
+
+export function isAllowedPrinterUploadFilename(filename: string): boolean {
+  const lower = filename.toLowerCase();
+  for (const ext of ALLOWED_EXTENSIONS) {
+    if (lower.endsWith(ext)) return true;
+  }
+  return false;
+}
+
+export type PrinterUploadJobInput = {
+  printer_id: string;
+  artifact_path: string;
+  filename: string;
+  start: boolean;
+  host_name?: string;
+  /** Active plan for Progress verify tracking (Phase D). */
+  profile_id?: number;
+  /** Incomplete Progress units to mark when the host job completes. */
+  checkoff_units?: PrinterCheckoffUnit[];
+  upload_job_id?: string;
+};
+
+export type PrinterUploadJobEmit = (patch: {
+  message?: string;
+  progress?: number;
+}) => void;
+
+export async function runPrinterUploadJob(
+  repo: AppRepository,
+  input: PrinterUploadJobInput,
+  emit: PrinterUploadJobEmit,
+): Promise<Record<string, unknown>> {
+  const fleet = loadFleet(repo);
+  const machine = fleet.find((m) => m.id === input.printer_id);
+  if (!machine) {
+    throw new Error("Fleet printer not found");
+  }
+  const integrationId = machine.integration_id?.trim();
+  if (!integrationId) {
+    throw new Error(
+      "Printer is not linked to a host. Link a Moonraker or PrusaLink host in Settings.",
+    );
+  }
+
+  const integration = getIntegrationConfig(repo, integrationId);
+  if (!integration) {
+    throw new Error("Linked printer host integration was not found");
+  }
+  if (integration.config.enabled === false) {
+    throw new Error("Linked printer host is disabled");
+  }
+
+  const adapter = getIntegrationAdapter(integration.type);
+  if (!adapter?.uploadFile) {
+    if (integration.type === "bambu") {
+      throw new Error(
+        "Bambu send is not enabled (LAN MQTT is status-only). Use Moonraker/PrusaLink for upload, or see Printer setup for Developer Mode / Connect-Local Server.",
+      );
+    }
+    throw new Error(`Upload is not supported for ${integration.type}`);
+  }
+
+  const hostLabel = input.host_name ?? integration.name ?? machine.name;
+  const filename = basename(input.filename);
+  if (!isAllowedPrinterUploadFilename(filename)) {
+    throw new Error("Only .gcode / .bgcode / .gco files can be sent to a printer");
+  }
+
+  emit({
+    message: `Uploading ${filename} to ${hostLabel}`,
+    progress: 20,
+  });
+
+  const bytes = new Uint8Array(readFileSync(input.artifact_path));
+  emit({
+    message: `Uploading ${filename} to ${hostLabel}`,
+    progress: 45,
+  });
+
+  const result = await adapter.uploadFile(integration.config, bytes, filename, {
+    start: input.start,
+  });
+
+  if (!result.ok) {
+    throw new Error(result.message ?? "Printer upload failed");
+  }
+
+  emit({
+    message: result.started
+      ? `Printing on ${hostLabel}`
+      : `Uploaded ${filename} to ${hostLabel}`,
+    progress: 90,
+  });
+
+  const checkoffUnits = input.checkoff_units ?? [];
+  let checkoffLinkId: string | undefined;
+  if (
+    checkoffUnits.length > 0 &&
+    typeof input.profile_id === "number" &&
+    Number.isInteger(input.profile_id) &&
+    input.profile_id > 0
+  ) {
+    const link = createPrinterCheckoffLink(repo, {
+      profile_id: input.profile_id,
+      integration_id: integrationId,
+      printer_id: machine.id,
+      host_name: hostLabel,
+      filename,
+      remote_path: result.remote_path ?? filename,
+      upload_job_id: input.upload_job_id,
+      units: checkoffUnits,
+      started: Boolean(result.started),
+    });
+    checkoffLinkId = link?.id;
+  }
+
+  return {
+    printer_id: machine.id,
+    printer_name: machine.name,
+    integration_id: integrationId,
+    integration_type: integration.type,
+    host_name: hostLabel,
+    filename,
+    remote_path: result.remote_path ?? filename,
+    started: Boolean(result.started),
+    message: result.message,
+    checkoff_link_id: checkoffLinkId,
+    checkoff_units: checkoffUnits.length,
+  };
+}
+
+/** Persist an uploaded gcode artifact under exportsDir for the job runner. */
+export function persistPrinterUploadArtifact(
+  exportsDir: string,
+  jobId: string,
+  filename: string,
+  bytes: Buffer,
+): string {
+  const safeName = basename(filename).replace(/[/\\]/g, "_") || "print.gcode";
+  const dir = join(exportsDir, "printer-uploads", jobId);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, safeName);
+  writeFileSync(path, bytes);
+  return path;
+}

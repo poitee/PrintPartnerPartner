@@ -99,6 +99,118 @@ export type IntegrationTestResult = {
   message?: string;
 };
 
+export type PrinterHostStatus = {
+  state: "idle" | "printing" | "paused" | "complete" | "error" | "offline" | "unknown";
+  progress?: number;
+  filename?: string;
+  message?: string;
+  eta_seconds?: number;
+};
+
+export type PrinterCheckoffUnit = {
+  part_id: number;
+  unit_index: number;
+};
+
+export type PrinterHostOutcome = "unknown" | "success" | "failed" | "cancelled";
+
+export type PrinterCheckoffLinkState =
+  | "watching"
+  | "awaiting_verify"
+  | "host_failed"
+  | "dismissed"
+  | "verified"
+  | "applied";
+
+export type PrintRejectReason =
+  | "bed_adhesion"
+  | "layer_shift"
+  | "warping"
+  | "stringing"
+  | "under_extrusion"
+  | "over_extrusion"
+  | "dimensional"
+  | "collision"
+  | "wrong_filament"
+  | "other";
+
+export type PrintOutcomeResult = "confirmed" | "rejected";
+
+export type PrintVerifyDecision = {
+  part_id: number;
+  unit_index: number;
+  result: PrintOutcomeResult;
+  reason?: PrintRejectReason;
+  note?: string;
+};
+
+export type PrintOutcomeEvent = {
+  id: string;
+  at: string;
+  profile_id: number;
+  part_id: number;
+  unit_index: number;
+  result: PrintOutcomeResult;
+  reason?: PrintRejectReason;
+  note?: string;
+  host_integration_id?: string;
+  filename?: string;
+  match_key?: string;
+  role?: string;
+  filament_display?: string;
+  link_id?: string;
+};
+
+export type PrintOutcomesSummary = {
+  profile_id: number;
+  total_confirmed: number;
+  total_rejected: number;
+  by_reason: Partial<Record<PrintRejectReason, number>>;
+  by_role: Record<string, { confirmed: number; rejected: number }>;
+  recent_rejected: PrintOutcomeEvent[];
+};
+
+export type PrinterCheckoffLink = {
+  id: string;
+  profile_id: number;
+  integration_id: string;
+  printer_id: string;
+  host_name: string;
+  filename: string;
+  remote_path?: string;
+  upload_job_id?: string;
+  units: PrinterCheckoffUnit[];
+  resolved_units?: PrintVerifyDecision[];
+  state: PrinterCheckoffLinkState;
+  host_outcome?: PrinterHostOutcome;
+  saw_active: boolean;
+  started?: boolean;
+  last_progress?: number;
+  created_at: string;
+  completed_at?: string;
+  applied_at?: string;
+  units_marked?: number;
+};
+
+export type PrinterCheckoffReconcileUpdate = {
+  link_id: string;
+  host_name: string;
+  profile_id: number;
+  filename: string;
+  event: "awaiting_verify" | "host_failed";
+  host_outcome: PrinterHostOutcome;
+  units_pending: number;
+};
+
+/** @deprecated Prefer PrinterCheckoffReconcileUpdate */
+export type PrinterCheckoffApplied = {
+  link_id: string;
+  host_name: string;
+  profile_id: number;
+  units_marked: number;
+  filename: string;
+};
+
 export type SpoolmanDefaultSettings = {
   integration_id: string | null;
 };
@@ -238,6 +350,8 @@ export type PrinterMachine = {
     label: string;
   }>;
   enabled?: boolean;
+  integration_id?: string | null;
+  device_id?: string | null;
 };
 
 export type PrinterPreset = {
@@ -1099,6 +1213,110 @@ export async function testIntegration(id: string): Promise<IntegrationTestResult
   return v1Fetch<IntegrationTestResult>(`/integrations/${encodeURIComponent(id)}/test`, {
     method: "POST",
   });
+}
+
+export async function fetchIntegrationStatus(id: string): Promise<PrinterHostStatus> {
+  return v1Fetch<PrinterHostStatus>(`/integrations/${encodeURIComponent(id)}/status`);
+}
+
+export async function reconcilePrinterCheckoff(options: {
+  integration_id: string;
+}): Promise<{
+  status: PrinterHostStatus;
+  updates: PrinterCheckoffReconcileUpdate[];
+  applied: PrinterCheckoffApplied[];
+}> {
+  return v1Fetch(`/printer-checkoff/reconcile`, {
+    method: "POST",
+    body: JSON.stringify({
+      integration_id: options.integration_id,
+    }),
+  });
+}
+
+export async function fetchPrinterCheckoffLinks(options?: {
+  state?: PrinterCheckoffLinkState;
+  profile_id?: number;
+  integration_id?: string;
+}): Promise<{ links: PrinterCheckoffLink[] }> {
+  const params = new URLSearchParams();
+  if (options?.state) params.set("state", options.state);
+  if (options?.profile_id != null) params.set("profile_id", String(options.profile_id));
+  if (options?.integration_id) params.set("integration_id", options.integration_id);
+  const qs = params.toString();
+  return v1Fetch(`/printer-checkoff${qs ? `?${qs}` : ""}`);
+}
+
+export async function verifyPrinterCheckoff(options: {
+  link_id: string;
+  decisions: PrintVerifyDecision[];
+}): Promise<{
+  link: PrinterCheckoffLink;
+  units_confirmed: number;
+  units_rejected: number;
+  outcomes: PrintOutcomeEvent[];
+}> {
+  return v1Fetch(`/printer-checkoff/verify`, {
+    method: "POST",
+    body: JSON.stringify(options),
+  });
+}
+
+export async function dismissPrinterCheckoff(options: {
+  link_id: string;
+}): Promise<{ link: PrinterCheckoffLink }> {
+  return v1Fetch(`/printer-checkoff/dismiss`, {
+    method: "POST",
+    body: JSON.stringify(options),
+  });
+}
+
+export async function fetchPrintOutcomesSummary(
+  profileId: number,
+): Promise<PrintOutcomesSummary> {
+  return v1Fetch(`/printer-outcomes/summary?profile_id=${encodeURIComponent(String(profileId))}`);
+}
+
+export async function startPrinterUpload(options: {
+  file: File;
+  printer_id: string;
+  start?: boolean;
+  profile_id?: number;
+  checkoff_units?: PrinterCheckoffUnit[];
+}): Promise<string> {
+  const form = new FormData();
+  form.append("file", options.file);
+  form.append("printer_id", options.printer_id);
+  form.append("start", options.start ? "1" : "0");
+  if (options.profile_id != null) {
+    form.append("profile_id", String(options.profile_id));
+  }
+  if (options.checkoff_units && options.checkoff_units.length > 0) {
+    form.append("checkoff_units", JSON.stringify(options.checkoff_units));
+  }
+  const res = await fetch(resolveEngineUrl("/jobs/printer-upload"), {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  if (res.status === 401) {
+    unauthorizedHandler?.();
+    throw new Error("Printer upload failed: 401");
+  }
+  if (!res.ok) {
+    let detail = `Printer upload failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  const body = (await res.json()) as { job_id?: string };
+  const jobId = typeof body.job_id === "string" ? body.job_id.trim() : "";
+  if (!jobId) throw new Error("Printer upload failed: missing job_id");
+  return jobId;
 }
 
 export async function fetchSpoolmanDefaultSettings(): Promise<SpoolmanDefaultSettings> {

@@ -18,6 +18,15 @@ import { runPackPreviewJob } from "../services/plate-workspace.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import { tenantStorage } from "../middleware/tenant-context.js";
 import { extractPendingPdfsForSource } from "../services/source-docs-index.js";
+import {
+  isAllowedPrinterUploadFilename,
+  persistPrinterUploadArtifact,
+  runPrinterUploadJob,
+} from "../services/printer-upload-job.js";
+import { parseCheckoffUnits } from "../services/printer-checkoff.js";
+import { sendProblem } from "../lib/api-error.js";
+import { getIntegrationConfig } from "../integrations/store.js";
+import { loadFleet } from "../services/printer-fleet.js";
 
 export type JobHandler = (
   jobId: string,
@@ -51,6 +60,15 @@ export class InProcessJobRunner {
   constructor(private readonly deps: JobRunnerDeps) {}
 
   private get repo(): AppRepository {
+    return this.deps.getRepo();
+  }
+
+  /** Used by multipart job routes that need to persist artifacts before start(). */
+  getExportsDir(): string {
+    return this.deps.exportsDir;
+  }
+
+  getRepo(): AppRepository {
     return this.deps.getRepo();
   }
 
@@ -196,13 +214,17 @@ export class InProcessJobRunner {
           result = await this.runExport3mf(payload);
         } else if (kind === "pack-preview") {
           result = await this.runPackPreview(payload);
+        } else if (kind === "printer-upload") {
+          result = await this.runPrinterUpload(jobId, payload);
         } else {
           result = { stub: true, kind, payload };
         }
         const doneMessage =
           kind === "export-stl-pack"
             ? exportStlPackJobMessage(result)
-            : kind === "sync" && Number(result.failed ?? 0) > 0
+            : kind === "printer-upload" && typeof result.message === "string"
+              ? result.message
+              : kind === "sync" && Number(result.failed ?? 0) > 0
               ? `Synced ${result.synced ?? 0}, ${result.failed} failed — check Settings → GitHub PAT if rate-limited`
               : "Complete";
         this.emit(jobId, {
@@ -419,6 +441,38 @@ export class InProcessJobRunner {
     });
   }
 
+  private async runPrinterUpload(
+    jobId: string,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const profileRaw = payload.profile_id;
+    const profileId =
+      typeof profileRaw === "number"
+        ? profileRaw
+        : typeof profileRaw === "string" && profileRaw.trim()
+          ? Number(profileRaw)
+          : undefined;
+    return runPrinterUploadJob(
+      this.repo,
+      {
+        printer_id: String(payload.printer_id ?? ""),
+        artifact_path: String(payload.artifact_path ?? ""),
+        filename: String(payload.filename ?? "print.gcode"),
+        start: Boolean(payload.start),
+        host_name: typeof payload.host_name === "string" ? payload.host_name : undefined,
+        profile_id:
+          typeof profileId === "number" && Number.isInteger(profileId) && profileId > 0
+            ? profileId
+            : undefined,
+        checkoff_units: Array.isArray(payload.checkoff_units)
+          ? parseCheckoffUnits(payload.checkoff_units)
+          : undefined,
+        upload_job_id: jobId,
+      },
+      (patch) => this.emit(jobId, patch),
+    );
+  }
+
   async get(jobId: string): Promise<JobSnapshot | null> {
     return this.jobs.get(jobId) ?? null;
   }
@@ -597,6 +651,134 @@ export async function registerJobRoutes(
     );
     return { job_id };
   });
+
+  app.post(
+    "/jobs/printer-upload",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      let printerId = "";
+      let start = false;
+      let filename = "print.gcode";
+      let fileBuffer: Buffer | null = null;
+      let profileId: number | undefined;
+      let checkoffUnitsRaw: string | undefined;
+
+      for await (const part of request.parts()) {
+        if (part.type === "field") {
+          const value = String(await part.value);
+          if (part.fieldname === "printer_id") printerId = value.trim();
+          if (part.fieldname === "start") {
+            const raw = value.toLowerCase();
+            start = raw === "1" || raw === "true" || raw === "yes";
+          }
+          if (part.fieldname === "profile_id") {
+            const n = Number(value);
+            if (Number.isInteger(n) && n > 0) profileId = n;
+          }
+          if (part.fieldname === "checkoff_units") {
+            checkoffUnitsRaw = value;
+          }
+          continue;
+        }
+        if (part.type !== "file") continue;
+        if (part.fieldname !== "file" && part.fieldname !== "gcode") {
+          part.file.resume();
+          continue;
+        }
+        if (fileBuffer) {
+          part.file.resume();
+          return sendProblem(reply, 400, "Bad Request", "Only one G-code file is allowed");
+        }
+        filename = (part.filename || "print.gcode").replace(/\\/g, "/");
+        const chunks: Buffer[] = [];
+        for await (const chunk of part.file) {
+          chunks.push(Buffer.from(chunk));
+        }
+        fileBuffer = Buffer.concat(chunks);
+      }
+
+      if (!printerId) {
+        return sendProblem(reply, 400, "Bad Request", "printer_id is required");
+      }
+      if (!fileBuffer || fileBuffer.length === 0) {
+        return sendProblem(reply, 400, "Bad Request", "G-code file required");
+      }
+
+      const baseName = basename(filename);
+      if (!isAllowedPrinterUploadFilename(baseName)) {
+        return sendProblem(
+          reply,
+          400,
+          "Bad Request",
+          "Only .gcode / .bgcode files can be sent to a printer",
+        );
+      }
+
+      const checkoff_units = parseCheckoffUnits(checkoffUnitsRaw);
+      if (checkoff_units.length > 0 && profileId == null) {
+        return sendProblem(
+          reply,
+          400,
+          "Bad Request",
+          "profile_id is required when checkoff_units are provided",
+        );
+      }
+      if (profileId != null && !jobs.getRepo().getProfile(profileId)) {
+        return sendProblem(reply, 404, "Not Found", "Profile not found");
+      }
+
+      const repo = jobs.getRepo();
+      const machine = loadFleet(repo).find((m) => m.id === printerId);
+      if (!machine) {
+        return sendProblem(reply, 404, "Not Found", "Fleet printer not found");
+      }
+      const integrationId = machine.integration_id?.trim();
+      if (!integrationId) {
+        return sendProblem(
+          reply,
+          400,
+          "Bad Request",
+          "Printer is not linked to a host. Link a Moonraker or PrusaLink host in Settings.",
+        );
+      }
+      const integration = getIntegrationConfig(repo, integrationId);
+      if (!integration) {
+        return sendProblem(reply, 400, "Bad Request", "Linked printer host was not found");
+      }
+      if (integration.type !== "moonraker" && integration.type !== "prusalink") {
+        return sendProblem(
+          reply,
+          400,
+          "Bad Request",
+          `Upload is not supported for ${integration.type}`,
+        );
+      }
+
+      const artifactKey = crypto.randomUUID();
+      const artifact_path = persistPrinterUploadArtifact(
+        jobs.getExportsDir(),
+        artifactKey,
+        baseName,
+        fileBuffer,
+      );
+
+      const job_id = await jobs.start(
+        "printer-upload",
+        {
+          printer_id: printerId,
+          artifact_path,
+          filename: baseName,
+          start,
+          host_name: integration.name,
+          profile_id: profileId,
+          checkoff_units,
+        },
+        request.tenantId,
+      );
+
+      return { job_id };
+    },
+  );
 
   app.get("/jobs/:id", async (request, reply) => {
     const id = (request.params as { id: string }).id;

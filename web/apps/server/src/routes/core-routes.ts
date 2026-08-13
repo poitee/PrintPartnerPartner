@@ -20,6 +20,7 @@ import { registerSourceRoutes } from "./sources.js";
 import { registerJobRoutes, type InProcessJobRunner } from "./jobs.js";
 import { registerApiV1ExtensionRoutes } from "./api-v1-extensions.js";
 import { registerIntegrationRoutes } from "./integrations.js";
+import { registerPrinterCheckoffRoutes } from "./printer-checkoff.js";
 import { registerWebhookRoutes } from "./webhooks.js";
 import { registerShareRoutes } from "./shares.js";
 import { registerAssistantRoutes } from "./assistant.js";
@@ -92,6 +93,7 @@ export async function registerCoreRoutes(
       getAdapter: getIntegrationAdapter,
     });
     await registerIntegrationRoutes(app, { integrations, repo: deps.repo });
+    await registerPrinterCheckoffRoutes(app, { integrations, repo: deps.repo });
     await registerWebhookRoutes(app, { repo: deps.repo });
   }
 

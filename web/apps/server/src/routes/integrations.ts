@@ -5,6 +5,7 @@ import type { AppRepository } from "../db/repository.js";
 import { sendProblem } from "../lib/api-error.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
 import { registerSpoolmanProxyRoutes } from "./spoolman-proxy.js";
+import { clearFleetIntegrationBinds } from "../services/printer-fleet.js";
 
 type RouteDeps = { integrations: IntegrationPort; repo: AppRepository };
 
@@ -61,6 +62,7 @@ export async function registerIntegrationRoutes(
     if (!deps.integrations.delete(id)) {
       return sendProblem(reply, 404, "Not Found", "Integration not found");
     }
+    clearFleetIntegrationBinds(deps.repo, id);
     return reply.status(204).send();
   });
 
@@ -85,6 +87,18 @@ export async function registerIntegrationRoutes(
     const devices = await deps.integrations.listDevices(id);
     return { devices };
   });
+
+  app.get(
+    "/integrations/:id/status",
+    { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const id = (request.params as { id: string }).id;
+      if (!deps.integrations.get(id)) {
+        return sendProblem(reply, 404, "Not Found", "Integration not found");
+      }
+      return deps.integrations.getStatus(id);
+    },
+  );
 
   await registerSpoolmanProxyRoutes(app, deps);
 }

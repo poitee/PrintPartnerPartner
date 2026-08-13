@@ -5,6 +5,7 @@ describe("jobKindLabel", () => {
   it("maps known job kinds", () => {
     expect(jobKindLabel("recompute")).toBe("Recompute");
     expect(jobKindLabel("export-3mf")).toBe("Export 3MF");
+    expect(jobKindLabel("printer-upload")).toBe("Send to printer");
   });
 
   it("falls back for unknown kinds", () => {
