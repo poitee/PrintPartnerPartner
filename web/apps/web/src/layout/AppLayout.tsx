@@ -1,6 +1,6 @@
 import { type MouseEvent, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { BookOpen, Layers, MoreHorizontal, Settings, Sparkles } from "lucide-react";
+import { BookOpen, MoreHorizontal, Settings, Sparkles } from "lucide-react";
 import CommandPalette from "../components/CommandPalette";
 import AssistantChatSheet from "../components/AssistantChatSheet";
 import ErrorBoundary from "../components/ErrorBoundary";
@@ -30,7 +30,6 @@ import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
 import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import { useWorkflowStages } from "../hooks/useWorkflowStages";
 import {
-  buildsRoute,
   helpRoute,
   isBuildPath,
   isPartsPath,
@@ -157,7 +156,6 @@ export default function AppLayout() {
   }, []);
 
   const secondaryMobile = [
-    { to: buildsRoute(selectedProfileId), label: "Builds", icon: Layers },
     { to: settingsRoute(), label: "Settings", icon: Settings },
     { to: helpRoute(), label: "Help", icon: BookOpen },
   ];
@@ -171,7 +169,6 @@ export default function AppLayout() {
             onToggleCollapsed={toggleSidebar}
             stages={stages}
             activeId={activeId}
-            selectedProfileId={selectedProfileId}
             aiAssistantEnabled={aiAssistantEnabled}
             assistantOpen={assistantOpen}
             onAssistantOpenChange={setAssistantOpenPersisted}
@@ -209,8 +206,8 @@ export default function AppLayout() {
                 <SupportCta variant="secondary" size="sm" className="hidden shrink-0 sm:inline-flex" />
                 <ThemePreferenceControl compact className="hidden shrink-0 md:inline-flex" />
                 <UserMenu />
-                <CreatePlanButton className="hidden sm:inline-flex" />
-                <CreatePlanButton size="icon" showLabel={false} className="sm:hidden" />
+                {/* Mobile-only plan switcher + create — spine owns both on lg+ */}
+                <CreatePlanButton className="lg:hidden" size="icon" showLabel={false} />
                 <PlanPicker className="min-w-0 flex-1 sm:min-w-[200px] sm:max-w-xs lg:hidden" />
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

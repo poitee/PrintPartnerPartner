@@ -23,22 +23,22 @@ const STEPS = [
   },
   {
     icon: Layers,
-    title: "Create a build",
+    title: "Create a plan",
     description:
-      "Use Create build in the header, or open Build and expand Manage builds to create or switch plans.",
+      "Use Create plan in the sidebar under the plan picker to create or switch plans.",
     to: null,
   },
   {
     icon: Hammer,
     title: "Pick files & colors",
-    description: "Attach sources, select STL folders, and set role filament colors on Build.",
+    description: "Attach sources, select STL folders, and set role filament colors on Plan.",
     to: buildRoute(null),
   },
   {
     icon: ClipboardCheck,
     title: "Update & review",
     description:
-      "Click Update build, then validate parts, track printing, and export on Review.",
+      "Click Rebuild plan, then validate on Parts, track printing on Progress, and ship from Export.",
     to: buildRoute(null),
   },
 ] as const;
@@ -74,7 +74,7 @@ export default function WelcomePage() {
       <header className="space-y-1 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">Welcome to Print Partner</h1>
         <p className="text-sm text-muted-foreground">
-          Self-hosted workflow for layered STL kits — Library → Plan → Parts → Progress.
+          Self-hosted workflow for layered STL kits — Library → Plan → Parts → Progress → Export.
         </p>
       </header>
 
