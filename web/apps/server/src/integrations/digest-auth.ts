@@ -26,15 +26,15 @@ export function quoteDigestParam(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-/** Prefer qop=auth when the challenge lists multiple options. */
+/** Prefer qop=auth when offered; never select auth-int (we don't hash the entity body). */
 export function pickDigestQop(qopRaw: string): string | undefined {
   const options = qopRaw
     .split(",")
-    .map((s) => s.trim())
+    .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
-  if (!options.length) return undefined;
   if (options.includes("auth")) return "auth";
-  return options[0];
+  // Unsupported qop only (e.g. auth-int) → fall back to RFC 2069 (no qop).
+  return undefined;
 }
 
 /** Build an Authorization: Digest … header for an HTTP Digest challenge (MD5 / auth). */

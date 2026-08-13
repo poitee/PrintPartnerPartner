@@ -55,6 +55,22 @@ describe("digest-auth", () => {
     expect(authorization).not.toContain("qop=auth-int");
   });
 
+  it("omits qop when only auth-int is offered", () => {
+    const authorization = buildDigestAuthorization({
+      username: "maker",
+      password: "secret",
+      method: "GET",
+      uri: "/api/v1/status",
+      challenge: {
+        realm: "Printer API",
+        nonce: "n1",
+        qop: "auth-int",
+        algorithm: "MD5",
+      },
+    });
+    expect(authorization).not.toContain("qop=");
+  });
+
   it("escapes quotes in username and rejects CR/LF", () => {
     const authorization = buildDigestAuthorization({
       username: 'ma"ker',

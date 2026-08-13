@@ -29,10 +29,38 @@ function storageRoot(config: IntegrationConfig): string {
 }
 
 /**
- * PrusaLink HTTP Digest fetch. Probes without a body to obtain the challenge,
- * then sends the real request (with body, if any) using Digest Authorization.
+ * PrusaLink HTTP Digest fetch.
+ * Obtain the Digest challenge via a bodyless GET to /api/v1/status — never probe
+ * with PUT/POST (a bodyless write can corrupt or create empty jobs on the printer).
+ * Then send the real request (with body, if any) using Digest Authorization.
  * Every hop is SSRF-checked with allowPrivate.
  */
+async function drainResponseBody(res: Response): Promise<void> {
+  try {
+    await res.arrayBuffer();
+  } catch {
+    /* ignore */
+  }
+}
+
+async function obtainDigestChallenge(
+  requestUrl: string,
+  signal: AbortSignal,
+): Promise<Record<string, string> | null> {
+  const origin = new URL(requestUrl).origin;
+  const probeUrl = `${origin}/api/v1/status`;
+  await assertSafeOutboundUrl(probeUrl, { allowPrivate: true });
+  const probe = await fetch(probeUrl, {
+    method: "GET",
+    signal,
+    redirect: "manual",
+  });
+  await drainResponseBody(probe);
+  if (probe.status !== 401) return null;
+  const challenge = parseWwwAuthenticate(probe.headers.get("www-authenticate") ?? "");
+  return challenge.nonce ? challenge : null;
+}
+
 async function prusalinkFetch(
   url: string,
   config: IntegrationConfig,
@@ -47,35 +75,51 @@ async function prusalinkFetch(
     return fetch(url, { ...init, method, signal, redirect: "manual" });
   }
 
-  // Omit body on the challenge probe so large G-code is not uploaded twice.
-  const probe = await fetch(url, {
-    method,
-    headers: init.headers,
-    signal,
-    redirect: "manual",
-  });
-
+  const challenge = await obtainDigestChallenge(url, signal);
   let authorization: string | undefined;
-  if (probe.status === 401) {
-    const challenge = parseWwwAuthenticate(probe.headers.get("www-authenticate") ?? "");
-    if (challenge.nonce) {
-      const parsed = new URL(url);
-      authorization = buildDigestAuthorization({
-        username: creds.username,
-        password: creds.password,
-        method,
-        uri: `${parsed.pathname}${parsed.search}`,
-        challenge,
-      });
-    }
-  } else if (init.body == null) {
-    return probe;
+  if (challenge) {
+    const parsed = new URL(url);
+    authorization = buildDigestAuthorization({
+      username: creds.username,
+      password: creds.password,
+      method,
+      uri: `${parsed.pathname}${parsed.search}`,
+      challenge,
+    });
   }
 
   const headers = new Headers(init.headers);
   if (authorization) headers.set("Authorization", authorization);
   await assertSafeOutboundUrl(url, { allowPrivate: true });
-  return fetch(url, { ...init, method, headers, signal, redirect: "manual" });
+  let res = await fetch(url, { ...init, method, headers, signal, redirect: "manual" });
+
+  // Stale/missing challenge: retry once from the real response's WWW-Authenticate.
+  if (res.status === 401) {
+    const retryChallenge = parseWwwAuthenticate(res.headers.get("www-authenticate") ?? "");
+    await drainResponseBody(res);
+    if (retryChallenge.nonce) {
+      const parsed = new URL(url);
+      const retryAuth = buildDigestAuthorization({
+        username: creds.username,
+        password: creds.password,
+        method,
+        uri: `${parsed.pathname}${parsed.search}`,
+        challenge: retryChallenge,
+      });
+      const retryHeaders = new Headers(init.headers);
+      retryHeaders.set("Authorization", retryAuth);
+      await assertSafeOutboundUrl(url, { allowPrivate: true });
+      res = await fetch(url, {
+        ...init,
+        method,
+        headers: retryHeaders,
+        signal,
+        redirect: "manual",
+      });
+    }
+  }
+
+  return res;
 }
 
 function mapPrinterState(raw: string | undefined): PrinterHostStatus["state"] {
