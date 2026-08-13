@@ -2,7 +2,7 @@
 
 How to connect Moonraker / PrusaLink / Bambu (status) hosts, link them to fleet machines, send sliced G-code from Export (Moonraker/PrusaLink), and open Progress verify when a host job finishes. Product UX: [PRINTER_UX.md](PRINTER_UX.md). Vendor APIs: [PRINTER_APIS.md](PRINTER_APIS.md).
 
-**Phases A–E (desk-first self-host):** Settings hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip**; **verify-first Progress** on successful job complete (confirm/reject); **Bambu LAN MQTT status** (Phase E). Bambu send stays out of the default product path.
+**Phases A–F (desk-first self-host):** Settings hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip** + active **send queue**; **verify-first Progress** on successful job complete (confirm/reject); **Bambu LAN MQTT status** (Phase E); thin **Queue for idle** / Send ready (Phase F). Bambu send stays out of the default product path.
 
 ---
 
@@ -82,6 +82,8 @@ After a fleet row is linked, open **Progress**. Above the search/filters sticky 
 - **Offline** / **Error** — host unreachable or adapter error (link back to Settings)
 
 The strip polls status about every 5 seconds while the tab is visible; manual −/+ checkoff still works. **Bambu-linked hosts** appear here as **status only** (no Export send / verify mapping from Bambu yet).
+
+**Send queue (Phase F):** when Export has **Queue for idle** jobs waiting, Progress shows the same **Send queue** panel (Send ready / Send now / Remove) under the live strip so you can manage the farm without leaving Progress. Empty queue hides the panel.
 
 ## Verify-first Progress (Phase D)
 

@@ -780,8 +780,8 @@ export default function ExportActionCards({ onShare }: Props) {
               </div>
               {selectedPrinterBusy ? (
                 <p className="text-xs text-muted-foreground">
-                  Selected printer is busy. Upload or Queue for idle still work; start is
-                  blocked until Idle.
+                  Selected printer is busy. Use Upload or Queue for idle; Upload &amp; start
+                  stays blocked until Idle. Queued jobs also appear on Progress.
                 </p>
               ) : null}
               <PrinterSendQueuePanel
