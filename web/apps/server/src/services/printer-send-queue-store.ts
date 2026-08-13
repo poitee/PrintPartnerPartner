@@ -92,12 +92,17 @@ export function loadPrinterSendQueue(repo: AppRepository): PrinterSendQueueItem[
   }
 }
 
-function savePrinterSendQueue(repo: AppRepository, items: PrinterSendQueueItem[]): void {
+/** Cap terminal history only — never drop queued/sending items. */
+export function trimPrinterSendQueue(items: PrinterSendQueueItem[]): PrinterSendQueueItem[] {
   const active = items.filter((i) => i.state === "queued" || i.state === "sending");
   const terminal = items.filter((i) => i.state !== "queued" && i.state !== "sending");
   const keepTerminal = Math.max(0, MAX_ITEMS - active.length);
-  const trimmed = [...active, ...terminal.slice(-keepTerminal)].slice(-MAX_ITEMS);
-  repo.setSetting(SETTINGS_KEY, JSON.stringify(trimmed));
+  if (keepTerminal === 0) return active;
+  return [...active, ...terminal.slice(-keepTerminal)];
+}
+
+function savePrinterSendQueue(repo: AppRepository, items: PrinterSendQueueItem[]): void {
+  repo.setSetting(SETTINGS_KEY, JSON.stringify(trimPrinterSendQueue(items)));
 }
 
 export type EnqueuePrinterSendInput = {

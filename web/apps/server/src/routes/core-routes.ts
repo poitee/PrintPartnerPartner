@@ -84,22 +84,24 @@ export async function registerCoreRoutes(
     registerShareRoutes(app, { repo: deps.repo, authStore, config: deps.config });
   }
 
+  // SPA-facing printer host routes (flat, not behind /api/v1 API-key gate).
+  const integrations = createIntegrationPort({
+    repo: deps.repo,
+    getAdapter: getIntegrationAdapter,
+  });
+  await registerPrinterCheckoffRoutes(app, { integrations, repo: deps.repo });
+  await registerPrinterSendQueueRoutes(app, {
+    integrations,
+    repo: deps.repo,
+    jobs: deps.jobs,
+  });
+
   if (options.apiV1Extensions) {
     await registerApiV1ExtensionRoutes(app, {
       repo: deps.repo,
       jobs: deps.jobs,
     });
-    const integrations = createIntegrationPort({
-      repo: deps.repo,
-      getAdapter: getIntegrationAdapter,
-    });
     await registerIntegrationRoutes(app, { integrations, repo: deps.repo });
-    await registerPrinterCheckoffRoutes(app, { integrations, repo: deps.repo });
-    await registerPrinterSendQueueRoutes(app, {
-      integrations,
-      repo: deps.repo,
-      jobs: deps.jobs,
-    });
     await registerWebhookRoutes(app, { repo: deps.repo });
   }
 

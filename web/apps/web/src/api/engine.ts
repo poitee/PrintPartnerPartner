@@ -1250,7 +1250,7 @@ export async function reconcilePrinterCheckoff(options: {
   updates: PrinterCheckoffReconcileUpdate[];
   applied: PrinterCheckoffApplied[];
 }> {
-  return v1Fetch(`/printer-checkoff/reconcile`, {
+  return engineFetch(`/printer-checkoff/reconcile`, {
     method: "POST",
     body: JSON.stringify({
       integration_id: options.integration_id,
@@ -1268,7 +1268,7 @@ export async function fetchPrinterCheckoffLinks(options?: {
   if (options?.profile_id != null) params.set("profile_id", String(options.profile_id));
   if (options?.integration_id) params.set("integration_id", options.integration_id);
   const qs = params.toString();
-  return v1Fetch(`/printer-checkoff${qs ? `?${qs}` : ""}`);
+  return engineFetch(`/printer-checkoff${qs ? `?${qs}` : ""}`);
 }
 
 export async function verifyPrinterCheckoff(options: {
@@ -1280,7 +1280,7 @@ export async function verifyPrinterCheckoff(options: {
   units_rejected: number;
   outcomes: PrintOutcomeEvent[];
 }> {
-  return v1Fetch(`/printer-checkoff/verify`, {
+  return engineFetch(`/printer-checkoff/verify`, {
     method: "POST",
     body: JSON.stringify(options),
   });
@@ -1289,7 +1289,7 @@ export async function verifyPrinterCheckoff(options: {
 export async function dismissPrinterCheckoff(options: {
   link_id: string;
 }): Promise<{ link: PrinterCheckoffLink }> {
-  return v1Fetch(`/printer-checkoff/dismiss`, {
+  return engineFetch(`/printer-checkoff/dismiss`, {
     method: "POST",
     body: JSON.stringify(options),
   });
@@ -1298,14 +1298,16 @@ export async function dismissPrinterCheckoff(options: {
 export async function fetchPrintOutcomesSummary(
   profileId: number,
 ): Promise<PrintOutcomesSummary> {
-  return v1Fetch(`/printer-outcomes/summary?profile_id=${encodeURIComponent(String(profileId))}`);
+  return engineFetch(
+    `/printer-outcomes/summary?profile_id=${encodeURIComponent(String(profileId))}`,
+  );
 }
 
 export async function fetchPrinterSendQueue(options?: {
   active?: boolean;
 }): Promise<{ items: PrinterSendQueueItem[] }> {
   const qs = options?.active ? "?active=1" : "";
-  return v1Fetch(`/printer-send-queue${qs}`);
+  return engineFetch(`/printer-send-queue${qs}`);
 }
 
 export async function enqueuePrinterSend(options: {
@@ -1327,7 +1329,7 @@ export async function enqueuePrinterSend(options: {
   if (options.checkoff_units && options.checkoff_units.length > 0) {
     form.append("checkoff_units", JSON.stringify(options.checkoff_units));
   }
-  const res = await fetch(resolveEngineUrl("/api/v1/printer-send-queue"), {
+  const res = await fetch(resolveEngineUrl("/printer-send-queue"), {
     method: "POST",
     body: form,
     credentials: "include",
@@ -1353,7 +1355,7 @@ export async function dispatchPrinterSendQueueItem(options: {
   id: string;
   force?: boolean;
 }): Promise<{ item: PrinterSendQueueItem; job_id: string }> {
-  return v1Fetch(`/printer-send-queue/${encodeURIComponent(options.id)}/dispatch`, {
+  return engineFetch(`/printer-send-queue/${encodeURIComponent(options.id)}/dispatch`, {
     method: "POST",
     body: JSON.stringify({ force: Boolean(options.force) }),
   });
@@ -1362,11 +1364,11 @@ export async function dispatchPrinterSendQueueItem(options: {
 export async function drainPrinterSendQueue(): Promise<{
   results: Array<{ item_id: string; job_id?: string; error?: string }>;
 }> {
-  return v1Fetch(`/printer-send-queue/drain`, { method: "POST", body: "{}" });
+  return engineFetch(`/printer-send-queue/drain`, { method: "POST", body: "{}" });
 }
 
 export async function cancelPrinterSendQueueItem(id: string): Promise<{ item: PrinterSendQueueItem }> {
-  return v1Fetch(`/printer-send-queue/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return engineFetch(`/printer-send-queue/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function startPrinterUpload(options: {

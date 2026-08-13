@@ -53,7 +53,12 @@ import type { PartRow, ProfileSummary, SourceSummary, PlanDecision, PlanSnapshot
 import { and, asc, count, eq, ne, sql } from "drizzle-orm";
 import { join, resolve, sep, basename } from "node:path";
 import type { DrizzleDb } from "./client.js";
-import { asSyncDb, type AppDrizzleDb } from "./sync-db-bridge.js";
+import {
+  asSyncDb,
+  isSyncSqliteDrizzle,
+  runSerializedSettingsMutation,
+  type AppDrizzleDb,
+} from "./sync-db-bridge.js";
 import { getRequestTenantId } from "../middleware/tenant-context.js";
 import * as defaultSchema from "./schema.js";
 import { DEFAULT_TENANT_ID } from "./schema.js";
@@ -181,6 +186,7 @@ export class AppRepository {
   readonly reposDir: string;
 
   private readonly schema: SchemaTables;
+  private readonly syncSqlite: boolean;
 
   constructor(
     db: AppDrizzleDb,
@@ -188,6 +194,7 @@ export class AppRepository {
     reposDir: string,
     schema: SchemaTables = defaultSchema,
   ) {
+    this.syncSqlite = isSyncSqliteDrizzle(db);
     this.db = asSyncDb(db);
     this.schema = schema;
     this.reposDir = reposDir;
@@ -234,9 +241,16 @@ export class AppRepository {
       .run();
   }
 
-  /** Sync SQLite transaction — serializes concurrent settings RMW mutations. */
+  /**
+   * Serialize settings-row RMW mutations.
+   * SQLite: native sync transaction. Postgres: in-process queue (sync bridge cannot
+   * rebind queries onto an async tx client).
+   */
   transaction<T>(fn: () => T): T {
-    return this.db.transaction(fn);
+    if (this.syncSqlite) {
+      return this.db.transaction(fn);
+    }
+    return runSerializedSettingsMutation(fn);
   }
 
   getGlobalNaming(): StlNamingProfileDict {

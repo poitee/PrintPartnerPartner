@@ -3,7 +3,7 @@ import type { PostgresDrizzleDb } from "./client-postgres.js";
 
 export type AppDrizzleDb = DrizzleDb | PostgresDrizzleDb;
 
-function syncAwait<T>(promise: Promise<T>): T {
+export function syncAwait<T>(promise: Promise<T>): T {
   const state = { done: false, value: undefined as T, error: undefined as unknown };
   promise
     .then((v) => {
@@ -20,6 +20,28 @@ function syncAwait<T>(promise: Promise<T>): T {
   }
   if (state.error) throw state.error;
   return state.value as T;
+}
+
+/** True when Drizzle exposes sync SQLite-style builders (`.all` / sync `.transaction`). */
+export function isSyncSqliteDrizzle(db: AppDrizzleDb): boolean {
+  try {
+    const sample = (db as DrizzleDb).select();
+    return typeof (sample as { all?: unknown }).all === "function";
+  } catch {
+    return false;
+  }
+}
+
+/** In-process serialization for settings RMW when sync DB transactions are unavailable (Postgres). */
+let settingsMutationChain: Promise<unknown> = Promise.resolve();
+
+export function runSerializedSettingsMutation<T>(fn: () => T): T {
+  const run = settingsMutationChain.then(() => fn());
+  settingsMutationChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return syncAwait(run);
 }
 
 function wrapBuilder(builder: unknown): unknown {
@@ -74,13 +96,8 @@ export function asSyncDb(db: AppDrizzleDb): DrizzleDb {
   if (!db || (typeof db !== "object" && typeof db !== "function")) {
     throw new Error("Database not connected");
   }
-  try {
-    const sample = (db as DrizzleDb).select();
-    if (typeof (sample as { all?: unknown }).all === "function") {
-      return db as DrizzleDb;
-    }
-  } catch {
-    /* postgres — wrap below */
+  if (isSyncSqliteDrizzle(db)) {
+    return db as DrizzleDb;
   }
   return new Proxy(db as object, {
     get(target, prop) {
