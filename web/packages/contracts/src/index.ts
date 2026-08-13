@@ -279,6 +279,33 @@ export type PrinterCheckoffReconcileUpdate = {
   units_pending: number;
 };
 
+export type PrinterSendQueueState =
+  | "queued"
+  | "sending"
+  | "done"
+  | "error"
+  | "cancelled";
+
+/** Durable outbound send queue item (Phase F thin farm assist). */
+export type PrinterSendQueueItem = {
+  id: string;
+  filename: string;
+  /** Absolute path under data/exports/printer-uploads/… */
+  artifact_path: string;
+  printer_id: string;
+  /** When true, wait for host Idle before dispatch (default). */
+  wait_for_idle: boolean;
+  start: boolean;
+  profile_id?: number;
+  checkoff_units?: PrinterCheckoffUnit[];
+  state: PrinterSendQueueState;
+  created_at: string;
+  updated_at: string;
+  upload_job_id?: string;
+  error?: string;
+  host_name?: string;
+};
+
 export type PrinterUploadResult = {
   ok: boolean;
   remote_path?: string;

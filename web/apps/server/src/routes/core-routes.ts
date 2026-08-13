@@ -21,6 +21,7 @@ import { registerJobRoutes, type InProcessJobRunner } from "./jobs.js";
 import { registerApiV1ExtensionRoutes } from "./api-v1-extensions.js";
 import { registerIntegrationRoutes } from "./integrations.js";
 import { registerPrinterCheckoffRoutes } from "./printer-checkoff.js";
+import { registerPrinterSendQueueRoutes } from "./printer-send-queue.js";
 import { registerWebhookRoutes } from "./webhooks.js";
 import { registerShareRoutes } from "./shares.js";
 import { registerAssistantRoutes } from "./assistant.js";
@@ -94,6 +95,11 @@ export async function registerCoreRoutes(
     });
     await registerIntegrationRoutes(app, { integrations, repo: deps.repo });
     await registerPrinterCheckoffRoutes(app, { integrations, repo: deps.repo });
+    await registerPrinterSendQueueRoutes(app, {
+      integrations,
+      repo: deps.repo,
+      jobs: deps.jobs,
+    });
     await registerWebhookRoutes(app, { repo: deps.repo });
   }
 

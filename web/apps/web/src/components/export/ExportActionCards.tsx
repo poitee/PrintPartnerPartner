@@ -3,6 +3,8 @@ import { toast } from "sonner";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  enqueuePrinterSend,
+  drainPrinterSendQueue,
   fetchIntegrationStatus,
   fetchIntegrations,
   fetchPrinters,
@@ -16,6 +18,7 @@ import {
   type ReviewPart,
   type StlPackGroupBy,
 } from "../../api/engine";
+import PrinterSendQueuePanel from "./PrinterSendQueuePanel";
 import { useEngineHealth } from "../../hooks/useEngineHealth";
 import { useJobRunner } from "../../hooks/useJobRunner";
 import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
@@ -118,8 +121,11 @@ export default function ExportActionCards({ onShare }: Props) {
   >({});
   const [autoCheckoff, setAutoCheckoff] = useState(true);
   const [selectedCheckoffPartIds, setSelectedCheckoffPartIds] = useState<number[]>([]);
+  const [queueRefreshKey, setQueueRefreshKey] = useState(0);
+  const [queueBusy, setQueueBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingStartRef = useRef(false);
+  const pendingModeRef = useRef<"send" | "queue">("send");
 
   const hasBlockers = review?.has_blockers ?? false;
   const includedParts = review
@@ -213,6 +219,20 @@ export default function ExportActionCards({ onShare }: Props) {
       const next = Object.fromEntries(entries);
       setHostStatusByIntegration(next);
       setSelectedPrinterId((prev) => pickPreferredPrinterId(linkedPrinters, next, prev));
+      const hasIdle = Object.values(next).some(
+        (s) => s.state === "idle" || s.state === "complete",
+      );
+      if (hasIdle) {
+        void drainPrinterSendQueue()
+          .then(({ results }) => {
+            if (results.some((r) => r.job_id)) {
+              setQueueRefreshKey((k) => k + 1);
+            }
+          })
+          .catch(() => {
+            /* ignore drain errors during status poll */
+          });
+      }
     };
 
     void tick();
@@ -337,26 +357,30 @@ export default function ExportActionCards({ onShare }: Props) {
     })();
   };
 
-  const openFilePicker = (startAfterUpload: boolean) => {
+  const openFilePicker = (
+    startAfterUpload: boolean,
+    mode: "send" | "queue" = "send",
+  ) => {
     if (!hasLinked || !selectedPrinterId) {
       toast.error("No linked printer", {
         description: "Link a Moonraker or PrusaLink host in Settings first.",
       });
       return;
     }
-    if (startAfterUpload && selectedPrinterBusy) {
+    if (mode === "send" && startAfterUpload && selectedPrinterBusy) {
       toast.error("Printer is busy", {
-        description: "Pick an Idle printer, or use Upload without start.",
+        description: "Pick an Idle printer, use Upload, or Queue for idle.",
       });
       return;
     }
-    if (startAfterUpload && selectedPrinterUnavailable) {
+    if (mode === "send" && startAfterUpload && selectedPrinterUnavailable) {
       toast.error("Printer not ready", {
         description: selectedHostStatus?.message?.trim() || "Host is offline or in error.",
       });
       return;
     }
     pendingStartRef.current = startAfterUpload;
+    pendingModeRef.current = mode;
     fileInputRef.current?.click();
   };
 
@@ -377,6 +401,7 @@ export default function ExportActionCards({ onShare }: Props) {
       return;
     }
     const start = pendingStartRef.current;
+    const mode = pendingModeRef.current;
     const printerName =
       linkedPrinters.find((p) => p.id === selectedPrinterId)?.name ?? "printer";
     const units =
@@ -388,6 +413,34 @@ export default function ExportActionCards({ onShare }: Props) {
         description: "Select at least one missing part, or turn the checkbox off.",
       });
     }
+
+    if (mode === "queue") {
+      setQueueBusy(true);
+      void (async () => {
+        try {
+          const { item } = await enqueuePrinterSend({
+            file,
+            printer_id: selectedPrinterId,
+            start,
+            wait_for_idle: true,
+            profile_id: units ? selectedProfileId ?? undefined : undefined,
+            checkoff_units: units,
+          });
+          toast.success(`Queued ${item.filename} for ${printerName}`, {
+            description: start
+              ? "Will upload & start when the printer is Idle."
+              : "Will upload when the printer is Idle (or tap Send ready).",
+          });
+          setQueueRefreshKey((k) => k + 1);
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : String(e));
+        } finally {
+          setQueueBusy(false);
+        }
+      })();
+      return;
+    }
+
     void printerUploadJob.runJob(
       () =>
         startPrinterUpload({
@@ -612,7 +665,7 @@ export default function ExportActionCards({ onShare }: Props) {
       title: "Send to printer",
       description:
         "Upload a sliced .gcode / .bgcode to a linked Moonraker or PrusaLink host. Bambu is status-only (see Settings / setup docs).",
-      chips: [linkedChip, "upload", "optional start", "Progress verify"] as const,
+      chips: [linkedChip, "upload", "queue", "Progress verify"] as const,
       highlight: hasLinked,
       body: (
         <div className="flex w-full flex-col gap-2">
@@ -692,7 +745,7 @@ export default function ExportActionCards({ onShare }: Props) {
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={exportBusy || !selectedPrinterId}
+                  disabled={exportBusy || queueBusy || !selectedPrinterId}
                   onClick={() => openFilePicker(false)}
                 >
                   {printerUploadJob.busy ? "Sending…" : "Upload"}
@@ -701,13 +754,14 @@ export default function ExportActionCards({ onShare }: Props) {
                   size="sm"
                   disabled={
                     exportBusy ||
+                    queueBusy ||
                     !selectedPrinterId ||
                     selectedPrinterBusy ||
                     selectedPrinterUnavailable
                   }
                   title={
                     selectedPrinterBusy
-                      ? "Printer is busy — pick Idle or use Upload"
+                      ? "Printer is busy — pick Idle, Upload, or Queue for idle"
                       : selectedPrinterUnavailable
                         ? "Printer offline or error"
                         : undefined
@@ -716,12 +770,25 @@ export default function ExportActionCards({ onShare }: Props) {
                 >
                   Upload & start
                 </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={exportBusy || queueBusy || !selectedPrinterId}
+                  onClick={() => openFilePicker(true, "queue")}
+                >
+                  {queueBusy ? "Queuing…" : "Queue for idle"}
+                </Button>
               </div>
               {selectedPrinterBusy ? (
                 <p className="text-xs text-muted-foreground">
-                  Selected printer is busy. Upload still works; start is blocked until Idle.
+                  Selected printer is busy. Upload or Queue for idle still work; start is
+                  blocked until Idle.
                 </p>
               ) : null}
+              <PrinterSendQueuePanel
+                engineReady={Boolean(health)}
+                refreshKey={queueRefreshKey}
+              />
             </>
           ) : (
             <div className="flex w-full flex-col gap-2">
