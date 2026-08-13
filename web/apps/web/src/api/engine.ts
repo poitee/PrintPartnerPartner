@@ -99,6 +99,145 @@ export type IntegrationTestResult = {
   message?: string;
 };
 
+export type PrinterHostStatus = {
+  state: "idle" | "printing" | "paused" | "complete" | "error" | "offline" | "unknown";
+  progress?: number;
+  filename?: string;
+  message?: string;
+  eta_seconds?: number;
+};
+
+export type PrinterCheckoffUnit = {
+  part_id: number;
+  unit_index: number;
+};
+
+export type PrinterHostOutcome = "unknown" | "success" | "failed" | "cancelled";
+
+export type PrinterCheckoffLinkState =
+  | "watching"
+  | "awaiting_verify"
+  | "host_failed"
+  | "dismissed"
+  | "verified"
+  | "applied";
+
+export type PrintRejectReason =
+  | "bed_adhesion"
+  | "layer_shift"
+  | "warping"
+  | "stringing"
+  | "under_extrusion"
+  | "over_extrusion"
+  | "dimensional"
+  | "collision"
+  | "wrong_filament"
+  | "other";
+
+export type PrintOutcomeResult = "confirmed" | "rejected";
+
+export type PrintVerifyDecision = {
+  part_id: number;
+  unit_index: number;
+  result: PrintOutcomeResult;
+  reason?: PrintRejectReason;
+  note?: string;
+};
+
+export type PrintOutcomeEvent = {
+  id: string;
+  at: string;
+  profile_id: number;
+  part_id: number;
+  unit_index: number;
+  result: PrintOutcomeResult;
+  reason?: PrintRejectReason;
+  note?: string;
+  host_integration_id?: string;
+  filename?: string;
+  match_key?: string;
+  role?: string;
+  filament_display?: string;
+  link_id?: string;
+};
+
+export type PrintOutcomesSummary = {
+  profile_id: number;
+  total_confirmed: number;
+  total_rejected: number;
+  by_reason: Partial<Record<PrintRejectReason, number>>;
+  by_role: Record<string, { confirmed: number; rejected: number }>;
+  recent_rejected: PrintOutcomeEvent[];
+};
+
+export type PrinterCheckoffLink = {
+  id: string;
+  profile_id: number;
+  integration_id: string;
+  printer_id: string;
+  host_name: string;
+  filename: string;
+  remote_path?: string;
+  upload_job_id?: string;
+  units: PrinterCheckoffUnit[];
+  resolved_units?: PrintVerifyDecision[];
+  state: PrinterCheckoffLinkState;
+  host_outcome?: PrinterHostOutcome;
+  saw_active: boolean;
+  started?: boolean;
+  last_progress?: number;
+  created_at: string;
+  completed_at?: string;
+  applied_at?: string;
+  units_marked?: number;
+};
+
+export type PrinterCheckoffReconcileUpdate = {
+  link_id: string;
+  host_name: string;
+  profile_id: number;
+  filename: string;
+  event: "awaiting_verify" | "host_failed";
+  host_outcome: PrinterHostOutcome;
+  units_pending: number;
+};
+
+export type PrinterSendQueueState =
+  | "queued"
+  | "sending"
+  | "done"
+  | "error"
+  | "cancelled";
+
+export type PrinterSendQueueMatch = "pinned" | "compatible";
+
+export type PrinterSendQueueItem = {
+  id: string;
+  filename: string;
+  artifact_path: string;
+  printer_id: string;
+  match?: PrinterSendQueueMatch;
+  wait_for_idle: boolean;
+  start: boolean;
+  profile_id?: number;
+  checkoff_units?: PrinterCheckoffUnit[];
+  state: PrinterSendQueueState;
+  created_at: string;
+  updated_at: string;
+  upload_job_id?: string;
+  error?: string;
+  host_name?: string;
+};
+
+/** @deprecated Prefer PrinterCheckoffReconcileUpdate */
+export type PrinterCheckoffApplied = {
+  link_id: string;
+  host_name: string;
+  profile_id: number;
+  units_marked: number;
+  filename: string;
+};
+
 export type SpoolmanDefaultSettings = {
   integration_id: string | null;
 };
@@ -238,6 +377,8 @@ export type PrinterMachine = {
     label: string;
   }>;
   enabled?: boolean;
+  integration_id?: string | null;
+  device_id?: string | null;
 };
 
 export type PrinterPreset = {
@@ -689,18 +830,18 @@ export async function deleteProfileLayer(
   });
 }
 
+/**
+ * Merge a single library category into source metadata.
+ * Empty/null persists as `""` so Uncategorised stays explicit (avoids role fallback).
+ */
 function mergeSourceMetadata(
   metadata: Record<string, unknown> | undefined,
   category: string | null | undefined,
 ): Record<string, unknown> | undefined {
   if (category === undefined) return metadata;
   const base = { ...(metadata ?? {}) };
-  if (category == null || category === "") {
-    delete base.category;
-  } else {
-    base.category = category;
-  }
-  return Object.keys(base).length > 0 ? base : undefined;
+  base.category = category == null || category === "" ? "" : category;
+  return base;
 }
 
 export async function fetchSourceCategories(): Promise<string[]> {
@@ -1099,6 +1240,243 @@ export async function testIntegration(id: string): Promise<IntegrationTestResult
   return v1Fetch<IntegrationTestResult>(`/integrations/${encodeURIComponent(id)}/test`, {
     method: "POST",
   });
+}
+
+export async function fetchIntegrationStatus(id: string): Promise<PrinterHostStatus> {
+  return v1Fetch<PrinterHostStatus>(`/integrations/${encodeURIComponent(id)}/status`);
+}
+
+export async function reconcilePrinterCheckoff(options: {
+  integration_id: string;
+}): Promise<{
+  status: PrinterHostStatus;
+  updates: PrinterCheckoffReconcileUpdate[];
+  applied: PrinterCheckoffApplied[];
+}> {
+  return engineFetch(`/printer-checkoff/reconcile`, {
+    method: "POST",
+    body: JSON.stringify({
+      integration_id: options.integration_id,
+    }),
+  });
+}
+
+export async function fetchPrinterCheckoffLinks(options?: {
+  state?: PrinterCheckoffLinkState;
+  profile_id?: number;
+  integration_id?: string;
+}): Promise<{ links: PrinterCheckoffLink[] }> {
+  const params = new URLSearchParams();
+  if (options?.state) params.set("state", options.state);
+  if (options?.profile_id != null) params.set("profile_id", String(options.profile_id));
+  if (options?.integration_id) params.set("integration_id", options.integration_id);
+  const qs = params.toString();
+  return engineFetch(`/printer-checkoff${qs ? `?${qs}` : ""}`);
+}
+
+export async function verifyPrinterCheckoff(options: {
+  link_id: string;
+  decisions: PrintVerifyDecision[];
+}): Promise<{
+  link: PrinterCheckoffLink;
+  units_confirmed: number;
+  units_rejected: number;
+  outcomes: PrintOutcomeEvent[];
+}> {
+  return engineFetch(`/printer-checkoff/verify`, {
+    method: "POST",
+    body: JSON.stringify(options),
+  });
+}
+
+export async function dismissPrinterCheckoff(options: {
+  link_id: string;
+}): Promise<{ link: PrinterCheckoffLink }> {
+  return engineFetch(`/printer-checkoff/dismiss`, {
+    method: "POST",
+    body: JSON.stringify(options),
+  });
+}
+
+export async function fetchPrintOutcomesSummary(
+  profileId: number,
+): Promise<PrintOutcomesSummary> {
+  return engineFetch(
+    `/printer-outcomes/summary?profile_id=${encodeURIComponent(String(profileId))}`,
+  );
+}
+
+export async function fetchPrinterSendQueue(options?: {
+  active?: boolean;
+}): Promise<{ items: PrinterSendQueueItem[] }> {
+  const qs = options?.active ? "?active=1" : "";
+  return engineFetch(`/printer-send-queue${qs}`);
+}
+
+export async function enqueuePrinterSend(options: {
+  file: File;
+  printer_id: string;
+  start?: boolean;
+  wait_for_idle?: boolean;
+  match?: PrinterSendQueueMatch;
+  profile_id?: number;
+  checkoff_units?: PrinterCheckoffUnit[];
+}): Promise<{ item: PrinterSendQueueItem }> {
+  const form = new FormData();
+  form.append("file", options.file);
+  form.append("printer_id", options.printer_id);
+  form.append("start", options.start ? "1" : "0");
+  form.append("wait_for_idle", options.wait_for_idle === false ? "0" : "1");
+  if (options.match === "compatible" || options.match === "pinned") {
+    form.append("match", options.match);
+  }
+  if (options.profile_id != null) {
+    form.append("profile_id", String(options.profile_id));
+  }
+  if (options.checkoff_units && options.checkoff_units.length > 0) {
+    form.append("checkoff_units", JSON.stringify(options.checkoff_units));
+  }
+  const res = await fetch(resolveEngineUrl("/printer-send-queue"), {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  if (res.status === 401) {
+    unauthorizedHandler?.();
+    throw new Error("Queue failed: 401");
+  }
+  if (!res.ok) {
+    let detail = `Queue failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<{ item: PrinterSendQueueItem }>;
+}
+
+export async function dispatchPrinterSendQueueItem(options: {
+  id: string;
+  force?: boolean;
+}): Promise<{ item: PrinterSendQueueItem; job_id: string }> {
+  return engineFetch(`/printer-send-queue/${encodeURIComponent(options.id)}/dispatch`, {
+    method: "POST",
+    body: JSON.stringify({ force: Boolean(options.force) }),
+  });
+}
+
+export async function drainPrinterSendQueue(): Promise<{
+  results: Array<{ item_id: string; job_id?: string; error?: string }>;
+}> {
+  return engineFetch(`/printer-send-queue/drain`, { method: "POST", body: "{}" });
+}
+
+export async function cancelPrinterSendQueueItem(id: string): Promise<{ item: PrinterSendQueueItem }> {
+  return engineFetch(`/printer-send-queue/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export type BambuConnectHandoffResult = {
+  handoff_id: string;
+  filename: string;
+  absolute_path: string;
+  connect_url: string;
+  launched: boolean;
+  launch_error?: string;
+  in_container: boolean;
+  download_path: string;
+  checkoff_link_id?: string;
+  checkoff_units?: number;
+  message: string;
+};
+
+/** Stage a sliced 3MF/G-code and hand off via official bambu-connect:// URL scheme. */
+export async function startBambuConnectHandoff(options: {
+  file: File;
+  printer_id?: string;
+  launch?: boolean;
+  profile_id?: number;
+  checkoff_units?: PrinterCheckoffUnit[];
+}): Promise<BambuConnectHandoffResult> {
+  const form = new FormData();
+  form.append("file", options.file);
+  if (options.printer_id) form.append("printer_id", options.printer_id);
+  if (options.launch === false) form.append("launch", "0");
+  else if (options.launch === true) form.append("launch", "1");
+  if (options.profile_id != null) {
+    form.append("profile_id", String(options.profile_id));
+  }
+  if (options.checkoff_units && options.checkoff_units.length > 0) {
+    form.append("checkoff_units", JSON.stringify(options.checkoff_units));
+  }
+  const res = await fetch(resolveEngineUrl("/bambu-connect/handoff"), {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  if (res.status === 401) {
+    unauthorizedHandler?.();
+    throw new Error("Bambu Connect handoff failed: 401");
+  }
+  if (!res.ok) {
+    let detail = `Bambu Connect handoff failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<BambuConnectHandoffResult>;
+}
+
+export function bambuConnectDownloadUrl(downloadPath: string): string {
+  return resolveEngineUrl(downloadPath);
+}
+
+export async function startPrinterUpload(options: {
+  file: File;
+  printer_id: string;
+  start?: boolean;
+  profile_id?: number;
+  checkoff_units?: PrinterCheckoffUnit[];
+}): Promise<string> {
+  const form = new FormData();
+  form.append("file", options.file);
+  form.append("printer_id", options.printer_id);
+  form.append("start", options.start ? "1" : "0");
+  if (options.profile_id != null) {
+    form.append("profile_id", String(options.profile_id));
+  }
+  if (options.checkoff_units && options.checkoff_units.length > 0) {
+    form.append("checkoff_units", JSON.stringify(options.checkoff_units));
+  }
+  const res = await fetch(resolveEngineUrl("/jobs/printer-upload"), {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  if (res.status === 401) {
+    unauthorizedHandler?.();
+    throw new Error("Printer upload failed: 401");
+  }
+  if (!res.ok) {
+    let detail = `Printer upload failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+  const body = (await res.json()) as { job_id?: string };
+  const jobId = typeof body.job_id === "string" ? body.job_id.trim() : "";
+  if (!jobId) throw new Error("Printer upload failed: missing job_id");
+  return jobId;
 }
 
 export async function fetchSpoolmanDefaultSettings(): Promise<SpoolmanDefaultSettings> {

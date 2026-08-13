@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { FolderGit2, MoreHorizontal, ArrowDownCircle, CheckCircle2 } from "lucide-react";
+import { ChevronDown, FolderGit2, MoreHorizontal, Search } from "lucide-react";
 import {
   createSource,
   deleteSource,
   fetchSourceCategories,
   fetchSources,
+  saveSourceCategories,
   importReposTxt,
   importSourceArchive,
   importSourceFiles,
   pickLocalDirectory,
   pickLocalFiles,
   pickZipArchive,
-  shortSha,
   startCheckSourceUpdates,
   startImportScan,
   startSync,
@@ -24,18 +24,24 @@ import {
 } from "../api/engine";
 import GitHubRefField, { type GithubRefType } from "../components/GitHubRefField";
 import { useDateFormat } from "../context/DateFormatContext";
+import { useJobContext } from "../context/JobContext";
+import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
+import { useProfileSelection } from "../context/ProfileContext";
 import {
   mapCopilotSourceTab,
   useCopilotUiOptional,
   type CopilotSourceTab,
 } from "../context/CopilotUiContext";
 import EmptyState from "../components/layout/EmptyState";
-import PageHeader from "../components/layout/PageHeader";
-import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
-import SourceCardCover from "../components/SourceCardCover";
 import GlobalStlSearch from "../components/sources/GlobalStlSearch";
+import LibraryCategoryRail, {
+  type LibraryAddKind,
+} from "../components/sources/LibraryCategoryRail";
+import LibrarySourceCard from "../components/sources/LibrarySourceCard";
+import LibraryStaleBanner from "../components/sources/LibraryStaleBanner";
 import SourceDetailSheet from "../components/sources/SourceDetailSheet";
+import SourceCategoryAssignSubmenu from "../components/sources/SourceCategoryAssignSubmenu";
 import SourceCategorySheet from "../components/sources/SourceCategorySheet";
 import SourcesToolbar, {
   type SourceViewMode,
@@ -47,10 +53,6 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Skeleton } from "../components/ui/skeleton";
 import { useImportSharedBuild } from "../hooks/useImportSharedBuild";
-import {
-  Card,
-  CardContent,
-} from "../components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -76,10 +78,21 @@ import {
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 import {
+  attachedSourceIds,
+  buildLibraryCardMeta,
+  pickCountsBySourceId,
+} from "../lib/librarySourceMeta";
+import {
+  countSourcesByCategory,
+  matchesSourceCategoryFilter,
+  sourceCategoryLabel,
+} from "../lib/sourceCategoryAssignment";
+import {
   loadPersistedSourcesUi,
   savePersistedSourcesUi,
 } from "../lib/persistedSourcesUi";
 import { toastJobResult } from "../lib/jobToasts";
+import { cn } from "../lib/utils";
 
 type PendingOpenSource = {
   sourceName?: string;
@@ -125,33 +138,13 @@ function matchesFilters(
     const hay = `${source.name} ${source.url}`.toLowerCase();
     if (!hay.includes(q)) return false;
   }
-  if (categoryFilter === UNCategorized_FILTER) {
-    if (source.category) return false;
-  } else if (categoryFilter !== "all" && source.category !== categoryFilter) {
+  if (!matchesSourceCategoryFilter(source.category, categoryFilter)) {
     return false;
   }
   if (syncFilter === "synced" && !source.last_synced_at) return false;
   if (syncFilter === "unsynced" && source.last_synced_at) return false;
   if (platformFilter !== "all" && source.source_kind !== platformFilter) return false;
   return true;
-}
-
-function UpdateStatusBadge({ status }: { status?: SourceSummary["update_status"] }) {
-  if (status === "updates_available") {
-    return (
-      <Badge variant="warning" icon={ArrowDownCircle}>
-        Update available
-      </Badge>
-    );
-  }
-  if (status === "up_to_date") {
-    return (
-      <Badge variant="success" icon={CheckCircle2}>
-        Up to date
-      </Badge>
-    );
-  }
-  return null;
 }
 
 export default function SourcesPage() {
@@ -161,6 +154,9 @@ export default function SourcesPage() {
   const { health, error: healthError } = useEngineHealth();
   const { busy, runJob } = useJobRunner("sync");
   const { busy: updateBusy, runJob: runUpdateJob } = useJobRunner("source-updates");
+  const { activeJobs } = useJobContext();
+  const { review } = usePlanWorkspace();
+  const { profiles, selectedProfileId } = useProfileSelection();
   const persistedUi = useMemo(() => loadPersistedSourcesUi(), []);
   const [sources, setSources] = useState<SourceSummary[]>([]);
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
@@ -189,7 +185,9 @@ export default function SourcesPage() {
   const searchSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stlSearchFocus, setStlSearchFocus] = useState(false);
   const [stlInitialQuery, setStlInitialQuery] = useState("");
+  const [stlSearchExpanded, setStlSearchExpanded] = useState(false);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
+  const [syncingSourceIds, setSyncingSourceIds] = useState<number[] | "all" | null>(null);
   const importSharedBuild = useImportSharedBuild();
   const pendingOpenRef = useRef<PendingOpenSource | null>(null);
   const appliedIntentSeqRef = useRef(0);
@@ -216,6 +214,7 @@ export default function SourcesPage() {
     } | null;
     if (state?.stlSearch) {
       setStlSearchFocus(true);
+      setStlSearchExpanded(true);
       if (state.stlQuery) setStlInitialQuery(state.stlQuery);
       window.history.replaceState({}, document.title);
     }
@@ -250,6 +249,7 @@ export default function SourcesPage() {
     } else if (intent.kind === "focus_stl_search") {
       appliedIntentSeqRef.current = copilot.intentSeq;
       setStlSearchFocus(true);
+      setStlSearchExpanded(true);
       if (intent.query) setStlInitialQuery(intent.query);
     }
   }, [copilot, copilot?.intentSeq, queueOpenSource]);
@@ -351,6 +351,18 @@ export default function SourcesPage() {
     void refresh();
   }, [refresh]);
 
+  const onCategoriesReorder = useCallback(async (next: string[]) => {
+    const previous = categories;
+    setCategories(next);
+    try {
+      const saved = await saveSourceCategories(next);
+      setCategories(saved);
+    } catch (e) {
+      setCategories(previous);
+      toast.error(e instanceof Error ? e.message : "Could not reorder categories");
+    }
+  }, [categories]);
+
   const filtered = useMemo(
     () =>
       sources.filter((s) =>
@@ -363,6 +375,40 @@ export default function SourcesPage() {
 
   // Skeletons until the first fetch resolves; bail out if the engine is offline.
   const sourcesLoading = !sourcesLoaded && !healthError;
+
+  const selectedPlan = profiles.find((p) => p.id === selectedProfileId) ?? null;
+  const attachedIds = useMemo(() => attachedSourceIds(review), [review]);
+  const pickCounts = useMemo(() => pickCountsBySourceId(review), [review]);
+  const attachedCount = attachedIds.size;
+
+  const sourcesByCategory = useMemo(
+    () => countSourcesByCategory(sources),
+    [sources],
+  );
+
+  const staleSources = useMemo(
+    () => sources.filter((s) => s.update_status === "updates_available"),
+    [sources],
+  );
+  const attachedStaleCount = useMemo(
+    () => staleSources.filter((s) => attachedIds.has(s.id)).length,
+    [staleSources, attachedIds],
+  );
+
+  const syncJob = activeJobs.find(
+    (j) => j.kind === "sync" && (j.status === "running" || j.status === "pending"),
+  );
+  const syncProgress = syncJob?.progress ?? null;
+
+  useEffect(() => {
+    if (!busy) setSyncingSourceIds(null);
+  }, [busy]);
+
+  const headerSubtitle = useMemo(() => {
+    const srcLabel = `${sources.length} source${sources.length === 1 ? "" : "s"}`;
+    if (!selectedPlan || attachedCount === 0) return srcLabel;
+    return `${srcLabel} · ${attachedCount} attached to ${selectedPlan.name}`;
+  }, [sources.length, selectedPlan, attachedCount]);
 
   const openDetail = (
     source: SourceSummary,
@@ -381,6 +427,7 @@ export default function SourcesPage() {
   };
 
   const syncSources = (ids?: number[]) => {
+    setSyncingSourceIds(ids && ids.length > 0 ? ids : "all");
     const label =
       ids?.length === 1
         ? "Source synced"
@@ -390,6 +437,7 @@ export default function SourcesPage() {
     void runJob(
       () => startSync(ids),
       (snap) => {
+        setSyncingSourceIds(null);
         void refresh();
         toastJobResult(snap, label, "Sync failed");
       },
@@ -406,10 +454,33 @@ export default function SourcesPage() {
     );
   };
 
-  const openAddWizard = () => {
-    setForm(emptyForm(categories));
+  const openAddWizard = (kind?: SourceKind) => {
+    const next = emptyForm(categories);
+    if (kind) next.source_kind = kind;
+    setForm(next);
     setEditId(null);
     setWizardOpen(true);
+  };
+
+  const onLibraryAdd = (kind: LibraryAddKind) => {
+    if (kind === "plan_bundle") {
+      void importSharedBuild();
+      return;
+    }
+    if (kind === "repos_txt") {
+      setReposImportOpen(true);
+      return;
+    }
+    openAddWizard(kind);
+  };
+
+  const onSeeStaleChanges = () => {
+    const first = staleSources[0];
+    if (first) {
+      openDetail(first, "docs");
+      return;
+    }
+    checkUpdates();
   };
 
   const openEditWizard = (s: SourceSummary) => {
@@ -426,6 +497,27 @@ export default function SourcesPage() {
     });
     setEditId(s.id);
     setWizardOpen(true);
+  };
+
+  const assignSourceCategory = async (
+    source: SourceSummary,
+    category: string | null,
+  ) => {
+    const previous = source.category ?? null;
+    const next = category?.trim() || null;
+    if (previous === next) return;
+    try {
+      const updated = await updateSource(source.id, { category: next });
+      setSources((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      setDetailSource((cur) => (cur?.id === updated.id ? updated : cur));
+      toast.success(
+        next
+          ? `Moved “${updated.name}” to ${next}`
+          : `Moved “${updated.name}” to Uncategorised`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const uploadPendingContent = async (
@@ -605,233 +697,392 @@ export default function SourcesPage() {
     });
   };
 
-  const renderSourceCard = (s: SourceSummary) => (
-    <Card key={s.id} className="overflow-hidden shadow-none">
-      <SourceCardCover sourceId={s.id} name={s.name} sourceKind={s.source_kind} />
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h3 className="truncate font-semibold">{s.name}</h3>
-            <p className="text-xs text-muted-foreground">{kindLabel(s.source_kind)}</p>
-          </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="ghost" aria-label="Source actions">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => openDetail(s, "docs")}>Open</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => openEditWizard(s)}>Edit</DropdownMenuItem>
-              {(s.source_kind === "local" ||
-                s.source_kind === "archive" ||
-                s.source_kind === "printables" ||
-                s.source_kind === "makerworld") && (
-                <DropdownMenuItem
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        if (s.source_kind === "local") {
-                          const files = await pickLocalFiles();
-                          if (!files.length) return;
-                          await importSourceFiles(s.id, files);
-                        } else {
-                          const zip = await pickZipArchive();
-                          if (!zip) return;
-                          await importSourceArchive(s.id, zip);
-                        }
-                        await refresh();
-                        toast.success("Upload complete");
-                      } catch (e) {
-                        toast.error(e instanceof Error ? e.message : String(e));
-                      }
-                    })();
-                  }}
-                >
-                  Upload files…
-                </DropdownMenuItem>
-              )}
-              {s.source_kind === "github" && (
-                <DropdownMenuItem onClick={() => syncSources([s.id])} disabled={busy}>
-                  Sync
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setDeleteTarget(s)}>Delete</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {s.category ? (
-            <Badge variant="default">{s.category}</Badge>
-          ) : (
-            <Badge variant="muted">Uncategorized</Badge>
-          )}
-          <Badge variant="muted">{formatDate(s.last_synced_at) || "Never"}</Badge>
-          {s.last_commit_sha && (
-            <Badge variant="muted">{shortSha(s.last_commit_sha)}</Badge>
-          )}
-          <UpdateStatusBadge status={s.update_status} />
-        </div>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="w-full"
+  const isSourceSyncing = (sourceId: number) => {
+    if (!busy || syncingSourceIds == null) return false;
+    if (syncingSourceIds === "all") return true;
+    return syncingSourceIds.includes(sourceId);
+  };
+
+  const canUpload = (s: SourceSummary) =>
+    s.source_kind === "local" ||
+    s.source_kind === "archive" ||
+    s.source_kind === "printables" ||
+    s.source_kind === "makerworld";
+
+  const runUpload = (s: SourceSummary) => {
+    void (async () => {
+      try {
+        if (s.source_kind === "local") {
+          const files = await pickLocalFiles();
+          if (!files.length) return;
+          await importSourceFiles(s.id, files);
+        } else {
+          const zip = await pickZipArchive();
+          if (!zip) return;
+          await importSourceArchive(s.id, zip);
+        }
+        await refresh();
+        toast.success("Upload complete");
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+    })();
+  };
+
+  const renderSourceCard = (s: SourceSummary) => {
+    const syncing = isSourceSyncing(s.id);
+    const meta = buildLibraryCardMeta({
+      source: s,
+      attached: attachedIds.has(s.id),
+      pickCount: attachedIds.has(s.id) ? (pickCounts.get(s.id) ?? 0) : null,
+      syncing,
+      syncProgress: syncing ? syncProgress : null,
+      formatDate,
+    });
+    return (
+      <LibrarySourceCard
+        key={s.id}
+        source={s}
+        meta={meta}
+        categories={categories}
+        busy={busy}
+        onOpen={() => openDetail(s, "docs")}
+        onEdit={() => openEditWizard(s)}
+        onSync={s.source_kind === "github" ? () => syncSources([s.id]) : undefined}
+        onUpload={canUpload(s) ? () => runUpload(s) : undefined}
+        onDelete={() => setDeleteTarget(s)}
+        onAssignCategory={(category) => void assignSourceCategory(s, category)}
+      />
+    );
+  };
+
+  const renderSourceRow = (s: SourceSummary) => {
+    const syncing = isSourceSyncing(s.id);
+    const meta = buildLibraryCardMeta({
+      source: s,
+      attached: attachedIds.has(s.id),
+      pickCount: attachedIds.has(s.id) ? (pickCounts.get(s.id) ?? 0) : null,
+      syncing,
+      syncProgress: syncing ? syncProgress : null,
+      formatDate,
+    });
+    return (
+      <div
+        key={s.id}
+        className={cn(
+          "flex flex-col gap-2 rounded-lg border bg-card px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center",
+          meta.borderTone === "update" && "border-amber-500/50",
+          meta.borderTone === "syncing" && "border-sky-400/70",
+        )}
+      >
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left"
           onClick={() => openDetail(s, "docs")}
         >
+          <p className="font-medium">{s.name}</p>
+          <p className="truncate font-mono text-xs text-muted-foreground">{meta.slug}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {sourceCategoryLabel(s.category)}
+          </p>
+        </button>
+        <span className="text-xs text-muted-foreground">{meta.stateLabel}</span>
+        <span className="font-mono text-xs font-medium tabular-nums">{meta.pickLabel}</span>
+        <Badge variant="muted">{kindLabel(s.source_kind)}</Badge>
+        <Button size="sm" variant="secondary" onClick={() => openDetail(s, "docs")}>
           Open
         </Button>
-      </CardContent>
-    </Card>
-  );
-
-  const renderSourceRow = (s: SourceSummary) => (
-    <div
-      key={s.id}
-      className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center"
-    >
-      <div className="min-w-0 flex-1">
-        <p className="font-medium">{s.name}</p>
-        <p className="text-xs text-muted-foreground">
-          {kindLabel(s.source_kind)} · {formatDate(s.last_synced_at) || "Never"}
-        </p>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="ghost" aria-label="Source actions">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => openEditWizard(s)}>Edit</DropdownMenuItem>
+            <SourceCategoryAssignSubmenu
+              categories={categories}
+              current={s.category}
+              onAssign={(category) => void assignSourceCategory(s, category)}
+              disabled={busy}
+            />
+            {canUpload(s) && (
+              <DropdownMenuItem onClick={() => runUpload(s)}>Upload files…</DropdownMenuItem>
+            )}
+            {s.source_kind === "github" && (
+              <DropdownMenuItem onClick={() => syncSources([s.id])} disabled={busy}>
+                Sync
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setDeleteTarget(s)}>Delete</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-      {s.category ? (
-        <Badge variant="default">{s.category}</Badge>
-      ) : (
-        <Badge variant="muted">Uncategorized</Badge>
-      )}
-      <UpdateStatusBadge status={s.update_status} />
-      <Button size="sm" variant="secondary" onClick={() => openDetail(s, "docs")}>
-        Open
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="ghost" aria-label="Source actions">
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => openEditWizard(s)}>Edit</DropdownMenuItem>
-          {(s.source_kind === "local" ||
-            s.source_kind === "archive" ||
-            s.source_kind === "printables" ||
-            s.source_kind === "makerworld") && (
-            <DropdownMenuItem
-              onClick={() => {
-                void (async () => {
-                  try {
-                    if (s.source_kind === "local") {
-                      const files = await pickLocalFiles();
-                      if (!files.length) return;
-                      await importSourceFiles(s.id, files);
-                    } else {
-                      const zip = await pickZipArchive();
-                      if (!zip) return;
-                      await importSourceArchive(s.id, zip);
-                    }
-                    await refresh();
-                    toast.success("Upload complete");
-                  } catch (e) {
-                    toast.error(e instanceof Error ? e.message : String(e));
-                  }
-                })();
-              }}
-            >
-              Upload files…
-            </DropdownMenuItem>
-          )}
-          {s.source_kind === "github" && (
-            <DropdownMenuItem onClick={() => syncSources([s.id])} disabled={busy}>
-              Sync
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setDeleteTarget(s)}>Delete</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className={detailSource != null ? "lg:pl-[min(42rem,100%)]" : undefined}>
-    <>
-      <RouteBreadcrumbs items={[{ label: "Sources" }]} />
-      <PageHeader
-        icon={FolderGit2}
-        accent
-        title="Sources"
-        description="Register repos, sync local trees, and choose import folders for each build."
-        actions={
-          <PageHeaderActions>
-            <Button
-              className="min-h-10 w-full sm:w-auto"
-              onClick={openAddWizard}
-              disabled={!health}
-            >
-              Add source
-            </Button>
-            <Button
-              variant="secondary"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={() => void importSharedBuild()}
-              disabled={!health}
-            >
-              Import shared build…
-            </Button>
-            <Button
-              variant="secondary"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={() => syncSources()}
-              disabled={busy || updateBusy || !health || sources.length === 0}
-            >
-              {busy ? "Syncing…" : "Sync all"}
-            </Button>
-            <Button
-              variant="secondary"
-              className="min-h-10 w-full sm:w-auto"
-              onClick={checkUpdates}
-              disabled={busy || updateBusy || !health || sources.length === 0}
-            >
-              {updateBusy ? "Checking…" : "Check updates"}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+      <RouteBreadcrumbs items={[{ label: "Library" }]} />
+
+      <div className="-mx-1 overflow-hidden rounded-xl border border-border bg-background sm:-mx-0 lg:grid lg:min-h-[min(70vh,720px)] lg:grid-cols-[178px_minmax(0,1fr)]">
+        <LibraryCategoryRail
+          className="hidden lg:flex"
+          categories={categories}
+          sourcesByCategory={sourcesByCategory}
+          totalCount={sources.length}
+          categoryFilter={categoryFilter}
+          onCategoryFilterChange={setCategoryFilter}
+          onManageCategories={() => setCategoriesSheetOpen(true)}
+          onCategoriesReorder={(next) => void onCategoriesReorder(next)}
+          onAddSource={onLibraryAdd}
+        />
+
+        <div className="flex min-w-0 flex-col">
+          <header className="flex flex-col gap-3 border-b border-border bg-card px-4 py-3.5 sm:flex-row sm:items-center sm:gap-3.5 sm:px-5">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-xl font-semibold tracking-tight">Library</h1>
+              <p className="text-[12.5px] text-muted-foreground">{headerSubtitle}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="flex min-h-9 min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:bg-accent/60 sm:max-w-[230px] sm:flex-none"
+                onClick={() => {
+                  setStlSearchExpanded(true);
+                  setStlSearchFocus(true);
+                }}
+              >
+                <Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="min-w-0 truncate">Search STLs everywhere</span>
+                <kbd className="ml-auto hidden font-mono text-[10px] text-muted-foreground sm:inline">
+                  ⌘K
+                </kbd>
+              </button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button className="min-h-9" disabled={!health}>
+                    Add source
+                    <ChevronDown className="ml-1.5 h-3.5 w-3.5 opacity-80" aria-hidden />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => openAddWizard("github")}>
+                    GitHub repo
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openAddWizard("local")}>
+                    Local folder
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openAddWizard("archive")}>
+                    Zip upload
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openAddWizard("printables")}>
+                    Printables
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openAddWizard("makerworld")}>
+                    MakerWorld
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => openAddWizard("self")}>
+                    Another instance / URL
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => void importSharedBuild()}>
+                    Plan bundle…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="min-h-9" disabled={!health}>
+                    More
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => syncSources()}
+                    disabled={busy || updateBusy || sources.length === 0}
+                  >
+                    {busy ? "Syncing…" : "Sync all"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={checkUpdates}
+                    disabled={busy || updateBusy || sources.length === 0}
+                  >
+                    {updateBusy ? "Checking…" : "Check updates"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => void refresh()}
+                    disabled={busy || updateBusy}
+                  >
+                    Refresh list
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setReposImportOpen(true)}>
+                    Import repos.txt…
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      document.getElementById("repos-txt-file-input")?.click();
+                    }}
+                  >
+                    Choose repos.txt file…
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setCategoriesSheetOpen(true)}>
+                    Manage categories…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </header>
+
+          <div className="flex flex-1 flex-col gap-3 overflow-auto p-3.5 sm:px-5 sm:py-3.5">
+            {(stlSearchExpanded || stlSearchFocus || stlInitialQuery) && (
+              <GlobalStlSearch
+                engineReady={Boolean(health)}
+                hasSyncedSources={hasSyncedSources}
+                onSelectHit={onStlHit}
+                autoFocus={stlSearchFocus}
+                initialQuery={stlInitialQuery}
+              />
+            )}
+
+            {/* Mobile category chips when side rail is hidden */}
+            <div className="flex gap-1.5 overflow-x-auto lg:hidden [-webkit-overflow-scrolling:touch]">
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0"
+                variant={categoryFilter === "all" ? "secondary" : "ghost"}
+                onClick={() => setCategoryFilter("all")}
+              >
+                All ({sources.length})
+              </Button>
+              {categories.map((c) => (
                 <Button
-                  variant="ghost"
-                  className="col-span-2 min-h-10 w-full sm:col-span-1 sm:w-auto"
-                  disabled={!health}
+                  key={c}
+                  type="button"
+                  size="sm"
+                  className="shrink-0"
+                  variant={categoryFilter === c ? "secondary" : "ghost"}
+                  onClick={() => setCategoryFilter(c)}
                 >
-                  More
+                  {c}
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onClick={() => void refresh()}
-                  disabled={busy || updateBusy || !health}
-                >
-                  Refresh list
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setReposImportOpen(true)}>
-                  Import repos.txt…
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    document.getElementById("repos-txt-file-input")?.click();
-                  }}
-                >
-                  Choose repos.txt file…
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setCategoriesSheetOpen(true)}>
-                  Manage categories…
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </PageHeaderActions>
-        }
-      />
+              ))}
+              <Button
+                type="button"
+                size="sm"
+                className="shrink-0"
+                variant={categoryFilter === UNCategorized_FILTER ? "secondary" : "ghost"}
+                onClick={() => setCategoryFilter(UNCategorized_FILTER)}
+              >
+                Uncategorised
+              </Button>
+            </div>
+
+            <LibraryStaleBanner
+              staleCount={staleSources.length}
+              attachedStaleCount={attachedStaleCount}
+              onSeeChanges={onSeeStaleChanges}
+            />
+
+            <SourcesToolbar
+              search={search}
+              onSearchChange={setSearch}
+              categoryFilter={categoryFilter}
+              onCategoryFilterChange={setCategoryFilter}
+              categories={categories}
+              syncFilter={syncFilter}
+              onSyncFilterChange={setSyncFilter}
+              platformFilter={platformFilter}
+              onPlatformFilterChange={setPlatformFilter}
+              sources={sources}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+              onManageCategories={() => setCategoriesSheetOpen(true)}
+              hideCategoryPills
+            />
+
+            {(loadError || reposImportNote || reposImportSyncNote) && (
+              <div className="space-y-1 text-sm">
+                {loadError && <p className="text-destructive">{loadError}</p>}
+                {reposImportNote && <p className="text-muted-foreground">{reposImportNote}</p>}
+                {reposImportSyncNote && (
+                  <p className="text-muted-foreground">{reposImportSyncNote}</p>
+                )}
+              </div>
+            )}
+
+            {sourcesLoading ? (
+              viewMode === "grid" ? (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {Array.from({ length: 6 }, (_, i) => (
+                    <div
+                      key={i}
+                      className="overflow-hidden rounded-lg border border-border bg-card"
+                    >
+                      <Skeleton className="h-16 w-full rounded-none" />
+                      <div className="space-y-2 p-3">
+                        <Skeleton className="h-4 w-2/3" />
+                        <Skeleton className="h-3 w-1/2" />
+                        <Skeleton className="h-1 w-full" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {Array.from({ length: 6 }, (_, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3"
+                    >
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <Skeleton className="h-4 w-48" />
+                        <Skeleton className="h-3 w-32" />
+                      </div>
+                      <Skeleton className="h-5 w-20" />
+                      <Skeleton className="h-8 w-16" />
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : sources.length === 0 ? (
+              <EmptyState
+                icon={FolderGit2}
+                title="No sources yet"
+                description="Add a GitHub repo, local folder, or Printables/MakerWorld URL to get started."
+                action={{ label: "Add source", onClick: () => openAddWizard() }}
+              />
+            ) : filtered.length === 0 ? (
+              <EmptyState
+                icon={FolderGit2}
+                title="No sources match"
+                description="Try clearing filters or search terms."
+                action={{
+                  label: "Clear filters",
+                  onClick: () => {
+                    setSearch("");
+                    setCategoryFilter("all");
+                    setSyncFilter("all");
+                    setPlatformFilter("all");
+                  },
+                }}
+              />
+            ) : viewMode === "grid" ? (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {filtered.map(renderSourceCard)}
+              </div>
+            ) : (
+              <div className="space-y-2">{filtered.map(renderSourceRow)}</div>
+            )}
+          </div>
+        </div>
+      </div>
 
       <input
         id="repos-txt-file-input"
@@ -842,38 +1093,6 @@ export default function SourcesPage() {
         aria-hidden
         onChange={(e) => onReposFilePicked(e.target.files?.[0] ?? null)}
       />
-
-      <GlobalStlSearch
-        engineReady={Boolean(health)}
-        hasSyncedSources={hasSyncedSources}
-        onSelectHit={onStlHit}
-        autoFocus={stlSearchFocus}
-        initialQuery={stlInitialQuery}
-      />
-
-      <SourcesToolbar
-        search={search}
-        onSearchChange={setSearch}
-        categoryFilter={categoryFilter}
-        onCategoryFilterChange={setCategoryFilter}
-        categories={categories}
-        syncFilter={syncFilter}
-        onSyncFilterChange={setSyncFilter}
-        platformFilter={platformFilter}
-        onPlatformFilterChange={setPlatformFilter}
-        sources={sources}
-        viewMode={viewMode}
-        onViewModeChange={setViewMode}
-        onManageCategories={() => setCategoriesSheetOpen(true)}
-      />
-
-      {(loadError || reposImportNote || reposImportSyncNote) && (
-        <div className="mb-4 space-y-1 text-sm">
-          {loadError && <p className="text-destructive">{loadError}</p>}
-          {reposImportNote && <p className="text-muted-foreground">{reposImportNote}</p>}
-          {reposImportSyncNote && <p className="text-muted-foreground">{reposImportSyncNote}</p>}
-        </div>
-      )}
 
       <Dialog open={reposImportOpen} onOpenChange={setReposImportOpen}>
         <DialogContent className="max-w-lg">
@@ -966,10 +1185,12 @@ export default function SourcesPage() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Uncategorized" />
+                  <SelectValue placeholder={sourceCategoryLabel(null)} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={UNCategorized_FILTER}>Uncategorized</SelectItem>
+                  <SelectItem value={UNCategorized_FILTER}>
+                    {sourceCategoryLabel(null)}
+                  </SelectItem>
                   {categories.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
@@ -1115,7 +1336,7 @@ export default function SourcesPage() {
           </div>
           <div className="flex justify-end gap-2 pt-2">
             {loadError && wizardOpen && (
-              <p className="mr-auto text-sm text-destructive self-center">{loadError}</p>
+              <p className="mr-auto self-center text-sm text-destructive">{loadError}</p>
             )}
             <Button variant="ghost" onClick={() => setWizardOpen(false)}>
               Cancel
@@ -1124,67 +1345,6 @@ export default function SourcesPage() {
           </div>
         </DialogContent>
       </Dialog>
-
-      {sourcesLoading ? (
-        viewMode === "grid" ? (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: 6 }, (_, i) => (
-              <div key={i} className="overflow-hidden rounded-lg border border-border bg-card">
-                <Skeleton className="aspect-[2/1] w-full rounded-none" />
-                <div className="space-y-3 p-4">
-                  <Skeleton className="h-5 w-2/3" />
-                  <div className="flex gap-1">
-                    <Skeleton className="h-5 w-20" />
-                    <Skeleton className="h-5 w-24" />
-                  </div>
-                  <Skeleton className="h-8 w-full" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {Array.from({ length: 6 }, (_, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3"
-              >
-                <div className="min-w-0 flex-1 space-y-2">
-                  <Skeleton className="h-4 w-48" />
-                  <Skeleton className="h-3 w-32" />
-                </div>
-                <Skeleton className="h-5 w-20" />
-                <Skeleton className="h-8 w-16" />
-              </div>
-            ))}
-          </div>
-        )
-      ) : sources.length === 0 ? (
-        <EmptyState
-          icon={FolderGit2}
-          title="No sources yet"
-          description="Add a GitHub repo, local folder, or Printables/MakerWorld URL to get started."
-          action={{ label: "Add source", onClick: openAddWizard }}
-        />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={FolderGit2}
-          title="No sources match"
-          description="Try clearing filters or search terms."
-          action={{ label: "Clear filters", onClick: () => {
-            setSearch("");
-            setCategoryFilter("all");
-            setSyncFilter("all");
-            setPlatformFilter("all");
-          }}}
-        />
-      ) : viewMode === "grid" ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map(renderSourceCard)}
-        </div>
-      ) : (
-        <div className="space-y-2">{filtered.map(renderSourceRow)}</div>
-      )}
 
       <Dialog
         open={deleteTarget != null}
@@ -1235,8 +1395,12 @@ export default function SourcesPage() {
         highlightPath={highlightPath}
         docsQuery={docsQuery}
         busy={busy}
+        categories={categories}
         onEdit={openEditWizard}
         onDelete={setDeleteTarget}
+        onAssignCategory={(source, category) =>
+          void assignSourceCategory(source, category)
+        }
         onSaveRules={() => {}}
         runImportScan={(sourceId) => {
           void runJob(
@@ -1245,7 +1409,6 @@ export default function SourcesPage() {
           );
         }}
       />
-    </>
     </div>
   );
 }

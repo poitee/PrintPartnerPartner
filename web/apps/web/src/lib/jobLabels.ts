@@ -8,6 +8,7 @@ const JOB_KIND_LABELS: Record<string, string> = {
   sync: "Sync",
   scan: "Import scan",
   job: "Background job",
+  "printer-upload": "Send to printer",
 };
 
 export function jobKindLabel(kind: string): string {

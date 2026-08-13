@@ -1,20 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BookOpen, ChevronDown, ChevronRight, Maximize2 } from "lucide-react";
+import { Maximize2 } from "lucide-react";
 import ImportRulesTree from "./ImportRulesTree";
 import Preview3D from "./Preview3D";
 import PartPreviewDialog from "./parts/PartPreviewDialog";
+import SourceCardCover from "./SourceCardCover";
 import SourceDocsSheet from "./sources/SourceDocsSheet";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "./ui/card";
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "./ui/sheet";
 import { fetchStlTree, type SourceSummary } from "../api/engine";
 import { useDateFormat } from "../context/DateFormatContext";
+import { useJobContext } from "../context/JobContext";
 import { useImportRulesAutosave } from "../hooks/useImportRulesAutosave";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import {
@@ -45,13 +47,37 @@ type Props = {
   stlFilterFocusSeq?: number;
 };
 
-function syncLabel(
+function attachedStateLabel(
   source: SourceSummary | null | undefined,
   formatDate: (iso: string | null | undefined) => string,
-): string {
-  if (!source?.last_synced_at) return "Not synced";
+  selectedCount: number,
+  totalFiles: number,
+  syncing: boolean,
+  syncMessage: string,
+): { text: string; tone: "muted" | "warn" | "sync" } {
+  if (syncing) {
+    return { text: syncMessage || "syncing", tone: "sync" };
+  }
+  if (source?.update_status === "updates_available") {
+    return { text: "update available", tone: "warn" };
+  }
+  if (source?.source_kind === "local") {
+    const picks =
+      totalFiles > 0 ? ` · ${selectedCount} of ${totalFiles} files` : selectedCount > 0 ? ` · ${selectedCount} picks` : "";
+    return { text: `local folder · always current${picks}`, tone: "muted" };
+  }
+  if (!source?.last_synced_at) {
+    return { text: "not synced", tone: "warn" };
+  }
   const formatted = formatDate(source.last_synced_at);
-  return formatted ? `Synced ${formatted}` : "Synced";
+  const syncBit = formatted ? `synced ${formatted}` : "synced";
+  const picks =
+    totalFiles > 0
+      ? ` · ${selectedCount} of ${totalFiles} files`
+      : selectedCount > 0
+        ? ` · ${selectedCount} picks`
+        : "";
+  return { text: `${syncBit}${picks}`, tone: "muted" };
 }
 
 export default function SourceFilePickerCard({
@@ -71,6 +97,7 @@ export default function SourceFilePickerCard({
   stlFilterFocusSeq = 0,
 }: Props) {
   const { formatDate } = useDateFormat();
+  const { activeJobs } = useJobContext();
   const expandedKey = `pp-build-source-${sourceId}-expanded`;
   const [expanded, setExpanded] = useState(() => {
     try {
@@ -91,7 +118,20 @@ export default function SourceFilePickerCard({
   const [totalFiles, setTotalFiles] = useState(0);
   const [duplicateBasenames, setDuplicateBasenames] = useState<string[]>([]);
   const [docsOpen, setDocsOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+
+  const activeSync = activeJobs.find(
+    (j) =>
+      j.kind === "sync" &&
+      (j.status === "pending" || j.status === "running") &&
+      (j.sourceIds == null || j.sourceIds.includes(sourceId)),
+  );
+  const syncBusy = Boolean(activeSync);
+  const syncProgress =
+    typeof activeSync?.progress === "number" && activeSync.progress >= 0
+      ? Math.min(100, Math.round(activeSync.progress * (activeSync.progress <= 1 ? 100 : 1)))
+      : null;
 
   const onSaved = useCallback(
     (rules: string[]) => {
@@ -145,7 +185,6 @@ export default function SourceFilePickerCard({
         saveUserEdit(rules);
         return;
       }
-      // STL tree load — only sync baseline before the user has edited (avoids clobbering in-flight saves).
       if (!userEditedRulesRef.current) {
         setPendingRules(rules);
         setSavedRules(rules);
@@ -199,118 +238,152 @@ export default function SourceFilePickerCard({
     return meshColorForPath(selectedFilePath);
   }, [selectedFilePath, meshColorForPath]);
 
-  const selectionLabel =
-    totalFiles > 0 ? `${selectedCount} of ${totalFiles} STL file(s) selected` : null;
+  const state = attachedStateLabel(
+    source,
+    formatDate,
+    selectedCount,
+    totalFiles,
+    syncBusy,
+    activeSync?.message ?? "syncing",
+  );
+  const updateWarn = source?.update_status === "updates_available" || !source?.last_synced_at;
+  const pickLabel =
+    selectedCount > 0 ? String(selectedCount) : totalFiles > 0 ? "0" : "—";
 
   return (
-    <Card className={cn(expanded && dirty && "border-primary/40")}>
-      <CardHeader className="p-4 pb-2">
-        <div className="flex flex-wrap items-start gap-2">
+    <div
+      className={cn(
+        "flex flex-col gap-2.5 rounded-lg border bg-card px-3.5 py-2.5 shadow-[0_1px_2px_rgba(89,115,166,0.06)]",
+        updateWarn || syncBusy
+          ? syncBusy
+            ? "border-sky-300/80 dark:border-sky-700/50"
+            : "border-amber-300/80 dark:border-amber-700/50"
+          : "border-border",
+        expanded && dirty && "border-primary/40",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2.5 sm:flex-nowrap">
+        <SourceCardCover
+          sourceId={sourceId}
+          name={sourceName}
+          sourceKind={source?.source_kind ?? "github"}
+          thumb
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={layerType} className="h-5 px-1.5 text-[10px]">
+              {layerType}
+            </Badge>
+            <span className="truncate text-[13px] font-semibold">{sourceName}</span>
+            {saveStatusLabel && (
+              <span
+                className={cn(
+                  "text-[10px] font-medium",
+                  status === "saved" && "text-emerald-600 dark:text-emerald-400",
+                  status === "error" && "text-destructive",
+                  (status === "pending" || status === "saving") && "text-muted-foreground",
+                )}
+                aria-live="polite"
+              >
+                {saveStatusLabel}
+              </span>
+            )}
+          </div>
+          <p
+            className={cn(
+              "font-mono text-[10.5px] font-normal",
+              state.tone === "warn" && "text-amber-700 dark:text-amber-400",
+              state.tone === "sync" && "text-sky-700 dark:text-sky-400",
+              state.tone === "muted" && "text-muted-foreground",
+            )}
+          >
+            {state.text}
+          </p>
+        </div>
+        <div className="ml-auto flex w-full flex-wrap items-center gap-3 sm:w-auto sm:flex-nowrap">
+          <span className="font-mono text-[11.5px] font-medium tabular-nums">{pickLabel}</span>
+          {(source?.local_path || source?.source_kind === "github") && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground"
+              disabled={disabled}
+              onClick={() => setDocsOpen(true)}
+            >
+              Docs
+            </button>
+          )}
+          {source?.local_path && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground"
+              disabled={disabled}
+              onClick={() => setRulesOpen(true)}
+            >
+              Rules
+            </button>
+          )}
           <button
             type="button"
-            className="flex min-w-0 flex-1 items-start gap-2 text-left"
+            className="text-xs font-semibold text-primary hover:underline"
+            disabled={disabled}
             onClick={() => setExpanded((v) => !v)}
             aria-expanded={expanded}
           >
-            {expanded ? (
-              <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            )}
-            <div className="min-w-0 space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={layerType}>{layerType}</Badge>
-                <CardTitle className="truncate text-sm">{sourceName}</CardTitle>
-                {saveStatusLabel && (
-                  <span
-                    className={cn(
-                      "text-[10px] font-medium",
-                      status === "saved" && "text-emerald-600 dark:text-emerald-400",
-                      status === "error" && "text-destructive",
-                      (status === "pending" || status === "saving") && "text-muted-foreground",
-                    )}
-                    aria-live="polite"
-                  >
-                    {saveStatusLabel}
-                  </span>
-                )}
-              </div>
-              <CardDescription className="text-xs">
-                {syncLabel(source, formatDate)}
-                {selectionLabel && (
-                  <span>
-                    {" "}
-                    · {selectionLabel}
-                  </span>
-                )}
-              </CardDescription>
-            </div>
+            {expanded ? "Hide picks" : "Edit picks"}
           </button>
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
-            {(source?.local_path || source?.source_kind === "github") && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="min-h-9 w-full gap-1 px-2 text-xs text-muted-foreground sm:w-auto"
-                disabled={disabled}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDocsOpen(true);
-                }}
-                title="View repo docs"
-              >
-                <BookOpen className="h-3.5 w-3.5" />
-                Docs
-                {(source.doc_count ?? 0) > 0 ? ` (${source.doc_count})` : ""}
-              </Button>
-            )}
-            {allSources && onChangeSource && (
-              <select
-                className="min-h-10 w-full max-w-none rounded-md border border-input bg-background px-2 py-2 text-base sm:max-w-[180px] sm:py-1 sm:text-xs"
-                value={sourceId}
-                disabled={disabled}
-                aria-label={`Change ${layerType} source`}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => {
-                  const pid = Number(e.target.value);
-                  if (pid && pid !== sourceId) onChangeSource(pid);
-                }}
-              >
-                {allSources.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            {layerType === "addon" && onRemove && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-xs"
-                disabled={disabled}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemove();
-                }}
-              >
-                Remove
-              </Button>
-            )}
-          </div>
+          {allSources && onChangeSource && (
+            <select
+              className="max-w-[140px] rounded-md border border-input bg-background px-1.5 py-1 text-[11px]"
+              value={sourceId}
+              disabled={disabled}
+              aria-label={`Change ${layerType} source`}
+              onChange={(e) => {
+                const pid = Number(e.target.value);
+                if (pid && pid !== sourceId) onChangeSource(pid);
+              }}
+            >
+              {allSources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {layerType === "addon" && onRemove && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-destructive"
+              disabled={disabled}
+              onClick={onRemove}
+            >
+              Remove
+            </button>
+          )}
         </div>
-      </CardHeader>
+      </div>
 
-      {source?.local_path && (
-        <CardContent className={cn("space-y-3 p-4 pt-0", !expanded && "hidden")}>
+      {syncBusy && (
+        <div className="flex items-center gap-2">
+          <span className="block h-1 flex-1 overflow-hidden rounded-full bg-muted">
+            <span
+              className="block h-full bg-sky-600 transition-[width] dark:bg-sky-400"
+              style={{ width: `${syncProgress ?? 56}%` }}
+            />
+          </span>
+          <span className="shrink-0 font-mono text-[10.5px] text-sky-700 dark:text-sky-400">
+            {activeSync?.message || "syncing"}
+          </span>
+        </div>
+      )}
+
+      {source?.local_path && expanded && (
+        <div className="space-y-3 border-t border-border pt-3">
           {expandedExtra}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
               Check STL files or folders to include on the next{" "}
-              <strong className="font-medium text-foreground">Update build</strong>. Selections
-              save automatically and are the source of truth for recompute. Click{" "}
-              <strong className="font-medium text-foreground">Update build</strong> to refresh
-              Review parts from these picks.
+              <strong className="font-medium text-foreground">Rebuild plan</strong>. Selections
+              save automatically.
             </p>
             {showRetry && (
               <Button
@@ -333,27 +406,28 @@ export default function SourceFilePickerCard({
                 ? ` (+${duplicateBasenames.length - 4} more)`
                 : ""}
               . Overlapping import rules may cause merge conflicts — narrow rules or exclude extras
-              on Review after{" "}
-              <strong className="font-medium text-foreground">Update build</strong>.
+              on Parts after rebuild.
             </p>
           )}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]">
-            <ImportRulesTree
-              key={sourceId}
-              projectId={sourceId}
-              variant="inline"
-              disabled={disabled}
-              selectedFilePath={selectedFilePath}
-              onFileSelect={setSelectedFilePath}
-              onRulesChange={onPendingRulesChange}
-              initialFilter={stlFilter}
-              filterFocusSeq={stlFilterFocusSeq}
-              onSelectionStats={(selected, total, duplicates) => {
-                setSelectedCount(selected);
-                setTotalFiles(total);
-                setDuplicateBasenames(duplicates);
-              }}
-            />
+            {!rulesOpen && (
+              <ImportRulesTree
+                key={sourceId}
+                projectId={sourceId}
+                variant="inline"
+                disabled={disabled}
+                selectedFilePath={selectedFilePath}
+                onFileSelect={setSelectedFilePath}
+                onRulesChange={onPendingRulesChange}
+                initialFilter={stlFilter}
+                filterFocusSeq={stlFilterFocusSeq}
+                onSelectionStats={(selected, total, duplicates) => {
+                  setSelectedCount(selected);
+                  setTotalFiles(total);
+                  setDuplicateBasenames(duplicates);
+                }}
+              />
+            )}
             <aside className="relative rounded-md border border-border bg-muted/20 p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h4 className="text-xs font-semibold text-muted-foreground">STL preview</h4>
@@ -385,7 +459,7 @@ export default function SourceFilePickerCard({
               </p>
             </aside>
           </div>
-        </CardContent>
+        </div>
       )}
 
       <SourceDocsSheet
@@ -394,6 +468,35 @@ export default function SourceFilePickerCard({
         open={docsOpen}
         onOpenChange={setDocsOpen}
       />
+
+      <Sheet open={rulesOpen} onOpenChange={setRulesOpen}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+          <SheetHeader>
+            <SheetTitle>Import rules · {sourceName}</SheetTitle>
+            <SheetDescription>
+              Choose which folders and STL files are included in this plan.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-4">
+            {source?.local_path ? (
+              <ImportRulesTree
+                key={`rules-sheet-${sourceId}`}
+                projectId={sourceId}
+                variant="inline"
+                disabled={disabled}
+                onRulesChange={onPendingRulesChange}
+                onSelectionStats={(selected, total, duplicates) => {
+                  setSelectedCount(selected);
+                  setTotalFiles(total);
+                  setDuplicateBasenames(duplicates);
+                }}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">Sync this source before editing rules.</p>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <PartPreviewDialog
         part={
@@ -410,6 +513,6 @@ export default function SourceFilePickerCard({
         size="large"
         onClose={() => setPreviewOpen(false)}
       />
-    </Card>
+    </div>
   );
 }

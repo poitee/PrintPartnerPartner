@@ -95,6 +95,7 @@ export const JOB_KINDS = [
   "export-kit-bundle",
   "export-3mf",
   "pack-preview",
+  "printer-upload",
 ] as const;
 
 export type JobKind = (typeof JOB_KINDS)[number];
@@ -153,6 +154,181 @@ export type DeviceSummary = {
   status?: string;
 };
 
+/** Live printer host status from IntegrationAdapter.getStatus. */
+export type PrinterHostState =
+  | "idle"
+  | "printing"
+  | "paused"
+  | "complete"
+  | "error"
+  | "offline"
+  | "unknown";
+
+export type PrinterHostStatus = {
+  state: PrinterHostState;
+  progress?: number;
+  filename?: string;
+  message?: string;
+  eta_seconds?: number;
+};
+
+/** One Progress unit linked to a sent print job (verify-first Phase D). */
+export type PrinterCheckoffUnit = {
+  part_id: number;
+  unit_index: number;
+};
+
+export type PrinterHostOutcome = "unknown" | "success" | "failed" | "cancelled";
+
+export type PrinterCheckoffLinkState =
+  | "watching"
+  | "awaiting_verify"
+  | "host_failed"
+  | "dismissed"
+  | "verified"
+  /** @deprecated Legacy auto-tick; treated as verified when loading. */
+  | "applied";
+
+export type PrintRejectReason =
+  | "bed_adhesion"
+  | "layer_shift"
+  | "warping"
+  | "stringing"
+  | "under_extrusion"
+  | "over_extrusion"
+  | "dimensional"
+  | "collision"
+  | "wrong_filament"
+  | "other";
+
+export type PrintOutcomeResult = "confirmed" | "rejected";
+
+export type PrintVerifyDecision = {
+  part_id: number;
+  unit_index: number;
+  result: PrintOutcomeResult;
+  reason?: PrintRejectReason;
+  note?: string;
+};
+
+export type PrintOutcomeEvent = {
+  id: string;
+  at: string;
+  profile_id: number;
+  part_id: number;
+  unit_index: number;
+  result: PrintOutcomeResult;
+  reason?: PrintRejectReason;
+  note?: string;
+  host_integration_id?: string;
+  filename?: string;
+  match_key?: string;
+  role?: string;
+  filament_display?: string;
+  link_id?: string;
+};
+
+export type PrintOutcomesSummary = {
+  profile_id: number;
+  total_confirmed: number;
+  total_rejected: number;
+  by_reason: Partial<Record<PrintRejectReason, number>>;
+  by_role: Record<string, { confirmed: number; rejected: number }>;
+  recent_rejected: PrintOutcomeEvent[];
+};
+
+/**
+ * Durable job ↔ Progress units mapping for verify-first checkoff.
+ * Created at Export send; host `complete` → awaiting_verify (user confirms).
+ */
+export type PrinterCheckoffLink = {
+  id: string;
+  profile_id: number;
+  integration_id: string;
+  printer_id: string;
+  host_name: string;
+  filename: string;
+  remote_path?: string;
+  upload_job_id?: string;
+  units: PrinterCheckoffUnit[];
+  /** Units already confirmed/rejected via verify API. */
+  resolved_units?: PrintVerifyDecision[];
+  state: PrinterCheckoffLinkState;
+  host_outcome?: PrinterHostOutcome;
+  /** True after we observe printing/paused for this filename. */
+  saw_active: boolean;
+  /** Upload used start=true — allow complete with cleared filename before first poll. */
+  started?: boolean;
+  /** Last observed print progress (0–100) while this link was active. */
+  last_progress?: number;
+  created_at: string;
+  /** When host finished successfully (entered awaiting_verify). */
+  completed_at?: string;
+  applied_at?: string;
+  units_marked?: number;
+};
+
+/** Reconcile side-effect (no longer auto-ticks Progress). */
+export type PrinterCheckoffReconcileUpdate = {
+  link_id: string;
+  host_name: string;
+  profile_id: number;
+  filename: string;
+  event: "awaiting_verify" | "host_failed";
+  host_outcome: PrinterHostOutcome;
+  units_pending: number;
+};
+
+export type PrinterSendQueueState =
+  | "queued"
+  | "sending"
+  | "done"
+  | "error"
+  | "cancelled";
+
+/** How drain/dispatch picks a live host for a queued send. */
+export type PrinterSendQueueMatch = "pinned" | "compatible";
+
+/** Durable outbound send queue item (Phase F thin farm assist). */
+export type PrinterSendQueueItem = {
+  id: string;
+  filename: string;
+  /** Absolute path under data/exports/printer-uploads/… */
+  artifact_path: string;
+  /**
+   * Preferred fleet printer. For `match: "compatible"`, bed size (and optional
+   * Progress filament) are taken from this machine; drain may reassign to
+   * another idle host with the same bed.
+   */
+  printer_id: string;
+  /**
+   * `pinned` (default): wait for this printer only.
+   * `compatible`: pick any idle linked Moonraker/PrusaLink with the same bed;
+   * prefer loaded-filament overlap with tracked Progress units.
+   */
+  match?: PrinterSendQueueMatch;
+  /** When true, wait for host Idle before dispatch (default). */
+  wait_for_idle: boolean;
+  start: boolean;
+  profile_id?: number;
+  checkoff_units?: PrinterCheckoffUnit[];
+  state: PrinterSendQueueState;
+  created_at: string;
+  updated_at: string;
+  upload_job_id?: string;
+  error?: string;
+  host_name?: string;
+};
+
+export type PrinterUploadResult = {
+  ok: boolean;
+  remote_path?: string;
+  started?: boolean;
+  message?: string;
+  checkoff_link_id?: string;
+  checkoff_units?: number;
+};
+
 export type WebhookEvent = "job.done" | "job.error";
 
 export type WebhookRegistration = {
@@ -182,6 +358,13 @@ export type HealthResponse = {
     connected: boolean;
     driver: string;
     postgres: boolean | null;
+  };
+  /**
+   * Optional Google Drive (GIS) client id for parts-manifest open/save.
+   * Public OAuth Web client id only — never a client secret.
+   */
+  google_drive?: {
+    client_id: string | null;
   };
 };
 

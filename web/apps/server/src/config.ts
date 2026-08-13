@@ -38,6 +38,11 @@ export type ServerConfig = {
   githubClientSecret: string | null;
   githubCallbackUrl: string | null;
   githubOAuthConfigured: boolean;
+  /**
+   * Public Google OAuth Web client id for Drive file open/save in the SPA.
+   * Not a secret — safe to expose via /health. Default: unset (Drive UI disabled).
+   */
+  googleClientId: string | null;
   authSuccessRedirect: string;
   basicAuthUser: string | null;
   basicAuthPass: string | null;
@@ -203,6 +208,8 @@ export function loadConfig(): ServerConfig {
   const githubClientId = process.env.GITHUB_CLIENT_ID ?? null;
   const githubClientSecret = process.env.GITHUB_CLIENT_SECRET ?? null;
   const githubCallbackUrl = process.env.GITHUB_CALLBACK_URL ?? null;
+  /** Public GIS/Drive client id (not a secret). See DEPLOY.md. */
+  const googleClientId = process.env.GOOGLE_CLIENT_ID?.trim() || null;
   const discordClientId = process.env.DISCORD_CLIENT_ID ?? null;
   const discordClientSecret = process.env.DISCORD_CLIENT_SECRET ?? null;
   const discordCallbackUrl = process.env.DISCORD_CALLBACK_URL ?? null;
@@ -268,6 +275,7 @@ export function loadConfig(): ServerConfig {
     githubClientSecret,
     githubCallbackUrl,
     githubOAuthConfigured: Boolean(githubClientId && githubClientSecret && githubCallbackUrl),
+    googleClientId,
     authSuccessRedirect: process.env.AUTH_SUCCESS_REDIRECT ?? "/",
     basicAuthUser: basicUser,
     basicAuthPass: basicPass,

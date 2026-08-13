@@ -74,11 +74,15 @@ export async function registerHealthRoutes(
         ...(config.multiUser ? ["multi_user_auth", "plan_sharing"] : []),
         ...(config.smtpConfigured ? ["password_reset_email"] : []),
         ...(aiAssistant ? ["ai_assistant"] : []),
+        ...(config.googleClientId ? ["google_drive_manifest"] : []),
       ],
       db: {
         connected: dbOk,
         driver: saasDb.bundle?.driver ?? "sqlite",
         postgres: postgresOk,
+      },
+      google_drive: {
+        client_id: config.googleClientId,
       },
     };
   });

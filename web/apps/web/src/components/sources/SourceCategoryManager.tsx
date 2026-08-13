@@ -1,8 +1,27 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  type DragEndEvent,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
   fetchSourceCategories,
   saveSourceCategories,
 } from "../../api/engine";
+import { moveItem } from "../../lib/reorderList";
+import { cn } from "../../lib/utils";
+import { SortableDragHandle } from "../dnd/SortableDragHandle";
 import { Button } from "../ui/button";
 import {
   Card,
@@ -19,6 +38,67 @@ type Props = {
   onSaved?: (categories: string[]) => void;
 };
 
+type SortableRowProps = {
+  id: string;
+  name: string;
+  index: number;
+  disabled: boolean;
+  canRemove: boolean;
+  onRename: (index: number, value: string) => void;
+  onRemove: (index: number) => void;
+};
+
+function SortableCategoryRow({
+  id,
+  name,
+  index,
+  disabled,
+  canRemove,
+  onRename,
+  onRemove,
+}: SortableRowProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id, disabled });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex items-center gap-2 rounded-md border border-transparent bg-background px-0.5 py-0.5",
+        isDragging && "z-10 opacity-90 shadow-md ring-1 ring-border",
+      )}
+    >
+      <SortableDragHandle
+        attributes={attributes}
+        listeners={listeners}
+        disabled={disabled}
+        label={`Reorder category ${name || index + 1}`}
+      />
+      <Input
+        value={name}
+        onChange={(e) => onRename(index, e.target.value)}
+        disabled={disabled}
+        aria-label={`Category ${index + 1}`}
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={disabled || !canRemove}
+        onClick={() => onRemove(index)}
+      >
+        Remove
+      </Button>
+    </li>
+  );
+}
+
 export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
   const [categories, setCategories] = useState<string[]>([]);
   const [draft, setDraft] = useState<string[]>([]);
@@ -27,6 +107,11 @@ export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const refresh = useCallback(async () => {
     if (!engineReady) return;
@@ -78,6 +163,16 @@ export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
     setLoadError(null);
   };
 
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = Number(String(active.id).replace(/^cat-/, ""));
+    const newIndex = Number(String(over.id).replace(/^cat-/, ""));
+    if (!Number.isFinite(oldIndex) || !Number.isFinite(newIndex)) return;
+    setDraft((prev) => moveItem(prev, oldIndex, newIndex));
+    setSaveNote(null);
+  };
+
   const onSave = async () => {
     setSaving(true);
     setSaveNote(null);
@@ -100,13 +195,16 @@ export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
     }
   };
 
+  // Index-based ids stay stable through mid-edit renames (names may collide briefly).
+  const sortableIds = draft.map((_, index) => `cat-${index}`);
+
   return (
     <Card className="shadow-none">
       <CardHeader>
         <CardTitle className="text-base">Source categories</CardTitle>
         <CardDescription>
-          Organize your library on the Sources page. Build still uses base vs addon layers
-          separately.
+          Organize your library. Drag to reorder (flat list — nesting is not
+          supported). Plans still use base vs addon layers separately.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -121,27 +219,28 @@ export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
             {loadError ? "Could not load categories." : "No categories yet. Add one below."}
           </p>
         ) : (
-          <ul className="space-y-2">
-            {draft.map((name, index) => (
-              <li key={`${index}-${name}`} className="flex items-center gap-2">
-                <Input
-                  value={name}
-                  onChange={(e) => onRename(index, e.target.value)}
-                  disabled={!engineReady || saving}
-                  aria-label={`Category ${index + 1}`}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  disabled={!engineReady || saving || draft.length <= 1}
-                  onClick={() => onRemove(index)}
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ul>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={onDragEnd}
+          >
+            <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+              <ul className="space-y-2" aria-label="Reorderable source categories">
+                {draft.map((name, index) => (
+                  <SortableCategoryRow
+                    key={sortableIds[index]}
+                    id={sortableIds[index]!}
+                    name={name}
+                    index={index}
+                    disabled={!engineReady || saving}
+                    canRemove={draft.length > 1}
+                    onRename={onRename}
+                    onRemove={onRemove}
+                  />
+                ))}
+              </ul>
+            </SortableContext>
+          </DndContext>
         )}
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-[12rem] flex-1">

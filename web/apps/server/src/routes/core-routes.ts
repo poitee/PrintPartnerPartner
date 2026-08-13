@@ -20,6 +20,9 @@ import { registerSourceRoutes } from "./sources.js";
 import { registerJobRoutes, type InProcessJobRunner } from "./jobs.js";
 import { registerApiV1ExtensionRoutes } from "./api-v1-extensions.js";
 import { registerIntegrationRoutes } from "./integrations.js";
+import { registerPrinterCheckoffRoutes } from "./printer-checkoff.js";
+import { registerPrinterSendQueueRoutes } from "./printer-send-queue.js";
+import { registerBambuConnectRoutes } from "./bambu-connect.js";
 import { registerWebhookRoutes } from "./webhooks.js";
 import { registerShareRoutes } from "./shares.js";
 import { registerAssistantRoutes } from "./assistant.js";
@@ -82,14 +85,23 @@ export async function registerCoreRoutes(
     registerShareRoutes(app, { repo: deps.repo, authStore, config: deps.config });
   }
 
+  // SPA-facing printer host routes (flat, not behind /api/v1 API-key gate).
+  const integrations = createIntegrationPort({
+    repo: deps.repo,
+    getAdapter: getIntegrationAdapter,
+  });
+  await registerPrinterCheckoffRoutes(app, { integrations, repo: deps.repo });
+  await registerPrinterSendQueueRoutes(app, {
+    integrations,
+    repo: deps.repo,
+    jobs: deps.jobs,
+  });
+  await registerBambuConnectRoutes(app, { repo: deps.repo, jobs: deps.jobs });
+
   if (options.apiV1Extensions) {
     await registerApiV1ExtensionRoutes(app, {
       repo: deps.repo,
       jobs: deps.jobs,
-    });
-    const integrations = createIntegrationPort({
-      repo: deps.repo,
-      getAdapter: getIntegrationAdapter,
     });
     await registerIntegrationRoutes(app, { integrations, repo: deps.repo });
     await registerWebhookRoutes(app, { repo: deps.repo });
