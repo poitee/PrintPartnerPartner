@@ -40,8 +40,11 @@ type Props = {
   refreshKey?: number;
   onVerified?: () => void;
   onQueueChange?: (state: PrintVerifyQueueState) => void;
-  /** When a live job is printing — hide Confirm/Reject until it finishes. */
-  suppressVerifyActions?: boolean;
+  /**
+   * Hosts still printing/paused — suppress Confirm/Reject only for links on
+   * those integration ids. Other awaiting_verify links stay actionable.
+   */
+  suppressIntegrationIds?: ReadonlySet<string>;
   className?: string;
 };
 
@@ -60,6 +63,8 @@ function pendingUnits(link: PrinterCheckoffLink) {
  * Verify-first Progress hero: confirm or reject mapped units after host job success.
  * Primary UI is Confirm / Reject for the finished job — not a per-unit control wall.
  */
+const EMPTY_SUPPRESS_IDS: ReadonlySet<string> = new Set();
+
 export default function PrintVerifyPanel({
   engineReady,
   profileId,
@@ -67,7 +72,7 @@ export default function PrintVerifyPanel({
   refreshKey = 0,
   onVerified,
   onQueueChange,
-  suppressVerifyActions = false,
+  suppressIntegrationIds,
   className,
 }: Props) {
   const [links, setLinks] = useState<PrinterCheckoffLink[]>([]);
@@ -85,6 +90,7 @@ export default function PrintVerifyPanel({
   onQueueChangeRef.current = onQueueChange;
 
   const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
+  const suppressedHosts = suppressIntegrationIds ?? EMPTY_SUPPRESS_IDS;
 
   const reload = useCallback(async () => {
     if (!engineReady || profileId == null) {
@@ -119,8 +125,12 @@ export default function PrintVerifyPanel({
   }, [links]);
 
   useEffect(() => {
-    if (suppressVerifyActions) setRejectTarget(null);
-  }, [suppressVerifyActions]);
+    if (!rejectTarget) return;
+    const target = links.find((l) => l.id === rejectTarget.linkId);
+    if (target && suppressedHosts.has(target.integration_id)) {
+      setRejectTarget(null);
+    }
+  }, [links, rejectTarget, suppressedHosts]);
 
   // Keep checklist selection in sync with pending units (default all selected).
   useEffect(() => {
@@ -134,9 +144,8 @@ export default function PrintVerifyPanel({
           next[link.id] = new Set(keys);
           continue;
         }
-        const kept = new Set(keys.filter((k) => prevSet.has(k)));
-        // If nothing remains selected but units exist, re-select all (fresh queue).
-        next[link.id] = kept.size > 0 || keys.length === 0 ? kept : new Set(keys);
+        // Keep a deliberate empty selection empty across live-strip polls.
+        next[link.id] = new Set(keys.filter((k) => prevSet.has(k)));
       }
       return next;
     });
@@ -232,11 +241,13 @@ export default function PrintVerifyPanel({
   if (!engineReady || profileId == null) return null;
 
   const showFailed = failedLinks.length > 0;
-  const showVerify = !suppressVerifyActions && links.length > 0;
-  const showSummary =
-    !suppressVerifyActions && summary != null && summary.total_rejected > 0;
+  const actionableLinks = links.filter((l) => !suppressedHosts.has(l.integration_id));
+  const suppressedLinks = links.filter((l) => suppressedHosts.has(l.integration_id));
+  const showVerify = actionableLinks.length > 0;
+  const showSuppressed = suppressedLinks.length > 0;
+  const showSummary = summary != null && summary.total_rejected > 0;
 
-  if (!showFailed && !showVerify && !showSummary) {
+  if (!showFailed && !showVerify && !showSuppressed && !showSummary) {
     return null;
   }
 
@@ -273,7 +284,7 @@ export default function PrintVerifyPanel({
       ))}
 
       {showVerify &&
-        links.map((link) => {
+        actionableLinks.map((link) => {
           const pending = pendingUnits(link);
           const selected = selectedByLink[link.id] ?? new Set<string>();
           const selectedCount = pending.filter((u) =>
@@ -355,6 +366,16 @@ export default function PrintVerifyPanel({
             </div>
           );
         })}
+
+      {showSuppressed
+        ? suppressedLinks.map((link) => (
+            <p key={link.id} className="text-sm text-muted-foreground">
+              {link.host_name} is still printing{" "}
+              <span className="font-mono">{link.filename}</span>. Verify appears when this
+              print finishes. We don&apos;t mark parts from a live job.
+            </p>
+          ))
+        : null}
 
       {rejectTarget && showVerify && (
         <div

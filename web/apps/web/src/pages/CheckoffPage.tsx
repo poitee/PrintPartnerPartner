@@ -180,6 +180,7 @@ export default function CheckoffPage() {
   const [verifyRefreshKey, setVerifyRefreshKey] = useState(0);
   const [liveStrip, setLiveStrip] = useState<PrinterLiveStripState>({
     anyPrinting: false,
+    activeIntegrationIds: [],
     hostCount: 0,
   });
   const [verifyQueue, setVerifyQueue] = useState<PrintVerifyQueueState>({
@@ -362,12 +363,18 @@ export default function CheckoffPage() {
   const loadError = workspaceError;
   const toggleBusy = busyPartId != null;
 
-  /** Progress operator modes — printing blocks verify UI until the live job ends. */
-  const progressMode: "printing" | "verify" | "idle" = liveStrip.anyPrinting
-    ? "printing"
-    : verifyQueue.awaitingCount > 0
+  const suppressIntegrationIds = useMemo(
+    () => new Set(liveStrip.activeIntegrationIds),
+    [liveStrip.activeIntegrationIds],
+  );
+
+  /** Prefer verify when any finished job awaits; printing only when nothing to confirm. */
+  const progressMode: "printing" | "verify" | "idle" =
+    verifyQueue.awaitingCount > 0
       ? "verify"
-      : "idle";
+      : liveStrip.anyPrinting
+        ? "printing"
+        : "idle";
 
   const progressEyebrow =
     selectedProfileId != null && includedParts.length > 0
@@ -535,7 +542,7 @@ export default function CheckoffPage() {
             profileId={selectedProfileId}
             parts={includedParts}
             refreshKey={verifyRefreshKey}
-            suppressVerifyActions={progressMode === "printing"}
+            suppressIntegrationIds={suppressIntegrationIds}
             onQueueChange={setVerifyQueue}
             onVerified={() => {
               if (selectedProfileId != null) void reload(selectedProfileId);
@@ -546,7 +553,9 @@ export default function CheckoffPage() {
             emphasizeSendReady={progressMode === "idle"}
             onActiveCountChange={onSendQueueActiveCountChange}
           />
-          {progressMode === "printing" && includedParts.length > 0 ? (
+          {liveStrip.anyPrinting &&
+          verifyQueue.awaitingCount === 0 &&
+          includedParts.length > 0 ? (
             <p className="text-sm text-muted-foreground">
               Verify appears when this print finishes. We don&apos;t mark parts from a live
               job.

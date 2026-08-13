@@ -36,6 +36,8 @@ type LinkedHost = {
 
 export type PrinterLiveStripState = {
   anyPrinting: boolean;
+  /** Integration ids currently printing or paused (for per-link verify suppress). */
+  activeIntegrationIds: string[];
   hostCount: number;
 };
 
@@ -219,20 +221,26 @@ export default function PrinterLiveStrip({
   }, [engineReady, hosts, refreshStatuses]);
 
   useEffect(() => {
-    const anyPrinting =
-      hosts.length > 0 &&
-      Object.values(statusById).some(
-        (s) => s?.state === "printing" || s?.state === "paused",
-      );
+    const activeIntegrationIds = hosts
+      .filter((h) => {
+        const state = statusById[h.integrationId]?.state;
+        return state === "printing" || state === "paused";
+      })
+      .map((h) => h.integrationId);
     onLiveStateChangeRef.current?.({
-      anyPrinting,
+      anyPrinting: activeIntegrationIds.length > 0,
+      activeIntegrationIds,
       hostCount: hosts.length,
     });
-  }, [statusById, hosts.length]);
+  }, [statusById, hosts]);
 
   useEffect(() => {
     if (engineReady) return;
-    onLiveStateChangeRef.current?.({ anyPrinting: false, hostCount: 0 });
+    onLiveStateChangeRef.current?.({
+      anyPrinting: false,
+      activeIntegrationIds: [],
+      hostCount: 0,
+    });
   }, [engineReady]);
 
   if (!engineReady) return null;
