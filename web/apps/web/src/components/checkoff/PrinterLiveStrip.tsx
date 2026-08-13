@@ -11,27 +11,40 @@ import {
 } from "../../api/engine";
 import { settingsRoute } from "../../lib/routes";
 import {
-  formatPrinterLiveLine,
+  PRINTER_LIVE_STRIP_POLL_MS,
+  formatPrinterHostCaption,
+  formatPrinterJobLine,
+  formatPrinterStatusPill,
   printerLiveStripTone,
+  type LiveStripHostType,
 } from "../../lib/printerLiveStrip";
 import { cn } from "../../lib/utils";
 
-/** Poll linked hosts for Progress — avoid hammering LAN printers. */
-const POLL_MS = 5_000;
-
-const LIVE_STRIP_HOST_TYPES = new Set(["moonraker", "prusalink", "bambu"]);
+const LIVE_STRIP_HOST_TYPES = new Set<LiveStripHostType>([
+  "moonraker",
+  "prusalink",
+  "bambu",
+]);
 
 type LinkedHost = {
   integrationId: string;
   name: string;
+  hostType: LiveStripHostType;
   /** Moonraker/PrusaLink run verify reconcile; Bambu is status-only. */
   reconcileCheckoff: boolean;
+};
+
+export type PrinterLiveStripState = {
+  anyPrinting: boolean;
+  hostCount: number;
 };
 
 type Props = {
   engineReady: boolean;
   /** Called when host finish enters verify queue (or host failed) for a plan. */
   onCheckoffUpdate?: (profileId: number) => void;
+  /** Reports whether any linked host is actively printing/paused. */
+  onLiveStateChange?: (state: PrinterLiveStripState) => void;
   className?: string;
 };
 
@@ -54,6 +67,22 @@ function toneClass(tone: ReturnType<typeof printerLiveStripTone>): string {
   }
 }
 
+function pillClass(tone: ReturnType<typeof printerLiveStripTone>): string {
+  switch (tone) {
+    case "printing":
+      return "border-sky-500/40 bg-sky-500/20 text-sky-950 dark:text-sky-50";
+    case "paused":
+      return "border-amber-500/40 bg-amber-500/20 text-amber-950 dark:text-amber-50";
+    case "complete":
+    case "idle":
+      return "border-emerald-500/40 bg-emerald-500/20 text-emerald-950 dark:text-emerald-50";
+    case "error":
+      return "border-destructive/40 bg-destructive/15 text-destructive";
+    default:
+      return "border-border bg-background/70 text-muted-foreground";
+  }
+}
+
 /**
  * Sticky Progress banner: live status for fleet machines linked to a printer host.
  * Moonraker/PrusaLink: reconcile may queue verify. Bambu: status poll only.
@@ -61,6 +90,7 @@ function toneClass(tone: ReturnType<typeof printerLiveStripTone>): string {
 export default function PrinterLiveStrip({
   engineReady,
   onCheckoffUpdate,
+  onLiveStateChange,
   className,
 }: Props) {
   const [hosts, setHosts] = useState<LinkedHost[]>([]);
@@ -72,6 +102,8 @@ export default function PrinterLiveStrip({
   const toastedLinks = useRef(new Set<string>());
   const onCheckoffUpdateRef = useRef(onCheckoffUpdate);
   onCheckoffUpdateRef.current = onCheckoffUpdate;
+  const onLiveStateChangeRef = useRef(onLiveStateChange);
+  onLiveStateChangeRef.current = onLiveStateChange;
 
   const refreshRoster = useCallback(async () => {
     if (!engineReady) {
@@ -93,12 +125,14 @@ export default function PrinterLiveStrip({
         if (!id || seen.has(id)) continue;
         const host = byId.get(id);
         if (!host || host.config.enabled === false) continue;
-        if (!LIVE_STRIP_HOST_TYPES.has(host.type)) continue;
+        if (!LIVE_STRIP_HOST_TYPES.has(host.type as LiveStripHostType)) continue;
+        const hostType = host.type as LiveStripHostType;
         seen.add(id);
         next.push({
           integrationId: id,
           name: host.name.trim() || machine.name.trim() || "Printer",
-          reconcileCheckoff: host.type === "moonraker" || host.type === "prusalink",
+          hostType,
+          reconcileCheckoff: hostType === "moonraker" || hostType === "prusalink",
         });
       }
       setHosts(next);
@@ -170,7 +204,7 @@ export default function PrinterLiveStrip({
     };
 
     tick();
-    const timer = window.setInterval(tick, POLL_MS);
+    const timer = window.setInterval(tick, PRINTER_LIVE_STRIP_POLL_MS);
     const onVisibility = () => {
       if (!document.hidden) tick();
     };
@@ -183,6 +217,23 @@ export default function PrinterLiveStrip({
       requestId.current += 1;
     };
   }, [engineReady, hosts, refreshStatuses]);
+
+  useEffect(() => {
+    const anyPrinting =
+      hosts.length > 0 &&
+      Object.values(statusById).some(
+        (s) => s?.state === "printing" || s?.state === "paused",
+      );
+    onLiveStateChangeRef.current?.({
+      anyPrinting,
+      hostCount: hosts.length,
+    });
+  }, [statusById, hosts.length]);
+
+  useEffect(() => {
+    if (engineReady) return;
+    onLiveStateChangeRef.current?.({ anyPrinting: false, hostCount: 0 });
+  }, [engineReady]);
 
   if (!engineReady) return null;
 
@@ -227,17 +278,32 @@ export default function PrinterLiveStrip({
           <div
             key={host.integrationId}
             className={cn(
-              "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+              "flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border px-3 py-2 text-sm",
               toneClass(tone),
             )}
             title={status?.message}
           >
             <Printer className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
-            <span className="min-w-0 flex-1 font-medium leading-snug">
-              {formatPrinterLiveLine({ name: host.name, status })}
+            <div className="min-w-0 flex-1 leading-snug">
+              <p className="font-medium">
+                {formatPrinterHostCaption(host.name, host.hostType)}
+              </p>
+              <p className="text-xs font-normal opacity-90">
+                {formatPrinterJobLine(status)}
+              </p>
               {!host.reconcileCheckoff ? (
-                <span className="ml-1 font-normal text-muted-foreground">(status only)</span>
+                <p className="mt-0.5 text-xs font-normal text-muted-foreground">
+                  Status only. Does not verify from here.
+                </p>
               ) : null}
+            </div>
+            <span
+              className={cn(
+                "inline-flex shrink-0 items-center rounded-md border px-2 py-0.5 font-mono text-[11px] font-medium tabular-nums",
+                pillClass(tone),
+              )}
+            >
+              {formatPrinterStatusPill(status)}
             </span>
             {(tone === "offline" || tone === "error") && (
               <Link
