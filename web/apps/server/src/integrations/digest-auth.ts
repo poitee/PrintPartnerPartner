@@ -81,6 +81,9 @@ export function buildDigestAuthorization(opts: {
   ];
   if (qop) {
     parts.push(`qop=${qop}`, `nc=${nc}`, `cnonce=${quoteDigestParam(cnonce)}`);
+  } else if (algorithm === "MD5-SESS") {
+    // MD5-SESS folds cnonce into HA1; server must receive it even without qop.
+    parts.push(`cnonce=${quoteDigestParam(cnonce)}`);
   }
   if (opaque) parts.push(`opaque=${quoteDigestParam(opaque)}`);
   parts.push(`algorithm=${algorithm}`);
