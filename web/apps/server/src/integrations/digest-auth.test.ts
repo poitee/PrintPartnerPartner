@@ -37,4 +37,41 @@ describe("digest-auth", () => {
     expect(authorization).toContain("nc=00000001");
     expect(authorization).toContain("response=");
   });
+
+  it("prefers qop=auth when multiple qop values are offered", () => {
+    const authorization = buildDigestAuthorization({
+      username: "maker",
+      password: "secret",
+      method: "GET",
+      uri: "/api/v1/status",
+      challenge: {
+        realm: "Printer API",
+        nonce: "n1",
+        qop: "auth-int, auth",
+        algorithm: "MD5",
+      },
+    });
+    expect(authorization).toContain("qop=auth");
+    expect(authorization).not.toContain("qop=auth-int");
+  });
+
+  it("escapes quotes in username and rejects CR/LF", () => {
+    const authorization = buildDigestAuthorization({
+      username: 'ma"ker',
+      password: "secret",
+      method: "GET",
+      uri: "/api/v1/status",
+      challenge: { realm: "Printer API", nonce: "n1", algorithm: "MD5" },
+    });
+    expect(authorization).toContain('username="ma\\"ker"');
+    expect(() =>
+      buildDigestAuthorization({
+        username: "bad\nuser",
+        password: "secret",
+        method: "GET",
+        uri: "/api/v1/status",
+        challenge: { realm: "Printer API", nonce: "n1", algorithm: "MD5" },
+      }),
+    ).toThrow(/Invalid digest parameter/);
+  });
 });

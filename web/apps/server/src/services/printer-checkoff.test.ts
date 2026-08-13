@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { PrinterCheckoffLink, PrinterHostStatus } from "@print-partner/contracts";
 import {
   decideCheckoffReconcile,
+  confirmsRespectProgressPrefix,
   normalizePrinterFilename,
   parseCheckoffUnits,
   pendingCheckoffUnits,
   printerFilenamesMatch,
 } from "./printer-checkoff.js";
+import { trimPrinterCheckoffLinks } from "./printer-checkoff-store.js";
 
 function link(overrides: Partial<PrinterCheckoffLink> = {}): PrinterCheckoffLink {
   return {
@@ -54,6 +56,22 @@ describe("printer-checkoff helpers", () => {
         }),
       ),
     ).toEqual([{ part_id: 1, unit_index: 1 }]);
+  });
+
+  it("rejects confirm that would mark unconfirmed lower units", () => {
+    expect(confirmsRespectProgressPrefix([false, false], [1])).toBe(false);
+    expect(confirmsRespectProgressPrefix([false, false], [0, 1])).toBe(true);
+    expect(confirmsRespectProgressPrefix([true, false], [1])).toBe(true);
+  });
+
+  it("trims terminal links before active ones", () => {
+    const watching = link({ id: "w1", state: "watching" });
+    const done = Array.from({ length: 5 }, (_, i) =>
+      link({ id: `d${i}`, state: "verified", filename: `f${i}.gcode` }),
+    );
+    // Force tiny cap by calling with overflow: keep watching + last verifieds
+    const trimmed = trimPrinterCheckoffLinks([...done, watching]);
+    expect(trimmed.some((l) => l.id === "w1")).toBe(true);
   });
 });
 

@@ -264,13 +264,15 @@ export default function PrintVerifyPanel({
                       size="sm"
                       variant="outline"
                       disabled={busy}
-                      onClick={() =>
+                      onClick={() => {
+                        setRejectReason("bed_adhesion");
+                        setRejectNote("");
                         setRejectTarget({
                           linkId: link.id,
                           partId: u.part_id,
                           unitIndex: u.unit_index,
-                        })
-                      }
+                        });
+                      }}
                     >
                       <X className="mr-1 h-3.5 w-3.5" aria-hidden />
                       Reject…
