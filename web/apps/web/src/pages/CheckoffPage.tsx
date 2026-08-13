@@ -27,7 +27,6 @@ import PrinterLiveStrip, {
 import PrintVerifyPanel, {
   type PrintVerifyQueueState,
 } from "../components/checkoff/PrintVerifyPanel";
-import PrinterSendQueuePanel from "../components/export/PrinterSendQueuePanel";
 import SortableProgressPart from "../components/checkoff/SortableProgressPart";
 import PartPreviewDialog from "../components/parts/PartPreviewDialog";
 import PartThumbExpandButton from "../components/parts/PartThumbExpandButton";
@@ -530,7 +529,6 @@ export default function CheckoffPage() {
               job.
             </p>
           ) : null}
-          <PrinterSendQueuePanel engineReady={Boolean(health?.ok)} />
           <PrintVerifyPanel
             engineReady={Boolean(health?.ok)}
             profileId={selectedProfileId}
@@ -547,8 +545,8 @@ export default function CheckoffPage() {
           Boolean(health?.ok) &&
           selectedProfileId != null ? (
             <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-              Nothing to verify. Queued .gcode waits here until you Send ready, then confirm
-              here when it finishes.
+              Nothing to verify. Send a sliced .gcode from Export, then confirm here when it
+              finishes.
             </div>
           ) : null}
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
