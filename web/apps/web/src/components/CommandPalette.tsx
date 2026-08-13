@@ -8,11 +8,17 @@ import {
   startSync,
   type StlPackGroupBy,
 } from "../api/engine";
+import { usePlanActions } from "../context/PlanActionsContext";
+import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useFlushBuildPageSaves } from "../hooks/useFlushBuildPageSaves";
 import { useImportSharedBuild } from "../hooks/useImportSharedBuild";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
+import { checkoffUnitTotals } from "../lib/checkoffProgress";
+import { completeExportDownload } from "../lib/exportActions";
+import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
+import { flattenReviewParts } from "../lib/reviewParts";
 import {
   buildRoute,
   checkoffRoute,
@@ -24,9 +30,6 @@ import {
   settingsRoute,
   sourcesRoute,
 } from "../lib/routes";
-import { completeExportDownload } from "../lib/exportActions";
-import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
-import { usePlanActions } from "../context/PlanActionsContext";
 import {
   CommandDialog,
   CommandEmpty,
@@ -56,6 +59,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
   const location = useLocation();
   const { health } = useEngineHealth();
   const { selectedProfileId } = useProfileSelection();
+  const { review } = usePlanWorkspace();
   const { openCreatePlan } = usePlanActions();
   const flushBuildSaves = useFlushBuildPageSaves();
   const importSharedBuild = useImportSharedBuild();
@@ -63,6 +67,12 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
   const syncJob = useJobRunner("sync");
   const stlExportJob = useJobRunner("stl-export");
   const kitExportJob = useJobRunner("kit-export");
+
+  const remainingUnits = useMemo(() => {
+    if (!review || review.profile_id !== selectedProfileId) return null;
+    const included = flattenReviewParts(review.part_groups).filter((p) => p.included);
+    return checkoffUnitTotals(included).remainingUnits;
+  }, [review, selectedProfileId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -257,11 +267,14 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
               },
             },
             {
-              id: `export-missing-stl-${groupBy}`,
-              label: `Export missing STLs (${groupHint})`,
-              hint: onReview ? "Parts" : `Plan #${selectedProfileId}`,
+              id: `export-remaining-stl-${groupBy}`,
+              label:
+                remainingUnits != null
+                  ? `Export remaining ${remainingUnits} (${groupHint})`
+                  : `Export remaining (${groupHint})`,
+              hint: "This plan · Progress checkoff",
               group: "Actions" as const,
-              disabled: stlExportJob.busy,
+              disabled: stlExportJob.busy || remainingUnits === 0,
               run: () => {
                 void stlExportJob.runJob(
                   () =>
@@ -270,14 +283,12 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
                       group_by: groupBy,
                     }),
                   (snap) => {
-                    handleStlPackExportJobDone("Missing-parts STL", snap, {
+                    handleStlPackExportJobDone("Export remaining", snap, {
                       pathField: "root_path",
                     });
                   },
                 );
-                if (!onReview) {
-                  navigate(reviewRoute(selectedProfileId));
-                }
+                navigate(exportRoute(selectedProfileId));
                 setOpen(false);
               },
             },
@@ -349,6 +360,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
   }, [
     health,
     selectedProfileId,
+    remainingUnits,
     navigate,
     recomputeJob,
     syncJob,
