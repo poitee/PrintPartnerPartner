@@ -195,6 +195,33 @@ describe("bambuAdapter", () => {
     expect(status.eta_seconds).toBe(300);
   });
 
+  it("does not crash when the mqtt client emits a late error after settling", async () => {
+    let client!: FakeMqttClient;
+    setBambuMqttConnectForTests((_url) => {
+      client = new FakeMqttClient();
+      return client as unknown as ReturnType<BambuMqttConnect>;
+    });
+
+    const statusPromise = bambuAdapter.getStatus!({
+      host: "192.168.1.90",
+      access_code: "lan-code",
+      serial: "01P00A000000002",
+    });
+
+    // Let resolveConnection's async validation run before the mqtt client exists.
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Connection refused: "close" fires immediately, before any "connect".
+    client.emit("close");
+    const status = await statusPromise;
+    expect(status.state).toBe("offline");
+
+    // The real mqtt client's internal connack-timeout can still fire an
+    // "error" after we've already resolved via "close" above. With zero
+    // listeners left, Node would throw synchronously and crash the process.
+    expect(() => client.emit("error", new Error("connack timeout"))).not.toThrow();
+  });
+
   it("listDevices returns configured serial without MQTT", async () => {
     const devices = await bambuAdapter.listDevices!({
       host: "192.168.1.80",
