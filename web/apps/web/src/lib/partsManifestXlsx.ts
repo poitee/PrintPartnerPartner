@@ -57,7 +57,7 @@ function sheetXml(rows: PartsManifestRow[]): string {
       const cXml = cells
         .map((val, cIdx) => {
           const ref = `${colLetter(cIdx)}${rIdx + 1}`;
-          return `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(val)}</t></is></c>`;
+          return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(val)}</t></is></c>`;
         })
         .join("");
       return `<row r="${rIdx + 1}">${cXml}</row>`;
@@ -112,14 +112,40 @@ export async function partsManifestToXlsxBlob(rows: PartsManifestRow[]): Promise
   });
 }
 
-/** Decode a handful of XML entities used in OOXML cell text. */
+/** Decode a handful of XML entities used in OOXML cell text (single pass). */
 function decodeXml(value: string): string {
-  return value
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&");
+  return value.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|lt|gt|quot|apos|amp);/g, (match, hex, dec) => {
+    if (hex != null || dec != null) {
+      const code = Number.parseInt(hex != null ? hex : dec, hex != null ? 16 : 10);
+      if (
+        !Number.isFinite(code) ||
+        code < 0 ||
+        code > 0x10ffff ||
+        (code >= 0xd800 && code <= 0xdfff)
+      ) {
+        return match;
+      }
+      try {
+        return String.fromCodePoint(code);
+      } catch {
+        return match;
+      }
+    }
+    switch (match) {
+      case "&lt;":
+        return "<";
+      case "&gt;":
+        return ">";
+      case "&quot;":
+        return '"';
+      case "&apos;":
+        return "'";
+      case "&amp;":
+        return "&";
+      default:
+        return match;
+    }
+  });
 }
 
 function parseSharedStrings(xml: string): string[] {

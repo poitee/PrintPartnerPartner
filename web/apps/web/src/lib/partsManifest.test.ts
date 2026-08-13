@@ -139,6 +139,17 @@ describe("partsManifest XLSX", () => {
     expect(parsed.rows[0]!.quantity).toBe("2");
   });
 
+  it("emits xml:space=preserve so spreadsheet clients keep cell padding", async () => {
+    const empty = Object.fromEntries(PARTS_MANIFEST_HEADERS.map((h) => [h, ""])) as PartsManifestRow;
+    empty.file_name = "  padded.stl  ";
+    empty.quantity = "1";
+    const blob = await partsManifestToXlsxBlob([empty]);
+    const zip = await (await import("jszip")).default.loadAsync(await blob.arrayBuffer());
+    const sheet = await zip.file("xl/worksheets/sheet1.xml")!.async("string");
+    expect(sheet).toContain('xml:space="preserve"');
+    expect(sheet).toContain(">  padded.stl  <");
+  });
+
   it("strips XML 1.0-invalid code points from cell values", async () => {
     const empty = Object.fromEntries(PARTS_MANIFEST_HEADERS.map((h) => [h, ""])) as PartsManifestRow;
     // U+FFFE, U+FFFF, and an unpaired high surrogate are not XML 1.0 Char.
