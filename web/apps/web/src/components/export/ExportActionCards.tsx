@@ -41,7 +41,8 @@ type Props = {
 /**
  * Slicer-input file cards for Export — STLs (all + remaining from this plan's
  * Progress checkoff), 3MF, share bundle. Sending to a printer lives in
- * PrinterSendPanel above. Farm queue stays off Progress until a spike passes.
+ * PrinterSendPanel above. Farm-queue verbs (Send ready / Send now / Remove)
+ * live on Progress, not here.
  */
 export default function ExportActionCards({ onShare }: Props) {
   const { health } = useEngineHealth();

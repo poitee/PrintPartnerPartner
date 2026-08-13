@@ -128,8 +128,8 @@ const SEND_HOST_TYPES = new Set<LiveStripHostType>(["moonraker", "prusalink"]);
  * Primary Export Send UI — Send / Start print for Moonraker/PrusaLink,
  * plus a separate Bambu Connect handoff row when a Bambu host is fleet-linked.
  *
- * Only two verbs live here: Send (upload) and Start print. No farm-queue
- * verbs on Export (or Progress until a farm-queue spike passes).
+ * Only two verbs live here: Send (upload) and Start print. Farm-queue verbs
+ * (Send ready / Send now / Remove) live on Progress, not on Export.
  */
 export default function PrinterSendPanel({
   remainingParts,
