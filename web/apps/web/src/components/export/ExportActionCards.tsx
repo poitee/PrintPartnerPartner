@@ -220,7 +220,7 @@ export default function ExportActionCards({ onShare }: Props) {
       setHostStatusByIntegration(next);
       setSelectedPrinterId((prev) => pickPreferredPrinterId(linkedPrinters, next, prev));
       const hasIdle = Object.values(next).some(
-        (s) => s.state === "idle" || s.state === "complete",
+        (s: PrinterHostStatus) => s.state === "idle" || s.state === "complete",
       );
       if (hasIdle) {
         void drainPrinterSendQueue()
