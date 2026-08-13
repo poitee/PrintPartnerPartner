@@ -15,6 +15,10 @@ type Props = {
   refreshKey?: number;
   /** When true (Progress), show Send ready / Send now. Default true. */
   allowDispatch?: boolean;
+  /** Idle Progress: Send ready is the primary operator move. */
+  emphasizeSendReady?: boolean;
+  /** Reports active queue length so Progress can choose idle copy. */
+  onActiveCountChange?: (count: number) => void;
   className?: string;
 };
 
@@ -47,6 +51,8 @@ export default function PrinterSendQueuePanel({
   engineReady,
   refreshKey = 0,
   allowDispatch = true,
+  emphasizeSendReady = false,
+  onActiveCountChange,
   className,
 }: Props) {
   const [items, setItems] = useState<PrinterSendQueueItem[]>([]);
@@ -80,6 +86,10 @@ export default function PrinterSendQueuePanel({
     return () => window.clearInterval(timer);
   }, [engineReady, reload]);
 
+  useEffect(() => {
+    onActiveCountChange?.(engineReady ? items.length : 0);
+  }, [engineReady, items.length, onActiveCountChange]);
+
   if (!engineReady || items.length === 0) return null;
 
   return (
@@ -96,7 +106,7 @@ export default function PrinterSendQueuePanel({
         {allowDispatch ? (
           <Button
             size="sm"
-            variant="outline"
+            variant={emphasizeSendReady ? "default" : "outline"}
             className="h-7 text-xs"
             disabled={busyId != null}
             onClick={() => {

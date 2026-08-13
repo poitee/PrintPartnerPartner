@@ -27,6 +27,7 @@ import PrinterLiveStrip, {
 import PrintVerifyPanel, {
   type PrintVerifyQueueState,
 } from "../components/checkoff/PrintVerifyPanel";
+import PrinterSendQueuePanel from "../components/export/PrinterSendQueuePanel";
 import SortableProgressPart from "../components/checkoff/SortableProgressPart";
 import PartPreviewDialog from "../components/parts/PartPreviewDialog";
 import PartThumbExpandButton from "../components/parts/PartThumbExpandButton";
@@ -185,6 +186,8 @@ export default function CheckoffPage() {
     awaitingCount: 0,
     primaryHostName: null,
   });
+  /** Farm send-queue has active items — drives idle copy (queue vs Export). */
+  const [sendQueueHasItems, setSendQueueHasItems] = useState(false);
   const sheetRef = useRef<HTMLElement>(null);
   const location = useLocation();
   const copilot = useCopilotUiOptional();
@@ -265,6 +268,10 @@ export default function CheckoffPage() {
   useEffect(() => {
     setVerifyQueue({ awaitingCount: 0, primaryHostName: null });
   }, [selectedProfileId]);
+
+  const onSendQueueActiveCountChange = useCallback((count: number) => {
+    setSendQueueHasItems(count > 0);
+  }, []);
 
   useEffect(() => {
     savePersistedCheckoffUi({
@@ -523,12 +530,6 @@ export default function CheckoffPage() {
               }
             }}
           />
-          {progressMode === "printing" && includedParts.length > 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Verify appears when this print finishes. We don&apos;t mark parts from a live
-              job.
-            </p>
-          ) : null}
           <PrintVerifyPanel
             engineReady={Boolean(health?.ok)}
             profileId={selectedProfileId}
@@ -540,13 +541,25 @@ export default function CheckoffPage() {
               if (selectedProfileId != null) void reload(selectedProfileId);
             }}
           />
+          <PrinterSendQueuePanel
+            engineReady={Boolean(health?.ok)}
+            emphasizeSendReady={progressMode === "idle"}
+            onActiveCountChange={onSendQueueActiveCountChange}
+          />
+          {progressMode === "printing" && includedParts.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Verify appears when this print finishes. We don&apos;t mark parts from a live
+              job.
+            </p>
+          ) : null}
           {progressMode === "idle" &&
           includedParts.length > 0 &&
           Boolean(health?.ok) &&
           selectedProfileId != null ? (
             <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-              Nothing to verify. Send a sliced .gcode from Export, then confirm here when it
-              finishes.
+              {sendQueueHasItems
+                ? "Nothing to verify. Queued .gcode waits here until you Send ready, then confirm when it finishes."
+                : "Nothing to verify. Send a sliced .gcode from Export, then confirm here when it finishes."}
             </div>
           ) : null}
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">

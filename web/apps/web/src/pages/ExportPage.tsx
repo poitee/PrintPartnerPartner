@@ -22,8 +22,8 @@ import { cn } from "../lib/utils";
 /**
  * Export — always shows the printer Send panel (works with external / hand-sliced
  * G-code, no plan required). Slicer-input file cards (STL, 3MF, share, manifest)
- * stay plan-gated below. Farm send-queue stays off Progress until a farm-queue
- * spike passes; Export only exposes Send / Start print.
+ * stay plan-gated below. Farm-queue verbs (Send ready / Send now / Remove) live on
+ * Progress, not here.
  */
 export default function ExportPage() {
   const { health, error: engineError } = useEngineHealth();
