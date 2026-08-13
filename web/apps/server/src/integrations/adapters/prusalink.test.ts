@@ -1,6 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { prusalinkAdapter } from "./prusalink.js";
 
+function digest401() {
+  return {
+    ok: false,
+    status: 401,
+    headers: new Headers({
+      "www-authenticate":
+        'Digest realm="Printer API", nonce="abc", qop="auth", algorithm=MD5',
+    }),
+    arrayBuffer: async () => new ArrayBuffer(0),
+    json: async () => ({}),
+    text: async () => "",
+  };
+}
+
 describe("prusalinkAdapter", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -19,34 +33,24 @@ describe("prusalinkAdapter", () => {
   it("testConnection follows Digest challenge then reads /info", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        headers: new Headers({
-          "www-authenticate":
-            'Digest realm="Printer API", nonce="abc", qop="auth", algorithm=MD5',
-        }),
-        json: async () => ({}),
-      })
+      // obtainDigestChallenge GET /status
+      .mockResolvedValueOnce(digest401())
+      // GET /info with Authorization
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
         headers: new Headers(),
+        arrayBuffer: async () => new ArrayBuffer(0),
         json: async () => ({ name: "Prusa MK4" }),
       })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        headers: new Headers({
-          "www-authenticate":
-            'Digest realm="Printer API", nonce="abc", qop="auth", algorithm=MD5',
-        }),
-        json: async () => ({}),
-      })
+      // readStatus: challenge GET /status
+      .mockResolvedValueOnce(digest401())
+      // readStatus: GET /status with Authorization
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
         headers: new Headers(),
+        arrayBuffer: async () => new ArrayBuffer(0),
         json: async () => ({ printer: { state: "IDLE" } }),
       });
     vi.stubGlobal("fetch", fetchMock);
@@ -59,6 +63,10 @@ describe("prusalinkAdapter", () => {
     expect(result.ok).toBe(true);
     expect(result.message).toContain("Prusa MK4");
 
+    const probe = fetchMock.mock.calls[0];
+    expect(String(probe![0])).toContain("/api/v1/status");
+    expect((probe![1] as RequestInit).method).toBe("GET");
+
     const authCall = fetchMock.mock.calls.find(
       (call) =>
         String(call[0]).includes("/api/v1/info") &&
@@ -69,38 +77,36 @@ describe("prusalinkAdapter", () => {
     expect(headers.get("Authorization")).toMatch(/^Digest /);
   });
 
-  it("uploadFile sends Print-After-Upload and Overwrite digest headers", async () => {
+  it("uploadFile probes via GET /status then PUTs with body (never bodyless PUT)", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        headers: new Headers({
-          "www-authenticate":
-            'Digest realm="Printer API", nonce="n2", qop="auth", algorithm=MD5',
-        }),
-        text: async () => "",
-      })
+      .mockResolvedValueOnce(digest401())
       .mockResolvedValueOnce({
         ok: true,
         status: 201,
         headers: new Headers(),
+        arrayBuffer: async () => new ArrayBuffer(0),
         text: async () => "",
       });
     vi.stubGlobal("fetch", fetchMock);
 
+    const body = new TextEncoder().encode("; bgcode");
     const result = await prusalinkAdapter.uploadFile!(
       {
         base_url: "http://127.0.0.1",
         username: "",
         password: "printer-key",
       },
-      new TextEncoder().encode("; bgcode"),
+      body,
       "part.bgcode",
       { start: true },
     );
     expect(result.ok).toBe(true);
     expect(result.started).toBe(true);
+
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/api/v1/status");
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).method).toBe("GET");
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).body).toBeUndefined();
 
     const putAuthed = fetchMock.mock.calls.find(
       (call) =>
@@ -108,29 +114,34 @@ describe("prusalinkAdapter", () => {
         new Headers((call[1] as RequestInit).headers).has("Authorization"),
     );
     expect(putAuthed).toBeTruthy();
+    expect(Buffer.isBuffer(putAuthed![1]!.body) || putAuthed![1]!.body instanceof Uint8Array).toBe(
+      true,
+    );
+    expect(Buffer.from(putAuthed![1]!.body as Uint8Array).equals(Buffer.from(body))).toBe(true);
     const headers = new Headers((putAuthed![1] as RequestInit).headers);
     expect(headers.get("Print-After-Upload")).toBe("?1");
     expect(headers.get("Overwrite")).toBe("?1");
     expect(headers.get("Authorization")).toMatch(/^Digest /);
     expect(String(putAuthed![0])).toContain("/api/v1/files/usb/part.bgcode");
+
+    // No bodyless PUT probes
+    for (const call of fetchMock.mock.calls) {
+      const init = call[1] as RequestInit | undefined;
+      if (init?.method === "PUT") {
+        expect(init.body).toBeTruthy();
+      }
+    }
   });
 
   it("getStatus maps PRINTING progress", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        headers: new Headers({
-          "www-authenticate":
-            'Digest realm="Printer API", nonce="n3", qop="auth", algorithm=MD5',
-        }),
-        json: async () => ({}),
-      })
+      .mockResolvedValueOnce(digest401())
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
         headers: new Headers(),
+        arrayBuffer: async () => new ArrayBuffer(0),
         json: async () => ({
           printer: { state: "PRINTING" },
           job: {
@@ -155,19 +166,12 @@ describe("prusalinkAdapter", () => {
   it("getStatus maps FINISHED to complete", async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        headers: new Headers({
-          "www-authenticate":
-            'Digest realm="Printer API", nonce="n4", qop="auth", algorithm=MD5',
-        }),
-        json: async () => ({}),
-      })
+      .mockResolvedValueOnce(digest401())
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
         headers: new Headers(),
+        arrayBuffer: async () => new ArrayBuffer(0),
         json: async () => ({
           printer: { state: "FINISHED" },
           job: { file: { name: "done.bgcode" }, progress: 100 },

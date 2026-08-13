@@ -208,26 +208,28 @@ export function createPrinterCheckoffLink(
   if (!filename || !integrationId || !printerId) return null;
   if (!Number.isInteger(input.profile_id) || input.profile_id <= 0) return null;
 
-  const link: PrinterCheckoffLink = {
-    id: randomUUID(),
-    profile_id: input.profile_id,
-    integration_id: integrationId,
-    printer_id: printerId,
-    host_name: input.host_name.trim() || "Printer",
-    filename,
-    remote_path: input.remote_path?.trim() || undefined,
-    upload_job_id: input.upload_job_id?.trim() || undefined,
-    units,
-    state: "watching",
-    host_outcome: "unknown",
-    saw_active: false,
-    started: Boolean(input.started),
-    created_at: new Date().toISOString(),
-  };
-  const all = loadPrinterCheckoffLinks(repo);
-  all.push(link);
-  savePrinterCheckoffLinks(repo, all);
-  return link;
+  return repo.transaction(() => {
+    const link: PrinterCheckoffLink = {
+      id: randomUUID(),
+      profile_id: input.profile_id,
+      integration_id: integrationId,
+      printer_id: printerId,
+      host_name: input.host_name.trim() || "Printer",
+      filename,
+      remote_path: input.remote_path?.trim() || undefined,
+      upload_job_id: input.upload_job_id?.trim() || undefined,
+      units,
+      state: "watching",
+      host_outcome: "unknown",
+      saw_active: false,
+      started: Boolean(input.started),
+      created_at: new Date().toISOString(),
+    };
+    const all = loadPrinterCheckoffLinks(repo);
+    all.push(link);
+    savePrinterCheckoffLinks(repo, all);
+    return link;
+  });
 }
 
 export type PrinterCheckoffLinkPatch = Partial<
@@ -250,19 +252,21 @@ export function updatePrinterCheckoffLink(
   patch: PrinterCheckoffLinkPatch,
   options?: { requireState?: PrinterCheckoffLinkState | PrinterCheckoffLinkState[] },
 ): PrinterCheckoffLink | null {
-  const all = loadPrinterCheckoffLinks(repo);
-  const idx = all.findIndex((l) => l.id === id);
-  if (idx < 0) return null;
-  if (options?.requireState) {
-    const allowed = Array.isArray(options.requireState)
-      ? options.requireState
-      : [options.requireState];
-    if (!allowed.includes(all[idx].state)) return null;
-  }
-  const next = { ...all[idx], ...patch };
-  all[idx] = next;
-  savePrinterCheckoffLinks(repo, all);
-  return next;
+  return repo.transaction(() => {
+    const all = loadPrinterCheckoffLinks(repo);
+    const idx = all.findIndex((l) => l.id === id);
+    if (idx < 0) return null;
+    if (options?.requireState) {
+      const allowed = Array.isArray(options.requireState)
+        ? options.requireState
+        : [options.requireState];
+      if (!allowed.includes(all[idx].state)) return null;
+    }
+    const next = { ...all[idx], ...patch };
+    all[idx] = next;
+    savePrinterCheckoffLinks(repo, all);
+    return next;
+  });
 }
 
 export function listWatchingPrinterCheckoffLinks(

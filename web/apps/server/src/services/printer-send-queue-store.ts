@@ -119,25 +119,27 @@ export function enqueuePrinterSend(
   const artifactPath = input.artifact_path.trim();
   const printerId = input.printer_id.trim();
   if (!filename || !artifactPath || !printerId) return null;
-  const now = new Date().toISOString();
-  const item: PrinterSendQueueItem = {
-    id: randomUUID(),
-    filename,
-    artifact_path: artifactPath,
-    printer_id: printerId,
-    wait_for_idle: input.wait_for_idle !== false,
-    start: Boolean(input.start),
-    profile_id: input.profile_id,
-    checkoff_units: input.checkoff_units?.filter(isUnit),
-    state: "queued",
-    created_at: now,
-    updated_at: now,
-    host_name: input.host_name?.trim() || undefined,
-  };
-  const all = loadPrinterSendQueue(repo);
-  all.push(item);
-  savePrinterSendQueue(repo, all);
-  return item;
+  return repo.transaction(() => {
+    const now = new Date().toISOString();
+    const item: PrinterSendQueueItem = {
+      id: randomUUID(),
+      filename,
+      artifact_path: artifactPath,
+      printer_id: printerId,
+      wait_for_idle: input.wait_for_idle !== false,
+      start: Boolean(input.start),
+      profile_id: input.profile_id,
+      checkoff_units: input.checkoff_units?.filter(isUnit),
+      state: "queued",
+      created_at: now,
+      updated_at: now,
+      host_name: input.host_name?.trim() || undefined,
+    };
+    const all = loadPrinterSendQueue(repo);
+    all.push(item);
+    savePrinterSendQueue(repo, all);
+    return item;
+  });
 }
 
 export function getPrinterSendQueueItem(
@@ -158,23 +160,25 @@ export function updatePrinterSendQueueItem(
   >,
   options?: { requireState?: PrinterSendQueueState | PrinterSendQueueState[] },
 ): PrinterSendQueueItem | null {
-  const all = loadPrinterSendQueue(repo);
-  const idx = all.findIndex((i) => i.id === id);
-  if (idx < 0) return null;
-  if (options?.requireState) {
-    const allowed = Array.isArray(options.requireState)
-      ? options.requireState
-      : [options.requireState];
-    if (!allowed.includes(all[idx].state)) return null;
-  }
-  const next = {
-    ...all[idx],
-    ...patch,
-    updated_at: patch.updated_at ?? new Date().toISOString(),
-  };
-  all[idx] = next;
-  savePrinterSendQueue(repo, all);
-  return next;
+  return repo.transaction(() => {
+    const all = loadPrinterSendQueue(repo);
+    const idx = all.findIndex((i) => i.id === id);
+    if (idx < 0) return null;
+    if (options?.requireState) {
+      const allowed = Array.isArray(options.requireState)
+        ? options.requireState
+        : [options.requireState];
+      if (!allowed.includes(all[idx].state)) return null;
+    }
+    const next = {
+      ...all[idx],
+      ...patch,
+      updated_at: patch.updated_at ?? new Date().toISOString(),
+    };
+    all[idx] = next;
+    savePrinterSendQueue(repo, all);
+    return next;
+  });
 }
 
 export function cancelPrinterSendQueueItem(

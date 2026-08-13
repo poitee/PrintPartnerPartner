@@ -234,6 +234,11 @@ export class AppRepository {
       .run();
   }
 
+  /** Sync SQLite transaction — serializes concurrent settings RMW mutations. */
+  transaction<T>(fn: () => T): T {
+    return this.db.transaction(fn);
+  }
+
   getGlobalNaming(): StlNamingProfileDict {
     const raw = this.getSetting(STL_NAMING_DEFAULTS_KEY);
     if (!raw) return structuredClone(DEFAULT_NAMING_PROFILE);
