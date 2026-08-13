@@ -133,9 +133,10 @@ describe("prusalinkAdapter", () => {
     }
   });
 
-  it("getStatus maps PRINTING progress", async () => {
+  it("getStatus maps PRINTING progress and prefers /job filename", async () => {
     const fetchMock = vi
       .fn()
+      // status challenge + status
       .mockResolvedValueOnce(digest401())
       .mockResolvedValueOnce({
         ok: true,
@@ -146,9 +147,19 @@ describe("prusalinkAdapter", () => {
           printer: { state: "PRINTING" },
           job: {
             progress: 33.3,
-            file: { display_name: "benchy.bgcode" },
             time_remaining: 1200,
           },
+        }),
+      })
+      // job challenge + job (file lives here)
+      .mockResolvedValueOnce(digest401())
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        arrayBuffer: async () => new ArrayBuffer(0),
+        json: async () => ({
+          file: { display_name: "benchy.bgcode" },
         }),
       });
     vi.stubGlobal("fetch", fetchMock);
@@ -161,6 +172,33 @@ describe("prusalinkAdapter", () => {
     expect(status.progress).toBe(33);
     expect(status.filename).toBe("benchy.bgcode");
     expect(status.eta_seconds).toBe(1200);
+    expect(
+      fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/v1/job")),
+    ).toBe(true);
+  });
+
+  it("getStatus maps READY to idle", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(digest401())
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        arrayBuffer: async () => new ArrayBuffer(0),
+        json: async () => ({ printer: { state: "READY" } }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const status = await prusalinkAdapter.getStatus!({
+      base_url: "http://127.0.0.1",
+      password: "printer-key",
+    });
+    expect(status.state).toBe("idle");
+    expect(status.message).toBe("Idle");
+    expect(
+      fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/v1/job")),
+    ).toBe(false);
   });
 
   it("getStatus maps FINISHED to complete", async () => {

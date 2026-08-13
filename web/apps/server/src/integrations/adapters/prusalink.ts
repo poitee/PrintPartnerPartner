@@ -127,21 +127,65 @@ function mapPrinterState(raw: string | undefined): PrinterHostStatus["state"] {
   if (state === "PRINTING") return "printing";
   if (state === "PAUSED") return "paused";
   if (state === "FINISHED") return "complete";
-  // STOPPED / IDLE → idle (cancel must not auto-checkoff)
-  if (state === "IDLE" || state === "STOPPED") return "idle";
+  // READY / IDLE / STOPPED → idle (Buddy uses READY between jobs; cancel must not auto-checkoff)
+  if (state === "READY" || state === "IDLE" || state === "STOPPED") return "idle";
   if (state === "ATTENTION" || state === "ERROR") return "error";
   if (!state) return "unknown";
   return "unknown";
 }
 
+type PrusaFileMeta = { name?: string; display_name?: string; path?: string };
+
 type PrusaStatusBody = {
   printer?: { state?: string; status?: string };
   job?: {
     progress?: number;
-    file?: { name?: string; display_name?: string; path?: string };
+    file?: PrusaFileMeta;
     time_remaining?: number;
   };
 };
+
+type PrusaJobBody = {
+  file?: PrusaFileMeta;
+  progress?: number;
+  time_remaining?: number;
+};
+
+function filenameFromFile(file: PrusaFileMeta | undefined): string | undefined {
+  return file?.display_name ?? file?.name ?? file?.path ?? undefined;
+}
+
+async function readJobFileMeta(
+  config: IntegrationConfig,
+  baseUrl: string,
+): Promise<{ filename?: string; progress?: number; eta_seconds?: number }> {
+  try {
+    const res = await prusalinkFetch(`${baseUrl}/api/v1/job`, config, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      await drainResponseBody(res);
+      return {};
+    }
+    const body = (await res.json()) as PrusaJobBody;
+    const progressRaw = body.progress;
+    const progress =
+      typeof progressRaw === "number" && Number.isFinite(progressRaw)
+        ? Math.round(Math.min(100, Math.max(0, progressRaw)))
+        : undefined;
+    const eta =
+      typeof body.time_remaining === "number" && Number.isFinite(body.time_remaining)
+        ? body.time_remaining
+        : undefined;
+    return {
+      filename: filenameFromFile(body.file),
+      progress,
+      eta_seconds: eta,
+    };
+  } catch {
+    return {};
+  }
+}
 
 async function readStatus(config: IntegrationConfig): Promise<PrinterHostStatus> {
   const baseUrl = normalizeBaseUrl(config.base_url ?? config.baseUrl);
@@ -163,19 +207,23 @@ async function readStatus(config: IntegrationConfig): Promise<PrinterHostStatus>
   const rawState = body.printer?.state ?? body.printer?.status;
   const state = mapPrinterState(rawState);
   const progressRaw = body.job?.progress;
-  const progress =
+  let progress =
     typeof progressRaw === "number" && Number.isFinite(progressRaw)
       ? Math.round(Math.min(100, Math.max(0, progressRaw)))
       : undefined;
-  const filename =
-    body.job?.file?.display_name ??
-    body.job?.file?.name ??
-    body.job?.file?.path ??
-    undefined;
-  const eta =
+  let filename = filenameFromFile(body.job?.file);
+  let eta =
     typeof body.job?.time_remaining === "number" && Number.isFinite(body.job.time_remaining)
       ? body.job.time_remaining
       : undefined;
+
+  // While printing/paused, `/api/v1/job` is the reliable source for active file metadata.
+  if (state === "printing" || state === "paused") {
+    const jobMeta = await readJobFileMeta(config, baseUrl);
+    if (jobMeta.filename) filename = jobMeta.filename;
+    if (progress == null && jobMeta.progress != null) progress = jobMeta.progress;
+    if (eta == null && jobMeta.eta_seconds != null) eta = jobMeta.eta_seconds;
+  }
 
   return {
     state,
