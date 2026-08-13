@@ -66,9 +66,10 @@ export function formatPrinterJobLine(
     return detail ? `Error · ${detail}` : "Error";
   }
   if (status.state === "printing" || status.state === "paused") {
-    const parts = [status.state === "paused" ? "Paused" : "Printing"];
+    const verb = status.state === "paused" ? "Paused" : "Printing";
     const filename = status.filename?.trim();
-    if (filename) parts.push(filename);
+    const head = filename ? `${verb} ${filename}` : verb;
+    const parts = [head];
     if (status.progress != null && Number.isFinite(status.progress)) {
       parts.push(`${Math.round(status.progress)}%`);
     }
