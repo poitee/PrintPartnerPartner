@@ -89,7 +89,8 @@ function parseDecisions(
 /**
  * Apply user verify/reject decisions for an awaiting_verify link.
  * Confirms mark Progress units; rejects leave units unprinted and log reasons.
- * Claims the link (resolved_units) before Progress mutation to reduce races.
+ * Claim, Progress apply, units_marked, and outcomes run in one transaction so a
+ * failed apply cannot leave the link resolved with unmarked units.
  */
 export function verifyPrinterCheckoff(
   repo: AppRepository,
@@ -155,65 +156,87 @@ export function verifyPrinterCheckoff(
   );
   const fullyDone = nextPending.length === 0;
 
-  // Claim before Progress mutation so concurrent verifies cannot double-apply.
-  const claimed = updatePrinterCheckoffLink(
-    repo,
-    link.id,
-    {
-      resolved_units: resolved,
-      state: fullyDone ? "verified" : "awaiting_verify",
-      applied_at: fullyDone ? new Date().toISOString() : link.applied_at,
-    },
-    { requireState: "awaiting_verify" },
-  );
-  if (!claimed) {
-    return { error: "Link changed concurrently", status: 409 };
-  }
+  try {
+    return repo.transaction(() => {
+      const claimed = updatePrinterCheckoffLink(
+        repo,
+        link.id,
+        {
+          resolved_units: resolved,
+          state: fullyDone ? "verified" : "awaiting_verify",
+          applied_at: fullyDone ? new Date().toISOString() : link.applied_at,
+        },
+        { requireState: "awaiting_verify" },
+      );
+      if (!claimed) {
+        throw Object.assign(new Error("Link changed concurrently"), { status: 409 as const });
+      }
 
-  let unitsConfirmed = 0;
-  if (toConfirm.length) {
-    unitsConfirmed = applyCheckoffUnits(
-      repo,
-      link.profile_id,
-      toConfirm.map((d) => ({ part_id: d.part_id, unit_index: d.unit_index })),
-    );
-    if (unitsConfirmed > 0) {
-      updatePrinterCheckoffLink(repo, link.id, {
-        units_marked: (link.units_marked ?? 0) + unitsConfirmed,
-      });
-    }
-  }
+      let unitsConfirmed = 0;
+      if (toConfirm.length) {
+        unitsConfirmed = applyCheckoffUnits(
+          repo,
+          link.profile_id,
+          toConfirm.map((d) => ({ part_id: d.part_id, unit_index: d.unit_index })),
+        );
+        const unitsById = repo.printUnitsByPartId(link.profile_id);
+        for (const d of toConfirm) {
+          const flags = unitsById.get(d.part_id);
+          if (!flags?.[d.unit_index]) {
+            throw Object.assign(new Error("Failed to apply confirmed Progress units"), {
+              status: 500 as const,
+            });
+          }
+        }
+        updatePrinterCheckoffLink(repo, link.id, {
+          units_marked: (link.units_marked ?? 0) + unitsConfirmed,
+        });
+      }
 
-  const partRows = repo.getProfilePartRows(link.profile_id);
-  const byId = new Map(partRows.map((p) => [p.id, p]));
-  const outcomes = appendPrintOutcomes(
-    repo,
-    decisions.map((d) => {
-      const part = byId.get(d.part_id);
+      const partRows = repo.getProfilePartRows(link.profile_id);
+      const byId = new Map(partRows.map((p) => [p.id, p]));
+      const outcomes = appendPrintOutcomes(
+        repo,
+        decisions.map((d) => {
+          const part = byId.get(d.part_id);
+          return {
+            profile_id: link.profile_id,
+            part_id: d.part_id,
+            unit_index: d.unit_index,
+            result: d.result,
+            reason: d.reason,
+            note: d.note,
+            host_integration_id: link.integration_id,
+            filename: link.filename,
+            match_key: part?.matchKey || undefined,
+            role: part?.role || undefined,
+            filament_display: undefined,
+            link_id: link.id,
+          };
+        }),
+      );
+
+      const updated = getPrinterCheckoffLink(repo, link.id) ?? claimed;
       return {
-        profile_id: link.profile_id,
-        part_id: d.part_id,
-        unit_index: d.unit_index,
-        result: d.result,
-        reason: d.reason,
-        note: d.note,
-        host_integration_id: link.integration_id,
-        filename: link.filename,
-        match_key: part?.matchKey || undefined,
-        role: part?.role || undefined,
-        filament_display: undefined,
-        link_id: link.id,
+        link: updated,
+        units_confirmed: unitsConfirmed,
+        units_rejected: toReject.length,
+        outcomes,
       };
-    }),
-  );
-
-  const updated = getPrinterCheckoffLink(repo, link.id) ?? claimed;
-  return {
-    link: updated,
-    units_confirmed: unitsConfirmed,
-    units_rejected: toReject.length,
-    outcomes,
-  };
+    });
+  } catch (err) {
+    const status =
+      err && typeof err === "object" && "status" in err && typeof (err as { status: unknown }).status === "number"
+        ? (err as { status: number }).status
+        : null;
+    if (status === 409 || status === 500) {
+      return {
+        error: err instanceof Error ? err.message : String(err),
+        status,
+      };
+    }
+    throw err;
+  }
 }
 
 export function dismissHostFailedLink(
