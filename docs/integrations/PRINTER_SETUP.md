@@ -1,6 +1,6 @@
 # Printer setup & debugging (desk-first)
 
-How to connect Moonraker / PrusaLink / Bambu (status) hosts, link them to fleet machines, send sliced G-code from Export (Moonraker/PrusaLink), and auto-check off Progress units when a print finishes. Product UX: [PRINTER_UX.md](PRINTER_UX.md). Vendor APIs: [PRINTER_APIS.md](PRINTER_APIS.md).
+How to connect Moonraker / PrusaLink / Bambu (status) hosts, link them to fleet machines, send sliced G-code from Export (Moonraker/PrusaLink), and open Progress verify when a host job finishes. Product UX: [PRINTER_UX.md](PRINTER_UX.md). Vendor APIs: [PRINTER_APIS.md](PRINTER_APIS.md).
 
 **Phases A–E (desk-first self-host):** Settings hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip**; **verify-first Progress** on successful job complete (confirm/reject); **Bambu LAN MQTT status** (Phase E). Bambu send stays out of the default product path.
 

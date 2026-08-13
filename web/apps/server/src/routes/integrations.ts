@@ -90,7 +90,18 @@ export async function registerIntegrationRoutes(
 
   app.get(
     "/integrations/:id/status",
-    { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: "1 minute",
+          keyGenerator: (request) => {
+            const id = (request.params as { id?: string }).id ?? "";
+            return `${request.ip}:${id}`;
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const id = (request.params as { id: string }).id;
       if (!deps.integrations.get(id)) {

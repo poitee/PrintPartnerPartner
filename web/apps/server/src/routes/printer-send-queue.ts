@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
 import { basename } from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { AppRepository } from "../db/repository.js";
@@ -19,7 +20,7 @@ import {
 } from "../services/printer-send-queue.js";
 import {
   isAllowedPrinterUploadFilename,
-  persistPrinterUploadArtifact,
+  streamPrinterUploadArtifact,
 } from "../services/printer-upload-job.js";
 import type { InProcessJobRunner } from "./jobs.js";
 
@@ -65,125 +66,138 @@ export async function registerPrinterSendQueueRoutes(
       let start = false;
       let waitForIdle = true;
       let filename = "print.gcode";
-      let fileBuffer: Buffer | null = null;
+      let artifactPath: string | null = null;
       let profileId: number | undefined;
       let checkoffUnitsRaw: string | undefined;
 
-      for await (const part of request.parts()) {
-        if (part.type === "field") {
-          const value = String(await part.value);
-          if (part.fieldname === "printer_id") printerId = value.trim();
-          if (part.fieldname === "start") {
-            const raw = value.toLowerCase();
-            start = raw === "1" || raw === "true" || raw === "yes";
+      try {
+        for await (const part of request.parts()) {
+          if (part.type === "field") {
+            const value = String(await part.value);
+            if (part.fieldname === "printer_id") printerId = value.trim();
+            if (part.fieldname === "start") {
+              const raw = value.toLowerCase();
+              start = raw === "1" || raw === "true" || raw === "yes";
+            }
+            if (part.fieldname === "wait_for_idle") {
+              const raw = value.toLowerCase();
+              waitForIdle = !(raw === "0" || raw === "false" || raw === "no");
+            }
+            if (part.fieldname === "profile_id") {
+              const n = Number(value);
+              if (Number.isInteger(n) && n > 0) profileId = n;
+            }
+            if (part.fieldname === "checkoff_units") {
+              checkoffUnitsRaw = value;
+            }
+            continue;
           }
-          if (part.fieldname === "wait_for_idle") {
-            const raw = value.toLowerCase();
-            waitForIdle = !(raw === "0" || raw === "false" || raw === "no");
+          if (part.type !== "file") continue;
+          if (part.fieldname !== "file" && part.fieldname !== "gcode") {
+            part.file.resume();
+            continue;
           }
-          if (part.fieldname === "profile_id") {
-            const n = Number(value);
-            if (Number.isInteger(n) && n > 0) profileId = n;
+          if (artifactPath) {
+            part.file.resume();
+            return sendProblem(reply, 400, "Bad Request", "Only one G-code file is allowed");
           }
-          if (part.fieldname === "checkoff_units") {
-            checkoffUnitsRaw = value;
+          filename = (part.filename || "print.gcode").replace(/\\/g, "/");
+          try {
+            artifactPath = await streamPrinterUploadArtifact(
+              deps.jobs.getExportsDir(),
+              randomUUID(),
+              basename(filename),
+              part.file,
+            );
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (/size limit/i.test(message)) {
+              return sendProblem(reply, 413, "Payload Too Large", message);
+            }
+            throw err;
           }
-          continue;
         }
-        if (part.type !== "file") continue;
-        if (part.fieldname !== "file" && part.fieldname !== "gcode") {
-          part.file.resume();
-          continue;
+
+        if (!printerId) {
+          return sendProblem(reply, 400, "Bad Request", "printer_id is required");
         }
-        if (fileBuffer) {
-          part.file.resume();
-          return sendProblem(reply, 400, "Bad Request", "Only one G-code file is allowed");
+        if (!artifactPath) {
+          return sendProblem(reply, 400, "Bad Request", "G-code file required");
         }
-        filename = (part.filename || "print.gcode").replace(/\\/g, "/");
-        const chunks: Buffer[] = [];
-        for await (const chunk of part.file) {
-          chunks.push(Buffer.from(chunk));
+
+        const baseName = basename(filename);
+        if (!isAllowedPrinterUploadFilename(baseName)) {
+          return sendProblem(
+            reply,
+            400,
+            "Bad Request",
+            "Only .gcode / .bgcode / .gco files can be queued",
+          );
         }
-        fileBuffer = Buffer.concat(chunks);
-      }
 
-      if (!printerId) {
-        return sendProblem(reply, 400, "Bad Request", "printer_id is required");
-      }
-      if (!fileBuffer || fileBuffer.length === 0) {
-        return sendProblem(reply, 400, "Bad Request", "G-code file required");
-      }
+        const checkoff_units = parseCheckoffUnits(checkoffUnitsRaw);
+        if (checkoff_units.length > 0 && profileId == null) {
+          return sendProblem(
+            reply,
+            400,
+            "Bad Request",
+            "profile_id is required when checkoff_units are provided",
+          );
+        }
+        if (profileId != null && !deps.repo.getProfile(profileId)) {
+          return sendProblem(reply, 404, "Not Found", "Profile not found");
+        }
 
-      const baseName = basename(filename);
-      if (!isAllowedPrinterUploadFilename(baseName)) {
-        return sendProblem(
-          reply,
-          400,
-          "Bad Request",
-          "Only .gcode / .bgcode / .gco files can be queued",
-        );
-      }
+        const machine = loadFleet(deps.repo).find((m) => m.id === printerId);
+        if (!machine) {
+          return sendProblem(reply, 404, "Not Found", "Fleet printer not found");
+        }
+        const integrationId = machine.integration_id?.trim();
+        if (!integrationId) {
+          return sendProblem(
+            reply,
+            400,
+            "Bad Request",
+            "Printer is not linked to a host. Link a Moonraker or PrusaLink host in Settings.",
+          );
+        }
+        const integration = getIntegrationConfig(deps.repo, integrationId);
+        if (!integration) {
+          return sendProblem(reply, 400, "Bad Request", "Linked printer host was not found");
+        }
+        if (integration.type !== "moonraker" && integration.type !== "prusalink") {
+          return sendProblem(
+            reply,
+            400,
+            "Bad Request",
+            `Queue is not supported for ${integration.type}`,
+          );
+        }
 
-      const checkoff_units = parseCheckoffUnits(checkoffUnitsRaw);
-      if (checkoff_units.length > 0 && profileId == null) {
-        return sendProblem(
-          reply,
-          400,
-          "Bad Request",
-          "profile_id is required when checkoff_units are provided",
-        );
+        const item = enqueuePrinterSend(deps.repo, {
+          filename: baseName,
+          artifact_path: artifactPath,
+          printer_id: printerId,
+          start,
+          wait_for_idle: waitForIdle,
+          profile_id: profileId,
+          checkoff_units,
+          host_name: integration.name,
+        });
+        if (!item) {
+          return sendProblem(reply, 400, "Bad Request", "Could not enqueue item");
+        }
+        artifactPath = null;
+        return { item };
+      } finally {
+        if (artifactPath) {
+          try {
+            rmSync(artifactPath, { force: true });
+          } catch {
+            /* ignore */
+          }
+        }
       }
-      if (profileId != null && !deps.repo.getProfile(profileId)) {
-        return sendProblem(reply, 404, "Not Found", "Profile not found");
-      }
-
-      const machine = loadFleet(deps.repo).find((m) => m.id === printerId);
-      if (!machine) {
-        return sendProblem(reply, 404, "Not Found", "Fleet printer not found");
-      }
-      const integrationId = machine.integration_id?.trim();
-      if (!integrationId) {
-        return sendProblem(
-          reply,
-          400,
-          "Bad Request",
-          "Printer is not linked to a host. Link a Moonraker or PrusaLink host in Settings.",
-        );
-      }
-      const integration = getIntegrationConfig(deps.repo, integrationId);
-      if (!integration) {
-        return sendProblem(reply, 400, "Bad Request", "Linked printer host was not found");
-      }
-      if (integration.type !== "moonraker" && integration.type !== "prusalink") {
-        return sendProblem(
-          reply,
-          400,
-          "Bad Request",
-          `Queue is not supported for ${integration.type}`,
-        );
-      }
-
-      const artifact_path = persistPrinterUploadArtifact(
-        deps.jobs.getExportsDir(),
-        randomUUID(),
-        baseName,
-        fileBuffer,
-      );
-
-      const item = enqueuePrinterSend(deps.repo, {
-        filename: baseName,
-        artifact_path,
-        printer_id: printerId,
-        start,
-        wait_for_idle: waitForIdle,
-        profile_id: profileId,
-        checkoff_units,
-        host_name: integration.name,
-      });
-      if (!item) {
-        return sendProblem(reply, 400, "Bad Request", "Could not enqueue item");
-      }
-      return { item };
     },
   );
 

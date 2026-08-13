@@ -13,11 +13,12 @@ function normalizeBaseUrl(raw: unknown): string | null {
 }
 
 function authHeaders(config: IntegrationConfig): Record<string, string> {
-  const apiKey = config.api_key ?? config.apiKey;
-  if (typeof apiKey !== "string" || !apiKey.trim() || apiKey === "****") return {};
-  const key = apiKey.trim();
-  // Moonraker API keys use X-Api-Key; JWTs use Authorization Bearer.
-  if (key.split(".").length === 3) {
+  const apiKeyRaw = config.api_key ?? config.apiKey;
+  if (typeof apiKeyRaw !== "string") return {};
+  const key = apiKeyRaw.trim();
+  if (!key || key === "****") return {};
+  // Moonraker API keys use X-Api-Key; JWTs use Authorization Bearer (three base64url segments).
+  if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(key)) {
     return { Authorization: `Bearer ${key}` };
   }
   return { "X-Api-Key": key };

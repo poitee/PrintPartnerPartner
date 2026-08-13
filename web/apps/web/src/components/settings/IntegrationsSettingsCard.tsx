@@ -165,8 +165,8 @@ export default function IntegrationsSettingsCard({ engineReady }: Props) {
         <div className="min-w-0">
           <p className="text-base font-semibold">Optional integrations</p>
           <p className="text-sm text-muted-foreground">
-            Spoolman filament inventory for the Build picker. Printer hosts live in the card
-            above.
+            Spoolman filament inventory for the Build picker. Printer hosts live in the
+            Printer hosts card.
           </p>
         </div>
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />

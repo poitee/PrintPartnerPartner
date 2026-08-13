@@ -17,7 +17,7 @@ flowchart LR
   Printer -.->|manual| Checkoff[Progress checkoff]
 ```
 
-- **Live send-to-printer does not exist.**
+- **Live send-to-printer ships for Moonraker and PrusaLink** (Export upload / start, Progress verify-first). Bambu is status-only over LAN MQTT.
 - **No G-code generation.** Exports are slicer inputs (STL packs, packed 3MF). Materials in 3MF are display colors, not AMS/MMU maps ([3MF_EXPORT_VALIDATION.md](../3MF_EXPORT_VALIDATION.md)).
 - **Spoolman is inventory**, not consumption: no weight deduction on Progress checkoff.
 - **Self-host** can reach LAN printers (`allowPrivate: true` for Spoolman/Moonraker). **SaaS** generally cannot reach customer LANs without an on-prem agent/tunnel.
@@ -156,7 +156,7 @@ Concrete extension points already in-repo:
 
 ## Feature unlock matrix
 
-Vendor API *capability* (what the host/API can support), not current Print Partner support — none of the live send/status rows below are shipped yet. Spoolman in Print Partner remains inventory-only ([SPOOLMAN.md](SPOOLMAN.md)).
+Vendor API *capability* (what the host/API can support). Print Partner ships Moonraker/PrusaLink status + upload and Bambu status-only today; L4 farm queue beyond the thin send-queue, L5 AMS mapping, and Bambu send remain open. Spoolman in Print Partner remains inventory-only ([SPOOLMAN.md](SPOOLMAN.md)).
 
 | Feature | Moonraker | PrusaLink | Bambu (dev MQTT) | Bambu (official) |
 |---------|-----------|-----------|------------------|------------------|
@@ -177,10 +177,10 @@ Vendor API *capability* (what the host/API can support), not current Print Partn
 
 ## Recommended stance when building
 
-Ship nothing until persona + slice boundary are agreed. When building:
+Shipped desk-v1: Moonraker/PrusaLink L1+L3+verify-first L2, Bambu L1 status-only, thin farm send-queue. Still open:
 
-1. **Moonraker L1+L3 first** (adapter already half-there).
-2. **PrusaLink in parallel** (same shape, official OpenAPI).
-3. **Bambu status-only + explicit Developer Mode control** until an official SDK path is chosen.
+1. **Official Bambu send** (Connect / Local Server) — not reverse-engineered MQTT print-start.
+2. **L5 AMS/MMU mapping** and richer L4 farm matching.
+3. **`startPrint` / pause / cancel / subscribe** beyond upload-with-start where hosts expose them.
 
 Related code: `web/apps/server/src/integrations/adapters/moonraker.ts`, `prusalink.ts`, `bambu.ts`; fleet service `web/apps/server/src/services/printer-fleet.ts`.
