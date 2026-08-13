@@ -66,7 +66,7 @@ Deleting a host clears `integration_id` / `device_id` on any fleet rows that poi
 ## Send a sliced file
 
 1. Slice in Orca / PrusaSlicer / etc. → `.gcode` or `.bgcode`.
-2. **Export → Send to printer** → pick a linked **Moonraker or PrusaLink** fleet machine → **Upload** or **Upload & start**.
+2. **Export → Send to printer** → pick a linked **Moonraker or PrusaLink** fleet machine (status shows Idle/Busy; picker prefers Idle) → **Upload** or **Upload & start** (start is blocked while Printing/Paused).
 3. Optional **Progress verify tracking:** when the active plan has missing Progress units, leave **Track for Progress verify when this print finishes** on and multi-select which missing parts this job covers (defaults to all missing). Incomplete unit indices are stored with the upload.
 4. JobTray shows kind **Send to printer** (`printer-upload`): uploading… → complete / error.
 

@@ -243,6 +243,18 @@ export default function ExportActionCards({ onShare }: Props) {
       : `${linkedPrinters.length} linked printers`;
   }, [hasLinked, linkedPrinters.length]);
 
+  const selectedHostStatus = useMemo(() => {
+    const machine = linkedPrinters.find((p) => p.id === selectedPrinterId);
+    const integrationId = machine?.integration_id?.trim();
+    if (!integrationId) return undefined;
+    return hostStatusByIntegration[integrationId];
+  }, [hostStatusByIntegration, linkedPrinters, selectedPrinterId]);
+
+  const selectedPrinterBusy =
+    selectedHostStatus?.state === "printing" || selectedHostStatus?.state === "paused";
+  const selectedPrinterUnavailable =
+    selectedHostStatus?.state === "offline" || selectedHostStatus?.state === "error";
+
   const checkoffUnits = useMemo(() => {
     if (!autoCheckoff || selectedProfileId == null) return [];
     return incompleteUnitsForSelectedParts(missingParts, selectedCheckoffPartIds);
@@ -329,6 +341,18 @@ export default function ExportActionCards({ onShare }: Props) {
     if (!hasLinked || !selectedPrinterId) {
       toast.error("No linked printer", {
         description: "Link a Moonraker or PrusaLink host in Settings first.",
+      });
+      return;
+    }
+    if (startAfterUpload && selectedPrinterBusy) {
+      toast.error("Printer is busy", {
+        description: "Pick an Idle printer, or use Upload without start.",
+      });
+      return;
+    }
+    if (startAfterUpload && selectedPrinterUnavailable) {
+      toast.error("Printer not ready", {
+        description: selectedHostStatus?.message?.trim() || "Host is offline or in error.",
       });
       return;
     }
@@ -675,12 +699,29 @@ export default function ExportActionCards({ onShare }: Props) {
                 </Button>
                 <Button
                   size="sm"
-                  disabled={exportBusy || !selectedPrinterId}
+                  disabled={
+                    exportBusy ||
+                    !selectedPrinterId ||
+                    selectedPrinterBusy ||
+                    selectedPrinterUnavailable
+                  }
+                  title={
+                    selectedPrinterBusy
+                      ? "Printer is busy — pick Idle or use Upload"
+                      : selectedPrinterUnavailable
+                        ? "Printer offline or error"
+                        : undefined
+                  }
                   onClick={() => openFilePicker(true)}
                 >
                   Upload & start
                 </Button>
               </div>
+              {selectedPrinterBusy ? (
+                <p className="text-xs text-muted-foreground">
+                  Selected printer is busy. Upload still works; start is blocked until Idle.
+                </p>
+              ) : null}
             </>
           ) : (
             <div className="flex w-full flex-col gap-2">
