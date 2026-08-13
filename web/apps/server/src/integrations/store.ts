@@ -9,6 +9,9 @@ import type {
 } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 
+/** In-memory bytes or a path on disk (streamed by adapters). */
+export type PrinterUploadSource = Uint8Array | { path: string };
+
 export type IntegrationAdapter = {
   type: IntegrationType;
   testConnection(config: IntegrationConfig): Promise<IntegrationTestResult>;
@@ -16,7 +19,7 @@ export type IntegrationAdapter = {
   getStatus?(config: IntegrationConfig): Promise<PrinterHostStatus>;
   uploadFile?(
     config: IntegrationConfig,
-    bytes: Uint8Array,
+    source: PrinterUploadSource,
     filename: string,
     options?: { start?: boolean },
   ): Promise<PrinterUploadResult>;

@@ -1,4 +1,4 @@
-import { createWriteStream, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { Readable } from "node:stream";
@@ -117,15 +117,19 @@ async function runPrinterUploadJobInner(
     progress: 20,
   });
 
-  const bytes = new Uint8Array(readFileSync(input.artifact_path));
   emit({
     message: `Uploading ${filename} to ${hostLabel}`,
     progress: 45,
   });
 
-  const result = await adapter.uploadFile(integration.config, bytes, filename, {
-    start: input.start,
-  });
+  const result = await adapter.uploadFile(
+    integration.config,
+    { path: input.artifact_path },
+    filename,
+    {
+      start: input.start,
+    },
+  );
 
   if (!result.ok) {
     throw new Error(result.message ?? "Printer upload failed");
