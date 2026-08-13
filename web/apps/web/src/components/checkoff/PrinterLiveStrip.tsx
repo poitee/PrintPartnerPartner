@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Printer } from "lucide-react";
 import {
+  fetchIntegrationStatus,
   fetchIntegrations,
   fetchPrinters,
   reconcilePrinterCheckoff,
@@ -18,9 +19,13 @@ import { cn } from "../../lib/utils";
 /** Poll linked hosts for Progress — avoid hammering LAN printers. */
 const POLL_MS = 5_000;
 
+const LIVE_STRIP_HOST_TYPES = new Set(["moonraker", "prusalink", "bambu"]);
+
 type LinkedHost = {
   integrationId: string;
   name: string;
+  /** Moonraker/PrusaLink run verify reconcile; Bambu is status-only. */
+  reconcileCheckoff: boolean;
 };
 
 type Props = {
@@ -51,7 +56,7 @@ function toneClass(tone: ReturnType<typeof printerLiveStripTone>): string {
 
 /**
  * Sticky Progress banner: live status for fleet machines linked to a printer host.
- * Host complete → toast “ready to verify” (does not auto-tick Progress).
+ * Moonraker/PrusaLink: reconcile may queue verify. Bambu: status poll only.
  */
 export default function PrinterLiveStrip({
   engineReady,
@@ -88,11 +93,12 @@ export default function PrinterLiveStrip({
         if (!id || seen.has(id)) continue;
         const host = byId.get(id);
         if (!host || host.config.enabled === false) continue;
-        if (host.type !== "moonraker" && host.type !== "prusalink") continue;
+        if (!LIVE_STRIP_HOST_TYPES.has(host.type)) continue;
         seen.add(id);
         next.push({
           integrationId: id,
           name: host.name.trim() || machine.name.trim() || "Printer",
+          reconcileCheckoff: host.type === "moonraker" || host.type === "prusalink",
         });
       }
       setHosts(next);
@@ -112,6 +118,10 @@ export default function PrinterLiveStrip({
     const entries = await Promise.all(
       linked.map(async (h) => {
         try {
+          if (!h.reconcileCheckoff) {
+            const status = await fetchIntegrationStatus(h.integrationId);
+            return [h.integrationId, status] as const;
+          }
           const { updates, status } = await reconcilePrinterCheckoff({
             integration_id: h.integrationId,
           });
@@ -225,6 +235,9 @@ export default function PrinterLiveStrip({
             <Printer className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
             <span className="min-w-0 flex-1 font-medium leading-snug">
               {formatPrinterLiveLine({ name: host.name, status })}
+              {!host.reconcileCheckoff ? (
+                <span className="ml-1 font-normal text-muted-foreground">(status only)</span>
+              ) : null}
             </span>
             {(tone === "offline" || tone === "error") && (
               <Link
