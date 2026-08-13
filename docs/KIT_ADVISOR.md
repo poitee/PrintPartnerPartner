@@ -57,8 +57,9 @@ The app container cannot reach `http://127.0.0.1:11434` (that is the *container�
    OLLAMA_HOST=0.0.0.0 ollama serve
    ```
    Confirm listen address is `*:11434` / `0.0.0.0:11434`, not only `127.0.0.1`.
-3. Recreate the app container after compose changes: `docker compose up -d --force-recreate`.
-4. Set model to an exact name from `ollama list`, save, **Test connection**.
+3. **Firewall the port.** Ollama’s local API has **no built-in auth**. When binding to `0.0.0.0`, allow TCP **11434** only from the Compose app → host gateway path (Docker Desktop / `host.docker.internal` on macOS/Windows; bridge gateway on Linux). Do **not** publish or port-forward `11434` to your LAN or the public internet.
+4. Recreate the app container after compose changes: `docker compose up -d --force-recreate`.
+5. Set model to an exact name from `ollama list`, save, **Test connection**.
 
 Chat uses Ollama’s native `/api/chat` so context size (`num_ctx`, default 16384) is honored. Override in Settings **Advanced** or env `OLLAMA_NUM_CTX`.
 

@@ -34,13 +34,15 @@ export default function SourceCategoryAssignSubmenu({
           }
         >
           <DropdownMenuRadioItem value={UNCategorized_FILTER}>
-            Uncategorised
+            Uncategorized
           </DropdownMenuRadioItem>
-          {categories.map((name) => (
-            <DropdownMenuRadioItem key={name} value={name}>
-              {name}
-            </DropdownMenuRadioItem>
-          ))}
+          {categories
+            .filter((name) => name.trim() && name.trim() !== UNCategorized_FILTER)
+            .map((name) => (
+              <DropdownMenuRadioItem key={name} value={name}>
+                {name}
+              </DropdownMenuRadioItem>
+            ))}
         </DropdownMenuRadioGroup>
       </DropdownMenuSubContent>
     </DropdownMenuSub>
