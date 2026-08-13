@@ -13,6 +13,11 @@ import { cn } from "../../lib/utils";
 type Props = {
   engineReady: boolean;
   refreshKey?: number;
+  /**
+   * When false (Progress), hide Send ready / Send now / force-start.
+   * Queue list + Remove remain.
+   */
+  allowDispatch?: boolean;
   className?: string;
 };
 
@@ -38,11 +43,12 @@ function stateLabel(item: PrinterSendQueueItem): string {
 
 /**
  * Thin Phase F queue list — Export enqueue surface and Progress operator view.
- * Hides when empty. Same actions everywhere: Send ready, Send now, Remove.
+ * Hides when empty. Export keeps Send ready / Send now; Progress is list + Remove only.
  */
 export default function PrinterSendQueuePanel({
   engineReady,
   refreshKey = 0,
+  allowDispatch = true,
   className,
 }: Props) {
   const [items, setItems] = useState<PrinterSendQueueItem[]>([]);
@@ -89,30 +95,32 @@ export default function PrinterSendQueuePanel({
     >
       <div className="mb-1.5 flex flex-wrap items-center gap-2">
         <p className="min-w-0 flex-1 font-medium text-foreground">Send queue</p>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 text-xs"
-          disabled={busyId != null}
-          onClick={() => {
-            setBusyId("drain");
-            void (async () => {
-              try {
-                const { results } = await drainPrinterSendQueue();
-                const ok = results.filter((r) => r.job_id).length;
-                if (ok > 0) toast.success(`Started ${ok} queued send${ok === 1 ? "" : "s"}`);
-                else toast.message("No idle printers ready for queued jobs");
-                await reload();
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : String(e));
-              } finally {
-                setBusyId(null);
-              }
-            })();
-          }}
-        >
-          Send ready
-        </Button>
+        {allowDispatch ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            disabled={busyId != null}
+            onClick={() => {
+              setBusyId("drain");
+              void (async () => {
+                try {
+                  const { results } = await drainPrinterSendQueue();
+                  const ok = results.filter((r) => r.job_id).length;
+                  if (ok > 0) toast.success(`Started ${ok} queued send${ok === 1 ? "" : "s"}`);
+                  else toast.message("No idle printers ready for queued jobs");
+                  await reload();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setBusyId(null);
+                }
+              })();
+            }}
+          >
+            Send ready
+          </Button>
+        ) : null}
       </div>
       <ul className="space-y-1.5">
         {items.map((item) => (
@@ -133,28 +141,30 @@ export default function PrinterSendQueuePanel({
             </span>
             {(item.state === "queued" || item.state === "error") && (
               <>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="h-7 text-xs"
-                  disabled={busyId != null}
-                  onClick={() => {
-                    setBusyId(item.id);
-                    void (async () => {
-                      try {
-                        await dispatchPrinterSendQueueItem({ id: item.id, force: true });
-                        toast.success(`Sending ${item.filename}`);
-                        await reload();
-                      } catch (e) {
-                        toast.error(e instanceof Error ? e.message : String(e));
-                      } finally {
-                        setBusyId(null);
-                      }
-                    })();
-                  }}
-                >
-                  Send now
-                </Button>
+                {allowDispatch ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-7 text-xs"
+                    disabled={busyId != null}
+                    onClick={() => {
+                      setBusyId(item.id);
+                      void (async () => {
+                        try {
+                          await dispatchPrinterSendQueueItem({ id: item.id, force: true });
+                          toast.success(`Sending ${item.filename}`);
+                          await reload();
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : String(e));
+                        } finally {
+                          setBusyId(null);
+                        }
+                      })();
+                    }}
+                  >
+                    Send now
+                  </Button>
+                ) : null}
                 <Button
                   size="sm"
                   variant="ghost"
