@@ -35,7 +35,10 @@ export function pickDigestQop(qopRaw: string): string | undefined {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   if (options.includes("auth")) return "auth";
-  // Unsupported qop only (e.g. auth-int) → fall back to RFC 2069 (no qop).
+  if (options.length > 0) {
+    throw new Error(`Unsupported digest qop: ${qopRaw}`);
+  }
+  // No qop in challenge → RFC 2069 (legacy no-qop response).
   return undefined;
 }
 

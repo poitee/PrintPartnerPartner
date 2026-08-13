@@ -64,7 +64,24 @@ describe("digest-auth", () => {
     expect(authorization).not.toContain("qop=auth-int");
   });
 
-  it("omits qop when only auth-int is offered", () => {
+  it("throws when only unsupported qop is offered", () => {
+    expect(() =>
+      buildDigestAuthorization({
+        username: "maker",
+        password: "secret",
+        method: "GET",
+        uri: "/api/v1/status",
+        challenge: {
+          realm: "Printer API",
+          nonce: "n1",
+          qop: "auth-int",
+          algorithm: "MD5",
+        },
+      }),
+    ).toThrow(/Unsupported digest qop/i);
+  });
+
+  it("omits qop when the challenge has no qop", () => {
     const authorization = buildDigestAuthorization({
       username: "maker",
       password: "secret",
@@ -73,11 +90,11 @@ describe("digest-auth", () => {
       challenge: {
         realm: "Printer API",
         nonce: "n1",
-        qop: "auth-int",
         algorithm: "MD5",
       },
     });
     expect(authorization).not.toContain("qop=");
+    expect(authorization).not.toContain("nc=");
   });
 
   it("formats nc as 8-digit lowercase hex", () => {
