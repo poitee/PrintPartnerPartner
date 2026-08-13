@@ -17,10 +17,10 @@ import {
   buildRoute,
   buildsRoute,
   checkoffRoute,
+  exportRoute,
   helpRoute,
   isBuildPath,
-  isCheckoffPath,
-  isReviewPath,
+  isPartsPath,
   reviewRoute,
   settingsRoute,
   sourcesRoute,
@@ -75,9 +75,8 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
   }, []);
 
   const onBuild = isBuildPath(location.pathname);
-  const onReview = isReviewPath(location.pathname);
-  const onCheckoff = isCheckoffPath(location.pathname);
-  const onSources = location.pathname === "/sources";
+  const onReview = isPartsPath(location.pathname);
+  const onSources = location.pathname === "/library" || location.pathname === "/sources";
 
   const actions: Action[] = useMemo(() => {
     const leaveBuildThen = (go: () => void) => {
@@ -88,7 +87,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
     const list: Action[] = [
       {
         id: "nav-sources",
-        label: "Go to Sources",
+        label: "Go to Library",
         hint: onSources ? "current" : undefined,
         group: "Navigate",
         run: () => {
@@ -101,7 +100,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
       {
         id: "search-stl",
         label: "Search all repos for part…",
-        hint: "Sources · cross-repo STL",
+        hint: "Library · cross-repo STL",
         group: "Navigate",
         disabled: !health,
         run: () => {
@@ -113,7 +112,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
       },
       {
         id: "nav-build",
-        label: "Go to Build",
+        label: "Go to Plan",
         hint: onBuild ? "current" : undefined,
         group: "Navigate",
         run: () => {
@@ -123,7 +122,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
       },
       {
         id: "nav-review",
-        label: "Go to Review",
+        label: "Go to Parts",
         hint: onReview ? "current" : undefined,
         group: "Navigate",
         run: () => {
@@ -134,13 +133,28 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
         },
       },
       {
-        id: "nav-checkoff",
-        label: "Go to Checkoff",
-        hint: onCheckoff ? "current" : undefined,
+        id: "nav-progress",
+        label: "Go to Progress",
+        hint:
+          location.pathname === "/progress" || location.pathname === "/checkoff"
+            ? "current"
+            : undefined,
         group: "Navigate",
         run: () => {
           leaveBuildThen(() => {
             navigate(checkoffRoute(selectedProfileId));
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "nav-export",
+        label: "Go to Export hub",
+        hint: location.pathname === "/export" ? "current" : undefined,
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(exportRoute(selectedProfileId));
             setOpen(false);
           });
         },
@@ -237,7 +251,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
                     });
                   },
                 );
-                if (!onBuild && !onReview && !onCheckoff) {
+                if (!onBuild && !onReview) {
                   navigate(reviewRoute(selectedProfileId));
                 }
                 setOpen(false);
@@ -246,11 +260,7 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
             {
               id: `export-missing-stl-${groupBy}`,
               label: `Export missing STLs (${groupHint})`,
-              hint: onCheckoff
-                ? "Checkoff"
-                : onReview
-                  ? "Review"
-                  : `Plan #${selectedProfileId}`,
+              hint: onReview ? "Parts" : `Plan #${selectedProfileId}`,
               group: "Actions" as const,
               disabled: stlExportJob.busy,
               run: () => {
@@ -266,8 +276,8 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
                     });
                   },
                 );
-                if (!onReview && !onCheckoff) {
-                  navigate(checkoffRoute(selectedProfileId));
+                if (!onReview) {
+                  navigate(reviewRoute(selectedProfileId));
                 }
                 setOpen(false);
               },
@@ -347,8 +357,8 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
     kitExportJob,
     onBuild,
     onReview,
-    onCheckoff,
     onSources,
+    location.pathname,
     flushBuildSaves,
     importSharedBuild,
     onOpenAssistant,

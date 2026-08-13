@@ -21,6 +21,13 @@ export type ActiveJob = {
   status: string;
   message: string;
   progress: number | null;
+  /** When set, scopes busy UI to these source IDs; omit = all sources. */
+  sourceIds?: number[];
+};
+
+type RunJobOptions = {
+  profileId?: number | null;
+  sourceIds?: number[];
 };
 
 type JobContextValue = {
@@ -30,10 +37,15 @@ type JobContextValue = {
     kind: string,
     start: () => Promise<string>,
     onDone?: (snapshot: JobSnapshot) => void,
-    options?: { profileId?: number | null },
+    options?: RunJobOptions,
   ) => Promise<void>;
   clearJob: (jobId?: string) => void;
-  isJobKindRunning: (kind: string) => boolean;
+  /**
+   * True when a job of `kind` is pending/running.
+   * When `sourceId` is set, only matches jobs that include that source
+   * (or jobs with no sourceIds, which mean "all sources").
+   */
+  isJobKindRunning: (kind: string, sourceId?: number) => boolean;
 };
 
 const JobContext = createContext<JobContextValue | null>(null);
@@ -94,12 +106,15 @@ export function JobProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isJobKindRunning = useCallback(
-    (kind: string) =>
-      activeJobs.some(
-        (j) =>
-          j.kind === kind &&
-          (j.status === "pending" || j.status === "running"),
-      ),
+    (kind: string, sourceId?: number) =>
+      activeJobs.some((j) => {
+        if (j.kind !== kind) return false;
+        if (j.status !== "pending" && j.status !== "running") return false;
+        if (sourceId == null) return true;
+        // Omit/empty sourceIds = unscoped busy (affects every source).
+        if (j.sourceIds == null || j.sourceIds.length === 0) return true;
+        return j.sourceIds.includes(sourceId);
+      }),
     [activeJobs],
   );
 
@@ -108,10 +123,11 @@ export function JobProvider({ children }: { children: ReactNode }) {
       kind: string,
       start: () => Promise<string>,
       onDone?: (snapshot: JobSnapshot) => void,
-      options?: { profileId?: number | null },
+      options?: RunJobOptions,
     ) => {
       let disconnect: (() => void) | null = null;
       let finished = false;
+      const sourceIds = options?.sourceIds;
       try {
         const jobId = await start();
         const initial: ActiveJob = {
@@ -120,6 +136,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
           status: "pending",
           message: "Starting…",
           progress: null,
+          sourceIds,
         };
         setActiveJobs((prev) => upsertJob(prev, initial));
 
@@ -136,6 +153,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
               status: snap.status,
               message: snap.message,
               progress: snap.progress,
+              sourceIds,
             }),
           );
           setTimeout(() => {
@@ -151,6 +169,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
               status: ev.status,
               message: ev.message,
               progress: ev.progress,
+              sourceIds,
             }),
           );
           if (JOB_TERMINAL.has(ev.status)) {
@@ -177,6 +196,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
               status: "error",
               message: e instanceof Error ? e.message : String(e),
               progress: null,
+              sourceIds,
             }),
           );
         });
@@ -188,6 +208,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
             status: "error",
             message: e instanceof Error ? e.message : String(e),
             progress: null,
+            sourceIds,
           }),
         );
       }

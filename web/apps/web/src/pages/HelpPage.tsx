@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   BookOpen,
-  CheckSquare,
   ClipboardCheck,
   FolderGit2,
   FolderOpen,
@@ -33,7 +32,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
-import { buildRoute, checkoffRoute, reviewRoute, sourcesRoute } from "../lib/routes";
+import { buildRoute, reviewRoute, sourcesRoute } from "../lib/routes";
 
 type LegalTab = "summary" | "license" | "attribution" | "third-party";
 
@@ -44,32 +43,26 @@ const LEGAL_TABS: { id: LegalTab; label: string }[] = [
   { id: "third-party", label: "Third-party notices" },
 ];
 
-const WORKFLOW_STEP_ICONS: LucideIcon[] = [FolderGit2, Hammer, ClipboardCheck, CheckSquare];
+const WORKFLOW_STEP_ICONS: LucideIcon[] = [FolderGit2, Hammer, ClipboardCheck];
 
 const WORKFLOW_STEPS = [
   {
     num: 1,
-    label: "Sources",
+    label: "Library",
     path: sourcesRoute(),
     description: "Register repos, sync, and set import rules; search STLs across repos",
   },
   {
     num: 2,
-    label: "Build",
+    label: "Plan",
     path: null as string | null,
-    description: "Manage builds, attach sources, pick STLs, set role colors, Update build",
+    description: "Manage plans, attach sources, pick STLs, set role colors, Update plan",
   },
   {
     num: 3,
-    label: "Review",
+    label: "Parts",
     path: null as string | null,
-    description: "Validation summary, 3D previews, quantity edits, Export STLs",
-  },
-  {
-    num: 4,
-    label: "Checkoff",
-    path: null as string | null,
-    description: "Per-unit progress, printable checklist, export missing STLs",
+    description: "Validate, edit quantities, then continue to Progress and Export",
   },
 ] as const;
 
@@ -116,9 +109,8 @@ export default function HelpPage() {
 
   const stepPaths = WORKFLOW_STEPS.map((step) => {
     if (step.path) return step.path;
-    if (step.label === "Build") return buildRoute(selectedProfileId);
-    if (step.label === "Review") return reviewRoute(selectedProfileId);
-    if (step.label === "Checkoff") return checkoffRoute(selectedProfileId);
+    if (step.label === "Plan") return buildRoute(selectedProfileId);
+    if (step.label === "Parts") return reviewRoute(selectedProfileId);
     return buildRoute(selectedProfileId);
   });
 
@@ -199,12 +191,12 @@ export default function HelpPage() {
             </span>
             <div>
               <CardTitle className="text-base">Workflow</CardTitle>
-              <CardDescription>Sources → Build → Review → Checkoff</CardDescription>
+              <CardDescription>Sources → Build → Review</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {WORKFLOW_STEPS.map((step, index) => {
               const StepIcon = WORKFLOW_STEP_ICONS[index];
               return (
@@ -255,7 +247,7 @@ export default function HelpPage() {
             </li>
             <li>
               Run <strong className="font-medium text-foreground">Update build</strong> so variant
-              parts appear on Review and Checkoff.
+              parts appear on Review.
             </li>
           </ol>
           <ul className="list-disc space-y-2 pl-5">

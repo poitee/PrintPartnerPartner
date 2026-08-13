@@ -75,6 +75,7 @@ export default function BuildSourcesPanel({
           void refetch();
         }
       },
+      { sourceIds: [sourceId] },
     );
   };
 
@@ -144,7 +145,7 @@ export default function BuildSourcesPanel({
         <SheetHeader>
           <SheetTitle>Plan sources</SheetTitle>
           <SheetDescription>
-            Attach repos and sync without leaving Build.{" "}
+            Attach repos and sync without leaving Plan.{" "}
             <Link to={sourcesRoute()} className="text-primary underline">
               Full source manager
               <ExternalLink className="ml-0.5 inline h-3 w-3" />
@@ -182,10 +183,14 @@ export default function BuildSourcesPanel({
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={syncJob.busy}
+                  disabled={syncJob.isBusyForSource(layer.project_id)}
                   onClick={() => syncSource(layer.project_id!)}
                 >
-                  <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncJob.busy ? "animate-spin" : ""}`} />
+                  <RefreshCw
+                    className={`mr-1.5 h-3.5 w-3.5 ${
+                      syncJob.isBusyForSource(layer.project_id) ? "animate-spin" : ""
+                    }`}
+                  />
                   Sync
                 </Button>
               )}

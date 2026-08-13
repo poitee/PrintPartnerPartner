@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  assertSafeOutboundHost,
   assertSafeOutboundUrl,
   classifyAddress,
   OutboundUrlError,
@@ -99,6 +100,23 @@ describe("assertSafeOutboundUrl", () => {
     await expect(
       assertSafeOutboundUrl("https://nope.invalid/", { lookupFn: failing }),
     ).rejects.toThrow(/Could not resolve host/);
+  });
+});
+
+describe("assertSafeOutboundHost", () => {
+  it("allows private LAN hosts with allowPrivate", async () => {
+    await expect(
+      assertSafeOutboundHost("192.168.1.60", { allowPrivate: true }),
+    ).resolves.toBe("192.168.1.60");
+  });
+
+  it("rejects host:port and metadata", async () => {
+    await expect(
+      assertSafeOutboundHost("192.168.1.60:8883", { allowPrivate: true }),
+    ).rejects.toThrow(/port separately/);
+    await expect(
+      assertSafeOutboundHost("169.254.169.254", { allowPrivate: true }),
+    ).rejects.toThrow(/metadata/);
   });
 });
 

@@ -24,3 +24,6 @@ web/**/.turbo/
 web/**/coverage/
 web/**/*.tsbuildinfo
 web/apps/server/data/
+
+# Local design / scratch (never commit)
+Do Not Push/

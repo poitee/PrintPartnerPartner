@@ -6,6 +6,16 @@ export type CheckoffSummaryPart = {
   missing: boolean;
 };
 
+export type CheckoffUnitTotals = {
+  printedUnits: number;
+  totalUnits: number;
+  remainingUnits: number;
+  /** 0–100, floored; 0 when totalUnits is 0. */
+  percent: number;
+};
+
+export type PartProgressTone = "empty" | "partial" | "done";
+
 export function isPartFullyPrinted(part: CheckoffSummaryPart): boolean {
   const qty = Math.max(1, part.quantity_effective);
   return part.printed_count >= qty;
@@ -27,18 +37,60 @@ export function printedCountFromUnits(units: boolean[]): number {
   return units.filter(Boolean).length;
 }
 
-export function formatCheckoffSummary(parts: CheckoffSummaryPart[]): string {
-  if (parts.length === 0) {
-    return "0/0 parts fully printed · 0/0 units";
-  }
-  const partsDone = parts.filter((p) => isPartFullyPrinted(p)).length;
+export function checkoffUnitTotals(parts: CheckoffSummaryPart[]): CheckoffUnitTotals {
   const totalUnits = parts.reduce(
     (sum, p) => sum + Math.max(1, p.quantity_effective),
     0,
   );
   const printedUnits = parts.reduce((sum, p) => sum + p.printed_count, 0);
+  const remainingUnits = Math.max(0, totalUnits - printedUnits);
+  const percent =
+    totalUnits === 0
+      ? 0
+      : Math.min(100, Math.max(0, Math.floor((printedUnits / totalUnits) * 100)));
+  return { printedUnits, totalUnits, remainingUnits, percent };
+}
+
+/** Mock-style line: "137 of 359 printed". */
+export function formatPrintedUnitsLine(parts: CheckoffSummaryPart[]): string {
+  const { printedUnits, totalUnits } = checkoffUnitTotals(parts);
+  return `${printedUnits} of ${totalUnits} printed`;
+}
+
+export function formatCheckoffSummary(parts: CheckoffSummaryPart[]): string {
+  if (parts.length === 0) {
+    return "0/0 parts fully printed · 0/0 units";
+  }
+  const partsDone = parts.filter((p) => isPartFullyPrinted(p)).length;
+  const { printedUnits, totalUnits } = checkoffUnitTotals(parts);
   return (
     `${partsDone}/${parts.length} parts fully printed · ` +
     `${printedUnits}/${totalUnits} units`
   );
+}
+
+export function partProgressPercent(printed: number, quantity: number): number {
+  const qty = Math.max(0, quantity);
+  if (qty === 0) return 0;
+  return Math.min(100, Math.floor((Math.max(0, printed) / qty) * 100));
+}
+
+export function partProgressTone(printed: number, quantity: number): PartProgressTone {
+  const qty = Math.max(0, quantity);
+  if (qty <= 0 || printed <= 0) return "empty";
+  if (printed >= qty) return "done";
+  return "partial";
+}
+
+/** Index of next unit to mark complete, or -1 when fully printed. */
+export function nextUnitToComplete(units: boolean[]): number {
+  return units.findIndex((u) => !u);
+}
+
+/** Index of last completed unit to undo, or -1 when none printed. */
+export function lastCompletedUnit(units: boolean[]): number {
+  for (let i = units.length - 1; i >= 0; i -= 1) {
+    if (units[i]) return i;
+  }
+  return -1;
 }

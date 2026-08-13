@@ -3,7 +3,7 @@ import type { PostgresDrizzleDb } from "./client-postgres.js";
 
 export type AppDrizzleDb = DrizzleDb | PostgresDrizzleDb;
 
-function syncAwait<T>(promise: Promise<T>): T {
+export function syncAwait<T>(promise: Promise<T>): T {
   const state = { done: false, value: undefined as T, error: undefined as unknown };
   promise
     .then((v) => {
@@ -20,6 +20,37 @@ function syncAwait<T>(promise: Promise<T>): T {
   }
   if (state.error) throw state.error;
   return state.value as T;
+}
+
+/** True when Drizzle exposes sync SQLite-style builders (`.all` / sync `.transaction`). */
+export function isSyncSqliteDrizzle(db: AppDrizzleDb): boolean {
+  try {
+    const sample = (db as DrizzleDb).select();
+    return typeof (sample as { all?: unknown }).all === "function";
+  } catch {
+    return false;
+  }
+}
+
+/** In-process serialization for settings RMW when sync DB transactions are unavailable (Postgres).
+ * Must not use Promise chaining + syncAwait: Atomics.wait blocks the event loop, so `.then`
+ * never runs and the call hangs. A sync lock is enough — Node is single-threaded, and
+ * syncAwait (if used inside fn) also blocks the loop, so concurrent handlers cannot interleave
+ * mid-mutation.
+ */
+let settingsMutationLocked = false;
+
+export function runSerializedSettingsMutation<T>(fn: () => T): T {
+  if (settingsMutationLocked) {
+    // Nested call on the same stack (e.g. helper → transaction → helper → transaction).
+    return fn();
+  }
+  settingsMutationLocked = true;
+  try {
+    return fn();
+  } finally {
+    settingsMutationLocked = false;
+  }
 }
 
 function wrapBuilder(builder: unknown): unknown {
@@ -74,13 +105,8 @@ export function asSyncDb(db: AppDrizzleDb): DrizzleDb {
   if (!db || (typeof db !== "object" && typeof db !== "function")) {
     throw new Error("Database not connected");
   }
-  try {
-    const sample = (db as DrizzleDb).select();
-    if (typeof (sample as { all?: unknown }).all === "function") {
-      return db as DrizzleDb;
-    }
-  } catch {
-    /* postgres — wrap below */
+  if (isSyncSqliteDrizzle(db)) {
+    return db as DrizzleDb;
   }
   return new Proxy(db as object, {
     get(target, prop) {

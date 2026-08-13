@@ -4,6 +4,10 @@ export type ReviewPrintFilter = "all" | "missing" | "partial" | "complete";
 export type ReviewIncludedFilter = "included" | "excluded" | "all";
 export type ReviewSortKey = "folder" | "filename" | "qty";
 export type ReviewViewMode = "edit" | "print";
+/** Parts stage: group sections by filament role or by source/folder. */
+export type PartsGroupMode = "role" | "source";
+/** Parts stage: card grid vs sheet table (edit/print still apply inside table). */
+export type PartsLayoutMode = "grid" | "table";
 
 export type PersistedReviewPartsUi = {
   search: string;
@@ -17,6 +21,8 @@ export type PersistedReviewPartsUi = {
   sort: ReviewSortKey;
   viewMode: ReviewViewMode;
   compactMode: boolean;
+  groupMode: PartsGroupMode;
+  layoutMode: PartsLayoutMode;
 };
 
 const DEFAULT: PersistedReviewPartsUi = {
@@ -31,6 +37,8 @@ const DEFAULT: PersistedReviewPartsUi = {
   sort: "folder",
   viewMode: "edit",
   compactMode: false,
+  groupMode: "role",
+  layoutMode: "grid",
 };
 
 function isPrintFilter(v: unknown): v is ReviewPrintFilter {
@@ -47,6 +55,14 @@ function isSortKey(v: unknown): v is ReviewSortKey {
 
 function isViewMode(v: unknown): v is ReviewViewMode {
   return v === "edit" || v === "print";
+}
+
+function isGroupMode(v: unknown): v is PartsGroupMode {
+  return v === "role" || v === "source";
+}
+
+function isLayoutMode(v: unknown): v is PartsLayoutMode {
+  return v === "grid" || v === "table";
 }
 
 export function parsePersistedReviewPartsUi(raw: string | null): PersistedReviewPartsUi {
@@ -81,6 +97,8 @@ export function parsePersistedReviewPartsUi(raw: string | null): PersistedReview
       viewMode: isViewMode(parsed.viewMode) ? parsed.viewMode : DEFAULT.viewMode,
       compactMode:
         typeof parsed.compactMode === "boolean" ? parsed.compactMode : DEFAULT.compactMode,
+      groupMode: isGroupMode(parsed.groupMode) ? parsed.groupMode : DEFAULT.groupMode,
+      layoutMode: isLayoutMode(parsed.layoutMode) ? parsed.layoutMode : DEFAULT.layoutMode,
     };
   } catch {
     return { ...DEFAULT };

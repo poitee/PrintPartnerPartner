@@ -30,6 +30,7 @@ import { StlNamingSettingsCard } from "../components/settings/StlNamingEditor";
 import AiAssistantSettingsCard from "../components/settings/AiAssistantSettingsCard";
 import IntegrationsSettingsCard from "../components/settings/IntegrationsSettingsCard";
 import PrinterFleetCard from "../components/settings/PrinterFleetCard";
+import PrinterHostsSettingsCard from "../components/settings/PrinterHostsSettingsCard";
 import AboutUpdatesCard from "../components/settings/AboutUpdatesCard";
 import AccountPasswordCard from "../components/settings/AccountPasswordCard";
 import ThemePreferenceControl from "../components/ThemePreferenceControl";
@@ -359,6 +360,8 @@ export default function SettingsPage() {
       <StlNamingSettingsCard engineReady={Boolean(health)} />
 
       <PrinterFleetCard engineReady={Boolean(health)} />
+
+      <PrinterHostsSettingsCard engineReady={Boolean(health)} />
 
       <AiAssistantSettingsCard engineReady={Boolean(health)} />
 

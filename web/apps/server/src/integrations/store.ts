@@ -4,6 +4,8 @@ import type {
   IntegrationSummary,
   IntegrationTestResult,
   IntegrationType,
+  PrinterHostStatus,
+  PrinterUploadResult,
 } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 
@@ -11,6 +13,13 @@ export type IntegrationAdapter = {
   type: IntegrationType;
   testConnection(config: IntegrationConfig): Promise<IntegrationTestResult>;
   listDevices?(config: IntegrationConfig): Promise<DeviceSummary[]>;
+  getStatus?(config: IntegrationConfig): Promise<PrinterHostStatus>;
+  uploadFile?(
+    config: IntegrationConfig,
+    bytes: Uint8Array,
+    filename: string,
+    options?: { start?: boolean },
+  ): Promise<PrinterUploadResult>;
 };
 
 export interface IntegrationPort {
@@ -28,6 +37,7 @@ export interface IntegrationPort {
   delete(id: string): boolean;
   test(id: string): Promise<IntegrationTestResult>;
   listDevices(id: string): Promise<DeviceSummary[]>;
+  getStatus(id: string): Promise<PrinterHostStatus>;
 }
 
 export type IntegrationStoreDeps = {
@@ -39,11 +49,14 @@ const SETTINGS_KEY = "integrations";
 
 const SECRET_KEYS = new Set([
   "api_key",
+  "apikey",
   "search_api_key",
   "token",
   "password",
   "secret",
   "access_token",
+  "access_code",
+  "accesscode",
 ]);
 
 const REDACTED = "****";
@@ -161,6 +174,29 @@ export function createIntegrationPort(deps: IntegrationStoreDeps): IntegrationPo
       const adapter = deps.getAdapter(item.type);
       if (!adapter?.listDevices) return [];
       return adapter.listDevices(item.config);
+    },
+
+    async getStatus(id): Promise<PrinterHostStatus> {
+      const items = loadRaw(deps.repo);
+      const item = items.find((x) => x.id === id);
+      if (!item) {
+        return { state: "offline", message: "Integration not found" };
+      }
+      if (item.config.enabled === false) {
+        return { state: "offline", message: "Integration disabled" };
+      }
+      const adapter = deps.getAdapter(item.type);
+      if (!adapter?.getStatus) {
+        return { state: "unknown", message: `Status not supported for ${item.type}` };
+      }
+      try {
+        return await adapter.getStatus(item.config);
+      } catch (e) {
+        return {
+          state: "offline",
+          message: e instanceof Error ? e.message : String(e),
+        };
+      }
     },
   };
 }

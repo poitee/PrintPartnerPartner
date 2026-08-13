@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
@@ -36,6 +36,8 @@ type PlanManagerProps = {
   collapsible?: boolean;
   /** When collapsible, start expanded (Build page). */
   defaultOpen?: boolean;
+  /** Bump to open the Duplicate plan dialog (Plan page header). */
+  duplicateTrigger?: number;
 };
 
 /** Full plan CRUD — use on Build; workflow pages use header PlanPicker for switching. */
@@ -50,6 +52,7 @@ export default function PlanManager({
   hideSelector,
   collapsible,
   defaultOpen,
+  duplicateTrigger = 0,
 }: PlanManagerProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -69,6 +72,7 @@ export default function PlanManager({
   const [duplicateName, setDuplicateName] = useState("");
   const [duplicateClearCheckoff, setDuplicateClearCheckoff] = useState(false);
   const [switchPrompt, setSwitchPrompt] = useState<SwitchPrompt | null>(null);
+  const lastDuplicateTriggerRef = useRef(0);
 
   const selected = profiles.find((p) => p.id === selectedProfileId);
 
@@ -152,6 +156,13 @@ export default function PlanManager({
     setDuplicateClearCheckoff(false);
     setDuplicateOpen(true);
   };
+
+  useEffect(() => {
+    if (duplicateTrigger <= 0 || duplicateTrigger === lastDuplicateTriggerRef.current) return;
+    if (selectedProfileId == null) return;
+    lastDuplicateTriggerRef.current = duplicateTrigger;
+    openDuplicateDialog();
+  }, [duplicateTrigger, selectedProfileId, selected?.name]);
 
   const confirmDuplicate = () => {
     if (selectedProfileId == null) return;

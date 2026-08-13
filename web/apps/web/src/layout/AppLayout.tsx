@@ -1,25 +1,13 @@
-import { type ComponentType, type MouseEvent, type ReactNode, useEffect, useState } from "react";
+import { type MouseEvent, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import {
-  BookOpen,
-  CheckSquare,
-  ClipboardCheck,
-  FolderGit2,
-  Hammer,
-  Layers,
-  MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Settings,
-  Sparkles,
-} from "lucide-react";
+import { BookOpen, Layers, MoreHorizontal, Settings, Sparkles } from "lucide-react";
 import CommandPalette from "../components/CommandPalette";
 import AssistantChatSheet from "../components/AssistantChatSheet";
 import ErrorBoundary from "../components/ErrorBoundary";
 import JobTray from "../components/JobTray";
+import PlanTray from "../components/PlanTray";
 import SupportCta from "../components/SupportCta";
 import { Toaster } from "../components/ui/sonner";
-import { Separator } from "../components/ui/separator";
 import { Button } from "../components/ui/button";
 import {
   DropdownMenu,
@@ -28,11 +16,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import PlanPicker from "../components/PlanPicker";
 import CreatePlanButton from "../components/CreatePlanButton";
 import SaveStatusIndicator from "../components/SaveStatusIndicator";
 import UserMenu from "../components/UserMenu";
 import WorkflowProgress from "../components/WorkflowProgress";
+import SpineRail from "../components/layout/SpineRail";
 import UpdateAvailableBanner, {
   dismissUpdateBanner,
   isUpdateBannerDismissed,
@@ -40,16 +28,15 @@ import UpdateAvailableBanner, {
 import { openSponsor } from "../lib/supportLinks";
 import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
 import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
+import { useWorkflowStages } from "../hooks/useWorkflowStages";
 import {
-  buildRoute,
   buildsRoute,
-  checkoffRoute,
+  helpRoute,
   isBuildPath,
-  isBuildsPath,
-  isCheckoffPath,
-  isReviewPath,
-  reviewRoute,
-  sourcesRoute,
+  isPartsPath,
+  isPlanPath,
+  isProgressPath,
+  settingsRoute,
 } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { useProfileSelection } from "../context/ProfileContext";
@@ -57,140 +44,10 @@ import { CopilotUiProvider } from "../context/CopilotUiContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
 import ThemePreferenceControl from "../components/ThemePreferenceControl";
+import PlanPicker from "../components/PlanPicker";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { readSidebarCollapsed, writeSidebarCollapsed } from "../lib/persistedSidebarUi";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "../components/ui/tooltip";
-
-type NavEntry = {
-  to: string;
-  label: string;
-  hint: string;
-  icon: ComponentType<{ className?: string }>;
-  isActive?: (pathname: string) => boolean;
-};
-
-const secondaryNav: Omit<NavEntry, "hint">[] = [
-  { to: buildsRoute(), label: "Builds", icon: Layers },
-  { to: "/settings", label: "Settings", icon: Settings },
-  { to: "/help", label: "Help", icon: BookOpen },
-];
-
-const NAV_HINTS: Record<string, string> = {
-  Sources: "Register repos and set import folders",
-  Build: "Attach sources, pick files, set colors and quantities",
-  Review: "Validate parts, edit quantities, and export",
-  Checkoff: "Track what you've printed on the shop floor",
-};
-
-function BrandMark({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent-brand text-primary-foreground shadow-sm",
-        className,
-      )}
-      aria-hidden
-    >
-      <Layers className="h-4 w-4" />
-    </span>
-  );
-}
-
-function navLinkClass(active: boolean, opts?: { compact?: boolean; sidebarCollapsed?: boolean }) {
-  const compact = opts?.compact ?? false;
-  const sidebarCollapsed = opts?.sidebarCollapsed ?? false;
-  return cn(
-    "relative flex transition-colors",
-    sidebarCollapsed
-      ? "items-center justify-center rounded-md p-2.5"
-      : compact
-        ? "shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium"
-        : "flex-col gap-0.5 rounded-md px-3 py-2 text-sm font-medium",
-    active
-      ? "bg-primary/12 text-primary shadow-sm before:absolute before:left-0 before:top-1/2 before:h-[60%] before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary"
-      : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
-    sidebarCollapsed && active && "before:hidden",
-  );
-}
-
-function SidebarTooltip({
-  label,
-  collapsed,
-  children,
-}: {
-  label: string;
-  collapsed: boolean;
-  children: ReactNode;
-}) {
-  if (!collapsed) return children;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{children}</TooltipTrigger>
-      <TooltipContent side="right">{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function NavItem({
-  to,
-  label,
-  hint,
-  icon: Icon,
-  isActive: matchPath,
-  onNavigate,
-  sidebarCollapsed = false,
-}: NavEntry & {
-  onNavigate?: (to: string, e: MouseEvent<HTMLAnchorElement>) => void;
-  sidebarCollapsed?: boolean;
-}) {
-  const location = useLocation();
-  const customActive = matchPath?.(location.pathname);
-
-  const link = (
-    <NavLink
-      to={to}
-      end={matchPath == null}
-      onClick={(e) => onNavigate?.(to, e)}
-      className={({ isActive }) =>
-        navLinkClass(matchPath ? Boolean(customActive) : isActive, { sidebarCollapsed })
-      }
-      aria-label={sidebarCollapsed ? label : undefined}
-      title={sidebarCollapsed ? undefined : label}
-    >
-      <span
-        className={cn(
-          "flex items-center gap-2 pl-0.5",
-          sidebarCollapsed && "justify-center pl-0",
-        )}
-      >
-        <Icon
-          className={cn(
-            "h-4 w-4 shrink-0",
-            (matchPath ? customActive : location.pathname === to.split("?")[0]) && "text-primary",
-          )}
-        />
-        {!sidebarCollapsed && label}
-      </span>
-      {!sidebarCollapsed && (matchPath ? customActive : location.pathname === to.split("?")[0]) && (
-        <span className="pl-6 text-[11px] font-normal leading-snug text-muted-foreground">
-          {hint}
-        </span>
-      )}
-    </NavLink>
-  );
-
-  return (
-    <SidebarTooltip label={sidebarCollapsed ? `${label} — ${hint}` : label} collapsed={sidebarCollapsed}>
-      {link}
-    </SidebarTooltip>
-  );
-}
-
+import { TooltipProvider } from "../components/ui/tooltip";
 export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -230,6 +87,24 @@ export default function AppLayout() {
     }
   }, [updateCheck?.latest_version]);
 
+  useEffect(() => {
+    const width = sidebarCollapsed ? "4.25rem" : "14rem";
+    document.documentElement.style.setProperty("--app-sidebar-width", width);
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const apply = () => {
+      document.documentElement.style.setProperty(
+        "--mobile-stage-height",
+        mq.matches ? "0px" : "3.25rem",
+      );
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
   const onDismissUpdateBanner = () => {
     if (!updateCheck?.latest_version) return;
     dismissUpdateBanner(updateCheck.latest_version);
@@ -240,10 +115,12 @@ export default function AppLayout() {
   const { selectedProfileId, profiles } = useProfileSelection();
   const { flushAll: flushImportRules } = useImportRulesSaveRegistry();
   const { flushAll: flushKitManifest } = useKitManifestSaveRegistry();
+  const { stages, activeId } = useWorkflowStages();
 
   const onPipelineNavigate = (to: string, e: MouseEvent<HTMLAnchorElement>) => {
-    const leavingBuild = isBuildPath(location.pathname) && !isBuildPath(to.split("?")[0] ?? to);
-    if (!leavingBuild) return;
+    const destPath = to.split("?")[0] ?? to;
+    const leavingPlan = isPlanPath(location.pathname) && !isPlanPath(destPath);
+    if (!leavingPlan) return;
     e.preventDefault();
     void Promise.all([flushImportRules(), flushKitManifest()]).then(() => {
       navigate(to);
@@ -258,269 +135,160 @@ export default function AppLayout() {
   const showPlanInHeader =
     activePlanName &&
     (isBuildPath(location.pathname) ||
-      isReviewPath(location.pathname) ||
-      isCheckoffPath(location.pathname));
+      isPartsPath(location.pathname) ||
+      isProgressPath(location.pathname));
 
-  const pipelineNav: NavEntry[] = [
-    { to: sourcesRoute(), label: "Sources", hint: NAV_HINTS.Sources, icon: FolderGit2 },
-    {
-      to: buildRoute(selectedProfileId),
-      label: "Build",
-      hint: NAV_HINTS.Build,
-      icon: Hammer,
-      isActive: (pathname) => pathname === "/build" || pathname === "/plan",
-    },
-    {
-      to: reviewRoute(selectedProfileId),
-      label: "Review",
-      hint: NAV_HINTS.Review,
-      icon: ClipboardCheck,
-      isActive: (pathname) => isReviewPath(pathname),
-    },
-    {
-      to: checkoffRoute(selectedProfileId),
-      label: "Checkoff",
-      hint: NAV_HINTS.Checkoff,
-      icon: CheckSquare,
-      isActive: (pathname) => isCheckoffPath(pathname),
-    },
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!aiAssistantEnabled) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        setAssistantOpenPersisted(!assistantOpen);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [aiAssistantEnabled, assistantOpen]);
+
+  useEffect(() => {
+    const onOpen = () => setAssistantOpenPersisted(true);
+    window.addEventListener("pp-open-assistant", onOpen);
+    return () => window.removeEventListener("pp-open-assistant", onOpen);
+  }, []);
+
+  const secondaryMobile = [
+    { to: buildsRoute(selectedProfileId), label: "Builds", icon: Layers },
+    { to: settingsRoute(), label: "Settings", icon: Settings },
+    { to: helpRoute(), label: "Help", icon: BookOpen },
   ];
 
   return (
     <TooltipProvider delayDuration={300}>
-    <CopilotUiProvider>
-    <div className="flex min-h-screen min-w-0 bg-background">
-      <aside
-        className={cn(
-          "hidden shrink-0 flex-col border-r border-border bg-card transition-[width] duration-200 ease-out lg:flex print:hidden",
-          sidebarCollapsed ? "w-[4.25rem]" : "w-56",
-        )}
-      >
-        <div className={cn("border-b border-border", sidebarCollapsed ? "px-2 py-3" : "px-4 py-4")}>
-          <div
-            className={cn(
-              "flex items-center gap-2.5",
-              sidebarCollapsed && "justify-center",
-            )}
-          >
-            <BrandMark />
-            {!sidebarCollapsed && (
-              <div className="min-w-0">
-                <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
-                <p className="text-xs text-muted-foreground">
-                  Sources → Build → Review → Checkoff
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-        <nav className={cn("flex flex-1 flex-col gap-1", sidebarCollapsed ? "p-2" : "p-3")}>
-          {pipelineNav.map((item) => (
-            <NavItem
-              key={item.label}
-              {...item}
-              onNavigate={onPipelineNavigate}
-              sidebarCollapsed={sidebarCollapsed}
-            />
-          ))}
-          {!sidebarCollapsed && (
-            <div className="px-1 py-2">
-              <WorkflowProgress />
-            </div>
-          )}
-          <Separator className={cn("my-2", sidebarCollapsed && "mx-1")} />
-          {secondaryNav.map((item) => {
-            const to = item.to === buildsRoute() ? buildsRoute(selectedProfileId) : item.to;
-            const active =
-              location.pathname === item.to.split("?")[0] ||
-              (item.label === "Builds" && isBuildsPath(location.pathname));
-            const link = (
-              <NavLink
-                key={item.to}
-                to={to}
-                className={cn(
-                  navLinkClass(active, { sidebarCollapsed }),
-                  !sidebarCollapsed && "flex-row items-center gap-2 pl-0.5",
-                )}
-                aria-label={sidebarCollapsed ? item.label : undefined}
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                {!sidebarCollapsed && item.label}
-              </NavLink>
-            );
-            return (
-              <SidebarTooltip key={item.to} label={item.label} collapsed={sidebarCollapsed}>
-                {link}
-              </SidebarTooltip>
-            );
-          })}
-        </nav>
-        <div className={cn("space-y-2 border-t border-border", sidebarCollapsed ? "p-2" : "p-3")}>
-          {!sidebarCollapsed && (
-            <>
-              <div className="px-1">
-                <p className="mb-1.5 text-xs font-medium text-muted-foreground">Theme</p>
-                <ThemePreferenceControl compact className="w-full" />
-              </div>
-              <SupportCta
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start text-muted-foreground"
-              />
-            </>
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size={sidebarCollapsed ? "icon" : "sm"}
-            className={cn(
-              "text-muted-foreground",
-              !sidebarCollapsed && "w-full justify-start",
-            )}
-            onClick={toggleSidebar}
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-expanded={!sidebarCollapsed}
-          >
-            {sidebarCollapsed ? (
-              <PanelLeftOpen className="h-4 w-4" />
-            ) : (
-              <>
-                <PanelLeftClose className="h-4 w-4" />
-                Collapse sidebar
-              </>
-            )}
-          </Button>
-        </div>
-      </aside>
+      <CopilotUiProvider>
+        <div className="flex min-h-screen min-w-0 bg-background">
+          <SpineRail
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={toggleSidebar}
+            stages={stages}
+            activeId={activeId}
+            selectedProfileId={selectedProfileId}
+            aiAssistantEnabled={aiAssistantEnabled}
+            assistantOpen={assistantOpen}
+            onAssistantOpenChange={setAssistantOpenPersisted}
+            onStageNavigate={onPipelineNavigate}
+          />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header
-          className="flex flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 print:hidden"
-          style={{ background: "var(--gradient-header)" }}
-        >
-          <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-            {showPlanInHeader && activePlanName && (
-              <span className="hidden truncate text-muted-foreground md:inline">
-                <span className="font-medium text-foreground">{activePlanName}</span>
-              </span>
-            )}
-          </div>
-          <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:justify-end">
-            <SaveStatusIndicator />
-            {aiAssistantEnabled && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1.5"
-                onClick={() => setAssistantOpenPersisted(!assistantOpen)}
-                aria-label={assistantOpen ? "Close kit advisor" : "Open kit advisor"}
-                aria-pressed={assistantOpen}
-              >
-                <Sparkles className="h-4 w-4" />
-                <span className="hidden sm:inline">Advisor</span>
-              </Button>
-            )}
-            <SupportCta variant="secondary" size="sm" className="hidden shrink-0 sm:inline-flex" />
-            <ThemePreferenceControl compact className="hidden shrink-0 md:inline-flex" />
-            <UserMenu />
-            <CreatePlanButton className="hidden sm:inline-flex" />
-            <CreatePlanButton size="icon" showLabel={false} className="sm:hidden" />
-            <PlanPicker className="min-w-0 flex-1 sm:min-w-[200px] sm:max-w-xs" />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="shrink-0 lg:hidden"
-                  aria-label="More"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-52">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header
+              className="flex flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 print:hidden"
+              style={{ background: "var(--gradient-header)" }}
+            >
+              <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+                {showPlanInHeader && activePlanName ? (
+                  <span className="hidden truncate text-muted-foreground md:inline">
+                    <span className="font-medium text-foreground">{activePlanName}</span>
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:justify-end">
+                <SaveStatusIndicator />
                 {aiAssistantEnabled && (
-                  <DropdownMenuItem
-                    className="lg:hidden"
-                    onClick={() => setAssistantOpenPersisted(true)}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 gap-1.5 lg:hidden"
+                    onClick={() => setAssistantOpenPersisted(!assistantOpen)}
+                    aria-label={assistantOpen ? "Close kit advisor" : "Open kit advisor"}
+                    aria-pressed={assistantOpen}
                   >
                     <Sparkles className="h-4 w-4" />
-                    Kit advisor
-                  </DropdownMenuItem>
+                    <span className="hidden sm:inline">Advisor</span>
+                  </Button>
                 )}
-                <DropdownMenuItem
-                  className="sm:hidden"
-                  onClick={() => openSponsor()}
-                >
-                  Sponsor on GitHub
-                </DropdownMenuItem>
-                <DropdownMenuSeparator className="sm:hidden" />
-                {secondaryNav.map((item) => (
-                  <DropdownMenuItem key={item.to} asChild>
-                    <NavLink
-                      to={item.to === buildsRoute() ? buildsRoute(selectedProfileId) : item.to}
-                      className="flex w-full cursor-pointer items-center gap-2"
+                <SupportCta variant="secondary" size="sm" className="hidden shrink-0 sm:inline-flex" />
+                <ThemePreferenceControl compact className="hidden shrink-0 md:inline-flex" />
+                <UserMenu />
+                <CreatePlanButton className="hidden sm:inline-flex" />
+                <CreatePlanButton size="icon" showLabel={false} className="sm:hidden" />
+                <PlanPicker className="min-w-0 flex-1 sm:min-w-[200px] sm:max-w-xs lg:hidden" />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0 lg:hidden"
+                      aria-label="More"
                     >
-                      <item.icon className="h-4 w-4" />
-                      {item.label}
-                    </NavLink>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    {aiAssistantEnabled && (
+                      <DropdownMenuItem
+                        className="lg:hidden"
+                        onClick={() => setAssistantOpenPersisted(true)}
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        Kit advisor
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem className="sm:hidden" onClick={() => openSponsor()}>
+                      Sponsor on GitHub
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator className="sm:hidden" />
+                    {secondaryMobile.map((item) => (
+                      <DropdownMenuItem key={item.to} asChild>
+                        <NavLink
+                          to={item.to}
+                          className="flex w-full cursor-pointer items-center gap-2"
+                        >
+                          <item.icon className="h-4 w-4" />
+                          {item.label}
+                        </NavLink>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </header>
+
+            <main
+              className={cn(
+                "flex-1 overflow-x-hidden overflow-y-auto p-3 pb-28 sm:p-5 sm:pb-24 lg:pb-20 print:overflow-visible print:p-0",
+                assistantOpen && "lg:pr-[28rem]",
+              )}
+            >
+              <ErrorBoundary key={location.pathname}>
+                <Outlet />
+              </ErrorBoundary>
+            </main>
+
+            <WorkflowProgress
+              variant="mobile"
+              stages={stages}
+              activeId={activeId}
+              onNavigate={onPipelineNavigate}
+              className="fixed bottom-[var(--plan-tray-height,0px)] left-0 right-0 z-30 lg:hidden"
+            />
+
+            {updateCheck && (
+              <UpdateAvailableBanner
+                updateCheck={updateCheck}
+                dismissed={bannerDismissed}
+                onDismiss={onDismissUpdateBanner}
+              />
+            )}
           </div>
-        </header>
 
-        <nav
-          className="flex shrink-0 flex-col gap-2 border-b border-border bg-card px-2 py-2 lg:hidden print:hidden"
-          aria-label="Workflow"
-        >
-          <div className="flex gap-1 overflow-x-auto [-webkit-overflow-scrolling:touch]">
-            {pipelineNav.map((item) => (
-              <NavLink
-                key={item.label}
-                to={item.to}
-                onClick={(e) => onPipelineNavigate(item.to, e)}
-                className={({ isActive }) => {
-                  const active = item.isActive?.(location.pathname) ?? isActive;
-                  return navLinkClass(active, { compact: true });
-                }}
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                {item.label}
-              </NavLink>
-            ))}
-          </div>
-          <WorkflowProgress compact className="mx-1" />
-        </nav>
-
-        <main
-          className={cn(
-            "flex-1 overflow-x-hidden overflow-y-auto p-3 pb-20 sm:p-5 sm:pb-16 lg:pb-14 print:overflow-visible print:p-0",
-            assistantOpen && "lg:pr-[28rem]",
-          )}
-        >
-          <ErrorBoundary key={location.pathname}>
-            <Outlet />
-          </ErrorBoundary>
-        </main>
-
-        {updateCheck && (
-          <UpdateAvailableBanner
-            updateCheck={updateCheck}
-            dismissed={bannerDismissed}
-            onDismiss={onDismissUpdateBanner}
-          />
-        )}
-      </div>
-
-      <JobTray />
-      <CommandPalette onOpenAssistant={() => setAssistantOpenPersisted(true)} />
-      <AssistantChatSheet open={assistantOpen} onOpenChange={setAssistantOpenPersisted} />
-      <Toaster position="bottom-right" richColors closeButton />
-    </div>
-    </CopilotUiProvider>
+          <JobTray sidebarCollapsed={sidebarCollapsed} />
+          <PlanTray />
+          <CommandPalette onOpenAssistant={() => setAssistantOpenPersisted(true)} />
+          <AssistantChatSheet open={assistantOpen} onOpenChange={setAssistantOpenPersisted} />
+          <Toaster position="bottom-right" richColors closeButton />
+        </div>
+      </CopilotUiProvider>
     </TooltipProvider>
   );
 }

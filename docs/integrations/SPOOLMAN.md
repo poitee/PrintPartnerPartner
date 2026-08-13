@@ -132,3 +132,8 @@ See [API.md](../API.md) for auth and OpenAPI.
 - **No automatic consumption** — marking units printed in Checkoff does not call Spoolman “Use Spool Filament” or deduct weight. A future optional “Suggest spool usage in Checkoff” toggle may be added; it will stay off by default.
 - **No live sync** — no WebSocket or Moonraker push from Spoolman; weights refresh when Review/Checkoff reloads.
 - Integrations API is `/api/v1` only; core workflow does not require Spoolman.
+
+## See also
+
+- [Printer API research](PRINTER_APIS.md) — future live printer hosts (Moonraker, PrusaLink, Bambu) and how Spoolman could bridge to them
+- [Printer UX deep dive](PRINTER_UX.md) — Settings / Export / Progress surfaces for live hosts (hosts stay separate from Spoolman inventory)

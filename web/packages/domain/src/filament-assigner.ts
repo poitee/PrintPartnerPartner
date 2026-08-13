@@ -16,6 +16,10 @@ export type PrinterMachine = {
     filament_color_id: string | null;
     label: string;
   }>;
+  /** Linked live host integration (Moonraker / PrusaLink). Absent = unbound. */
+  integration_id?: string | null;
+  /** Optional device id within the host (Moonraker uses "default"). */
+  device_id?: string | null;
 };
 
 export type MergePartExport = MergePart & {

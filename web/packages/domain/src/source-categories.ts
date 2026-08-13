@@ -69,17 +69,25 @@ export function parseProjectMetadata(metadataJson: string | null | undefined): R
   }
 }
 
+/**
+ * Resolve the library category for a source.
+ *
+ * Single category per source. When `metadata.category` is present (including
+ * empty string / null), that value wins so Uncategorised can be set explicitly.
+ * When the key is absent, fall back to legacy role → category mapping.
+ */
 export function resolveSourceCategory(
   metadataJson: string | null | undefined,
   role: string | null | undefined,
 ): string | null {
   const metadata = parseProjectMetadata(metadataJson);
-  if (metadata) {
+  if (metadata && "category" in metadata) {
     const raw = metadata.category;
     if (typeof raw === "string") {
       const stripped = raw.trim();
       return stripped || null;
     }
+    return null;
   }
   const r = (role ?? "unassigned").trim().toLowerCase();
   return ROLE_TO_CATEGORY[r] ?? null;

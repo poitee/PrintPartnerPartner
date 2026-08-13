@@ -98,6 +98,19 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
 | `DELETE` | `/api/v1/integrations/:id` | Remove |
 | `POST` | `/api/v1/integrations/:id/test` | Test connection (rate-limited) |
 | `GET` | `/api/v1/integrations/:id/devices` | Device discovery |
+| `GET` | `/api/v1/integrations/:id/status` | Live printer host status (`getStatus`; states include `complete`) |
+| `GET` | `/api/v1/printer-checkoff` | List durable job↔Progress unit mappings (`?state=watching\|awaiting_verify`) |
+| `POST` | `/api/v1/printer-checkoff/reconcile` | Fetch live host status; queue verify or mark host_failed (`{ integration_id }`) |
+| `POST` | `/api/v1/printer-checkoff/verify` | Confirm/reject awaiting units (`{ link_id, decisions }`) |
+| `POST` | `/api/v1/printer-checkoff/dismiss` | Dismiss a `host_failed` link |
+| `GET` | `/api/v1/printer-outcomes/summary` | Reject/confirm aggregates (`?profile_id=`) |
+| `GET` | `/api/v1/printer-send-queue` | List send queue (`?active=1`) |
+| `POST` | `/api/v1/printer-send-queue` | Enqueue G-code for Idle dispatch (multipart; optional `match=compatible`) |
+| `POST` | `/api/v1/printer-send-queue/:id/dispatch` | Dispatch one item (`force` skips Idle wait) |
+| `POST` | `/api/v1/printer-send-queue/drain` | Dispatch ready queued items to Idle printers |
+| `DELETE` | `/api/v1/printer-send-queue/:id` | Cancel a queued/error item |
+| `POST` | `/bambu-connect/handoff` | Stage `.3mf`/`.gcode` and return official `bambu-connect://import-file` URL (optional OS launch; SPA flat route) |
+| `GET` | `/bambu-connect/handoff/:id/file` | Download staged Connect handoff file |
 
 **Moonraker** (reference adapter): set `config.base_url` to e.g. `http://192.168.1.50:7125`. Test calls `GET {base_url}/server/info`.
 
@@ -110,7 +123,28 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
 
 `GET /filaments/catalog` includes `spoolman_colors` when `default_spoolman_integration_id` is set (Settings) or when `?spoolman_integration_id=` is passed. User guide: [integrations/SPOOLMAN.md](integrations/SPOOLMAN.md).
 
-Stub adapters (`prusalink`, `bambu`) return `{ ok: false, message: "…not implemented" }`.
+Moonraker and PrusaLink support test, status, upload, and Progress verify-first checkoff. Bambu supports LAN MQTT status plus **Connect URL handoff** (not MQTT print-start). Setup: [integrations/PRINTER_SETUP.md](integrations/PRINTER_SETUP.md). Research: [integrations/PRINTER_APIS.md](integrations/PRINTER_APIS.md).
+
+**AI assistant (`ai_assistant` integration):** create/update via the integrations API (or **Settings → AI assistant**). Config fields include `provider`, `model`, `api_key`, `base_url` / `ollama_url`, `max_tokens`, budgets, `search_provider`, `search_api_key`, `allow_url_ingest`, `guide_ingest_max_bytes`, `ollama_num_ctx`. Secrets are redacted in list responses. User guide: [KIT_ADVISOR.md](KIT_ADVISOR.md).
+
+## Kit advisor (`/assistant/*`)
+
+Flat routes (same handlers also appear under `/api/v1` where mounted). Full schemas: OpenAPI (`GET /api/v1/openapi.json`) when available.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/assistant/status` | Enabled?, provider, model, `source` (`settings` \| `env` \| `none`), tools, budgets used/cap, search status (no secrets) |
+| `POST` | `/assistant/chat` | Chat turn (SSE/stream); may propose Apply cards. Soft daily budgets → `429` |
+| `POST` | `/assistant/actions/apply` | Confirm a proposed action |
+| `POST` | `/assistant/actions/dismiss` | Dismiss a proposed action |
+| `GET` / `DELETE` | `/assistant/history` | Per-tenant chat history |
+| `GET` / `DELETE` | `/assistant/decisions` | Decision memory (`?plan_id=` or `?all=true`) |
+| `GET` / `POST` / `DELETE` | `/assistant/feedback` | Thumbs up/down ranking (not training) |
+| `GET` | `/assistant/preferences` | Debug digest used in the system prompt (`?plan_id=`) |
+| `GET` | `/assistant/domain` | Loaded domain research pack summary |
+| `POST` | `/assistant/domain/import` | Import / backfill domain packs |
+
+Mutations never auto-apply — clients must call `actions/apply`. Operator env + MCP: [`web/DEPLOY.md`](../web/DEPLOY.md).
 
 ## Webhooks (optional)
 
