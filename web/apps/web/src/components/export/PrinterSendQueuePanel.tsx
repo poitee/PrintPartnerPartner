@@ -13,10 +13,7 @@ import { cn } from "../../lib/utils";
 type Props = {
   engineReady: boolean;
   refreshKey?: number;
-  /**
-   * When false (Progress), hide Send ready / Send now / force-start.
-   * Queue list + Remove remain.
-   */
+  /** When true (Progress), show Send ready / Send now. Default true. */
   allowDispatch?: boolean;
   className?: string;
 };
@@ -25,9 +22,9 @@ function stateLabel(item: PrinterSendQueueItem): string {
   switch (item.state) {
     case "queued":
       if (item.match === "compatible") {
-        return item.wait_for_idle ? "Waiting for matching Idle" : "Queued (any match)";
+        return item.wait_for_idle ? "Waiting for Idle" : "Idle match";
       }
-      return item.wait_for_idle ? "Waiting for Idle" : "Queued";
+      return item.wait_for_idle ? "Waiting for Idle" : "Idle match";
     case "sending":
       return "Sending…";
     case "error":
@@ -42,8 +39,9 @@ function stateLabel(item: PrinterSendQueueItem): string {
 }
 
 /**
- * Thin Phase F queue list — Export enqueue surface and Progress operator view.
- * Hides when empty. Export keeps Send ready / Send now; Progress is list + Remove only.
+ * Farm send-queue operator surface for Progress.
+ * Hides when empty. Send ready / Send now / Remove when allowDispatch.
+ * Export Send panel does not mount this — Export only has Send / Start print.
  */
 export default function PrinterSendQueuePanel({
   engineReady,
