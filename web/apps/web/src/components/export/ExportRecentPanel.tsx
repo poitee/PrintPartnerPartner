@@ -10,6 +10,7 @@ export const EXPORT_JOB_KINDS = new Set([
   "kit-export",
   "export-checklist-html",
   "export-kit-bundle",
+  "printer-upload",
 ]);
 
 export function hasExportJobs(jobs: { kind: string }[]): boolean {

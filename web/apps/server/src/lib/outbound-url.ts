@@ -7,8 +7,8 @@ import { isIP } from "node:net";
  * Strict default: reject URLs that resolve to private / loopback / link-local
  * ranges (cover images, page refetches, anything internet-facing).
  *
- * `allowPrivate: true`: for self-host integrations (Spoolman, Moonraker) that
- * legitimately live on LAN/private IPs. Cloud metadata endpoints stay blocked
+ * `allowPrivate: true`: for self-host integrations (Spoolman, Moonraker, Bambu MQTT)
+ * that legitimately live on LAN/private IPs. Cloud metadata endpoints stay blocked
  * even then.
  */
 
@@ -79,27 +79,10 @@ export function classifyAddress(address: string): AddressClass {
 
 const defaultLookup: LookupFn = (hostname) => lookup(hostname, { all: true, verbatim: true });
 
-/**
- * Validate that a user-supplied URL is safe to fetch.
- * Throws OutboundUrlError if the URL is malformed, uses a non-HTTP protocol,
- * or resolves to a blocked address range. Returns the parsed URL on success.
- */
-export async function assertSafeOutboundUrl(
-  rawUrl: string,
-  options: OutboundUrlOptions = {},
-): Promise<URL> {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    throw new OutboundUrlError(`Invalid URL: ${rawUrl}`);
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new OutboundUrlError(`Unsupported URL protocol: ${url.protocol}`);
-  }
-  const hostname = url.hostname.replace(/^\[|\]$/g, "");
-  if (!hostname) throw new OutboundUrlError(`Invalid URL host: ${rawUrl}`);
-
+async function assertResolvedHostSafe(
+  hostname: string,
+  options: OutboundUrlOptions,
+): Promise<void> {
   let addresses: string[];
   if (isIP(hostname)) {
     addresses = [hostname];
@@ -124,6 +107,52 @@ export async function assertSafeOutboundUrl(
       throw new OutboundUrlError(`URL resolves to a private or internal address: ${hostname}`);
     }
   }
+}
+
+/**
+ * SSRF guard for non-HTTP LAN targets (e.g. Bambu MQTT on :8883).
+ * Validates hostname / IP the same way as {@link assertSafeOutboundUrl}.
+ * Pass hostname or IP only — not `host:port` (use a separate port field).
+ */
+export async function assertSafeOutboundHost(
+  rawHost: string,
+  options: OutboundUrlOptions = {},
+): Promise<string> {
+  const hostname = rawHost.trim().replace(/^\[|\]$/g, "");
+  if (!hostname) throw new OutboundUrlError("Host is required");
+  if (/[/\\?\s#]/.test(hostname)) {
+    throw new OutboundUrlError(`Invalid host: ${rawHost}`);
+  }
+  // Allow IPv6 literals (contain ":"); reject host:port forms that are not IPv6.
+  if (hostname.includes(":") && isIP(hostname) !== 6) {
+    throw new OutboundUrlError(`Invalid host (include port separately): ${rawHost}`);
+  }
+  await assertResolvedHostSafe(hostname, options);
+  return hostname;
+}
+
+/**
+ * Validate that a user-supplied URL is safe to fetch.
+ * Throws OutboundUrlError if the URL is malformed, uses a non-HTTP protocol,
+ * or resolves to a blocked address range. Returns the parsed URL on success.
+ */
+export async function assertSafeOutboundUrl(
+  rawUrl: string,
+  options: OutboundUrlOptions = {},
+): Promise<URL> {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new OutboundUrlError(`Invalid URL: ${rawUrl}`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new OutboundUrlError(`Unsupported URL protocol: ${url.protocol}`);
+  }
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+  if (!hostname) throw new OutboundUrlError(`Invalid URL host: ${rawUrl}`);
+
+  await assertResolvedHostSafe(hostname, options);
   return url;
 }
 

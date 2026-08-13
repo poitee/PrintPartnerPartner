@@ -54,7 +54,10 @@ After the app is running, open **Help** in the sidebar for the in-app workflow g
 | [Architecture](ARCHITECTURE.md) | Monorepo layout, deploy modes, job runner, kit advisor overview |
 | [HTTP API](API.md) | `/api/v1` discovery, auth, jobs, exports, `/assistant/*` |
 | [Deploy reference](../web/DEPLOY.md) | Docker Compose, env vars, SaaS (Postgres + S3 + OAuth), Settings vs env for AI |
-| [Spoolman integration](integrations/SPOOLMAN.md) | Filament inventory on Build; spool weights in Review |
+| [Spoolman integration](integrations/SPOOLMAN.md) | Filament inventory on Plan; spool weights in Parts |
+| [Printer setup & debugging](integrations/PRINTER_SETUP.md) | Add Moonraker/PrusaLink, link fleet, send G-code, common failures |
+| [Printer API research](integrations/PRINTER_APIS.md) | Klipper / Prusa / Bambu capability ladder and stance |
+| [Printer UX deep dive](integrations/PRINTER_UX.md) | Desk-first screens, Export/Progress binds, phased A→F UI map |
 | [3MF export validation](3MF_EXPORT_VALIDATION.md) | Slicer import checklist for 3MF packs |
 | [Kit advisor MCP](assistant-mcp.md) | Stdio MCP server for Cursor / Claude Desktop |
 | [Assistant research brief](assistant-research-brief.md) | Prompt/brief for producing domain research packs |

@@ -98,6 +98,12 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
 | `DELETE` | `/api/v1/integrations/:id` | Remove |
 | `POST` | `/api/v1/integrations/:id/test` | Test connection (rate-limited) |
 | `GET` | `/api/v1/integrations/:id/devices` | Device discovery |
+| `GET` | `/api/v1/integrations/:id/status` | Live printer host status (`getStatus`; states include `complete`) |
+| `GET` | `/api/v1/printer-checkoff` | List durable job↔Progress unit mappings (`?state=watching\|awaiting_verify`) |
+| `POST` | `/api/v1/printer-checkoff/reconcile` | Fetch live host status; queue verify or mark host_failed (`{ integration_id }`) |
+| `POST` | `/api/v1/printer-checkoff/verify` | Confirm/reject awaiting units (`{ link_id, decisions }`) |
+| `POST` | `/api/v1/printer-checkoff/dismiss` | Dismiss a `host_failed` link |
+| `GET` | `/api/v1/printer-outcomes/summary` | Reject/confirm aggregates (`?profile_id=`) |
 
 **Moonraker** (reference adapter): set `config.base_url` to e.g. `http://192.168.1.50:7125`. Test calls `GET {base_url}/server/info`.
 
@@ -110,7 +116,7 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
 
 `GET /filaments/catalog` includes `spoolman_colors` when `default_spoolman_integration_id` is set (Settings) or when `?spoolman_integration_id=` is passed. User guide: [integrations/SPOOLMAN.md](integrations/SPOOLMAN.md).
 
-Stub adapters (`prusalink`, `bambu`) return `{ ok: false, message: "…not implemented" }`.
+Stub adapter (`bambu`) returns not-implemented for send; Moonraker and PrusaLink support test, status, upload, and Progress verify-first checkoff (desk-v1 self-host). Setup: [integrations/PRINTER_SETUP.md](integrations/PRINTER_SETUP.md). Research: [integrations/PRINTER_APIS.md](integrations/PRINTER_APIS.md).
 
 **AI assistant (`ai_assistant` integration):** create/update via the integrations API (or **Settings → AI assistant**). Config fields include `provider`, `model`, `api_key`, `base_url` / `ollama_url`, `max_tokens`, budgets, `search_provider`, `search_api_key`, `allow_url_ingest`, `guide_ingest_max_bytes`, `ollama_num_ctx`. Secrets are redacted in list responses. User guide: [KIT_ADVISOR.md](KIT_ADVISOR.md).
 
