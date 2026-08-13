@@ -2,7 +2,7 @@
 
 How to connect Moonraker / PrusaLink / Bambu (status) hosts, link them to fleet machines, send sliced G-code from Export (Moonraker/PrusaLink), and open Progress verify when a host job finishes. Product UX: [PRINTER_UX.md](PRINTER_UX.md). Vendor APIs: [PRINTER_APIS.md](PRINTER_APIS.md).
 
-**Phases A–F (desk-first self-host):** Settings hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip** + active **send queue**; **verify-first Progress** on successful job complete (confirm/reject); **Bambu LAN MQTT status** (Phase E); thin **Queue for idle** / Send ready (Phase F). Bambu send stays out of the default product path.
+**Phases A–F (desk-first self-host):** Settings hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip** + active **send queue**; **verify-first Progress** on successful job complete (confirm/reject); **Bambu LAN MQTT status** (Phase E); thin **Queue for idle** / Send ready (Phase F); **Bambu Connect handoff** (official `bambu-connect://` URL — no MQTT print-start).
 
 ---
 
@@ -31,14 +31,13 @@ Secrets are stored with integrations redaction (`****` in list responses). Never
 5. **Add host** → **Test connection**. Expect `Connected (LAN MQTT · Idle)` (or Printing / … from `gcode_state`).
 6. Link the host on **Printer fleet** — Progress **live strip** and fleet status pill use the same `GET /api/v1/integrations/:id/status` poll as Moonraker/PrusaLink.
 
-**What works today:** status / progress / ETA / filename via local MQTT TLS (`mqtts://IP:8883`).
+**What works today:** status / progress / ETA / filename via local MQTT TLS (`mqtts://IP:8883`); Export **Open in Bambu Connect** stages a sliced `.3mf` / `.gcode` and hands off via the official `bambu-connect://import-file` URL scheme (desk self-host can launch Connect; Docker users download the staged file or set `BAMBU_CONNECT_HOST_PATH_MAP`).
 
-**What does not ship as the default send path:** reverse-engineered MQTT print-start. Export **Send to printer** stays **Moonraker / PrusaLink** (`.gcode` / `.bgcode`). Linked Bambu machines are excluded from that card with copy pointing here.
+**What does not ship:** reverse-engineered MQTT print-start. Moonraker / PrusaLink keep direct G-code upload on the same Export card.
 
-**Future send (documented only):**
+**Docker / path map:** when the API runs in a container, Connect on the host cannot see container paths. Either download from the handoff response, or set `BAMBU_CONNECT_HOST_PATH_MAP=/data=/host/path/to/data` so the Connect URL uses the host mount path. Optional `BAMBU_CONNECT_LAUNCH=0|1` forces skip/force of OS URL launch.
 
-- Power-user **Developer Mode** (LAN + Developer Mode) — community MQTT control may work; ACS firmware can silently drop control writes when Developer Mode is off.
-- Official **Bambu Connect** / signed network plugin, or **Local Server + Printer Control API / Local SDK** ([third-party integration wiki](https://wiki.bambulab.com/en/software/third-party-integration)) — preferred product path when we add Bambu send later.
+**Not in desk-v1:** Local Server / Fleet Hub SDK (requires Bambu access application).
 
 ### Bambu debugging
 
@@ -50,7 +49,7 @@ Secrets are stored with integrations redaction (`****` in list responses). Never
 | Connection refused / closed | LAN mode off, wrong IP, firewall | Enable LAN mode; ping printer from the Print Partner host; open TCP `8883` |
 | TLS / cert errors | Self-signed printer cert | For **private IP literals** the adapter skips cert verification (self-signed v1 cert). Prefer entering the printer’s LAN IP. Hostnames keep TLS verification on |
 | Connects but no status / timeout | Wrong serial, wrong code | Confirm serial matches MQTT topic `device/{serial}/report`; re-test access code |
-| Status OK but cannot start print | Expected | Status-only Phase E; ACS may drop control without Developer Mode — use official Connect/Local Server for supported send |
+| Connect handoff did not open | Connect not installed / Docker | Install [Bambu Connect](https://wiki.bambulab.com/en/software/bambu-connect); in Docker download the staged file or set `BAMBU_CONNECT_HOST_PATH_MAP` |
 | SaaS cannot reach printer | LAN not reachable | Desk-v1 is self-host; SaaS needs a future site-agent |
 
 ---

@@ -22,6 +22,7 @@ import { registerApiV1ExtensionRoutes } from "./api-v1-extensions.js";
 import { registerIntegrationRoutes } from "./integrations.js";
 import { registerPrinterCheckoffRoutes } from "./printer-checkoff.js";
 import { registerPrinterSendQueueRoutes } from "./printer-send-queue.js";
+import { registerBambuConnectRoutes } from "./bambu-connect.js";
 import { registerWebhookRoutes } from "./webhooks.js";
 import { registerShareRoutes } from "./shares.js";
 import { registerAssistantRoutes } from "./assistant.js";
@@ -95,6 +96,7 @@ export async function registerCoreRoutes(
     repo: deps.repo,
     jobs: deps.jobs,
   });
+  await registerBambuConnectRoutes(app, { repo: deps.repo, jobs: deps.jobs });
 
   if (options.apiV1Extensions) {
     await registerApiV1ExtensionRoutes(app, {

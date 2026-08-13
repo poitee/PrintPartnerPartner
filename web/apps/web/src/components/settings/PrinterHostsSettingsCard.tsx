@@ -250,7 +250,7 @@ export default function PrinterHostsSettingsCard({ engineReady }: Props) {
               <SelectContent>
                 <SelectItem value="moonraker">Moonraker (Klipper)</SelectItem>
                 <SelectItem value="prusalink">PrusaLink</SelectItem>
-                <SelectItem value="bambu">Bambu (LAN status)</SelectItem>
+                <SelectItem value="bambu">Bambu (LAN + Connect)</SelectItem>
               </SelectContent>
             </Select>
           </label>

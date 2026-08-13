@@ -109,6 +109,8 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
 | `POST` | `/api/v1/printer-send-queue/:id/dispatch` | Dispatch one item (`force` skips Idle wait) |
 | `POST` | `/api/v1/printer-send-queue/drain` | Dispatch ready queued items to Idle printers |
 | `DELETE` | `/api/v1/printer-send-queue/:id` | Cancel a queued/error item |
+| `POST` | `/bambu-connect/handoff` | Stage `.3mf`/`.gcode` and return official `bambu-connect://import-file` URL (optional OS launch; SPA flat route) |
+| `GET` | `/bambu-connect/handoff/:id/file` | Download staged Connect handoff file |
 
 **Moonraker** (reference adapter): set `config.base_url` to e.g. `http://192.168.1.50:7125`. Test calls `GET {base_url}/server/info`.
 
@@ -121,7 +123,7 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
 
 `GET /filaments/catalog` includes `spoolman_colors` when `default_spoolman_integration_id` is set (Settings) or when `?spoolman_integration_id=` is passed. User guide: [integrations/SPOOLMAN.md](integrations/SPOOLMAN.md).
 
-Stub adapter (`bambu`) returns not-implemented for send; Moonraker and PrusaLink support test, status, upload, and Progress verify-first checkoff (desk-v1 self-host). Setup: [integrations/PRINTER_SETUP.md](integrations/PRINTER_SETUP.md). Research: [integrations/PRINTER_APIS.md](integrations/PRINTER_APIS.md).
+Moonraker and PrusaLink support test, status, upload, and Progress verify-first checkoff. Bambu supports LAN MQTT status plus **Connect URL handoff** (not MQTT print-start). Setup: [integrations/PRINTER_SETUP.md](integrations/PRINTER_SETUP.md). Research: [integrations/PRINTER_APIS.md](integrations/PRINTER_APIS.md).
 
 **AI assistant (`ai_assistant` integration):** create/update via the integrations API (or **Settings → AI assistant**). Config fields include `provider`, `model`, `api_key`, `base_url` / `ollama_url`, `max_tokens`, budgets, `search_provider`, `search_api_key`, `allow_url_ingest`, `guide_ingest_max_bytes`, `ollama_num_ctx`. Secrets are redacted in list responses. User guide: [KIT_ADVISOR.md](KIT_ADVISOR.md).
 

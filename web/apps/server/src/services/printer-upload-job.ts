@@ -75,7 +75,7 @@ export async function runPrinterUploadJob(
   if (!adapter?.uploadFile) {
     if (integration.type === "bambu") {
       throw new Error(
-        "Bambu send is not enabled (LAN MQTT is status-only). Use Moonraker/PrusaLink for upload, or see Printer setup for Developer Mode / Connect-Local Server.",
+        "Direct Bambu upload is not available. Use Export → Open in Bambu Connect (official URL handoff), or Moonraker/PrusaLink for G-code upload.",
       );
     }
     throw new Error(`Upload is not supported for ${integration.type}`);
