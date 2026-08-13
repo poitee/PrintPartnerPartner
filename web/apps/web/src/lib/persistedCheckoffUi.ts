@@ -15,7 +15,7 @@ export type PersistedCheckoffUi = {
 };
 
 const DEFAULT: PersistedCheckoffUi = {
-  /** Progress stage defaults to Missing (Workflow mock). */
+  /** Progress stage defaults to Remaining (unprinted checkoff units). */
   filter: "missing",
   compactMode: false,
   continuousPrintLayout: false,

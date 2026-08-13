@@ -143,7 +143,7 @@ function CheckoffSheetRow({
 }
 
 const FILTER_MODES: { mode: CheckoffFilterMode; label: string }[] = [
-  { mode: "missing", label: "Missing" },
+  { mode: "missing", label: "Remaining" },
   { mode: "done", label: "Done" },
   { mode: "all", label: "All" },
 ];
