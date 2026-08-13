@@ -97,6 +97,19 @@ export function shouldAttemptBambuConnectLaunch(options?: {
   return p === "darwin" || p === "win32" || p === "linux";
 }
 
+/** Resolve OS launcher for a bambu-connect:// URL (exported for tests). */
+export function bambuConnectLaunchCommand(
+  url: string,
+  osPlatform: NodeJS.Platform = platform(),
+): { cmd: string; args: string[] } {
+  if (osPlatform === "darwin") return { cmd: "open", args: [url] };
+  if (osPlatform === "win32") {
+    // rundll32 preserves query `&` — `cmd /c start` would split on `&`.
+    return { cmd: "rundll32", args: ["url.dll,FileProtocolHandler", url] };
+  }
+  return { cmd: "xdg-open", args: [url] };
+}
+
 /**
  * Open the Connect URL scheme on the host OS (desk self-host).
  * Does not reverse-engineer MQTT print-start.
@@ -105,19 +118,7 @@ export function tryLaunchBambuConnectUrl(
   url: string,
 ): Promise<{ launched: boolean; error?: string }> {
   return new Promise((resolve) => {
-    const p = platform();
-    let cmd: string;
-    let args: string[];
-    if (p === "darwin") {
-      cmd = "open";
-      args = [url];
-    } else if (p === "win32") {
-      cmd = "cmd";
-      args = ["/c", "start", "", url];
-    } else {
-      cmd = "xdg-open";
-      args = [url];
-    }
+    const { cmd, args } = bambuConnectLaunchCommand(url);
     try {
       const child = spawn(cmd, args, {
         detached: true,

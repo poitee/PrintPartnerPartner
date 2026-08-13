@@ -1,5 +1,5 @@
 import { createWriteStream, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { Readable } from "node:stream";
 import type { PrinterCheckoffUnit } from "@print-partner/contracts";
@@ -10,6 +10,19 @@ import { createPrinterCheckoffLink } from "./printer-checkoff-store.js";
 import { loadFleet } from "./printer-fleet.js";
 
 const ALLOWED_EXTENSIONS = new Set([".gcode", ".bgcode", ".gco"]);
+
+/** Remove `exports/.../printer-uploads/<jobId>/` after the host transfer finishes. */
+export function cleanupPrinterUploadArtifactDir(artifactPath: string): void {
+  const trimmed = artifactPath?.trim();
+  if (!trimmed) return;
+  try {
+    const dir = dirname(trimmed);
+    if (basename(dirname(dir)) !== "printer-uploads") return;
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+}
 
 export function sanitizePrinterUploadFilename(filename: string): string {
   const base = basename(filename.replace(/\\/g, "/")).trim() || "print.gcode";
@@ -47,6 +60,18 @@ export type PrinterUploadJobEmit = (patch: {
 }) => void;
 
 export async function runPrinterUploadJob(
+  repo: AppRepository,
+  input: PrinterUploadJobInput,
+  emit: PrinterUploadJobEmit,
+): Promise<Record<string, unknown>> {
+  try {
+    return await runPrinterUploadJobInner(repo, input, emit);
+  } finally {
+    cleanupPrinterUploadArtifactDir(input.artifact_path);
+  }
+}
+
+async function runPrinterUploadJobInner(
   repo: AppRepository,
   input: PrinterUploadJobInput,
   emit: PrinterUploadJobEmit,

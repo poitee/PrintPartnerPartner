@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bambuConnectDisplayName,
+  bambuConnectLaunchCommand,
   buildBambuConnectUrl,
   isAllowedBambuConnectFilename,
   resolveBambuConnectHostPath,
@@ -47,5 +48,14 @@ describe("bambu-connect", () => {
 
   it("strips control characters from filenames", () => {
     expect(sanitizeBambuConnectFilename("bad\nname.3mf")).toBe("badname.3mf");
+  });
+
+  it("preserves URL query ampersands on Windows launch", () => {
+    const url = buildBambuConnectUrl("/tmp/cube.gcode.3mf", "Cube");
+    expect(url).toContain("&");
+    const { cmd, args } = bambuConnectLaunchCommand(url, "win32");
+    expect(cmd).toBe("rundll32");
+    expect(args).toEqual(["url.dll,FileProtocolHandler", url]);
+    expect(args[1]).toContain("&");
   });
 });

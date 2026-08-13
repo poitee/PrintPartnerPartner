@@ -27,6 +27,7 @@ import {
 import { reconcileSendQueueJobResult } from "../services/printer-send-queue.js";
 import { parseCheckoffUnits } from "../services/printer-checkoff.js";
 import { sendProblem } from "../lib/api-error.js";
+import { getIntegrationAdapter } from "../integrations/registry.js";
 import { getIntegrationConfig } from "../integrations/store.js";
 import { loadFleet } from "../services/printer-fleet.js";
 
@@ -777,6 +778,27 @@ export async function registerJobRoutes(
             "Bad Request",
             `Upload is not supported for ${integration.type}`,
           );
+        }
+
+        if (start) {
+          const adapter = getIntegrationAdapter(integration.type);
+          let hostState: string = "unknown";
+          try {
+            const status = adapter?.getStatus
+              ? await adapter.getStatus(integration.config)
+              : { state: "unknown" as const };
+            hostState = status.state;
+          } catch {
+            hostState = "offline";
+          }
+          if (hostState !== "idle" && hostState !== "complete") {
+            return sendProblem(
+              reply,
+              409,
+              "Conflict",
+              `Printer is ${hostState} — wait for Idle or queue for idle`,
+            );
+          }
         }
 
         const job_id = await jobs.start(

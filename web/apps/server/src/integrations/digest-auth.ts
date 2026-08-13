@@ -10,7 +10,8 @@ export function parseWwwAuthenticate(header: string): Record<string, string> {
   while ((m = re.exec(match[1]!)) !== null) {
     const quoted = m[2];
     const value = quoted ?? m[3] ?? "";
-    params[m[1]!] = quoted === undefined ? value : value.replace(/\\(.)/g, "$1");
+    // RFC 7616 parameter names are case-insensitive; normalize for lookups.
+    params[m[1]!.toLowerCase()] = quoted === undefined ? value : value.replace(/\\(.)/g, "$1");
   }
   return params;
 }

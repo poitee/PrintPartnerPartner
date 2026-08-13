@@ -85,10 +85,17 @@ async function resolveDispatchTarget(
     return { error: `Upload is not supported for ${integration.type}`, status: 400 };
   }
   if (item.wait_for_idle && !deps.force) {
-    const status = await deps.getStatus(integrationId);
-    if (!isIdleish(status.state)) {
+    try {
+      const status = await deps.getStatus(integrationId);
+      if (!isIdleish(status.state)) {
+        return {
+          error: `Printer is ${status.state} — wait for Idle or force dispatch`,
+          status: 409,
+        };
+      }
+    } catch (e) {
       return {
-        error: `Printer is ${status.state} — wait for Idle or force dispatch`,
+        error: e instanceof Error ? e.message : String(e),
         status: 409,
       };
     }
@@ -180,9 +187,12 @@ export async function dispatchPrinterSendQueueItem(
   }
 }
 
+/** Max queue items examined in one HTTP drain request (status checks can be slow). */
+export const DRAIN_ITEM_CAP = 8;
+
 /**
  * For each waiting queue item, dispatch when a compatible (or pinned) host is idle.
- * At most one send per printer per drain pass.
+ * At most one send per printer per drain pass. Bounded by {@link DRAIN_ITEM_CAP}.
  */
 export async function drainPrinterSendQueue(
   repo: AppRepository,
@@ -196,13 +206,22 @@ export async function drainPrinterSendQueue(
   const results: Array<{ item_id: string; job_id?: string; error?: string }> = [];
   const usedPrinters = new Set<string>();
 
-  for (const item of queued) {
-    const dispatched = await dispatchPrinterSendQueueItem(repo, exportsDir, item.id, {
-      startJob: deps.startJob,
-      getStatus: deps.getStatus,
-      force: !item.wait_for_idle,
-      excludePrinterIds: usedPrinters,
-    });
+  for (const item of queued.slice(0, DRAIN_ITEM_CAP)) {
+    let dispatched: Awaited<ReturnType<typeof dispatchPrinterSendQueueItem>>;
+    try {
+      dispatched = await dispatchPrinterSendQueueItem(repo, exportsDir, item.id, {
+        startJob: deps.startJob,
+        getStatus: deps.getStatus,
+        force: !item.wait_for_idle,
+        excludePrinterIds: usedPrinters,
+      });
+    } catch (e) {
+      results.push({
+        item_id: item.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      continue;
+    }
     if ("error" in dispatched) {
       if (dispatched.status === 409) continue;
       results.push({ item_id: item.id, error: dispatched.error });
