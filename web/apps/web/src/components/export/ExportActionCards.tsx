@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  fetchIntegrationStatus,
   fetchIntegrations,
   fetchPrinters,
   startExport3mf,
@@ -10,6 +11,7 @@ import {
   startExportStlPack,
   startPrinterUpload,
   type IntegrationSummary,
+  type PrinterHostStatus,
   type PrinterMachine,
   type ReviewPart,
   type StlPackGroupBy,
@@ -58,6 +60,44 @@ function remainingLabel(part: ReviewPart): string {
   return left === 1 ? "1 unit left" : `${left} units left`;
 }
 
+function statusLabel(status: PrinterHostStatus | undefined): string {
+  if (!status) return "…";
+  switch (status.state) {
+    case "idle":
+      return "Idle";
+    case "printing":
+      return status.progress != null ? `Printing ${Math.round(status.progress)}%` : "Printing";
+    case "paused":
+      return "Paused";
+    case "complete":
+      return "Complete";
+    case "error":
+      return "Error";
+    case "offline":
+      return "Offline";
+    default:
+      return status.state;
+  }
+}
+
+function pickPreferredPrinterId(
+  printers: PrinterMachine[],
+  statusByIntegration: Record<string, PrinterHostStatus>,
+  prev: string,
+): string {
+  const prevMachine = prev ? printers.find((p) => p.id === prev) : undefined;
+  if (prevMachine) {
+    const integrationId = prevMachine.integration_id?.trim();
+    // Once we have a status for the current pick, keep the user's selection.
+    if (integrationId && statusByIntegration[integrationId]) return prev;
+  }
+  const idle = printers.find((p) => {
+    const id = p.integration_id?.trim();
+    return id && statusByIntegration[id]?.state === "idle";
+  });
+  return idle?.id ?? prevMachine?.id ?? printers[0]?.id ?? "";
+}
+
 /**
  * Export hub card grid — one-click / dropdown actions matching the workflow mock.
  */
@@ -73,6 +113,9 @@ export default function ExportActionCards({ onShare }: Props) {
   const [linkedPrinters, setLinkedPrinters] = useState<PrinterMachine[]>([]);
   const [bambuStatusOnlyCount, setBambuStatusOnlyCount] = useState(0);
   const [selectedPrinterId, setSelectedPrinterId] = useState<string>("");
+  const [hostStatusByIntegration, setHostStatusByIntegration] = useState<
+    Record<string, PrinterHostStatus>
+  >({});
   const [autoCheckoff, setAutoCheckoff] = useState(true);
   const [selectedCheckoffPartIds, setSelectedCheckoffPartIds] = useState<number[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,7 +152,7 @@ export default function ExportActionCards({ onShare }: Props) {
           const id = p.integration_id?.trim();
           if (!id) return false;
           const host = byId.get(id);
-          return Boolean(host && sendTypes.has(host.type));
+          return Boolean(host && sendTypes.has(host.type) && host.config.enabled !== false);
         });
         const bambuLinked = printers.filter((p) => {
           const id = p.integration_id?.trim();
@@ -133,6 +176,57 @@ export default function ExportActionCards({ onShare }: Props) {
       cancelled = true;
     };
   }, [health]);
+
+  // Thin Phase F: poll linked send hosts so the picker can prefer Idle printers.
+  useEffect(() => {
+    if (!health || linkedPrinters.length === 0) {
+      setHostStatusByIntegration({});
+      return;
+    }
+    let cancelled = false;
+    const integrationIds = [
+      ...new Set(
+        linkedPrinters
+          .map((p) => p.integration_id?.trim())
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+
+    const tick = async () => {
+      if (cancelled || document.hidden) return;
+      const entries = await Promise.all(
+        integrationIds.map(async (id) => {
+          try {
+            return [id, await fetchIntegrationStatus(id)] as const;
+          } catch (e) {
+            return [
+              id,
+              {
+                state: "offline" as const,
+                message: e instanceof Error ? e.message : String(e),
+              },
+            ] as const;
+          }
+        }),
+      );
+      if (cancelled) return;
+      const next = Object.fromEntries(entries);
+      setHostStatusByIntegration(next);
+      setSelectedPrinterId((prev) => pickPreferredPrinterId(linkedPrinters, next, prev));
+    };
+
+    void tick();
+    const timer = window.setInterval(() => void tick(), 5_000);
+    const onVisibility = () => {
+      if (!document.hidden) void tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [health, linkedPrinters]);
 
   const missingPartIdsKey = missingParts.map((p) => p.id).join(",");
 
@@ -514,11 +608,15 @@ export default function ExportActionCards({ onShare }: Props) {
                 aria-label="Target printer"
                 onChange={(e) => setSelectedPrinterId(e.target.value)}
               >
-                {linkedPrinters.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
+                {linkedPrinters.map((p) => {
+                  const integrationId = p.integration_id?.trim() ?? "";
+                  const label = statusLabel(hostStatusByIntegration[integrationId]);
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {label}
+                    </option>
+                  );
+                })}
               </select>
               {missingCount > 0 && selectedProfileId != null ? (
                 <div className="rounded-md border border-border/80 bg-muted/30 px-2.5 py-2 text-xs">
