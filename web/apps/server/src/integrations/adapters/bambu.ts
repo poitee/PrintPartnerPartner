@@ -251,8 +251,12 @@ function fetchBambuStatus(conn: BambuConnection): Promise<PrinterHostStatus> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // Keep the "error" listener bound (guarded by `settled`) instead of
+      // removeAllListeners(): the mqtt client's own internal connect/connack
+      // timers can still fire an "error" after we resolve, and an Emitter
+      // with zero "error" listeners throws and crashes the process.
       try {
-        client?.removeAllListeners();
+        client?.removeListener("message", onMessage);
         client?.end(true);
       } catch {
         // ignore disconnect errors after we already have a result
