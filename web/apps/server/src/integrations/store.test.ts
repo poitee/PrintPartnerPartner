@@ -75,4 +75,44 @@ describe("integration store", () => {
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("redacts and preserves camelCase apiKey / accessCode aliases", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-int-camel-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+    const port = createIntegrationPort({
+      repo,
+      getAdapter: (type) => (type === "spoolman" ? spoolmanAdapter : undefined),
+    });
+
+    const created = port.create({
+      type: "moonraker",
+      name: "Pi",
+      config: {
+        base_url: "http://192.168.1.60:7125",
+        apiKey: "moonraker-secret",
+        accessCode: "bambu-lan-code",
+      },
+    });
+
+    const listed = port.list().find((x) => x.id === created.id)!;
+    expect(listed.config.apiKey).toBe("****");
+    expect(listed.config.accessCode).toBe("****");
+
+    const updated = port.update(created.id, {
+      config: { ...listed.config, enabled: true },
+    });
+    expect(updated?.config.apiKey).toBe("****");
+    expect(updated?.config.accessCode).toBe("****");
+
+    const raw = repo.getSetting("integrations");
+    expect(raw).toContain("moonraker-secret");
+    expect(raw).toContain("bambu-lan-code");
+    expect(raw).not.toContain('"apiKey":"****"');
+    expect(raw).not.toContain('"accessCode":"****"');
+
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
