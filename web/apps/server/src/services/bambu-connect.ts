@@ -9,7 +9,8 @@ const ALLOWED_EXT = [".gcode.3mf", ".3mf", ".gcode", ".gco"] as const;
 
 export function sanitizeBambuConnectFilename(filename: string): string {
   const base = basename(filename.replace(/\\/g, "/")).trim() || "print.3mf";
-  const cleaned = base.replace(/[/\\]/g, "_");
+  // eslint-disable-next-line no-control-regex -- strip NUL/C0 controls from upload names
+  const cleaned = base.replace(/[/\\]/g, "_").replace(/[\u0000-\u001f\u007f]/g, "");
   if (!cleaned || cleaned === "." || cleaned === ".." || /^\.+$/.test(cleaned)) {
     return "print.3mf";
   }
@@ -65,9 +66,15 @@ export function resolveBambuConnectHostPath(absolutePath: string): string {
   if (!raw) return absolutePath;
   const eq = raw.indexOf("=");
   if (eq <= 0) return absolutePath;
-  const from = raw.slice(0, eq);
-  const to = raw.slice(eq + 1);
-  if (!from || !absolutePath.startsWith(from)) return absolutePath;
+  let from = raw.slice(0, eq);
+  let to = raw.slice(eq + 1);
+  if (!from) return absolutePath;
+  // Normalize trailing separators so `/data/` and `/data` behave the same.
+  while (from.length > 1 && from.endsWith("/")) from = from.slice(0, -1);
+  while (to.length > 1 && to.endsWith("/")) to = to.slice(0, -1);
+  if (absolutePath !== from && !absolutePath.startsWith(`${from}/`)) {
+    return absolutePath;
+  }
   return `${to}${absolutePath.slice(from.length)}`;
 }
 
