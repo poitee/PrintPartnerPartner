@@ -62,7 +62,12 @@ export function buildDigestAuthorization(opts: {
     ha1 = md5(`${ha1}:${nonce}:${cnonce}`);
   }
   const ha2 = md5(`${method}:${uri}`);
-  const nc = String(opts.nc ?? 1).padStart(8, "0");
+  // RFC 7616: nc is 8LHEX (nonce count as 8 lowercase hex digits).
+  const ncRaw = opts.nc ?? 1;
+  if (!Number.isInteger(ncRaw) || ncRaw < 1 || ncRaw > 0xffffffff) {
+    throw new Error("Invalid digest nc");
+  }
+  const nc = ncRaw.toString(16).padStart(8, "0");
   const response = qop
     ? md5(`${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`)
     : md5(`${ha1}:${nonce}:${ha2}`);

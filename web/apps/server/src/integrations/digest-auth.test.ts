@@ -71,6 +71,24 @@ describe("digest-auth", () => {
     expect(authorization).not.toContain("qop=");
   });
 
+  it("formats nc as 8-digit lowercase hex", () => {
+    const authorization = buildDigestAuthorization({
+      username: "maker",
+      password: "secret",
+      method: "GET",
+      uri: "/api/v1/status",
+      challenge: {
+        realm: "Printer API",
+        nonce: "n1",
+        qop: "auth",
+        algorithm: "MD5",
+      },
+      nc: 10,
+    });
+    expect(authorization).toContain("nc=0000000a");
+    expect(authorization).not.toContain("nc=00000010");
+  });
+
   it("escapes quotes in username and rejects CR/LF", () => {
     const authorization = buildDigestAuthorization({
       username: 'ma"ker',
