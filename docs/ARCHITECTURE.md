@@ -63,7 +63,7 @@ STL previews and the on-scroll Checkoff thumbnails are rendered **client-side wi
 - **Automation auth (self-host):** optional `PRINT_PARTNER_API_KEY` for `/api/v1/*`.
 - **Integrations:** pluggable adapters under `/api/v1/integrations` (Moonraker test connection first; other vendors stubbed).
 - **Fleet presets:** `/printers` bed metadata for 3MF packing — separate from live printer hosts.
-- **Live printer hosts:** not implemented yet. Research (capability ladder, Moonraker / PrusaLink / Bambu) is in [integrations/PRINTER_APIS.md](./integrations/PRINTER_APIS.md); product/UX screens and phased ship map are in [integrations/PRINTER_UX.md](./integrations/PRINTER_UX.md).
+- **Live printer hosts:** Moonraker and PrusaLink support status + G-code upload with verify-first Progress; Bambu LAN MQTT is status-only. Setup: [integrations/PRINTER_SETUP.md](./integrations/PRINTER_SETUP.md); research/UX: [integrations/PRINTER_APIS.md](./integrations/PRINTER_APIS.md), [integrations/PRINTER_UX.md](./integrations/PRINTER_UX.md).
 
 See [API.md](./API.md) for slicer polling, exports, and webhooks.
 

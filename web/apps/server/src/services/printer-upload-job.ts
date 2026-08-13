@@ -1,5 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { pipeline } from "node:stream/promises";
+import type { Readable } from "node:stream";
 import type { PrinterCheckoffUnit } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
@@ -9,8 +11,17 @@ import { loadFleet } from "./printer-fleet.js";
 
 const ALLOWED_EXTENSIONS = new Set([".gcode", ".bgcode", ".gco"]);
 
+export function sanitizePrinterUploadFilename(filename: string): string {
+  const base = basename(filename.replace(/\\/g, "/")).trim() || "print.gcode";
+  const cleaned = base.replace(/[/\\]/g, "_");
+  if (!cleaned || cleaned === "." || cleaned === ".." || /^\.+$/.test(cleaned)) {
+    return "print.gcode";
+  }
+  return cleaned;
+}
+
 export function isAllowedPrinterUploadFilename(filename: string): boolean {
-  const lower = filename.toLowerCase();
+  const lower = sanitizePrinterUploadFilename(filename).toLowerCase();
   for (const ext of ALLOWED_EXTENSIONS) {
     if (lower.endsWith(ext)) return true;
   }
@@ -146,10 +157,42 @@ export function persistPrinterUploadArtifact(
   filename: string,
   bytes: Buffer,
 ): string {
-  const safeName = basename(filename).replace(/[/\\]/g, "_") || "print.gcode";
+  const safeName = sanitizePrinterUploadFilename(filename);
   const dir = join(exportsDir, "printer-uploads", jobId);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, safeName);
   writeFileSync(path, bytes);
+  return path;
+}
+
+/** Stream a multipart file to disk; reject when the multipart limit truncates the body. */
+export async function streamPrinterUploadArtifact(
+  exportsDir: string,
+  jobId: string,
+  filename: string,
+  file: Readable & { truncated?: boolean },
+): Promise<string> {
+  const safeName = sanitizePrinterUploadFilename(filename);
+  const dir = join(exportsDir, "printer-uploads", jobId);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, safeName);
+  try {
+    await pipeline(file, createWriteStream(path));
+  } catch (err) {
+    try {
+      rmSync(path, { force: true });
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+  if (file.truncated) {
+    try {
+      rmSync(path, { force: true });
+    } catch {
+      /* ignore */
+    }
+    throw new Error("Upload exceeded size limit");
+  }
   return path;
 }

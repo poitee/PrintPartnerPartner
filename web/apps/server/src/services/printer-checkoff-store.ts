@@ -179,9 +179,9 @@ function savePrinterCheckoffLinks(repo: AppRepository, links: PrinterCheckoffLin
   repo.setSetting(SETTINGS_KEY, JSON.stringify(trimPrinterCheckoffLinks(links)));
 }
 
-/** Keep active links; prefer dropping oldest terminal history when over cap. */
+/** Keep active links; prefer dropping oldest terminal history when over cap.
+ * Never drop non-terminal (watching / awaiting_verify) links. */
 export function trimPrinterCheckoffLinks(links: PrinterCheckoffLink[]): PrinterCheckoffLink[] {
-  if (links.length <= MAX_LINKS) return links;
   const terminal = new Set(["verified", "dismissed", "host_failed", "applied"]);
   const active: PrinterCheckoffLink[] = [];
   const done: PrinterCheckoffLink[] = [];
@@ -189,10 +189,8 @@ export function trimPrinterCheckoffLinks(links: PrinterCheckoffLink[]): PrinterC
     if (terminal.has(link.state)) done.push(link);
     else active.push(link);
   }
-  if (active.length >= MAX_LINKS) {
-    return active.slice(-MAX_LINKS);
-  }
-  const keepDone = MAX_LINKS - active.length;
+  const keepDone = Math.max(0, MAX_LINKS - active.length);
+  if (keepDone === 0) return active;
   return [...active, ...done.slice(-keepDone)];
 }
 
@@ -263,7 +261,9 @@ export function updatePrinterCheckoffLink(
       if (!allowed.includes(all[idx].state)) return null;
     }
     const next = { ...all[idx], ...patch };
-    all[idx] = next;
+    // Move patched link to the end so terminal-history trim prefers it.
+    all.splice(idx, 1);
+    all.push(next);
     savePrinterCheckoffLinks(repo, all);
     return next;
   });

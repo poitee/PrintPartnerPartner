@@ -277,7 +277,11 @@ export const prusalinkAdapter: IntegrationAdapter = {
     if (!credentials(config)) {
       return { ok: false, message: "username and password are required" };
     }
-    const safeName = filename.replace(/[/\\]/g, "_").trim() || "print.gcode";
+    const safeName = (() => {
+      const cleaned = filename.replace(/[/\\]/g, "_").trim() || "print.gcode";
+      if (cleaned === "." || cleaned === ".." || /^\.+$/.test(cleaned)) return "print.gcode";
+      return cleaned;
+    })();
     const storage = storageRoot(config);
     const remotePath = `${storage}/${safeName}`;
     const uploadUrl = `${baseUrl}/api/v1/files/${remotePath

@@ -64,7 +64,7 @@
 
 **Tips:** **⌘K / Ctrl+K** opens the command palette (sync, recompute, exports, navigation). Collapse the left sidebar to an icon rail; the first-run **Progress** widget hides after you complete Library → Plan → Parts → Progress once. Open **Help** in the sidebar for the full workflow guide.
 
-Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Spoolman instance in Settings to pick filaments from your inventory on Plan and see read-only spool remaining weights in Parts. Live printer hosts: **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload (see **[Printer setup](docs/integrations/PRINTER_SETUP.md)**); **Bambu** is not shipped yet — see **[Printer API research](docs/integrations/PRINTER_APIS.md)** and the **[Printer UX deep dive](docs/integrations/PRINTER_UX.md)**.
+Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Spoolman instance in Settings to pick filaments from your inventory on Plan and see read-only spool remaining weights in Parts. Live printer hosts: **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload with verify-first Progress (see **[Printer setup](docs/integrations/PRINTER_SETUP.md)**); **Bambu** ships as LAN MQTT **status-only** (send deferred) — see **[Printer API research](docs/integrations/PRINTER_APIS.md)** and the **[Printer UX deep dive](docs/integrations/PRINTER_UX.md)**.
 
 ---
 

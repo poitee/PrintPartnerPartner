@@ -187,7 +187,7 @@ New job kind next to `export-3mf` in the jobs runner ([`web/apps/server/src/rout
 
 **Outbound SSRF:** every printer adapter operation (`getStatus`, `listDevices`, `uploadFile`, `startPrint` / pause / cancel, `subscribe`) must call the existing [`assertSafeOutboundUrl`](../../web/apps/server/src/lib/outbound-url.ts) guard — not only the initial connect URL. Self-host uses `allowPrivate: true` (same as today’s Moonraker/Spoolman probes); cloud metadata stays blocked. SaaS: later site-agent; out of desk-v1 scope. See [ARCHITECTURE.md](../ARCHITECTURE.md) and [API.md](../API.md).
 
-Adapter stubs today: [`moonraker.ts`](../../web/apps/server/src/integrations/adapters/moonraker.ts), [`prusalink.ts`](../../web/apps/server/src/integrations/adapters/prusalink.ts), [`bambu.ts`](../../web/apps/server/src/integrations/adapters/bambu.ts).
+Adapter implementations: [`moonraker.ts`](../../web/apps/server/src/integrations/adapters/moonraker.ts), [`prusalink.ts`](../../web/apps/server/src/integrations/adapters/prusalink.ts), [`bambu.ts`](../../web/apps/server/src/integrations/adapters/bambu.ts). `getStatus` / `uploadFile` ship for Moonraker/PrusaLink; Bambu is status-only. Still open on the adapter surface: dedicated `startPrint` / pause / cancel / `subscribe`.
 
 ---
 
