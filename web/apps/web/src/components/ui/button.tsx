@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
-import { Loader2 } from "lucide-react";
+import { Spinner } from "./spinner";
 import { cn } from "../../lib/utils";
 
 const buttonVariants = cva(
@@ -79,7 +79,7 @@ export function Button({
       aria-busy={loading || undefined}
       {...props}
     >
-      {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+      {loading && <Spinner className="h-4 w-4" aria-hidden />}
       {children}
     </button>
   );

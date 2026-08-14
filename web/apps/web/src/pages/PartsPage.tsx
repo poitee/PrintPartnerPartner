@@ -11,6 +11,7 @@ import {
   XCircle,
 } from "lucide-react";
 import StaleBuildBanner from "../components/StaleBuildBanner";
+import DeskNextStep from "../components/layout/DeskNextStep";
 import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -32,8 +33,9 @@ import {
   PARTS_CONFLICT_CTA,
   PARTS_CONFLICT_HINT,
 } from "../lib/mergeConflictCopy";
-import { countPartWarnings } from "../lib/partWarnings";
+import { countMissingStls, countPartWarnings } from "../lib/partWarnings";
 import { partsSummaryLine } from "../lib/partsGroups";
+import { deskNextStepLine } from "../lib/deskNextStep";
 import { flattenReviewParts } from "../lib/reviewParts";
 import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { useProfileSelection } from "../context/ProfileContext";
@@ -141,9 +143,44 @@ export default function PartsPage() {
     return partsSummaryLine(parts, review.totals.by_role, warnCount);
   }, [review]);
 
+  const missingStlCount = useMemo(() => {
+    if (!review) return 0;
+    return countMissingStls(flattenReviewParts(review.part_groups));
+  }, [review]);
+
+  const partsNextStep = deskNextStepLine("parts", {
+    partCount: hasIncludedParts ? 1 : 0,
+    mergeConflictCount: mergeConflicts.length,
+    missingStlCount,
+  });
+
   const onPrint = useCallback(() => {
     void sheetRef.current?.print();
   }, []);
+
+  const syncAllMissingSources = () => {
+    const ids = [
+      ...new Set(
+        (review?.layers ?? [])
+          .filter((l) => l.project_id != null)
+          .map((l) => l.project_id!),
+      ),
+    ];
+    if (ids.length === 0) {
+      // Fall back to Library when there is nothing to sync from layers.
+      return;
+    }
+    void syncJob.runJob(
+      () => startSync(ids),
+      (snap) => {
+        if (snap.status === "error") {
+          toast.error(snap.message || "Sync failed");
+          return;
+        }
+        if (selectedProfileId != null) void reload(selectedProfileId);
+      },
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -186,6 +223,8 @@ export default function PartsPage() {
         }
       />
 
+      <DeskNextStep>{partsNextStep}</DeskNextStep>
+
       <StaleBuildBanner
         stale={buildStale}
         busy={recomputeJob.busy}
@@ -218,6 +257,36 @@ export default function PartsPage() {
         </Card>
       ) : review ? (
         <>
+          {missingStlCount > 0 && (
+            <div
+              className="flex gap-2 rounded-md border border-warning bg-warning/15 px-3 py-2.5 text-sm"
+              role="alert"
+            >
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden />
+              <div>
+                <p className="font-medium">
+                  {missingStlCount} STL missing
+                </p>
+                <p className="mt-1 text-muted-foreground">
+                  Sync sources to pull missing files for this plan.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-primary underline"
+                    onClick={syncAllMissingSources}
+                    disabled={syncJob.busy}
+                  >
+                    {syncJob.busy ? "Syncing…" : "Sync sources"}
+                  </button>
+                  <Link to={libraryRoute()} className="text-xs text-primary underline">
+                    Go to Library
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
+
           {(mergeConflicts.length > 0 || blockers.length > 0 || warnings.length > 0) && (
             <section className="section-card space-y-3">
               <h3 className="text-sm font-semibold">Issues</h3>

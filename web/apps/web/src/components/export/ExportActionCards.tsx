@@ -5,6 +5,7 @@ import {
   fetchPrinters,
   startExport3mf,
   startExportStlPack,
+  type RoleFilamentRow,
   type StlPackGroupBy,
 } from "../../api/engine";
 import { useEngineHealth } from "../../hooks/useEngineHealth";
@@ -15,6 +16,7 @@ import { checkoffUnitTotals } from "../../lib/checkoffProgress";
 import { slicerExportGates } from "../../lib/exportActionGates";
 import { handleExport3mfJobDone } from "../../lib/export3mfJobResult";
 import { handleStlPackExportJobDone } from "../../lib/exportStlJobResult";
+import { planHasUnsetRoleColors } from "../../lib/roleColorSet";
 import { flattenReviewParts } from "../../lib/reviewParts";
 import { settingsPrintersRoute } from "../../lib/routes";
 import { Badge } from "../ui/badge";
@@ -37,15 +39,14 @@ import {
 
 type Props = {
   onShare: () => void;
+  roleFilaments?: RoleFilamentRow[];
 };
 
 /**
- * Slicer-input file cards for Export — STLs (all + remaining from this plan's
- * Progress checkoff), 3MF, share bundle. Sending to a printer lives in
- * PrinterSendPanel above. Farm-queue verbs (Send ready / Send now / Remove)
- * live on Progress, not here.
+ * Slicer-input file cards for Export — remaining first (GRE-226), then STLs,
+ * 3MF, share. Sending to a printer lives in PrinterSendPanel above.
  */
-export default function ExportActionCards({ onShare }: Props) {
+export default function ExportActionCards({ onShare, roleFilaments = [] }: Props) {
   const { health } = useEngineHealth();
   const { selectedProfileId } = useProfileSelection();
   const { review } = usePlanWorkspace();
@@ -58,9 +59,7 @@ export default function ExportActionCards({ onShare }: Props) {
   const includedCount = includedParts.length;
   const remainingUnits = checkoffUnitTotals(includedParts).remainingUnits;
   const exportBusy = exportStlJob.busy || export3mfJob.busy;
-  // Do not gate on review.has_blockers — pack/3MF already skip missing STLs and
-  // warn. Fresh multi-source plans often have one blocker and would otherwise
-  // hard-disable Export STLs / remaining / 3MF (Command Palette already allows).
+  const colorsUnset = planHasUnsetRoleColors(roleFilaments);
   const { canExportParts, canExportRemaining } = slicerExportGates({
     profileSelected: selectedProfileId != null,
     engineOk: Boolean(health),
@@ -125,50 +124,6 @@ export default function ExportActionCards({ onShare }: Props) {
 
   const cards = [
     {
-      key: "stls",
-      title: "Export STLs",
-      description: "Every included part, organised by role and source folder.",
-      chips: ["by role", "flat or nested"] as const,
-      body: (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              disabled={!canExportParts || exportBusy}
-              className="gap-1"
-            >
-              {exportStlJob.busy
-                ? "Exporting…"
-                : includedCount > 0
-                  ? `Export ${includedCount} parts`
-                  : "Export STLs"}
-              <ChevronDown className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-64">
-            <DropdownMenuLabel>Group exported files by</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => onExportStls("color_dir")}>
-              <div className="flex flex-col">
-                <span>Color + directory</span>
-                <span className="text-xs text-muted-foreground">
-                  Keep source folders (e.g. Primary/partsDir/file.stl)
-                </span>
-              </div>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onExportStls("color")}>
-              <div className="flex flex-col">
-                <span>Color only</span>
-                <span className="text-xs text-muted-foreground">
-                  Flatten all directories (e.g. Primary/file.stl)
-                </span>
-              </div>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ),
-    },
-    {
       key: "remaining",
       title: `Export remaining ${remainingUnits}`,
       description:
@@ -185,6 +140,7 @@ export default function ExportActionCards({ onShare }: Props) {
             <Button
               size="sm"
               disabled={!canExportRemaining || exportBusy}
+              loading={exportStlJob.busy}
               className="gap-1"
             >
               {exportStlJob.busy
@@ -192,7 +148,7 @@ export default function ExportActionCards({ onShare }: Props) {
                 : remainingUnits > 0
                   ? `Export remaining ${remainingUnits}`
                   : "Export remaining"}
-              <ChevronDown className="h-3.5 w-3.5" />
+              {!exportStlJob.busy ? <ChevronDown className="h-3.5 w-3.5" /> : null}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-64">
@@ -219,6 +175,51 @@ export default function ExportActionCards({ onShare }: Props) {
       ),
     },
     {
+      key: "stls",
+      title: "Export STLs",
+      description: "Every included part, organised by role and source folder.",
+      chips: ["by role", "flat or nested"] as const,
+      body: (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="sm"
+              disabled={!canExportParts || exportBusy}
+              loading={exportStlJob.busy}
+              className="gap-1"
+            >
+              {exportStlJob.busy
+                ? "Exporting…"
+                : includedCount > 0
+                  ? `Export ${includedCount} parts`
+                  : "Export STLs"}
+              {!exportStlJob.busy ? <ChevronDown className="h-3.5 w-3.5" /> : null}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuLabel>Group exported files by</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => onExportStls("color_dir")}>
+              <div className="flex flex-col">
+                <span>Color + directory</span>
+                <span className="text-xs text-muted-foreground">
+                  Keep source folders (e.g. Primary/partsDir/file.stl)
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onExportStls("color")}>
+              <div className="flex flex-col">
+                <span>Color only</span>
+                <span className="text-xs text-muted-foreground">
+                  Flatten all folders (e.g. Primary/file.stl)
+                </span>
+              </div>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+    },
+    {
       key: "3mf",
       title: "Export 3MF",
       description: "Plated, per role, ready to open in your slicer.",
@@ -230,10 +231,11 @@ export default function ExportActionCards({ onShare }: Props) {
               size="sm"
               variant="outline"
               disabled={!canExportParts || exportBusy}
+              loading={export3mfJob.busy}
               className="gap-1"
             >
               {export3mfJob.busy ? "Exporting…" : "Export 3MF"}
-              <ChevronDown className="h-3.5 w-3.5" />
+              {!export3mfJob.busy ? <ChevronDown className="h-3.5 w-3.5" /> : null}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
@@ -285,33 +287,40 @@ export default function ExportActionCards({ onShare }: Props) {
   ];
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      {cards.map((card) => (
-        <Card key={card.key} className="flex flex-col border-border shadow-sm">
-          <CardHeader className="space-y-2 pb-2">
-            <CardTitle className="text-[13.5px] font-semibold leading-snug">
-              {card.title}
-            </CardTitle>
-            <CardDescription className="text-[12.5px] leading-relaxed">
-              {card.description}
-            </CardDescription>
-            <div className="flex flex-wrap gap-1.5 pt-0.5">
-              {card.chips.map((chip) => (
-                <Badge
-                  key={chip}
-                  variant="muted"
-                  className="rounded-full px-2 py-0.5 font-mono text-[10.5px] font-normal"
-                >
-                  {chip}
-                </Badge>
-              ))}
-            </div>
-          </CardHeader>
-          <CardContent className="mt-auto flex items-center gap-2 pt-1">
-            {card.body}
-          </CardContent>
-        </Card>
-      ))}
+    <div className="space-y-2">
+      {colorsUnset ? (
+        <p className="text-[12.5px] text-muted-foreground">
+          Colors still Unassigned on Plan.
+        </p>
+      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {cards.map((card) => (
+          <Card key={card.key} className="flex flex-col border-border shadow-sm">
+            <CardHeader className="space-y-2 pb-2">
+              <CardTitle className="text-[13.5px] font-semibold leading-snug">
+                {card.title}
+              </CardTitle>
+              <CardDescription className="text-[12.5px] leading-relaxed">
+                {card.description}
+              </CardDescription>
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {card.chips.map((chip) => (
+                  <Badge
+                    key={chip}
+                    variant="muted"
+                    className="rounded-full px-2 py-0.5 font-mono text-[10.5px] font-normal"
+                  >
+                    {chip}
+                  </Badge>
+                ))}
+              </div>
+            </CardHeader>
+            <CardContent className="mt-auto flex items-center gap-2 pt-1">
+              {card.body}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
