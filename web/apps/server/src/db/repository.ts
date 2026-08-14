@@ -477,6 +477,7 @@ export class AppRepository {
       id: profile.id,
       name: profile.name,
       order_number: profile.orderNumber,
+      special_request: profile.specialRequest?.trim() ? profile.specialRequest.trim() : null,
       part_count: partCount,
       build_stale: this.isProfileStale(profile),
       archived_at: profile.archivedAt ?? null,
@@ -623,6 +624,21 @@ export class AppRepository {
     return profile;
   }
 
+  updateProfileSpecialRequest(id: number, specialRequest: string | null): ProfileSummary {
+    if (!this.getProfile(id)) throw new Error("Profile not found");
+    const trimmed = (specialRequest ?? "").trim();
+    this.db
+      .update(this.schema.buildProfiles)
+      .set({ specialRequest: trimmed || null })
+      .where(
+        and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)),
+      )
+      .run();
+    const profile = this.getProfile(id);
+    if (!profile) throw new Error("Profile not found");
+    return profile;
+  }
+
   archiveProfile(id: number): ProfileSummary {
     const existing = this.getProfile(id);
     if (!existing) throw new Error("Profile not found");
@@ -705,6 +721,7 @@ export class AppRepository {
         tenantId: this.tenantId,
         name: trimmed,
         orderNumber: source.orderNumber,
+        specialRequest: source.specialRequest,
         // Copies are always active spine plans (templates stay archived).
         archivedAt: null,
         lastUsedAt: new Date().toISOString(),

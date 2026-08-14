@@ -53,7 +53,15 @@ export function useCreateProfileMutation() {
 export function useUpdateProfileMutation() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, name }: { id: number; name: string }) => updateProfile(id, name),
+    mutationFn: ({
+      id,
+      name,
+      special_request,
+    }: {
+      id: number;
+      name?: string;
+      special_request?: string | null;
+    }) => updateProfile(id, { name, special_request }),
     onSuccess: async (updated) => {
       qc.setQueryData<ProfileSummary[]>(queryKeys.profiles, (prev) =>
         upsertProfile(prev, updated),

@@ -386,6 +386,8 @@ export type ProfileSummary = {
   id: number;
   name: string;
   order_number: string | null;
+  /** Quiet operator note (e.g. contact customer before printing). */
+  special_request: string | null;
   part_count: number;
   /** True when plan config changed since the last successful recompute. */
   build_stale: boolean;

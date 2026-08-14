@@ -64,6 +64,9 @@ export class SqliteDatabase {
     if (!profileCols.some((c) => c.name === "last_used_at")) {
       this.sqlite.exec("ALTER TABLE build_profiles ADD COLUMN last_used_at TEXT");
     }
+    if (!profileCols.some((c) => c.name === "special_request")) {
+      this.sqlite.exec("ALTER TABLE build_profiles ADD COLUMN special_request TEXT");
+    }
     const row = this.sqlite
       .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
       .get("default", schemaVersionKey) as { value?: string } | undefined;
