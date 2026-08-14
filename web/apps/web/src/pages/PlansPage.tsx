@@ -76,6 +76,7 @@ export default function PlansPage() {
     duplicateMutation.isPending ||
     archiveMutation.isPending;
 
+  /** GRE-231: activate spine plan only — stay on /plans; do not navigate to /plan or unarchive. */
   const selectPlan = (id: number) => {
     setSelectedProfileId(id);
     touchMutation.mutate(id);

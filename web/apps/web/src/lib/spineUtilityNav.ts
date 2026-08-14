@@ -9,7 +9,10 @@ export type SpineUtilityNavItem = {
   path: string;
 };
 
-/** Footer / More utility stack: Plans · Printers · Settings · Help (not desk-loop). */
+/**
+ * Spine / More utility rows: Plans · Printers · Settings · Help.
+ * Stage-weight chrome below the desk-loop track — not WorkflowProgress, not a sixth step.
+ */
 export function spineUtilityNavItems(
   profileId?: number | null,
 ): SpineUtilityNavItem[] {
