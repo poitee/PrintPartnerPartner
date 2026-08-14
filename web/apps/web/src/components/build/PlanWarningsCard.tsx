@@ -2,12 +2,11 @@ import { cn } from "../../lib/utils";
 
 type Props = {
   warnings: string[];
-  onAskAssistant?: () => void;
   className?: string;
 };
 
 /** Desk-loop Plan warnings (stale / blockers) — short copy. */
-export default function PlanWarningsCard({ warnings, onAskAssistant, className }: Props) {
+export default function PlanWarningsCard({ warnings, className }: Props) {
   if (warnings.length === 0) return null;
 
   return (
@@ -25,15 +24,6 @@ export default function PlanWarningsCard({ warnings, onAskAssistant, className }
         <span className="text-[12.5px] font-semibold text-amber-950 dark:text-amber-100">
           Update build
         </span>
-        {onAskAssistant ? (
-          <button
-            type="button"
-            className="ml-auto text-[11px] font-semibold text-amber-800 hover:underline dark:text-amber-300"
-            onClick={onAskAssistant}
-          >
-            Ask assistant
-          </button>
-        ) : null}
       </div>
       <ul className="space-y-1.5">
         {warnings.map((line, idx) => (

@@ -91,55 +91,39 @@ When a user pastes a guide or product URL into the kit advisor:
 
 Mutations never auto-apply — the user must click Apply.
 
-### Kit advisor MCP (stdio)
+### HTTP MCP (preferred on live host)
 
-A thin **stdio MCP server** exposes the same assistant product verbs (`get_kit_catalog`, `ingest_guide_url`, `add_addon`, …) for hosts like Cursor / Claude Desktop. It opens the self-host SQLite data dir and reuses `invokeAssistantTool` / `applyAssistantAction`. Mutating tools only **propose**; call `confirm_apply` (optional `suggested_excludes` override) or `dismiss_proposed_action` — same confirm-to-apply rule as the SPA.
-
-```bash
-cd web
-# Optional: point at the same data volume the app uses
-export PRINT_PARTNER_DATA_DIR=./data
-# Optional: default plan_id when tools omit it
-export PRINT_PARTNER_MCP_PLAN_ID=1
-npm run mcp -w @print-partner/server
-```
-
-Cursor / Claude Desktop example (`mcp.json` / Claude config):
+Streamable HTTP MCP is served by the running app at **`/api/v1/mcp`** (same product tools as stdio). Auth uses **`PRINT_PARTNER_API_KEY`** (Bearer or `X-Print-Partner-Api-Key`), same as REST `/api/v1/*`.
 
 ```json
 {
   "mcpServers": {
     "print-partner": {
-      "command": "npm",
-      "args": ["run", "mcp", "-w", "@print-partner/server"],
-      "cwd": "/absolute/path/to/PrintPartnerPartner/web",
-      "env": {
-        "PRINT_PARTNER_DATA_DIR": "/absolute/path/to/data",
-        "DEPLOY_MODE": "self-host"
+      "url": "http://192.168.200.80:8080/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY"
       }
     }
   }
 }
 ```
 
-Requires `DEPLOY_MODE=self-host` (default). Do not point two writers at the same SQLite file concurrently with the running Docker/API process unless you accept SQLite locking risk — prefer stopping the app or using a copy of `PRINT_PARTNER_DATA_DIR` for MCP experiments.
+Cursor plugin: [`cursor-plugin/print-partner`](../cursor-plugin/print-partner). Full connect guide: [`docs/assistant-mcp.md`](../docs/assistant-mcp.md).
 
-**Recommended (self-host):** configure the kit advisor in the UI under **Settings → AI assistant** (provider, model, budgets, web search, URL research, Ollama context). An enabled `ai_assistant` integration takes precedence over env for every field it sets. Env vars remain the SaaS/operator default path when no Settings integration exists (or when a field is left unset / Auto). Keys stay server-side and are redacted in integration list responses / never returned by `/assistant/status`.
+### Stdio MCP (DATA_DIR copy only)
 
-**Settings vs env (hosted-ready):** user-facing knobs live on the per-tenant `ai_assistant` integration JSON:
+Stdio opens SQLite directly. **Do not** point it at the live Docker volume while the app is running (two writers). Use a copy of `PRINT_PARTNER_DATA_DIR`, or stop the app.
 
-| Settings field | Env fallback |
-|----------------|--------------|
-| `provider`, `model`, `api_key`, `base_url` / `ollama_url` | `AI_PROVIDER`, `AI_MODEL`, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, `OLLAMA_URL` / `OPENAI_BASE_URL` |
-| `max_tokens` | `AI_MAX_TOKENS` |
-| `daily_request_budget` / `daily_token_budget` | `AI_DAILY_*` |
-| `search_provider` (`null` / Auto = no override) | `SEARCH_PROVIDER` |
-| `search_api_key` | `SEARCH_API_KEY` / `BRAVE_API_KEY` / `EXA_API_KEY` |
-| `allow_url_ingest` | `ASSISTANT_ALLOW_URL_INGEST` |
-| `guide_ingest_max_bytes` | `ASSISTANT_GUIDE_INGEST_MAX_BYTES` |
-| `ollama_num_ctx` | `OLLAMA_NUM_CTX` (default 16384) |
+```bash
+cd web
+export PRINT_PARTNER_DATA_DIR=./data-copy
+export PRINT_PARTNER_MCP_PLAN_ID=1
+npm run mcp -w @print-partner/server
+```
 
-`SOURCE_DOCS_MAX_BYTES` and MCP `PRINT_PARTNER_MCP_PLAN_ID` remain operator-only (not in Settings). `GET /assistant/status` reports `source` (`settings` \| `env` \| `none`) and search `configured` without secrets.
+Requires `DEPLOY_MODE=self-host` (default).
+
+In-app kit advisor chat and **Settings → AI** are removed (GRE-225). Attach an external agent via MCP instead.
 
 **Learning from your other builds (examples, not training):** when **Use my other builds as examples** is on (default), the advisor receives compact summaries of other plans this user/tenant can access (layers, kit selections, inferred stack preset). That is few-shot *context* for the current chat only — it does **not** fine-tune or train the model. Toggle it in Settings or per-chat in the kit advisor sheet. Mutating suggestions appear as **Apply / Dismiss** action cards; nothing writes until `POST /assistant/actions/apply`.
 
