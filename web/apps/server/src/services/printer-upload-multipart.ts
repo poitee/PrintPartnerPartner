@@ -81,7 +81,7 @@ export async function parsePrinterUploadMultipart(
             else if (raw === "pinned") match = "pinned";
           }
         }
-        if (part.fieldname === "profile_id") {
+        if (part.fieldname === "profile_id" || part.fieldname === "plan_id") {
           const n = Number(value);
           if (Number.isInteger(n) && n > 0) profileId = n;
         }
