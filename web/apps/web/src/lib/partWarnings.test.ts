@@ -103,7 +103,7 @@ describe("partWarnings", () => {
         {
           severity: "warning",
           code: "merge_conflict",
-          message: "Merge conflict for dup.stl — exclude duplicates or pick one in Build.",
+          message: "Merge conflict for dup.stl — exclude duplicates on the Plan source cards.",
           link_hint: "build",
         },
       ],

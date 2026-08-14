@@ -1,20 +1,19 @@
 import { AlertTriangle } from "lucide-react";
-import { Link } from "react-router-dom";
-import { reviewRoute } from "../lib/routes";
+import {
+  PLAN_CONFLICT_HINT,
+} from "../lib/mergeConflictCopy";
 import { cn } from "../lib/utils";
 
 type Props = {
   conflictCount: number;
   /** Unique filenames with variant counts, e.g. [["widget.stl", 2]] */
   groupedByFilename?: Array<[string, number]>;
-  profileId: number | null;
   className?: string;
 };
 
 export default function MergeConflictBanner({
   conflictCount,
   groupedByFilename,
-  profileId,
   className,
 }: Props) {
   if (conflictCount === 0) return null;
@@ -35,10 +34,7 @@ export default function MergeConflictBanner({
         <p className="font-medium">
           Duplicate part names ({conflictCount} conflict{conflictCount === 1 ? "" : "s"})
         </p>
-        <p className="mt-1 text-muted-foreground">
-          Overlapping import rules or addon layers can import the same part slug twice. Narrow
-          import rules or exclude extras on Review.
-        </p>
+        <p className="mt-1 text-muted-foreground">{PLAN_CONFLICT_HINT}</p>
         {showGroups && (
           <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
             {groups.map(([filename, count]) => (
@@ -49,14 +45,6 @@ export default function MergeConflictBanner({
               </li>
             ))}
           </ul>
-        )}
-        {profileId != null && (
-          <Link
-            to={reviewRoute(profileId)}
-            className="mt-2 inline-block text-xs text-primary underline"
-          >
-            Resolve on Review
-          </Link>
         )}
       </div>
     </div>

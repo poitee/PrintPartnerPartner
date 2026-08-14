@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   findActiveSlugConflictKeys,
   folderKeyFromRelativePath,
+  mergeConflictIssueMessage,
   resolveNamingProfile,
   ROOT_FOLDER,
 } from "@print-partner/domain";
@@ -198,7 +199,7 @@ export function buildPlanReview(
     issues.push({
       severity: "warning",
       code: "merge_conflict",
-      message: `Merge conflict for ${part.filename} — exclude duplicates or pick one in Build.`,
+      message: mergeConflictIssueMessage(part.filename),
       link_hint: "build",
     });
   }
