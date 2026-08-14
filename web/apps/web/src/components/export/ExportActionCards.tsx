@@ -12,6 +12,7 @@ import { useJobRunner } from "../../hooks/useJobRunner";
 import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../../context/ProfileContext";
 import { checkoffUnitTotals } from "../../lib/checkoffProgress";
+import { slicerExportGates } from "../../lib/exportActionGates";
 import { handleExport3mfJobDone } from "../../lib/export3mfJobResult";
 import { handleStlPackExportJobDone } from "../../lib/exportStlJobResult";
 import { flattenReviewParts } from "../../lib/reviewParts";
@@ -51,16 +52,22 @@ export default function ExportActionCards({ onShare }: Props) {
   const exportStlJob = useJobRunner("stl-export");
   const export3mfJob = useJobRunner("export-3mf");
 
-  const hasBlockers = review?.has_blockers ?? false;
   const includedParts = review
     ? flattenReviewParts(review.part_groups).filter((p) => p.included)
     : [];
   const includedCount = includedParts.length;
   const remainingUnits = checkoffUnitTotals(includedParts).remainingUnits;
   const exportBusy = exportStlJob.busy || export3mfJob.busy;
-  const canRun = selectedProfileId != null && Boolean(health) && Boolean(review);
-  const canExportParts = canRun && !hasBlockers && includedCount > 0;
-  const canExportRemaining = canExportParts && remainingUnits > 0;
+  // Do not gate on review.has_blockers — pack/3MF already skip missing STLs and
+  // warn. Fresh multi-source plans often have one blocker and would otherwise
+  // hard-disable Export STLs / remaining / 3MF (Command Palette already allows).
+  const { canExportParts, canExportRemaining } = slicerExportGates({
+    profileSelected: selectedProfileId != null,
+    engineOk: Boolean(health),
+    hasReview: Boolean(review),
+    includedCount,
+    remainingUnits,
+  });
 
   const onExportStls = (groupBy: StlPackGroupBy) => {
     if (selectedProfileId == null) return;
