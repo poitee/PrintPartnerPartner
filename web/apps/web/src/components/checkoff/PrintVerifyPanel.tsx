@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Check, X } from "lucide-react";
 import {
@@ -11,6 +11,11 @@ import {
   type PrinterCheckoffLink,
   type ReviewPart,
 } from "../../api/engine";
+import {
+  buildPreviewRowsFromUnits,
+  type ObjectPreviewRow,
+} from "../../lib/proposeCheckoffFromObjects";
+import ObjectProposalRows from "../export/ObjectProposalRows";
 import { Button } from "../ui/button";
 import { cn } from "../../lib/utils";
 
@@ -29,6 +34,7 @@ const REJECT_REASONS: { value: PrintRejectReason; label: string }[] = [
 
 export type PrintVerifyQueueState = {
   awaitingCount: number;
+  watchingCount: number;
   /** Host name for the first awaiting_verify link (header copy). */
   primaryHostName: string | null;
 };
@@ -42,7 +48,7 @@ type Props = {
   onQueueChange?: (state: PrintVerifyQueueState) => void;
   /**
    * Hosts still printing/paused — suppress Confirm/Reject only for links on
-   * those integration ids. Other awaiting_verify links stay actionable.
+   * those integration ids. Watching links still show proposal + printing note.
    */
   suppressIntegrationIds?: ReadonlySet<string>;
   className?: string;
@@ -59,9 +65,21 @@ function pendingUnits(link: PrinterCheckoffLink) {
   return link.units.filter((u) => !done.has(unitKey(u.part_id, u.unit_index)));
 }
 
+function linkPreviewRows(link: PrinterCheckoffLink, parts: ReviewPart[]): ObjectPreviewRow[] {
+  const unlabeled =
+    Array.isArray((link as { unlabeled_names?: unknown }).unlabeled_names)
+      ? ((link as { unlabeled_names?: string[] }).unlabeled_names ?? []).filter(
+          (n) => typeof n === "string" && n.trim(),
+        )
+      : [];
+  return buildPreviewRowsFromUnits(pendingUnits(link), parts, unlabeled);
+}
+
 /**
- * Verify-first Progress hero: confirm or reject mapped units after host job success.
- * Primary UI is Confirm / Reject for the finished job — not a per-unit control wall.
+ * Verify-first Progress hero:
+ * - Watching (during print): same named-object rows + per-row `printing` — no Confirm/Reject.
+ * - Awaiting verify (after finish): Confirm / Reject marks proposed units (never auto-tick).
+ * Unlabeled rows (if present) are visible but never in the confirm set.
  */
 const EMPTY_SUPPRESS_IDS: ReadonlySet<string> = new Set();
 
@@ -75,6 +93,7 @@ export default function PrintVerifyPanel({
   suppressIntegrationIds,
   className,
 }: Props) {
+  const [watchingLinks, setWatchingLinks] = useState<PrinterCheckoffLink[]>([]);
   const [links, setLinks] = useState<PrinterCheckoffLink[]>([]);
   const [failedLinks, setFailedLinks] = useState<PrinterCheckoffLink[]>([]);
   const [summary, setSummary] = useState<PrintOutcomesSummary | null>(null);
@@ -84,27 +103,27 @@ export default function PrintVerifyPanel({
   } | null>(null);
   const [rejectReason, setRejectReason] = useState<PrintRejectReason>("bed_adhesion");
   const [rejectNote, setRejectNote] = useState("");
-  /** Selected pending units per link (compact checklist). Default: all pending. */
-  const [selectedByLink, setSelectedByLink] = useState<Record<string, Set<string>>>({});
   const onQueueChangeRef = useRef(onQueueChange);
   onQueueChangeRef.current = onQueueChange;
 
-  const partsById = useMemo(() => new Map(parts.map((p) => [p.id, p])), [parts]);
   const suppressedHosts = suppressIntegrationIds ?? EMPTY_SUPPRESS_IDS;
 
   const reload = useCallback(async () => {
     if (!engineReady || profileId == null) {
+      setWatchingLinks([]);
       setLinks([]);
       setFailedLinks([]);
       setSummary(null);
       return;
     }
     try {
-      const [awaiting, failed, outcomes] = await Promise.all([
+      const [watching, awaiting, failed, outcomes] = await Promise.all([
+        fetchPrinterCheckoffLinks({ state: "watching", profile_id: profileId }),
         fetchPrinterCheckoffLinks({ state: "awaiting_verify", profile_id: profileId }),
         fetchPrinterCheckoffLinks({ state: "host_failed", profile_id: profileId }),
         fetchPrintOutcomesSummary(profileId),
       ]);
+      setWatchingLinks(watching.links);
       setLinks(awaiting.links);
       setFailedLinks(failed.links);
       setSummary(outcomes);
@@ -120,9 +139,10 @@ export default function PrintVerifyPanel({
   useEffect(() => {
     onQueueChangeRef.current?.({
       awaitingCount: links.length,
-      primaryHostName: links[0]?.host_name ?? null,
+      watchingCount: watchingLinks.length,
+      primaryHostName: links[0]?.host_name ?? watchingLinks[0]?.host_name ?? null,
     });
-  }, [links]);
+  }, [links, watchingLinks]);
 
   useEffect(() => {
     if (!rejectTarget) return;
@@ -131,25 +151,6 @@ export default function PrintVerifyPanel({
       setRejectTarget(null);
     }
   }, [links, rejectTarget, suppressedHosts]);
-
-  // Keep checklist selection in sync with pending units (default all selected).
-  useEffect(() => {
-    setSelectedByLink((prev) => {
-      const next: Record<string, Set<string>> = {};
-      for (const link of links) {
-        const pending = pendingUnits(link);
-        const keys = pending.map((u) => unitKey(u.part_id, u.unit_index));
-        const prevSet = prev[link.id];
-        if (!prevSet) {
-          next[link.id] = new Set(keys);
-          continue;
-        }
-        // Keep a deliberate empty selection empty across live-strip polls.
-        next[link.id] = new Set(keys.filter((k) => prevSet.has(k)));
-      }
-      return next;
-    });
-  }, [links]);
 
   const runVerify = async (
     linkId: string,
@@ -179,15 +180,8 @@ export default function PrintVerifyPanel({
     }
   };
 
-  const selectedPending = (link: PrinterCheckoffLink) => {
-    const pending = pendingUnits(link);
-    const selected = selectedByLink[link.id];
-    if (!selected) return pending;
-    return pending.filter((u) => selected.has(unitKey(u.part_id, u.unit_index)));
-  };
-
-  const onConfirmSelected = (link: PrinterCheckoffLink) => {
-    const units = selectedPending(link);
+  const onConfirmAll = (link: PrinterCheckoffLink) => {
+    const units = pendingUnits(link);
     if (!units.length) return;
     void runVerify(
       link.id,
@@ -203,7 +197,7 @@ export default function PrintVerifyPanel({
     if (!rejectTarget) return;
     const link = links.find((l) => l.id === rejectTarget.linkId);
     if (!link) return;
-    const units = selectedPending(link);
+    const units = pendingUnits(link);
     if (!units.length) return;
     void runVerify(
       link.id,
@@ -229,25 +223,18 @@ export default function PrintVerifyPanel({
     }
   };
 
-  const toggleUnit = (linkId: string, key: string) => {
-    setSelectedByLink((prev) => {
-      const cur = new Set(prev[linkId] ?? []);
-      if (cur.has(key)) cur.delete(key);
-      else cur.add(key);
-      return { ...prev, [linkId]: cur };
-    });
-  };
-
   if (!engineReady || profileId == null) return null;
 
   const showFailed = failedLinks.length > 0;
   const actionableLinks = links.filter((l) => !suppressedHosts.has(l.integration_id));
-  const suppressedLinks = links.filter((l) => suppressedHosts.has(l.integration_id));
+  const suppressedAwaiting = links.filter((l) => suppressedHosts.has(l.integration_id));
+  // Watching links always show proposal + printing (Confirm suppressed until finish).
+  const watchingForDisplay = watchingLinks.length > 0 ? watchingLinks : suppressedAwaiting;
+  const showWatching = watchingForDisplay.length > 0;
   const showVerify = actionableLinks.length > 0;
-  const showSuppressed = suppressedLinks.length > 0;
   const showSummary = summary != null && summary.total_rejected > 0;
 
-  if (!showFailed && !showVerify && !showSuppressed && !showSummary) {
+  if (!showFailed && !showVerify && !showWatching && !showSummary) {
     return null;
   }
 
@@ -283,66 +270,60 @@ export default function PrintVerifyPanel({
         </div>
       ))}
 
-      {showVerify &&
-        actionableLinks.map((link) => {
-          const pending = pendingUnits(link);
-          const selected = selectedByLink[link.id] ?? new Set<string>();
-          const selectedCount = pending.filter((u) =>
-            selected.has(unitKey(u.part_id, u.unit_index)),
-          ).length;
-          return (
-            <div
-              key={link.id}
-              className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-4 text-sm shadow-sm"
-              role="region"
-              aria-label={`Confirm these parts from ${link.filename}`}
-            >
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 flex-1 space-y-1">
-                  <p className="text-base font-semibold text-foreground">
-                    Confirm these parts
-                  </p>
+      {/* DURING print: named-object rows + per-row printing — no Confirm/Reject. */}
+      {showWatching
+        ? watchingForDisplay.map((link) => {
+            const rows = linkPreviewRows(link, parts);
+            if (!rows.length) return null;
+            return (
+              <div
+                key={`watching:${link.id}`}
+                className="rounded-lg border border-sky-500/35 bg-sky-500/10 px-4 py-4 text-sm shadow-sm"
+                role="status"
+                aria-label={`Printing proposed parts from ${link.filename}`}
+              >
+                <div className="min-w-0 space-y-2">
+                  <p className="text-base font-semibold text-foreground">Confirm these parts</p>
                   <p className="text-sm text-muted-foreground">
-                    Mapped from{" "}
+                    Proposed from{" "}
                     <span className="font-mono text-foreground">{link.filename}</span>
                     . Confirm marks them printed. Reject leaves them remaining.
                   </p>
-                  {pending.length > 0 && (
-                    <ul className="mt-2 space-y-1">
-                      {pending.map((u) => {
-                        const part = partsById.get(u.part_id);
-                        const name = part?.filename ?? `Part #${u.part_id}`;
-                        const key = unitKey(u.part_id, u.unit_index);
-                        const checked = selected.has(key);
-                        return (
-                          <li key={key}>
-                            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-                              <input
-                                type="checkbox"
-                                className="size-3.5 rounded border-border"
-                                checked={checked}
-                                disabled={busy}
-                                onChange={() => toggleUnit(link.id, key)}
-                              />
-                              <span className="min-w-0 truncate">
-                                <span className="font-medium text-foreground">{name}</span>
-                                {" · unit "}
-                                {u.unit_index + 1}
-                                {part?.role ? ` · ${part.role}` : ""}
-                              </span>
-                            </label>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
+                  <ObjectProposalRows rows={rows} printing />
+                </div>
+              </div>
+            );
+          })
+        : null}
+
+      {/* AFTER finish: Confirm / Reject hero (matched units only). */}
+      {showVerify &&
+        actionableLinks.map((link) => {
+          const units = pendingUnits(link);
+          const rows = linkPreviewRows(link, parts);
+          return (
+            <div
+              key={link.id}
+              className="rounded-lg border border-orange-500/35 bg-orange-500/5 px-4 py-4 text-sm shadow-sm"
+              role="region"
+              aria-label={`Confirm these parts from ${link.filename}`}
+            >
+              <div className="flex flex-col gap-3">
+                <div className="min-w-0 space-y-2">
+                  <p className="text-base font-semibold text-foreground">Confirm these parts</p>
+                  <p className="text-sm text-muted-foreground">
+                    Proposed from{" "}
+                    <span className="font-mono text-foreground">{link.filename}</span>
+                    . Confirm marks them printed. Reject leaves them remaining.
+                  </p>
+                  <ObjectProposalRows rows={rows} />
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <Button
                     size="sm"
                     className="min-h-10"
-                    disabled={busy || selectedCount === 0}
-                    onClick={() => onConfirmSelected(link)}
+                    disabled={busy || units.length === 0}
+                    onClick={() => onConfirmAll(link)}
                   >
                     <Check className="mr-1 h-4 w-4" aria-hidden />
                     Confirm
@@ -351,7 +332,7 @@ export default function PrintVerifyPanel({
                     size="sm"
                     variant="outline"
                     className="min-h-10"
-                    disabled={busy || selectedCount === 0}
+                    disabled={busy || units.length === 0}
                     onClick={() => {
                       setRejectReason("bed_adhesion");
                       setRejectNote("");
@@ -359,23 +340,13 @@ export default function PrintVerifyPanel({
                     }}
                   >
                     <X className="mr-1 h-4 w-4" aria-hidden />
-                    Reject
+                    Reject…
                   </Button>
                 </div>
               </div>
             </div>
           );
         })}
-
-      {showSuppressed
-        ? suppressedLinks.map((link) => (
-            <p key={link.id} className="text-sm text-muted-foreground">
-              {link.host_name} is still printing{" "}
-              <span className="font-mono">{link.filename}</span>. Verify appears when this
-              print finishes. We don&apos;t mark parts from a live job.
-            </p>
-          ))
-        : null}
 
       {rejectTarget && showVerify && (
         <div

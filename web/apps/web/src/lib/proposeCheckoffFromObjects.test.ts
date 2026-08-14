@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewPart } from "../api/engine";
 import {
+  buildObjectPreviewRows,
+  buildPreviewRowsFromUnits,
   exportUnitKey,
   objectStem,
   proposeCheckoffFromObjects,
@@ -107,5 +109,22 @@ describe("proposeCheckoffFromObjects", () => {
     const result = proposeCheckoffFromObjects([], parts);
     expect(result.units).toEqual([]);
     expect(result.unmatchedNames).toEqual([]);
+  });
+
+  it("builds one preview list with matched ×N · remaining and unlabeled rows", () => {
+    const parts = [
+      part({ id: 1, filename: "[a]_CDR.stl", quantity_effective: 5, print_units: [true, true, false, false, false], printed_count: 2 }),
+      part({ id: 2, filename: "[a]_motor_mount.stl", quantity_effective: 3, print_units: [true, true, false], printed_count: 2 }),
+    ];
+    const proposed = proposeCheckoffFromObjects(
+      ["[a]_CDR_01", "[a]_CDR_02", "[a]_CDR_03", "[a]_motor_mount_01", "[c]_rear_housing.stl"],
+      parts,
+    );
+    const rows = buildObjectPreviewRows(proposed, parts);
+    expect(rows.some((r) => r.kind === "matched" && r.filename === "[a]_CDR.stl")).toBe(true);
+    expect(rows.some((r) => r.kind === "unlabeled" && r.name.includes("rear_housing"))).toBe(true);
+    const fromUnits = buildPreviewRowsFromUnits(proposed.units, parts, ["[c]_rear_housing.stl"]);
+    expect(fromUnits.filter((r) => r.kind === "matched").length).toBeGreaterThan(0);
+    expect(fromUnits.some((r) => r.kind === "unlabeled")).toBe(true);
   });
 });
