@@ -479,6 +479,8 @@ export class AppRepository {
       order_number: profile.orderNumber,
       part_count: partCount,
       build_stale: this.isProfileStale(profile),
+      archived_at: profile.archivedAt ?? null,
+      last_used_at: profile.lastUsedAt ?? null,
     };
   }
 
@@ -572,6 +574,7 @@ export class AppRepository {
         tenantId: this.tenantId,
         name: trimmed,
         configModifiedAt: new Date().toISOString(),
+        lastUsedAt: new Date().toISOString(),
       })
       .returning()
       .get();
@@ -620,6 +623,55 @@ export class AppRepository {
     return profile;
   }
 
+  archiveProfile(id: number): ProfileSummary {
+    const existing = this.getProfile(id);
+    if (!existing) throw new Error("Profile not found");
+    if (existing.archived_at) return existing;
+
+    const partRows = this.listPartRows(id).filter((p) => p.included);
+    let totalUnits = 0;
+    let printedUnits = 0;
+    const unitsById = this.printUnitsByPartId(id);
+    for (const part of partRows) {
+      const qty = Math.max(1, part.quantityEffective);
+      totalUnits += qty;
+      printedUnits += (unitsById.get(part.id) ?? []).filter(Boolean).length;
+    }
+    const remainingUnits = Math.max(0, totalUnits - printedUnits);
+    if (totalUnits <= 0 || remainingUnits > 0) {
+      throw new Error("Archive only when print remaining is 0");
+    }
+
+    const now = new Date().toISOString();
+    this.db
+      .update(this.schema.buildProfiles)
+      .set({ archivedAt: now })
+      .where(
+        and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)),
+      )
+      .run();
+    return this.getProfile(id)!;
+  }
+
+  /** Unarchive is intentionally unsupported — duplicate an archived template instead. */
+  unarchiveProfile(_id: number): never {
+    throw new Error("Cannot unarchive; duplicate the archived template instead");
+  }
+
+  touchProfileLastUsed(id: number): ProfileSummary {
+    const existing = this.getProfile(id);
+    if (!existing) throw new Error("Profile not found");
+    const now = new Date().toISOString();
+    this.db
+      .update(this.schema.buildProfiles)
+      .set({ lastUsedAt: now })
+      .where(
+        and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)),
+      )
+      .run();
+    return this.getProfile(id)!;
+  }
+
   duplicateProfile(
     id: number,
     newName: string,
@@ -649,7 +701,15 @@ export class AppRepository {
 
     const newProfile = this.db
       .insert(this.schema.buildProfiles)
-      .values({ tenantId: this.tenantId, name: trimmed, orderNumber: source.orderNumber })
+      .values({
+        tenantId: this.tenantId,
+        name: trimmed,
+        orderNumber: source.orderNumber,
+        // Copies are always active spine plans (templates stay archived).
+        archivedAt: null,
+        lastUsedAt: new Date().toISOString(),
+        configModifiedAt: new Date().toISOString(),
+      })
       .returning()
       .get();
     if (!newProfile) throw new Error("Failed to duplicate profile");

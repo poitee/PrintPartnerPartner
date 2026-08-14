@@ -58,6 +58,12 @@ export class SqliteDatabase {
     if (!profileCols.some((c) => c.name === "last_recomputed_at")) {
       this.sqlite.exec("ALTER TABLE build_profiles ADD COLUMN last_recomputed_at TEXT");
     }
+    if (!profileCols.some((c) => c.name === "archived_at")) {
+      this.sqlite.exec("ALTER TABLE build_profiles ADD COLUMN archived_at TEXT");
+    }
+    if (!profileCols.some((c) => c.name === "last_used_at")) {
+      this.sqlite.exec("ALTER TABLE build_profiles ADD COLUMN last_used_at TEXT");
+    }
     const row = this.sqlite
       .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
       .get("default", schemaVersionKey) as { value?: string } | undefined;

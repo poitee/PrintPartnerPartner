@@ -82,7 +82,7 @@ describe("buildPlanWarningLines", () => {
 
 describe("planHeaderSubtitle", () => {
   it("joins name, sources, parts", () => {
-    const profile = { id: 1, name: "Voron Trident 300", order_number: null, part_count: 359, build_stale: false } satisfies ProfileSummary;
+    const profile = { id: 1, name: "Voron Trident 300", order_number: null, part_count: 359, build_stale: false, archived_at: null, last_used_at: null } satisfies ProfileSummary;
     expect(planHeaderSubtitle({ profile, sourceCount: 4, partCount: 359 })).toBe(
       "Voron Trident 300 · 4 sources · 359 parts",
     );

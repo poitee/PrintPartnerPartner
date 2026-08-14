@@ -39,6 +39,10 @@ export const buildProfiles = sqliteTable(
     orderNumber: text("order_number"),
     configModifiedAt: text("config_modified_at"),
     lastRecomputedAt: text("last_recomputed_at"),
+    /** ISO timestamp when plan was archived as a reusable template; null = active. */
+    archivedAt: text("archived_at"),
+    /** ISO timestamp of last spine selection (picker / activate). */
+    lastUsedAt: text("last_used_at"),
   },
   (t) => [uniqueIndex("uq_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -230,7 +234,7 @@ export const planSnapshots = sqliteTable("plan_snapshots", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 7;
+export const currentSchemaVersion = 8;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
