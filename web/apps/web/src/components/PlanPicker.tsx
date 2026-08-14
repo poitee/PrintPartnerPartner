@@ -1,15 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, ChevronsUpDown, Layers, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { buildRoute } from "../lib/routes";
+import { partitionPlanPickerGroups } from "../lib/planPickerGroups";
 import { cn } from "../lib/utils";
 import { usePlanActions } from "../context/PlanActionsContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import {
+  useArchiveProfileMutation,
   useCreateProfileMutation,
   useDeleteProfileMutation,
   useDuplicateProfileMutation,
+  useTouchProfileLastUsedMutation,
   useUpdateProfileMutation,
 } from "../queries/profiles";
 import { Button } from "./ui/button";
@@ -42,7 +45,6 @@ type Props = {
 type SwitchPrompt = {
   targetId: number;
   targetName: string;
-  actionLabel: "created" | "duplicated";
 };
 
 /** Spine/mobile plan switcher (CRUD dialogs opened via PlanActionsContext). */
@@ -54,18 +56,23 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
   const updateMutation = useUpdateProfileMutation();
   const deleteMutation = useDeleteProfileMutation();
   const duplicateMutation = useDuplicateProfileMutation();
+  const archiveMutation = useArchiveProfileMutation();
+  const touchMutation = useTouchProfileLastUsedMutation();
   const {
     registerOpenCreate,
     registerOpenRename,
     registerOpenDuplicate,
     registerOpenDelete,
+    registerOpenArchive,
   } = usePlanActions();
 
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [renameName, setRenameName] = useState("");
   const [duplicateName, setDuplicateName] = useState("");
@@ -73,11 +80,19 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
   const [switchPrompt, setSwitchPrompt] = useState<SwitchPrompt | null>(null);
 
   const selected = profiles.find((p) => p.id === selectedProfileId);
+  const selectedArchived = Boolean(selected?.archived_at);
   const busy =
     createMutation.isPending ||
     updateMutation.isPending ||
     deleteMutation.isPending ||
-    duplicateMutation.isPending;
+    duplicateMutation.isPending ||
+    archiveMutation.isPending;
+
+  const groups = useMemo(
+    () =>
+      partitionPlanPickerGroups(profiles, selectedProfileId, { search }),
+    [profiles, selectedProfileId, search],
+  );
 
   useEffect(() => {
     setRenameName(selected?.name ?? "");
@@ -115,6 +130,14 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
     return () => registerOpenDelete(null);
   }, [registerOpenDelete, selectedProfileId]);
 
+  useEffect(() => {
+    registerOpenArchive(() => {
+      if (selectedProfileId == null) return;
+      setArchiveOpen(true);
+    });
+    return () => registerOpenArchive(null);
+  }, [registerOpenArchive, selectedProfileId]);
+
   const shouldAskToSwitch = () => {
     if (selectedProfileId == null) return false;
     return (selected?.part_count ?? 0) > 0;
@@ -122,21 +145,24 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
 
   const activatePlan = (id: number) => {
     setSelectedProfileId(id);
+    touchMutation.mutate(id);
     navigate(buildRoute(id), { replace: true });
   };
 
-  const offerSwitchOrActivate = (
-    targetId: number,
-    targetName: string,
-    actionLabel: SwitchPrompt["actionLabel"],
-  ) => {
+  const selectPlan = (id: number) => {
+    setSelectedProfileId(id);
+    touchMutation.mutate(id);
+    setOpen(false);
+    setSearch("");
+  };
+
+  const offerSwitchOrActivate = (targetId: number, targetName: string) => {
     if (shouldAskToSwitch() && selectedProfileId !== targetId) {
-      setSwitchPrompt({ targetId, targetName, actionLabel });
+      setSwitchPrompt({ targetId, targetName });
       return;
     }
     activatePlan(targetId);
-    const verb = actionLabel === "created" ? "Created" : "Duplicated";
-    toast.success(`${verb} plan “${targetName}”`);
+    toast.success(`Created plan “${targetName}”`);
   };
 
   const onCreate = async () => {
@@ -146,7 +172,7 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
       const created = await createMutation.mutateAsync(name);
       setNewName("");
       setCreateOpen(false);
-      offerSwitchOrActivate(created.id, name, "created");
+      offerSwitchOrActivate(created.id, name);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -176,7 +202,9 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
         clearCheckoff: duplicateClearCheckoff,
       });
       setDuplicateOpen(false);
-      offerSwitchOrActivate(copy.id, name, "duplicated");
+      // Copy becomes the spine plan (no stay-on-current prompt).
+      activatePlan(copy.id);
+      toast.success(`Duplicated plan “${name}”`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -194,12 +222,46 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
     }
   };
 
+  const confirmArchive = async () => {
+    if (selectedProfileId == null || !selected) return;
+    try {
+      await archiveMutation.mutateAsync(selectedProfileId);
+      setArchiveOpen(false);
+      toast.success(`Archived “${selected.name}”`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const labelName = selected?.name ?? null;
   const label =
     selected != null
       ? `${selected.name} (${selected.part_count} parts)`
       : profiles.length === 0
         ? "Create your first plan"
         : "Select plan";
+
+  const renderPlanItem = (
+    p: { id: number; name: string; archived_at: string | null },
+    opts?: { showArchivedHint?: boolean },
+  ) => (
+    <CommandItem
+      key={p.id}
+      value={`${p.name} ${p.id}`}
+      onSelect={() => selectPlan(p.id)}
+    >
+      <Check
+        className={cn(
+          "mr-2 h-4 w-4",
+          selectedProfileId === p.id ? "opacity-100" : "opacity-0",
+        )}
+      />
+      <span className="truncate">{p.name}</span>
+      {opts?.showArchivedHint && p.archived_at ? (
+        <span className="ml-2 shrink-0 text-xs text-muted-foreground">Archived</span>
+      ) : null}
+    </CommandItem>
+  );
 
   return (
     <>
@@ -225,7 +287,13 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
           )}
         </Button>
       ) : (
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (!next) setSearch("");
+          }}
+        >
           <PopoverTrigger asChild>
             <Button
               variant={compact ? "ghost" : "outline"}
@@ -243,7 +311,22 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
                 <Layers className="h-4 w-4" />
               ) : (
                 <>
-                  <span className="truncate">{label}</span>
+                  <span className="min-w-0 truncate">
+                    {labelName != null ? (
+                      <>
+                        <span>{labelName}</span>
+                        {selectedArchived ? (
+                          <span className="text-muted-foreground"> Archived</span>
+                        ) : null}
+                        <span className="text-muted-foreground">
+                          {" "}
+                          ({selected!.part_count} parts)
+                        </span>
+                      </>
+                    ) : (
+                      label
+                    )}
+                  </span>
                   <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </>
               )}
@@ -254,34 +337,29 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
             align={compact ? "start" : "end"}
             side={compact ? "right" : "bottom"}
           >
-            <Command>
-              <CommandInput placeholder="Search plans…" />
+            <Command shouldFilter={false}>
+              <CommandInput
+                placeholder="Search plans…"
+                value={search}
+                onValueChange={setSearch}
+              />
               <CommandList>
                 <CommandEmpty>No plans found.</CommandEmpty>
-                <CommandGroup heading="Plans">
-                  {profiles.map((p) => (
-                    <CommandItem
-                      key={p.id}
-                      value={p.name}
-                      onSelect={() => {
-                        setSelectedProfileId(p.id);
-                        setOpen(false);
-                      }}
-                    >
-                      <Check
-                        className={cn(
-                          "mr-2 h-4 w-4",
-                          selectedProfileId === p.id ? "opacity-100" : "opacity-0",
-                        )}
-                      />
-                      <span className="truncate">{p.name}</span>
-                      <span className="ml-auto text-xs text-muted-foreground">
-                        {p.part_count}
-                        {p.build_stale ? " · stale" : ""}
-                      </span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
+                {groups.active.length > 0 ? (
+                  <CommandGroup heading="Active">
+                    {groups.active.map((p) => renderPlanItem(p, { showArchivedHint: true }))}
+                  </CommandGroup>
+                ) : null}
+                {groups.recent.length > 0 ? (
+                  <CommandGroup heading="Recent">
+                    {groups.recent.map((p) => renderPlanItem(p))}
+                  </CommandGroup>
+                ) : null}
+                {groups.archived.length > 0 ? (
+                  <CommandGroup heading="Archived">
+                    {groups.archived.map((p) => renderPlanItem(p))}
+                  </CommandGroup>
+                ) : null}
               </CommandList>
             </Command>
           </PopoverContent>
@@ -393,6 +471,25 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
         </DialogContent>
       </Dialog>
 
+      <Dialog open={archiveOpen} onOpenChange={setArchiveOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Archive plan?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Archive “{selected?.name}”? It stays in the picker as a template.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setArchiveOpen(false)}>
+              Cancel
+            </Button>
+            <Button disabled={busy} onClick={() => void confirmArchive()}>
+              Archive
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={switchPrompt != null} onOpenChange={(o) => !o && setSwitchPrompt(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -400,7 +497,7 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             {switchPrompt && selected
-              ? `${switchPrompt.actionLabel === "created" ? "Created" : "Duplicated"} “${switchPrompt.targetName}”. Switch now or stay on “${selected.name}”?`
+              ? `Created “${switchPrompt.targetName}”. Switch now or stay on “${selected.name}”?`
               : ""}
           </p>
           <div className="flex justify-end gap-2">

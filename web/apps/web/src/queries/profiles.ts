@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  archiveProfile,
   createProfile,
   deleteProfile,
   duplicateProfile,
   fetchProfiles,
+  touchProfileLastUsed,
   updateProfile,
   type ProfileSummary,
 } from "../api/engine";
@@ -57,6 +59,34 @@ export function useUpdateProfileMutation() {
         upsertProfile(prev, updated),
       );
       await qc.invalidateQueries({ queryKey: queryKeys.profiles });
+    },
+  });
+}
+
+export function useArchiveProfileMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => archiveProfile(id),
+    onSuccess: async (updated) => {
+      qc.setQueryData<ProfileSummary[]>(queryKeys.profiles, (prev) =>
+        upsertProfile(prev, updated),
+      );
+      await qc.invalidateQueries({ queryKey: queryKeys.profiles });
+    },
+  });
+}
+
+export function useTouchProfileLastUsedMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => touchProfileLastUsed(id),
+    onSuccess: (updated) => {
+      // Merge only last_used_at so a delayed touch cannot clobber archived_at.
+      qc.setQueryData<ProfileSummary[]>(queryKeys.profiles, (prev) =>
+        (prev ?? []).map((p) =>
+          p.id === updated.id ? { ...p, last_used_at: updated.last_used_at } : p,
+        ),
+      );
     },
   });
 }

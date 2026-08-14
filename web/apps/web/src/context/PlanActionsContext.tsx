@@ -12,10 +12,12 @@ type PlanActionsContextValue = {
   openRenamePlan: () => void;
   openDuplicatePlan: () => void;
   openDeletePlan: () => void;
+  openArchivePlan: () => void;
   registerOpenCreate: (fn: (() => void) | null) => void;
   registerOpenRename: (fn: (() => void) | null) => void;
   registerOpenDuplicate: (fn: (() => void) | null) => void;
   registerOpenDelete: (fn: (() => void) | null) => void;
+  registerOpenArchive: (fn: (() => void) | null) => void;
 };
 
 const PlanActionsContext = createContext<PlanActionsContextValue | null>(null);
@@ -25,6 +27,7 @@ export function PlanActionsProvider({ children }: { children: ReactNode }) {
   const openRenameRef = useRef<(() => void) | null>(null);
   const openDuplicateRef = useRef<(() => void) | null>(null);
   const openDeleteRef = useRef<(() => void) | null>(null);
+  const openArchiveRef = useRef<(() => void) | null>(null);
 
   const registerOpenCreate = useCallback((fn: (() => void) | null) => {
     openCreateRef.current = fn;
@@ -40,6 +43,10 @@ export function PlanActionsProvider({ children }: { children: ReactNode }) {
 
   const registerOpenDelete = useCallback((fn: (() => void) | null) => {
     openDeleteRef.current = fn;
+  }, []);
+
+  const registerOpenArchive = useCallback((fn: (() => void) | null) => {
+    openArchiveRef.current = fn;
   }, []);
 
   const openCreatePlan = useCallback(() => {
@@ -58,26 +65,34 @@ export function PlanActionsProvider({ children }: { children: ReactNode }) {
     openDeleteRef.current?.();
   }, []);
 
+  const openArchivePlan = useCallback(() => {
+    openArchiveRef.current?.();
+  }, []);
+
   const value = useMemo(
     () => ({
       openCreatePlan,
       openRenamePlan,
       openDuplicatePlan,
       openDeletePlan,
+      openArchivePlan,
       registerOpenCreate,
       registerOpenRename,
       registerOpenDuplicate,
       registerOpenDelete,
+      registerOpenArchive,
     }),
     [
       openCreatePlan,
       openRenamePlan,
       openDuplicatePlan,
       openDeletePlan,
+      openArchivePlan,
       registerOpenCreate,
       registerOpenRename,
       registerOpenDuplicate,
       registerOpenDelete,
+      registerOpenArchive,
     ],
   );
 
