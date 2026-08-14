@@ -18,7 +18,7 @@
   ·
   <a href="#quick-start--docker-self-host">Quick start</a>
   ·
-  <a href="#ai-kit-advisor-optional">AI kit advisor</a>
+  <a href="#attach-mcp-cursor--grok--claude">Attach MCP</a>
   ·
   <a href="#screenshots">Screenshots</a>
   ·
@@ -42,7 +42,7 @@
   <sub>
     Ships as a single Docker container — <strong>Fastify</strong> API + <strong>React</strong> SPA on one port.
     Warm UI with <strong>light</strong>, <strong>dark</strong>, or <strong>system</strong> theme. Data stays in a volume you control.
-    Optional <strong>kit advisor</strong> (bring your own Anthropic / OpenAI key, or run <strong>Ollama</strong> fully local).
+    Attach <strong>Cursor / Grok / Claude</strong> over HTTP MCP (kit brain; confirm-to-apply).
     Multi-tenant <strong>SaaS</strong> mode (Postgres + S3 + OAuth) is available for hosted deployments.
   </sub>
 </p>
@@ -60,7 +60,7 @@
 
 **Managing builds** (not a pipeline step): use the header **Create build** button and plan picker, the collapsible **Manage builds** panel on Plan, or the **Builds** page in the sidebar to create, rename, duplicate, and delete plans. The active plan is shared across Plan, Parts, and Progress.
 
-**Kit advisor (optional AI):** research kits and mods with web search, paste a product/guide URL, walk decisions with you, and propose changes as **Apply** cards — nothing mutates until you confirm. Configure under **Settings → AI assistant**. Full guide: [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md).
+**MCP attach:** Print Partner is the kit brain. Connect Cursor / Grok / Claude to HTTP MCP (`/api/v1/mcp` + `PRINT_PARTNER_API_KEY`). Mutations stay confirm-to-apply. Guide: [`docs/assistant-mcp.md`](docs/assistant-mcp.md).
 
 **Tips:** **⌘K / Ctrl+K** opens the command palette (sync, recompute, exports, navigation). Collapse the left sidebar to an icon rail; the first-run **Progress** widget hides after you complete Library → Plan → Parts → Progress once. Open **Help** in the sidebar for the full workflow guide.
 
@@ -68,38 +68,20 @@ Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Sp
 
 ---
 
-## AI kit advisor (optional)
+## Attach MCP (Cursor / Grok / Claude)
 
-The app works fully **without** AI. When you want help researching kits, comparing mods, or walking a build, turn on the **kit advisor**.
+Print Partner exposes product tools over **streamable HTTP MCP** on the running host. There is **no in-app Ask assistant / Kit Advisor sheet** and **no Settings → AI**.
 
-Configure it in the UI: **Settings → AI assistant**. Env vars are only an operator fallback when no Settings integration is saved (see [`web/DEPLOY.md`](web/DEPLOY.md)).
+| | |
+|--|--|
+| URL | `http://<host>:<port>/api/v1/mcp` |
+| Auth | `PRINT_PARTNER_API_KEY` (Bearer or `X-Print-Partner-Api-Key`) |
+| Cursor plugin | [`cursor-plugin/print-partner`](cursor-plugin/print-partner) |
+| Connect guide | [`docs/assistant-mcp.md`](docs/assistant-mcp.md) |
 
-### Bring your own AI account
+Desk-loop tools include `get_plan_snapshot`, `get_remaining`, `list_sources`, plus confirm-to-apply `duplicate_plan` / `archive_plan`. Never `start_print` / auto-tick / auto-compose.
 
-| Provider | What you need |
-|----------|----------------|
-| **Anthropic** | An Anthropic API key + model (default Claude Sonnet). |
-| **OpenAI** | An OpenAI API key + model (default `gpt-4o-mini`), or any **OpenAI-compatible** base URL. |
-
-Paste the key in Settings (write-only; never shown again). Keys stay on your server / tenant — not in the browser after save.
-
-### Run fully local with Ollama
-
-Use **[Ollama](https://ollama.com/)** on the same machine (or LAN) for a free, offline-capable advisor:
-
-1. Install Ollama and pull a model (`ollama pull llama3.1`).
-2. In **Settings → AI assistant**, set provider **Ollama**, URL (e.g. `http://127.0.0.1:11434` for local Node, or `http://host.docker.internal:11434` when Print Partner runs in Docker), and the exact model name from `ollama list`.
-3. Click **Test connection**, then open **Advisor** in the header.
-
-Docker + host Ollama needs Ollama listening beyond loopback (`OLLAMA_HOST=0.0.0.0`) — details in [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) and [`web/DEPLOY.md`](web/DEPLOY.md).
-
-### Optional web search & URL research
-
-- **Search:** Auto / DuckDuckGo (free) / Brave / Exa (API key) / Disabled — all in Settings.
-- **URL research:** paste a guide or product page; the advisor fetches text (SSRF-guarded) and proposes Apply cards — never silent writes.
-- Soft **daily request/token budgets** are optional.
-
-More: [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) · operator env table in [`web/DEPLOY.md`](web/DEPLOY.md).
+Stdio MCP (`npm run mcp -w @print-partner/server`) is only for a **DATA_DIR copy** (or stop the app) — not against the live Docker volume.
 
 ---
 
@@ -157,27 +139,6 @@ Print checkoff — per-unit progress, filters, and printable checklist. Capture 
   <img src="docs/screenshots/light/progress.png" alt="Progress — print checkoff with per-unit progress and filters.">
 </picture>
 
-### AI assistant (Settings)
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/settings-ai.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/settings-ai.png">
-  <img src="docs/screenshots/light/settings-ai.png" alt="Settings — AI assistant card with provider, model, search, and budgets.">
-</picture>
-
-**Settings → AI assistant** — Anthropic, OpenAI, or Ollama; web search; URL research; budgets.
-
-### Kit advisor
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/advisor.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/advisor.png">
-  <img src="docs/screenshots/light/advisor.png" alt="Kit advisor sheet open beside the build workflow.">
-</picture>
-
-Header **Advisor** opens the kit advisor sheet — chat, research tools, and Apply / Dismiss cards.
-
----
 
 ## Quick start — Docker self-host
 
@@ -204,7 +165,7 @@ docker compose up --build
 3. Run `docker compose pull && docker compose up -d` (or `docker compose up --build` to build from source).
 4. Open [http://localhost:8080](http://localhost:8080).
 5. Add a **Source** on the Sources page, then create a build with **Create build** in the header or **Manage builds** on Build (or open **Builds** in the sidebar).
-6. Optional: open **Settings → AI assistant** to connect Anthropic, OpenAI, or local Ollama — see [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md).
+6. Optional: set `PRINT_PARTNER_API_KEY` and attach Cursor/Grok/Claude via [`docs/assistant-mcp.md`](docs/assistant-mcp.md).
 
 ### Environment variables (self-host)
 
@@ -230,7 +191,7 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped: compare against this version instead of GitHub |
-| Kit advisor (`AI_*`, `SEARCH_*`, Ollama, …) | unset | **Prefer Settings → AI assistant.** Env is operator/SaaS fallback only — full table in [`web/DEPLOY.md`](web/DEPLOY.md) |
+| `PRINT_PARTNER_API_KEY` | unset | Gates `/api/v1/*` including HTTP MCP |
 
 The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker upgrade: `docker compose pull && docker compose up -d`.
 
@@ -327,9 +288,10 @@ Print Partner builds on work shared by the **3D Printing Community** and by **[T
 
 - [Project site (GitHub Pages)](https://poitee.github.io/PrintPartnerPartner/) — landing page with workflow screenshots
 - [`docs/INSTALL.md`](docs/INSTALL.md) — beginner Docker install and first run
-- [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) — kit advisor: Anthropic, OpenAI, or local Ollama
+- [`docs/assistant-mcp.md`](docs/assistant-mcp.md) — attach Cursor / Grok / Claude via HTTP MCP
+- [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) — kit brain + MCP (no in-app AI)
 - [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, kit-advisor operator reference
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design
-- [`docs/API.md`](docs/API.md) — HTTP API overview (including `/assistant/*`)
+- [`docs/API.md`](docs/API.md) — HTTP API overview (`/api/v1`, MCP)
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
 - [`LICENSE`](LICENSE) — full license text

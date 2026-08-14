@@ -6,7 +6,7 @@ Print Partner is a self-hostable web workflow for **layered STL kits** — a bas
 
 Plan management (create, rename, duplicate, delete) is separate from that pipeline — use the header **Create build** button, **Manage builds** on Plan, or the **Builds** page in the sidebar.
 
-**Optional kit advisor:** research kits with web search / URL paste, walk decisions, and propose **Apply** cards — configure under **Settings → AI assistant** (Anthropic, OpenAI, or local Ollama). See [Kit advisor](KIT_ADVISOR.md).
+**MCP attach:** connect Cursor / Grok / Claude to HTTP MCP on the live host. See [MCP attach](assistant-mcp.md) and [Kit brain](KIT_ADVISOR.md).
 
 ---
 
@@ -15,9 +15,10 @@ Plan management (create, rename, duplicate, delete) is separate from that pipeli
 | Doc | Audience |
 |-----|----------|
 | [Install with Docker](INSTALL.md) | First-time Docker users — install, first run, data volume, troubleshooting |
-| [Kit advisor (AI)](KIT_ADVISOR.md) | Bring-your-own Anthropic/OpenAI keys or fully local Ollama; search & Apply cards |
+| [MCP attach](assistant-mcp.md) | HTTP MCP + Cursor plugin / Grok / Claude |
+| [Kit brain](KIT_ADVISOR.md) | No in-app AI; confirm-to-apply via MCP |
 | [Project site (landing page)](https://poitee.github.io/PrintPartnerPartner/) | Overview with workflow + AI screenshots (light/dark) |
-| [README (repo home)](../README.md) | Full feature list, quick start, AI options, env vars, monorepo layout |
+| [README (repo home)](../README.md) | Full feature list, quick start, MCP attach, env vars, monorepo layout |
 
 After the app is running, open **Help** in the sidebar for the in-app workflow guide.
 
@@ -59,7 +60,7 @@ After the app is running, open **Help** in the sidebar for the in-app workflow g
 | [Printer API research](integrations/PRINTER_APIS.md) | Klipper / Prusa / Bambu capability ladder and stance |
 | [Printer UX deep dive](integrations/PRINTER_UX.md) | Desk-first screens, Export/Progress binds, phased A→F UI map |
 | [3MF export validation](3MF_EXPORT_VALIDATION.md) | Slicer import checklist for 3MF packs |
-| [Kit advisor MCP](assistant-mcp.md) | Stdio MCP server for Cursor / Claude Desktop |
+| [MCP attach](assistant-mcp.md) | HTTP MCP + Cursor / Grok / Claude connect |
 | [Assistant research brief](assistant-research-brief.md) | Prompt/brief for producing domain research packs |
 | [Domain ingest schema](assistant-domain-ingest-schema.md) | YAML/MD schemas for `assistant-domain/` packs |
 
