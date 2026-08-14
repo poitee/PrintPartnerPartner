@@ -1110,6 +1110,14 @@
   }
 }
 
+/* GRE-233: Progress Print sheet is print-only — desk loop is the screen UI.
+   `.is-print-prep` briefly mounts off-screen so thumbs can load before window.print. */
+@media screen {
+  .checkoff-sheet-print-only:not(.is-print-prep) {
+    display: none !important;
+  }
+}
+
 .sheet-header {
   border-bottom: 2px solid var(--paper-fg);
   padding-bottom: 0.75rem;
@@ -1131,7 +1139,6 @@
 
 .sheet-repo {
   margin-top: 1.5rem;
-  break-inside: avoid;
 }
 
 .sheet-repo-title {
@@ -1156,7 +1163,6 @@
 
 .sheet-folder {
   margin-top: 1rem;
-  break-inside: avoid;
 }
 
 .sheet-folder-title {
@@ -1683,12 +1689,25 @@
     print-color-adjust: exact;
   }
 
+  /* GRE-233 / GRE-215: never avoid a whole repo/folder/header — that left
+     title + tally alone on page 1 when the first group was taller than a page.
+     Keep only a single part row together. */
+  .sheet-header {
+    break-after: avoid;
+    break-inside: avoid;
+  }
+
   .sheet-repo {
-    break-inside: avoid-page;
+    break-inside: auto;
   }
 
   .sheet-folder {
     break-inside: auto;
+  }
+
+  .sheet-repo-title,
+  .sheet-folder-title {
+    break-after: avoid;
   }
 
   .sheet-table thead {
@@ -1699,9 +1718,9 @@
     break-inside: avoid;
   }
 
+  /* Continuous opt-in still allows repo/folder to flow; never split part rows. */
   .checkoff-sheet.checkoff-sheet-print-continuous .sheet-repo,
-  .checkoff-sheet.checkoff-sheet-print-continuous .sheet-folder,
-  .checkoff-sheet.checkoff-sheet-print-continuous .sheet-table tr {
+  .checkoff-sheet.checkoff-sheet-print-continuous .sheet-folder {
     break-inside: auto;
   }
 
