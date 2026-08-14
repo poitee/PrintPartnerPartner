@@ -90,7 +90,7 @@ describe("assistant routes", () => {
       search?: { provider: string; configured: boolean };
     };
     expect(body).toMatchObject({
-      enabled: true,
+      enabled: false,
       provider: "anthropic",
       model: "test-model",
       use_other_builds_as_examples: true,
@@ -102,7 +102,7 @@ describe("assistant routes", () => {
     expect(mockedCreate).toHaveBeenCalled();
   });
 
-  it("enables via settings integration without env AI_ENABLED", async () => {
+  it("status reports enabled=false while still resolving settings source for MCP tooling", async () => {
     await app.close();
 
     dataDir = mkdtempSync(join(tmpdir(), "pp-assistant-settings-"));
@@ -157,7 +157,7 @@ describe("assistant routes", () => {
     const res = await app.inject({ method: "GET", url: "/assistant/status" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({
-      enabled: true,
+      enabled: false,
       provider: "ollama",
       model: "llama3.2",
       use_other_builds_as_examples: false,
@@ -165,7 +165,7 @@ describe("assistant routes", () => {
     });
   });
 
-  it("POST /assistant/chat returns JSON when stream=false", async () => {
+  it("POST /assistant/chat returns 410 Gone (in-app advisor removed)", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/assistant/chat",
@@ -174,49 +174,8 @@ describe("assistant routes", () => {
         messages: [{ role: "user", content: "Which base should I use?" }],
       },
     });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as {
-      message: { role: string; content: string };
-      tools_degraded?: boolean;
-    };
-    expect(body.message.role).toBe("assistant");
-    expect(body.message.content).toContain("voron_2_4");
-    expect(body.tools_degraded).toBe(true);
-  });
-
-  it("POST /assistant/chat surfaces provider error detail when stream=false", async () => {
-    mockedCreate.mockReturnValue({
-      provider: "ollama",
-      model: "llama3.2",
-      configured: true,
-      supportsTools: false,
-      async complete() {
-        throw new Error("Ollama HTTP 404: model 'llama3.2' not found");
-      },
-      async stream(_p, h) {
-        h.onError(new Error("Ollama HTTP 404: model 'llama3.2' not found"));
-      },
-    });
-
-    const res = await app.inject({
-      method: "POST",
-      url: "/assistant/chat",
-      payload: {
-        stream: false,
-        messages: [{ role: "user", content: "hi" }],
-      },
-    });
-    expect(res.statusCode).toBe(502);
-    expect(JSON.stringify(res.json())).toMatch(/llama3\.2.*not found/i);
-  });
-
-  it("rejects empty messages", async () => {
-    const res = await app.inject({
-      method: "POST",
-      url: "/assistant/chat",
-      payload: { stream: false, messages: [] },
-    });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(410);
+    expect(JSON.stringify(res.json())).toMatch(/HTTP MCP|mcp/i);
   });
 
   it("stores feedback", async () => {
@@ -281,98 +240,11 @@ describe("assistant routes", () => {
     expect((listed.json() as { entries: unknown[] }).entries).toHaveLength(0);
   });
 
-  it("persists chat history after non-stream chat", async () => {
-    await app.inject({
-      method: "POST",
-      url: "/assistant/chat",
-      payload: {
-        stream: false,
-        messages: [{ role: "user", content: "Which base?" }],
-      },
-    });
-    const hist = await app.inject({ method: "GET", url: "/assistant/history" });
-    expect(hist.statusCode).toBe(200);
-    const body = hist.json() as { messages: Array<{ role: string; content: string }> };
-    expect(body.messages.some((m) => m.role === "user" && m.content.includes("base"))).toBe(true);
-    expect(body.messages.some((m) => m.role === "assistant")).toBe(true);
-  });
-
   it("DELETE /assistant/history clears stored turns", async () => {
-    await app.inject({
-      method: "POST",
-      url: "/assistant/chat",
-      payload: {
-        stream: false,
-        messages: [{ role: "user", content: "Remember this" }],
-      },
-    });
     const cleared = await app.inject({ method: "DELETE", url: "/assistant/history" });
     expect(cleared.statusCode).toBe(200);
     expect(cleared.json()).toMatchObject({ ok: true });
     const hist = await app.inject({ method: "GET", url: "/assistant/history" });
     expect((hist.json() as { messages: unknown[] }).messages).toHaveLength(0);
-  });
-
-  it("POST /assistant/chat returns 429 when daily request budget is exceeded", async () => {
-    await app.close();
-
-    dataDir = mkdtempSync(join(tmpdir(), "pp-assistant-budget-"));
-    const ports = createSelfHostPorts(dataDir);
-    await ports.db.connect();
-    const repo = ports.repository!;
-
-    mockedCreate.mockReturnValue({
-      provider: "anthropic",
-      model: "test-model",
-      configured: true,
-      supportsTools: false,
-      async complete() {
-        return "ok";
-      },
-      async stream(_p, h) {
-        h.onDone();
-      },
-    });
-
-    const config = {
-      ...loadConfig(),
-      aiEnabled: true,
-      aiProvider: "anthropic" as const,
-      aiModel: "test-model",
-      aiMaxTokens: 256,
-      anthropicApiKey: "test-key",
-      aiDailyRequestBudget: 1,
-      aiDailyTokenBudget: 0,
-    };
-
-    app = Fastify();
-    await app.register(rateLimit, { global: false });
-    app.decorateRequest("tenantId", "");
-    app.addHook("onRequest", async (req: { tenantId: string }) => {
-      req.tenantId = "default";
-    });
-    await registerAssistantRoutes(app, { repo, config, jobs: mockJobs() });
-    await app.ready();
-
-    const first = await app.inject({
-      method: "POST",
-      url: "/assistant/chat",
-      payload: {
-        stream: false,
-        messages: [{ role: "user", content: "first" }],
-      },
-    });
-    expect(first.statusCode).toBe(200);
-
-    const second = await app.inject({
-      method: "POST",
-      url: "/assistant/chat",
-      payload: {
-        stream: false,
-        messages: [{ role: "user", content: "second" }],
-      },
-    });
-    expect(second.statusCode).toBe(429);
-    expect(JSON.stringify(second.json())).toMatch(/request budget exceeded/i);
   });
 });

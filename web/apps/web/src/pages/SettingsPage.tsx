@@ -28,7 +28,6 @@ import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { StlNamingSettingsCard } from "../components/settings/StlNamingEditor";
-import AiAssistantSettingsCard from "../components/settings/AiAssistantSettingsCard";
 import IntegrationsSettingsCard from "../components/settings/IntegrationsSettingsCard";
 import PrintersSettingsCard from "../components/settings/PrintersSettingsCard";
 import AboutUpdatesCard from "../components/settings/AboutUpdatesCard";
@@ -234,7 +233,7 @@ export default function SettingsPage() {
         icon={Settings}
         accent
         title="Settings"
-        description="Printers, library, appearance, AI, and account."
+        description="Printers, library, appearance, and account."
         actions={
           <PageHeaderActions>
             <SupportCta size="sm" className="min-h-10 w-full sm:w-auto" />
@@ -499,10 +498,6 @@ export default function SettingsPage() {
             </label>
           </CardContent>
         </Card>
-      </SettingsSection>
-
-      <SettingsSection title="AI">
-        <AiAssistantSettingsCard engineReady={Boolean(health)} />
       </SettingsSection>
 
       {multiUser && user?.provider === "email" ? (

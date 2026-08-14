@@ -1,8 +1,7 @@
 import { type MouseEvent, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { BookOpen, MoreHorizontal, Printer, Settings, Sparkles } from "lucide-react";
+import { BookOpen, MoreHorizontal, Printer, Settings } from "lucide-react";
 import CommandPalette from "../components/CommandPalette";
-import AssistantChatSheet from "../components/AssistantChatSheet";
 import ErrorBoundary from "../components/ErrorBoundary";
 import JobTray from "../components/JobTray";
 import PlanTray from "../components/PlanTray";
@@ -40,7 +39,6 @@ import {
 } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { useProfileSelection } from "../context/ProfileContext";
-import { CopilotUiProvider } from "../context/CopilotUiContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
 import ThemePreferenceControl from "../components/ThemePreferenceControl";
@@ -55,24 +53,6 @@ export default function AppLayout() {
   const { updateCheck } = useAppUpdateCheck(Boolean(health));
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed());
-  const [assistantOpen, setAssistantOpen] = useState(() => {
-    try {
-      return sessionStorage.getItem("pp-assistant-open") === "1";
-    } catch {
-      return false;
-    }
-  });
-
-  const setAssistantOpenPersisted = (open: boolean) => {
-    setAssistantOpen(open);
-    try {
-      sessionStorage.setItem("pp-assistant-open", open ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
-  };
-  const aiAssistantEnabled = Boolean(health?.capabilities?.includes("ai_assistant"));
-
   const toggleSidebar = () => {
     setSidebarCollapsed((prev) => {
       const next = !prev;
@@ -138,24 +118,6 @@ export default function AppLayout() {
       isPartsPath(location.pathname) ||
       isProgressPath(location.pathname));
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!aiAssistantEnabled) return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        setAssistantOpenPersisted(!assistantOpen);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [aiAssistantEnabled, assistantOpen]);
-
-  useEffect(() => {
-    const onOpen = () => setAssistantOpenPersisted(true);
-    window.addEventListener("pp-open-assistant", onOpen);
-    return () => window.removeEventListener("pp-open-assistant", onOpen);
-  }, []);
-
   const secondaryMobile = [
     { to: printersRoute(), label: "Printers", icon: Printer },
     { to: settingsRoute(), label: "Settings", icon: Settings },
@@ -164,16 +126,12 @@ export default function AppLayout() {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <CopilotUiProvider>
         <div className="flex min-h-screen min-w-0 bg-background">
           <SpineRail
             collapsed={sidebarCollapsed}
             onToggleCollapsed={toggleSidebar}
             stages={stages}
             activeId={activeId}
-            aiAssistantEnabled={aiAssistantEnabled}
-            assistantOpen={assistantOpen}
-            onAssistantOpenChange={setAssistantOpenPersisted}
             onStageNavigate={onPipelineNavigate}
           />
 
@@ -191,20 +149,6 @@ export default function AppLayout() {
               </div>
               <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:justify-end">
                 <SaveStatusIndicator />
-                {aiAssistantEnabled && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0 gap-1.5 lg:hidden"
-                    onClick={() => setAssistantOpenPersisted(!assistantOpen)}
-                    aria-label={assistantOpen ? "Close kit advisor" : "Open kit advisor"}
-                    aria-pressed={assistantOpen}
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    <span className="hidden sm:inline">Advisor</span>
-                  </Button>
-                )}
                 <SupportCta variant="secondary" size="sm" className="hidden shrink-0 sm:inline-flex" />
                 <ThemePreferenceControl compact className="hidden shrink-0 md:inline-flex" />
                 <UserMenu />
@@ -224,15 +168,6 @@ export default function AppLayout() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-52">
-                    {aiAssistantEnabled && (
-                      <DropdownMenuItem
-                        className="lg:hidden"
-                        onClick={() => setAssistantOpenPersisted(true)}
-                      >
-                        <Sparkles className="h-4 w-4" />
-                        Kit advisor
-                      </DropdownMenuItem>
-                    )}
                     <DropdownMenuItem className="sm:hidden" onClick={() => openSponsor()}>
                       Sponsor on GitHub
                     </DropdownMenuItem>
@@ -256,7 +191,6 @@ export default function AppLayout() {
             <main
               className={cn(
                 "flex-1 overflow-x-hidden overflow-y-auto p-3 pb-28 sm:p-5 sm:pb-24 lg:pb-20 print:overflow-visible print:p-0",
-                assistantOpen && "lg:pr-[28rem]",
               )}
             >
               <ErrorBoundary key={location.pathname}>
@@ -283,11 +217,9 @@ export default function AppLayout() {
 
           <JobTray sidebarCollapsed={sidebarCollapsed} />
           <PlanTray />
-          <CommandPalette onOpenAssistant={() => setAssistantOpenPersisted(true)} />
-          <AssistantChatSheet open={assistantOpen} onOpenChange={setAssistantOpenPersisted} />
+          <CommandPalette />
           <Toaster position="bottom-right" richColors closeButton />
         </div>
-      </CopilotUiProvider>
     </TooltipProvider>
   );
 }

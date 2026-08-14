@@ -89,6 +89,17 @@ export const ASSISTANT_TOOL_SPECS: AssistantToolSpec[] = [
     tier: "read",
   },
   {
+    name: "get_remaining",
+    description:
+      "Print progress for a plan: printed/remaining units, percent, and whether archive is allowed (remaining = 0).",
+    input_schema: {
+      type: "object",
+      properties: { plan_id: { type: "number", description: "Plan / profile id" } },
+      required: ["plan_id"],
+    },
+    tier: "read",
+  },
+  {
     name: "get_plan_review",
     description:
       "Review summary for a plan: issue counts, blockers, role/filament totals — not a full STL dump.",
@@ -689,6 +700,39 @@ export const ASSISTANT_TOOL_SPECS: AssistantToolSpec[] = [
     },
     tier: "mutate",
   },
+  {
+    name: "duplicate_plan",
+    description:
+      "PROPOSE duplicating a plan (optionally clearing checkoff). Requires confirm_apply. Never auto-composes or starts a print.",
+    input_schema: {
+      type: "object",
+      properties: {
+        plan_id: { type: "number", description: "Source plan id" },
+        name: { type: "string", description: "Name for the new plan" },
+        clear_checkoff: {
+          type: "boolean",
+          description: "When true, reset print progress on the duplicate",
+        },
+        rationale: { type: "string" },
+      },
+      required: ["plan_id", "name"],
+    },
+    tier: "mutate",
+  },
+  {
+    name: "archive_plan",
+    description:
+      "PROPOSE archiving a plan as a reusable template. Only succeeds when remaining print units are 0. Requires confirm_apply.",
+    input_schema: {
+      type: "object",
+      properties: {
+        plan_id: { type: "number" },
+        rationale: { type: "string" },
+      },
+      required: ["plan_id"],
+    },
+    tier: "mutate",
+  },
 ];
 
 export type ToolContext = {
@@ -1050,6 +1094,40 @@ export async function invokeAssistantTool(
         const planId = resolvePlanId(input, ctx);
         if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
         return { content: JSON.stringify(planSnapshotJson(ctx.repo, planId)) };
+      }
+
+      case "get_remaining": {
+        const planId = resolvePlanId(input, ctx);
+        if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
+        const profile = ctx.repo.getProfile(planId);
+        if (!profile) return { content: JSON.stringify({ error: "Plan not found" }) };
+        const checkoff = ctx.repo.getCheckoff(planId);
+        let totalUnits = 0;
+        let printedUnits = 0;
+        for (const part of checkoff.parts) {
+          const qty = Math.max(1, part.quantity_effective);
+          totalUnits += qty;
+          printedUnits += Math.min(qty, part.printed_count ?? 0);
+        }
+        const remainingUnits = Math.max(0, totalUnits - printedUnits);
+        const percent =
+          totalUnits === 0
+            ? 0
+            : Math.min(100, Math.max(0, Math.floor((printedUnits / totalUnits) * 100)));
+        return {
+          content: JSON.stringify({
+            plan_id: planId,
+            plan_name: profile.name,
+            archived_at: profile.archived_at ?? null,
+            summary: checkoff.summary,
+            printed_units: printedUnits,
+            total_units: totalUnits,
+            remaining_units: remainingUnits,
+            percent,
+            can_archive: totalUnits > 0 && remainingUnits === 0 && !profile.archived_at,
+            part_count: checkoff.parts.length,
+          }),
+        };
       }
 
       case "get_plan_review": {
@@ -2308,6 +2386,70 @@ export async function invokeAssistantTool(
         );
       }
 
+      case "duplicate_plan": {
+        const planId = resolvePlanId(input, ctx);
+        if (planId == null) {
+          return { content: JSON.stringify({ error: "plan_id required" }) };
+        }
+        const name = typeof input.name === "string" ? input.name.trim() : "";
+        if (!name) {
+          return { content: JSON.stringify({ error: "name required" }) };
+        }
+        const clearCheckoff = input.clear_checkoff === true;
+        const rationale =
+          typeof input.rationale === "string" ? input.rationale.trim() : "";
+        return proposeChecked(
+          ctx,
+          "duplicate_plan",
+          planId,
+          `Duplicate plan as “${name}”`,
+          rationale ||
+            `Copy plan ${planId} to “${name}”${clearCheckoff ? " (clear checkoff)" : ""}.`,
+          { name, clear_checkoff: clearCheckoff },
+        );
+      }
+
+      case "archive_plan": {
+        const planId = resolvePlanId(input, ctx);
+        if (planId == null) {
+          return { content: JSON.stringify({ error: "plan_id required" }) };
+        }
+        const profile = ctx.repo.getProfile(planId);
+        if (!profile) {
+          return { content: JSON.stringify({ error: "Plan not found" }) };
+        }
+        const checkoff = ctx.repo.getCheckoff(planId);
+        let totalUnits = 0;
+        let printedUnits = 0;
+        for (const part of checkoff.parts) {
+          const qty = Math.max(1, part.quantity_effective);
+          totalUnits += qty;
+          printedUnits += Math.min(qty, part.printed_count ?? 0);
+        }
+        const remainingUnits = Math.max(0, totalUnits - printedUnits);
+        if (totalUnits <= 0 || remainingUnits > 0) {
+          return {
+            content: JSON.stringify({
+              error: "Archive only when print remaining is 0",
+              remaining_units: remainingUnits,
+              total_units: totalUnits,
+              hint: "Call get_remaining first; finish Progress checkoff before archive_plan.",
+            }),
+          };
+        }
+        const rationale =
+          typeof input.rationale === "string" ? input.rationale.trim() : "";
+        return proposeChecked(
+          ctx,
+          "archive_plan",
+          planId,
+          `Archive “${profile.name}”`,
+          rationale ||
+            `Archive plan ${planId} as a reusable template (remaining = 0).`,
+          {},
+        );
+      }
+
       default:
         return { content: JSON.stringify({ error: `Unknown tool: ${name}` }) };
     }
@@ -2817,6 +2959,36 @@ export async function applyAssistantAction(
           exclude: merged,
         });
         outcome = { ok: true, result: { exclude: saved.exclude } };
+        break;
+      }
+      case "duplicate_plan": {
+        const name = String(action.params.name ?? "").trim();
+        if (!name) return { ok: false, detail: "name required" };
+        const clearCheckoff = action.params.clear_checkoff === true;
+        const dup = deps.repo.duplicateProfile(planId, name, {
+          clearCheckoff,
+        });
+        outcome = {
+          ok: true,
+          result: {
+            plan_id: dup.id,
+            name: dup.name,
+            part_count: dup.part_count,
+            clear_checkoff: clearCheckoff,
+          },
+        };
+        break;
+      }
+      case "archive_plan": {
+        const archived = deps.repo.archiveProfile(planId);
+        outcome = {
+          ok: true,
+          result: {
+            plan_id: archived.id,
+            name: archived.name,
+            archived_at: archived.archived_at,
+          },
+        };
         break;
       }
       default:
