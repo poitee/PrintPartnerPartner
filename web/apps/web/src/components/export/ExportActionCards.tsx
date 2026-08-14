@@ -15,7 +15,7 @@ import { checkoffUnitTotals } from "../../lib/checkoffProgress";
 import { handleExport3mfJobDone } from "../../lib/export3mfJobResult";
 import { handleStlPackExportJobDone } from "../../lib/exportStlJobResult";
 import { flattenReviewParts } from "../../lib/reviewParts";
-import { settingsRoute } from "../../lib/routes";
+import { settingsPrintersRoute } from "../../lib/routes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -250,7 +250,7 @@ export default function ExportActionCards({ onShare }: Props) {
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link to={settingsRoute()} className="cursor-pointer">
+              <Link to={settingsPrintersRoute()} className="cursor-pointer">
                 Manage printers in Settings…
               </Link>
             </DropdownMenuItem>
