@@ -74,8 +74,8 @@ Print Partner exposes product tools over **streamable HTTP MCP** on the running 
 
 | | |
 |--|--|
-| URL | `http://<host>:<port>/api/v1/mcp` |
-| Auth | `PRINT_PARTNER_API_KEY` (Bearer or `X-Print-Partner-Api-Key`) |
+| URL | `https://<host>/api/v1/mcp` (remote) · `http://127.0.0.1:<port>/api/v1/mcp` (loopback/tunnel only) |
+| Auth | `PRINT_PARTNER_API_KEY` required when `HOST` is not loopback |
 | Cursor plugin | [`cursor-plugin/print-partner`](cursor-plugin/print-partner) |
 | Connect guide | [`docs/assistant-mcp.md`](docs/assistant-mcp.md) |
 
@@ -165,7 +165,7 @@ docker compose up --build
 3. Run `docker compose pull && docker compose up -d` (or `docker compose up --build` to build from source).
 4. Open [http://localhost:8080](http://localhost:8080).
 5. Add a **Source** on the Sources page, then create a build with **Create build** in the header or **Manage builds** on Build (or open **Builds** in the sidebar).
-6. Optional: set `PRINT_PARTNER_API_KEY` and attach Cursor/Grok/Claude via [`docs/assistant-mcp.md`](docs/assistant-mcp.md).
+6. For MCP attach on Docker (`HOST=0.0.0.0`): set `PRINT_PARTNER_API_KEY`, prefer HTTPS via a reverse proxy, then connect via [`docs/assistant-mcp.md`](docs/assistant-mcp.md).
 
 ### Environment variables (self-host)
 
@@ -191,11 +191,11 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped: compare against this version instead of GitHub |
-| `PRINT_PARTNER_API_KEY` | unset | Gates `/api/v1/*` including HTTP MCP |
+| `PRINT_PARTNER_API_KEY` | unset | Gates `/api/v1/*` when set; **required** for `/api/v1/mcp` unless `HOST` is loopback |
 
 The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker upgrade: `docker compose pull && docker compose up -d`.
 
-See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables, kit-advisor env, search backends, and desktop-data migration.
+See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables, MCP attach, and desktop-data migration.
 
 ---
 
@@ -290,7 +290,7 @@ Print Partner builds on work shared by the **3D Printing Community** and by **[T
 - [`docs/INSTALL.md`](docs/INSTALL.md) — beginner Docker install and first run
 - [`docs/assistant-mcp.md`](docs/assistant-mcp.md) — attach Cursor / Grok / Claude via HTTP MCP
 - [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) — kit brain + MCP (no in-app AI)
-- [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, kit-advisor operator reference
+- [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, MCP attach
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design
 - [`docs/API.md`](docs/API.md) — HTTP API overview (`/api/v1`, MCP)
 - [`CHANGELOG.md`](CHANGELOG.md) — release history

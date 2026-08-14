@@ -10,11 +10,12 @@ On a running self-host / Docker app:
 
 | | |
 |--|--|
-| URL | `http://<host>:<port>/api/v1/mcp` |
+| URL (remote) | `https://<host>/api/v1/mcp` |
+| URL (loopback / tunnel only) | `http://127.0.0.1:<port>/api/v1/mcp` |
 | Auth | `Authorization: Bearer <PRINT_PARTNER_API_KEY>` or `X-Print-Partner-Api-Key` |
-| Transport | Streamable HTTP (same tools as stdio) |
+| Transport | Streamable HTTP (same tools as stdio); pending proposes are **per MCP session** |
 
-Set `PRINT_PARTNER_API_KEY` on the server (same key as REST `/api/v1/*`).
+**Fail-closed:** set `PRINT_PARTNER_API_KEY` whenever `HOST` is not loopback (Docker defaults to `0.0.0.0`). Without a key on an exposed bind, `/api/v1/mcp` returns **503**. Remote examples use **HTTPS** (terminate TLS at a reverse proxy). Plain `http://` is only for loopback or an authenticated tunnel.
 
 **Do not** point stdio MCP at the live Docker `PRINT_PARTNER_DATA_DIR` while the app is running — that is a second SQLite writer.
 
@@ -24,7 +25,7 @@ Set `PRINT_PARTNER_API_KEY` on the server (same key as REST `/api/v1/*`).
 
 Install the in-repo plugin at [`cursor-plugin/print-partner`](../cursor-plugin/print-partner). Set:
 
-- `PRINT_PARTNER_MCP_URL` = `http://192.168.200.80:8080/api/v1/mcp` (your host)
+- `PRINT_PARTNER_MCP_URL` = `https://print-partner.example/api/v1/mcp` (your HTTPS host)
 - `PRINT_PARTNER_API_KEY` = your API key
 
 ### Manual `mcp.json`
@@ -33,7 +34,22 @@ Install the in-repo plugin at [`cursor-plugin/print-partner`](../cursor-plugin/p
 {
   "mcpServers": {
     "print-partner": {
-      "url": "http://192.168.200.80:8080/api/v1/mcp",
+      "url": "https://print-partner.example/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY"
+      }
+    }
+  }
+}
+```
+
+Loopback / local tunnel only:
+
+```json
+{
+  "mcpServers": {
+    "print-partner": {
+      "url": "http://127.0.0.1:8080/api/v1/mcp",
       "headers": {
         "Authorization": "Bearer YOUR_API_KEY"
       }
@@ -44,11 +60,11 @@ Install the in-repo plugin at [`cursor-plugin/print-partner`](../cursor-plugin/p
 
 ## Grok
 
-Use the same **URL + API key** connect card as Cursor (streamable HTTP MCP). Point the bot at `/api/v1/mcp` with Bearer auth.
+Use the same **URL + API key** connect card as Cursor (streamable HTTP MCP). Prefer **HTTPS** for remote hosts.
 
 ## Claude Desktop
 
-Prefer **HTTP** when the host exposes `/api/v1/mcp`.
+Prefer **HTTPS** HTTP MCP when the host exposes `/api/v1/mcp`.
 
 Stdio is only for a **copy** of `PRINT_PARTNER_DATA_DIR` (or stop the app first):
 
@@ -87,7 +103,7 @@ Claude Desktop `mcpServers` entry:
 | `list_plans` / `get_plan_review` | Plan list / review summary |
 | `duplicate_plan` | Propose duplicate (confirm_apply) |
 | `archive_plan` | Propose archive when remaining = 0 (confirm_apply) |
-| `list_pending_actions` / `confirm_apply` / `dismiss_proposed_action` | Confirm-to-apply |
+| `list_pending_actions` / `confirm_apply` / `dismiss_proposed_action` | Confirm-to-apply (this session only) |
 
 SPA-only `ui_*` tools are not registered. There is no `start_print` tool.
 

@@ -17,7 +17,7 @@ Plan management (create, rename, duplicate, delete) is separate from that pipeli
 | [Install with Docker](INSTALL.md) | First-time Docker users — install, first run, data volume, troubleshooting |
 | [MCP attach](assistant-mcp.md) | HTTP MCP + Cursor plugin / Grok / Claude |
 | [Kit brain](KIT_ADVISOR.md) | No in-app AI; confirm-to-apply via MCP |
-| [Project site (landing page)](https://poitee.github.io/PrintPartnerPartner/) | Overview with workflow + AI screenshots (light/dark) |
+| [Project site (landing page)](https://poitee.github.io/PrintPartnerPartner/) | Overview with workflow screenshots (light/dark) |
 | [README (repo home)](../README.md) | Full feature list, quick start, MCP attach, env vars, monorepo layout |
 
 After the app is running, open **Help** in the sidebar for the in-app workflow guide.
@@ -33,7 +33,7 @@ After the app is running, open **Help** in the sidebar for the in-app workflow g
 | **Parts** | Validation summary by role and filament, 3D previews, quantity edits, **Export STLs** / 3MF, **Export missing STLs** |
 | **Progress** | Print checkoff — per-unit progress, filters, printable checklist |
 
-**Tips:** **⌘K / Ctrl+K** command palette · collapsible sidebar · header **Advisor** when AI is enabled · first-run **Progress** widget hides after one full pipeline pass
+**Tips:** **⌘K / Ctrl+K** command palette · collapsible sidebar · first-run **Progress** widget hides after one full pipeline pass
 
 ### Playbooks
 
@@ -52,9 +52,9 @@ After the app is running, open **Help** in the sidebar for the in-app workflow g
 
 | Doc | Contents |
 |-----|----------|
-| [Architecture](ARCHITECTURE.md) | Monorepo layout, deploy modes, job runner, kit advisor overview |
-| [HTTP API](API.md) | `/api/v1` discovery, auth, jobs, exports, `/assistant/*` |
-| [Deploy reference](../web/DEPLOY.md) | Docker Compose, env vars, SaaS (Postgres + S3 + OAuth), Settings vs env for AI |
+| [Architecture](ARCHITECTURE.md) | Monorepo layout, deploy modes, job runner |
+| [HTTP API](API.md) | `/api/v1` discovery, auth, jobs, exports, MCP |
+| [Deploy reference](../web/DEPLOY.md) | Docker Compose, env vars, SaaS (Postgres + S3 + OAuth), MCP attach |
 | [Spoolman integration](integrations/SPOOLMAN.md) | Filament inventory on Plan; spool weights in Parts |
 | [Printer setup & debugging](integrations/PRINTER_SETUP.md) | Add Moonraker/PrusaLink, link fleet, send G-code, common failures |
 | [Printer API research](integrations/PRINTER_APIS.md) | Klipper / Prusa / Bambu capability ladder and stance |

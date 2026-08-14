@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **HTTP MCP attach (GRE-225)** — streamable HTTP at `/api/v1/mcp` gated by `PRINT_PARTNER_API_KEY`; Cursor plugin at `cursor-plugin/print-partner`; tools `get_remaining`, `duplicate_plan`, `archive_plan` (confirm-to-apply). Connect guide: `docs/assistant-mcp.md`.
+- **HTTP MCP attach (GRE-225)** — streamable HTTP at `/api/v1/mcp`; `PRINT_PARTNER_API_KEY` required unless `HOST` is loopback; pending proposes are per MCP session; Cursor plugin at `cursor-plugin/print-partner`; tools `get_remaining`, `duplicate_plan`, `archive_plan` (confirm-to-apply). Connect guide: `docs/assistant-mcp.md`.
 
 ### Removed
 
