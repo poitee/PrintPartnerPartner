@@ -136,3 +136,8 @@ export function newBagBarId(): string {
   }
   return `bag-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/** Default label for a newly added bag/sort bar (Bag 1, Bag 2, …). */
+export function defaultBagBarLabel(existingBagCount: number): string {
+  return `Bag ${Math.max(0, existingBagCount) + 1}`;
+}

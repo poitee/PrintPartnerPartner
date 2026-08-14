@@ -57,6 +57,7 @@ import {
 } from "../lib/persistedCheckoffUi";
 import { moveItemById } from "../lib/reorderList";
 import {
+  defaultBagBarLabel,
   mergeVisibleProgressReorder,
   newBagBarId,
   progressRowSortableId,
@@ -273,7 +274,11 @@ export default function CheckoffPage() {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
     const sheet = sheetRef.current;
-    if (sheet) await waitForSheetThumbnails(sheet);
+    if (!sheet) {
+      setPrintPrep(false);
+      return;
+    }
+    await waitForSheetThumbnails(sheet);
     window.print();
   }, []);
 
@@ -430,10 +435,9 @@ export default function CheckoffPage() {
   const onAddBagBar = useCallback(() => {
     if (selectedProfileId == null) return;
     const bags = planProgressRows.filter((r) => r.kind === "bag");
-    const nextLabel = `Bag ${bags.length + 1}`;
     setPlanProgressRows([
       ...planProgressRows,
-      { kind: "bag", id: newBagBarId(), label: nextLabel },
+      { kind: "bag", id: newBagBarId(), label: defaultBagBarLabel(bags.length) },
     ]);
   }, [planProgressRows, selectedProfileId, setPlanProgressRows]);
 
@@ -580,7 +584,7 @@ export default function CheckoffPage() {
                 variant="ghost"
                 className="min-h-10 w-full sm:w-auto"
                 onClick={() => void onPrint()}
-                disabled={selectedProfileId == null || includedParts.length === 0}
+                disabled={selectedProfileId == null || filtered.length === 0}
               >
                 <Printer className="mr-1 h-4 w-4" />
                 Print
@@ -737,61 +741,67 @@ export default function CheckoffPage() {
             <p className="text-sm text-muted-foreground">Loading progress…</p>
           </CardContent>
         </Card>
-      ) : filtered.length === 0 ? (
-        <div className="no-print">{renderEmpty()}</div>
       ) : (
         <>
-          {/* Screen Progress list (mock Progress / phone checkoff). */}
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={onProgressDragEnd}
-          >
-            <SortableContext
-              items={filteredRows.map(progressRowSortableId)}
-              strategy={verticalListSortingStrategy}
+          {/*
+            GRE-223: list visibility uses filteredRows (parts + bags), not parts-only.
+            Bags stay visible when filters hide all parts; Add stays when a plan is selected.
+          */}
+          {filteredRows.length === 0 ? (
+            <div className="no-print">{renderEmpty()}</div>
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onProgressDragEnd}
             >
-              <div
-                className="no-print flex flex-col gap-2 sm:gap-2"
-                aria-label="Reorderable progress parts"
+              <SortableContext
+                items={filteredRows.map(progressRowSortableId)}
+                strategy={verticalListSortingStrategy}
               >
-                {filteredRows.map((row) => {
-                  if (row.kind === "bag") {
+                <div
+                  className="no-print flex flex-col gap-2 sm:gap-2"
+                  aria-label="Reorderable progress parts"
+                >
+                  {filteredRows.map((row) => {
+                    if (row.kind === "bag") {
+                      return (
+                        <SortableProgressPart
+                          key={progressRowSortableId(row)}
+                          kind="bag"
+                          bagId={row.id}
+                          label={row.label}
+                          mobile={isMobileLayout}
+                          busy={toggleBusy}
+                          disabled={toggleBusy}
+                          onLabelChange={(label) => onBagLabelChange(row.id, label)}
+                          onRemove={() => onRemoveBagBar(row.id)}
+                        />
+                      );
+                    }
+                    const part = partsById.get(row.id);
+                    if (!part) return null;
                     return (
                       <SortableProgressPart
                         key={progressRowSortableId(row)}
-                        kind="bag"
-                        bagId={row.id}
-                        label={row.label}
+                        kind="part"
+                        part={part}
                         mobile={isMobileLayout}
-                        busy={toggleBusy}
+                        busy={busyPartId === part.id || toggleBusy}
                         disabled={toggleBusy}
-                        onLabelChange={(label) => onBagLabelChange(row.id, label)}
-                        onRemove={() => onRemoveBagBar(row.id)}
+                        onToggleUnit={onToggleUnit}
+                        onIncrement={onIncrement}
+                        onDecrement={onDecrement}
+                        onPreview={setPreviewPart}
                       />
                     );
-                  }
-                  const part = partsById.get(row.id);
-                  if (!part) return null;
-                  return (
-                    <SortableProgressPart
-                      key={progressRowSortableId(row)}
-                      kind="part"
-                      part={part}
-                      mobile={isMobileLayout}
-                      busy={busyPartId === part.id || toggleBusy}
-                      disabled={toggleBusy}
-                      onToggleUnit={onToggleUnit}
-                      onIncrement={onIncrement}
-                      onDecrement={onDecrement}
-                      onPreview={setPreviewPart}
-                    />
-                  );
-                })}
-              </div>
-            </SortableContext>
-          </DndContext>
-          {selectedProfileId != null && includedParts.length > 0 ? (
+                  })}
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
+
+          {selectedProfileId != null ? (
             <div className="no-print">
               <Button
                 type="button"
@@ -801,70 +811,72 @@ export default function CheckoffPage() {
                 disabled={toggleBusy}
                 onClick={onAddBagBar}
               >
-                Add bag bar
+                Add bag/sort
               </Button>
             </div>
           ) : null}
 
           {/* Printable sheet — paper tokens; only this node prints. */}
-          <article
-            ref={sheetRef}
-            aria-hidden={!printPrep}
-            className={cn(
-              "checkoff-sheet",
-              compactMode && "compact",
-              printPrep && continuousPrintLayout && "checkoff-sheet-print-continuous",
-              printPrep
-                ? "pointer-events-none fixed top-0 left-0 -z-10 w-[880px] opacity-0 print:pointer-events-auto print:relative print:z-auto print:w-auto print:opacity-100"
-                : "hidden print:block",
-            )}
-          >
-            <header className="sheet-header">
-              <h1 className="sheet-title">{planName}</h1>
-              <p className="sheet-subtitle">
-                {filtered.length} part{filtered.length === 1 ? "" : "s"} · {printedLine}
-              </p>
-            </header>
+          {filtered.length > 0 ? (
+            <article
+              ref={sheetRef}
+              aria-hidden={!printPrep}
+              className={cn(
+                "checkoff-sheet",
+                compactMode && "compact",
+                printPrep && continuousPrintLayout && "checkoff-sheet-print-continuous",
+                printPrep
+                  ? "pointer-events-none fixed top-0 left-0 -z-10 w-[880px] opacity-0 print:pointer-events-auto print:relative print:z-auto print:w-auto print:opacity-100"
+                  : "hidden print:block",
+              )}
+            >
+              <header className="sheet-header">
+                <h1 className="sheet-title">{planName}</h1>
+                <p className="sheet-subtitle">
+                  {filtered.length} part{filtered.length === 1 ? "" : "s"} · {printedLine}
+                </p>
+              </header>
 
-            {grouped.map((repo) => (
-              <section key={repo.repoLayer} className="sheet-repo">
-                <h2 className="sheet-repo-title">
-                  {repo.repoLabel}
-                  <span className="sheet-repo-count">{repo.partCount}</span>
-                </h2>
-                {repo.folders.map((group) => (
-                  <div key={group.folder} className="sheet-folder">
-                    <h3 className="sheet-folder-title">{group.folder}</h3>
-                    <div className="sheet-table-wrap">
-                      <table className="sheet-table">
-                        <thead>
-                          <tr>
-                            <th className="sheet-cell-part">Part</th>
-                            <th className="sheet-cell-qty">Qty</th>
-                            <th className="sheet-cell-printed">Printed</th>
-                            <th className="sheet-cell-notes">Notes</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {group.parts.map((part) => (
-                            <CheckoffSheetRow
-                              key={part.id}
-                              part={part}
-                              busy={busyPartId === part.id || toggleBusy}
-                              compact={compactMode}
-                              eagerThumbs={printPrep}
-                              onToggleUnit={onToggleUnit}
-                              onPreview={setPreviewPart}
-                            />
-                          ))}
-                        </tbody>
-                      </table>
+              {grouped.map((repo) => (
+                <section key={repo.repoLayer} className="sheet-repo">
+                  <h2 className="sheet-repo-title">
+                    {repo.repoLabel}
+                    <span className="sheet-repo-count">{repo.partCount}</span>
+                  </h2>
+                  {repo.folders.map((group) => (
+                    <div key={group.folder} className="sheet-folder">
+                      <h3 className="sheet-folder-title">{group.folder}</h3>
+                      <div className="sheet-table-wrap">
+                        <table className="sheet-table">
+                          <thead>
+                            <tr>
+                              <th className="sheet-cell-part">Part</th>
+                              <th className="sheet-cell-qty">Qty</th>
+                              <th className="sheet-cell-printed">Printed</th>
+                              <th className="sheet-cell-notes">Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.parts.map((part) => (
+                              <CheckoffSheetRow
+                                key={part.id}
+                                part={part}
+                                busy={busyPartId === part.id || toggleBusy}
+                                compact={compactMode}
+                                eagerThumbs={printPrep}
+                                onToggleUnit={onToggleUnit}
+                                onPreview={setPreviewPart}
+                              />
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </section>
-            ))}
-          </article>
+                  ))}
+                </section>
+              ))}
+            </article>
+          ) : null}
         </>
       )}
 

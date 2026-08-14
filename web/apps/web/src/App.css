@@ -1080,11 +1080,12 @@
 }
 
 /* ---- Checkoff / Review printable sheet (mirrors export-html.ts) ---- */
+/* GRE-222: on-screen sheet uses available width (no 880px cap). Print stays paper below. */
 .checkoff-sheet {
   background: var(--paper-bg);
   color: var(--paper-fg);
-  max-width: 880px;
-  margin: 0 auto 2rem;
+  max-width: none;
+  margin: 0 0 2rem;
   padding: 2.5rem 2.75rem;
   border-radius: 6px;
   box-shadow: var(--paper-shadow);
@@ -1619,12 +1620,6 @@
   .sheet-unit input {
     width: 1.1rem;
     height: 1.1rem;
-  }
-}
-
-@media (max-width: 1023px) {
-  .checkoff-sheet {
-    max-width: 100%;
   }
 }
 
