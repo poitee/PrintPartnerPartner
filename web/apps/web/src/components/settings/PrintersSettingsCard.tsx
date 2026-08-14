@@ -224,6 +224,7 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
     void refresh();
   }, [refresh]);
 
+  // URL defaults follow host type only.
   useEffect(() => {
     if (hostType === "moonraker") {
       setNewUrl((prev) =>
@@ -238,10 +239,24 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
           : prev,
       );
     }
-    if (presets.length) {
-      setPresetId(pickDefaultPresetId(presets, hostType));
-    }
-  }, [hostType, presets]);
+  }, [hostType]);
+
+  const presetsRef = useRef(presets);
+  presetsRef.current = presets;
+
+  // Bed-size preset resets only when hostType changes — not when fleet refresh
+  // replaces the presets array with a new reference.
+  useEffect(() => {
+    const rows = presetsRef.current;
+    if (!rows.length) return;
+    setPresetId(pickDefaultPresetId(rows, hostType));
+  }, [hostType]);
+
+  // Seed a default once presets first arrive (without resetting later refreshes).
+  useEffect(() => {
+    if (!presets.length) return;
+    setPresetId((prev) => prev || pickDefaultPresetId(presets, hostType));
+  }, [presets, hostType]);
 
   const onAddPrinter = async () => {
     const name = newName.trim();
