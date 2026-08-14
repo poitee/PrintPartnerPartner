@@ -16,6 +16,7 @@ import {
 import { useJobRunner } from "../../hooks/useJobRunner";
 import { incompleteUnitsForSelectedParts } from "../../lib/printerCheckoffUnits";
 import { printerHostTypeLabel, type LiveStripHostType } from "../../lib/printerLiveStrip";
+import { usePrinterStatusPollMs } from "../../hooks/usePrinterStatusPollMs";
 import { settingsPrintersRoute } from "../../lib/routes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -137,6 +138,7 @@ export default function PrinterSendPanel({
   engineReady,
 }: Props) {
   const printerUploadJob = useJobRunner("printer-upload");
+  const pollMs = usePrinterStatusPollMs();
 
   const [linkedPrinters, setLinkedPrinters] = useState<PrinterMachine[]>([]);
   const [bambuPrinters, setBambuPrinters] = useState<PrinterMachine[]>([]);
@@ -259,7 +261,7 @@ export default function PrinterSendPanel({
     };
 
     void tick();
-    const timer = window.setInterval(() => void tick(), 5_000);
+    const timer = window.setInterval(() => void tick(), pollMs);
     const onVisibility = () => {
       if (!document.hidden) void tick();
     };
@@ -269,7 +271,7 @@ export default function PrinterSendPanel({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [engineReady, linkedPrinters, bambuPrinters]);
+  }, [engineReady, linkedPrinters, bambuPrinters, pollMs]);
 
   const remainingPartIdsKey = remainingParts.map((p) => p.id).join(",");
 

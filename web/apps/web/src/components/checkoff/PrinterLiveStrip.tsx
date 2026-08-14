@@ -11,13 +11,13 @@ import {
 } from "../../api/engine";
 import { settingsPrintersRoute } from "../../lib/routes";
 import {
-  PRINTER_LIVE_STRIP_POLL_MS,
   formatPrinterHostCaption,
   formatPrinterJobLine,
   formatPrinterStatusPill,
   printerLiveStripTone,
   type LiveStripHostType,
 } from "../../lib/printerLiveStrip";
+import { usePrinterStatusPollMs } from "../../hooks/usePrinterStatusPollMs";
 import { cn } from "../../lib/utils";
 
 const LIVE_STRIP_HOST_TYPES = new Set<LiveStripHostType>([
@@ -106,6 +106,7 @@ export default function PrinterLiveStrip({
   onCheckoffUpdateRef.current = onCheckoffUpdate;
   const onLiveStateChangeRef = useRef(onLiveStateChange);
   onLiveStateChangeRef.current = onLiveStateChange;
+  const pollMs = usePrinterStatusPollMs();
 
   const refreshRoster = useCallback(async () => {
     if (!engineReady) {
@@ -206,7 +207,7 @@ export default function PrinterLiveStrip({
     };
 
     tick();
-    const timer = window.setInterval(tick, PRINTER_LIVE_STRIP_POLL_MS);
+    const timer = window.setInterval(tick, pollMs);
     const onVisibility = () => {
       if (!document.hidden) tick();
     };
@@ -218,7 +219,7 @@ export default function PrinterLiveStrip({
       document.removeEventListener("visibilitychange", onVisibility);
       requestId.current += 1;
     };
-  }, [engineReady, hosts, refreshStatuses]);
+  }, [engineReady, hosts, refreshStatuses, pollMs]);
 
   useEffect(() => {
     const activeIntegrationIds = hosts
