@@ -87,6 +87,31 @@ describe("findPlanNameForLiveJob", () => {
       }),
     ).toBeNull();
   });
+
+  it("prefers watching / awaiting_verify over stale terminal same-filename", () => {
+    const mixed = [
+      {
+        printer_id: "p1",
+        filename: "plate.gcode",
+        profile_id: 10,
+        state: "verified" as const,
+      },
+      {
+        printer_id: "p1",
+        filename: "plate.gcode",
+        profile_id: 20,
+        state: "watching" as const,
+      },
+    ];
+    expect(
+      findPlanNameForLiveJob({
+        printerId: "p1",
+        filename: "plate.gcode",
+        links: mixed,
+        planNameById: names,
+      }),
+    ).toBe("Beta");
+  });
 });
 
 describe("resolvePlanIdForPrinterFetch", () => {

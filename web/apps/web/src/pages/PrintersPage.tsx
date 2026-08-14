@@ -97,7 +97,9 @@ export default function PrintersPage() {
       const [fleet, integrations, checkoff] = await Promise.all([
         fetchPrinters(),
         fetchIntegrations(),
-        fetchPrinterCheckoffLinks().catch(() => ({ links: [] as PrinterCheckoffLink[] })),
+        fetchPrinterCheckoffLinks()
+          .then((r) => r)
+          .catch(() => null),
       ]);
       const byId = new Map(integrations.map((i) => [i.id, i]));
       const next: LinkedPrinter[] = [];
@@ -116,7 +118,8 @@ export default function PrintersPage() {
         });
       }
       setLinked(next);
-      setCheckoffLinks(checkoff.links ?? []);
+      // Keep last successful links on transient failure (avoid flashing "No plan.").
+      if (checkoff) setCheckoffLinks(checkoff.links ?? []);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -151,11 +154,13 @@ export default function PrintersPage() {
           }
         }),
       ),
-      fetchPrinterCheckoffLinks().catch(() => ({ links: [] as PrinterCheckoffLink[] })),
+      fetchPrinterCheckoffLinks()
+        .then((r) => r)
+        .catch(() => null),
     ]);
     if (id !== requestId.current) return;
     setStatusById(Object.fromEntries(entries));
-    setCheckoffLinks(checkoff.links ?? []);
+    if (checkoff) setCheckoffLinks(checkoff.links ?? []);
   }, []);
 
   useEffect(() => {

@@ -37,6 +37,8 @@ export type LiveJobCheckoffLink = {
 /**
  * Resolve this-plan name for a live farm job from stored checkoff links.
  * Spine changes do not rebind — links carry immutable profile_id from send.
+ * Prefer active (watching / awaiting_verify) matches so a reprint under another
+ * plan does not pick a stale terminal link with the same filename.
  */
 export function findPlanNameForLiveJob(opts: {
   printerId: string;
@@ -54,6 +56,9 @@ export function findPlanNameForLiveJob(opts: {
     return opts.planNameById[id]?.trim() || null;
   };
 
+  const ACTIVE = new Set(["watching", "awaiting_verify"]);
+  let fallbackName: string | null = null;
+
   for (const link of opts.links) {
     if (link.printer_id !== opts.printerId) continue;
     const match =
@@ -61,9 +66,11 @@ export function findPlanNameForLiveJob(opts: {
       normalizeFilename(link.remote_path) === hostFile;
     if (!match) continue;
     const name = nameOf(link.profile_id);
-    if (name) return name;
+    if (!name) continue;
+    if (ACTIVE.has(link.state)) return name;
+    if (fallbackName == null) fallbackName = name;
   }
-  return null;
+  return fallbackName;
 }
 
 /**
