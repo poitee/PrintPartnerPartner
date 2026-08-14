@@ -36,10 +36,11 @@ const API_PREFIXES = [
 ];
 
 /**
- * SPA routes that share a prefix with API routes (`/settings` vs `/settings/*`).
- * Exact document navigations must not be proxied — there is no GET API at these paths.
+ * SPA routes that share a prefix with API routes (`/settings` vs `/settings/*`,
+ * `/plans` page vs `/plans` API list and `/plans/:id/*`).
+ * Exact document navigations must not be proxied.
  */
-const SPA_EXACT_PATHS = new Set(["/settings", "/help", "/parts"]);
+const SPA_EXACT_PATHS = new Set(["/settings", "/help", "/parts", "/plans"]);
 
 function spaExactBypass(req: IncomingMessage): string | undefined {
   const raw = req.url ?? "";

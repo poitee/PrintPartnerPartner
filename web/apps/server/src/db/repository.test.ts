@@ -49,6 +49,8 @@ describe("AppRepository", () => {
       expect(plan.name).toBe("My Plan");
       expect(plan.archived_at).toBeNull();
       expect(plan.last_used_at).toBeTruthy();
+      expect(plan.remaining_units).toBe(0);
+      expect(plan.total_units).toBe(0);
       expect(repo.listProfiles()).toHaveLength(1);
     });
   });
@@ -57,8 +59,11 @@ describe("AppRepository", () => {
     withRepo((repo, db) => {
       const plan = repo.createProfile("In progress");
       const part = insertIncludedPart(db, plan.id);
+      expect(repo.getProfile(plan.id)?.remaining_units).toBe(1);
+      expect(repo.getProfile(plan.id)?.total_units).toBe(1);
       expect(() => repo.archiveProfile(plan.id)).toThrow(/remaining/i);
       repo.patchPartProgress(part.id, 0, true);
+      expect(repo.getProfile(plan.id)?.remaining_units).toBe(0);
       const archived = repo.archiveProfile(plan.id);
       expect(archived.archived_at).toBeTruthy();
       expect(repo.listProfiles().find((p) => p.id === plan.id)?.archived_at).toBeTruthy();

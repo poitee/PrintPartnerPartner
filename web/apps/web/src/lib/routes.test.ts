@@ -12,12 +12,14 @@ import {
   isLibraryPath,
   isPartsPath,
   isPlanPath,
+  isPlansPath,
   isPlanWorkflowPath,
   isProgressPath,
   isReviewPath,
   libraryRoute,
   partsRoute,
   planRoute,
+  plansRoute,
   planStudioRoute,
   progressRoute,
   reviewRoute,
@@ -52,6 +54,7 @@ describe("workflow routes", () => {
     expect(progressRoute(5)).toBe("/progress?profile=5");
     expect(exportRoute(5)).toBe("/export?profile=5");
     expect(buildsRoute(5)).toBe("/builds?profile=5");
+    expect(plansRoute(5)).toBe("/plans?profile=5");
   });
 
   it("legacy aliases point at canonical paths", () => {
@@ -75,6 +78,8 @@ describe("path matchers", () => {
     expect(isBuildPath("/plan")).toBe(true);
     expect(isPlanPath("/plan")).toBe(true);
     expect(isBuildsPath("/builds")).toBe(true);
+    expect(isPlansPath("/plans")).toBe(true);
+    expect(isPlansPath("/plan")).toBe(false);
     expect(isPartsPath("/parts")).toBe(true);
     expect(isPartsPath("/review")).toBe(true);
     expect(isProgressPath("/progress")).toBe(true);
@@ -93,6 +98,7 @@ describe("path matchers", () => {
     expect(isPlanWorkflowPath("/library")).toBe(true);
     expect(isPlanWorkflowPath("/build")).toBe(true);
     expect(isPlanWorkflowPath("/builds")).toBe(true);
+    expect(isPlanWorkflowPath("/plans")).toBe(true);
     expect(isPlanWorkflowPath("/plan")).toBe(true);
     expect(isPlanWorkflowPath("/parts")).toBe(true);
     expect(isPlanWorkflowPath("/progress")).toBe(true);
