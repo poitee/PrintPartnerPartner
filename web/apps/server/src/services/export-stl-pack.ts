@@ -91,7 +91,15 @@ export function exportProfileStlPack(
 
   if (options.missingOnly) {
     const any = [...byRoleFolder.values()].some((m) => [...m.values()].some((e) => e.length));
-    if (!any) warnings.push("All included units are already marked printed in checkoff.");
+    if (!any) {
+      if (included.length === 0) {
+        warnings.push("No included parts to export.");
+      } else if (missingPath.length === included.length) {
+        // Missing-STL warnings already cover why nothing was packed.
+      } else {
+        warnings.push("All included units are already marked printed in checkoff.");
+      }
+    }
   }
 
   const fileCounts: Record<string, number> = Object.fromEntries(order.map((r) => [r, 0]));

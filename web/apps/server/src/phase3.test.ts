@@ -122,6 +122,90 @@ describe("Phase 3 APIs", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("export remaining on fresh composed plan succeeds (missing_only)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-exp-remaining-"));
+    process.env.PRINT_PARTNER_DATA_DIR = dir;
+    const config = loadConfig();
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const repo = ports.repository;
+    const source = repo.createSource({ name: "R", url: "https://github.com/a/b" });
+    const repoPath = join(dir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "p"), { recursive: true });
+    writeFileSync(join(repoPath, "p", "a.stl"), "stl");
+    repo.updateSource(source.id, { local_path: repoPath });
+    repo.updateImportRules(source.id, ["p/"]);
+    const plan = repo.createProfile("RemainingFresh", source.id);
+    await repo.recomputeProfile(plan.id);
+
+    const review = buildPlanReview(repo, plan.id);
+    expect(review.has_blockers).toBe(false);
+    expect(review.totals.total_print_units).toBeGreaterThan(0);
+
+    const app = await buildApp(config, ports);
+    const res = await app.inject({
+      method: "POST",
+      url: "/jobs/export-stl-pack",
+      payload: { profile_id: plan.id, missing_only: true },
+    });
+    expect(res.statusCode).toBe(200);
+    const { job_id } = res.json() as { job_id: string };
+    await new Promise((r) => setTimeout(r, 300));
+    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
+    const job = jobRes.json() as {
+      status: string;
+      result?: { file_total?: number; warnings?: string[] };
+    };
+    expect(job.status).toBe("done");
+    expect(job.result?.file_total ?? 0).toBeGreaterThan(0);
+    expect((job.result?.warnings ?? []).some((w) => /already marked printed/i.test(w))).toBe(false);
+
+    await app.close();
+    await ports.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("export remaining still packs when review has a missing-STL blocker", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-exp-blocker-"));
+    process.env.PRINT_PARTNER_DATA_DIR = dir;
+    const config = loadConfig();
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const repo = ports.repository;
+    const source = repo.createSource({ name: "R", url: "https://github.com/a/b" });
+    const repoPath = join(dir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "p"), { recursive: true });
+    writeFileSync(join(repoPath, "p", "good.stl"), "stl");
+    writeFileSync(join(repoPath, "p", "gone.stl"), "stl");
+    repo.updateSource(source.id, { local_path: repoPath });
+    repo.updateImportRules(source.id, ["p/"]);
+    const plan = repo.createProfile("BlockerFresh", source.id);
+    await repo.recomputeProfile(plan.id);
+    rmSync(join(repoPath, "p", "gone.stl"));
+
+    const review = buildPlanReview(repo, plan.id);
+    expect(review.has_blockers).toBe(true);
+    expect(review.issues.some((i) => i.code === "missing_stl")).toBe(true);
+
+    const app = await buildApp(config, ports);
+    const res = await app.inject({
+      method: "POST",
+      url: "/jobs/export-stl-pack",
+      payload: { profile_id: plan.id, missing_only: true },
+    });
+    expect(res.statusCode).toBe(200);
+    const { job_id } = res.json() as { job_id: string };
+    await new Promise((r) => setTimeout(r, 300));
+    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
+    const job = jobRes.json() as { status: string; result?: { file_total?: number } };
+    expect(job.status).toBe("done");
+    expect(job.result?.file_total ?? 0).toBeGreaterThan(0);
+
+    await app.close();
+    await ports.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("export STL pack job via HTTP with group_by color", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-exp-color-"));
     process.env.PRINT_PARTNER_DATA_DIR = dir;
@@ -299,6 +383,47 @@ describe("Phase 3 APIs", () => {
     );
     expect(warnings[0]).toContain("Missing STL: parts/missing.stl");
     expect(warnings[0]).toContain(STL_EXPORT_MISSING_HINT);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("missing_only with no included parts does not claim everything is printed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-pack-empty-missing-"));
+    const { warnings, fileCounts } = exportProfileStlPack("Empty", [], join(dir, "exports"), {
+      missingOnly: true,
+      completedByMatchKey: {},
+    });
+    expect(Object.values(fileCounts).reduce((a, b) => a + b, 0)).toBe(0);
+    expect(warnings.some((w) => /already marked printed/i.test(w))).toBe(false);
+    expect(warnings[0]).toMatch(/no included parts/i);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("missing_only with only missing STL paths does not claim everything is printed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-pack-all-missing-"));
+    const { warnings } = exportProfileStlPack(
+      "Missing",
+      [
+        {
+          matchKey: "missing.stl",
+          relativePath: "parts/missing.stl",
+          filename: "missing.stl",
+          sourceLayer: "base:R",
+          status: "base",
+          role: "primary",
+          quantityAuto: 1,
+          quantityOverride: null,
+          partSlug: "missing",
+          included: true,
+          notes: "",
+          geometrySame: null,
+          absolutePath: null,
+        },
+      ],
+      join(dir, "exports"),
+      { missingOnly: true, completedByMatchKey: {} },
+    );
+    expect(warnings.some((w) => /already marked printed/i.test(w))).toBe(false);
+    expect(warnings.some((w) => /Missing STL/i.test(w))).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
 
