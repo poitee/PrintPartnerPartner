@@ -794,6 +794,20 @@ export async function updateProfile(
   });
 }
 
+export async function archiveProfile(profileId: number): Promise<ProfileSummary> {
+  return engineFetch(`/plans/${profileId}/archive`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function touchProfileLastUsed(profileId: number): Promise<ProfileSummary> {
+  return engineFetch(`/plans/${profileId}/touch`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export async function deleteProfile(profileId: number): Promise<void> {
   await engineFetch(`/plans/${profileId}`, { method: "DELETE" });
 }
