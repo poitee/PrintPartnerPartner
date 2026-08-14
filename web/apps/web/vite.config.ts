@@ -36,11 +36,23 @@ const API_PREFIXES = [
 ];
 
 /**
- * SPA routes that share a prefix with API routes (`/settings` vs `/settings/*`,
- * `/plans` page vs `/plans` API list and `/plans/:id/*`).
- * Exact document navigations must not be proxied.
+ * SPA routes that share a prefix with API routes (`/settings` vs `/settings/*`).
+ * Exact document navigations must not be proxied — there is no GET API at these paths.
  */
-const SPA_EXACT_PATHS = new Set(["/settings", "/help", "/parts", "/plans"]);
+const SPA_EXACT_PATHS = new Set(["/settings", "/help", "/parts"]);
+
+/**
+ * Exact SPA paths that also expose a same-path API (GET `/plans` list).
+ * Bypass only browser document navigations so API fetches still proxy.
+ */
+const SPA_EXACT_PATHS_WITH_API = new Set(["/plans"]);
+
+function isDocumentNavigation(req: IncomingMessage): boolean {
+  const mode = req.headers["sec-fetch-mode"];
+  if (mode === "navigate") return true;
+  const accept = String(req.headers.accept ?? "");
+  return accept.includes("text/html") && !accept.includes("application/json");
+}
 
 function spaExactBypass(req: IncomingMessage): string | undefined {
   const raw = req.url ?? "";
@@ -49,6 +61,7 @@ function spaExactBypass(req: IncomingMessage): string | undefined {
     pathname = pathname.slice(0, -1);
   }
   if (SPA_EXACT_PATHS.has(pathname)) return raw;
+  if (SPA_EXACT_PATHS_WITH_API.has(pathname) && isDocumentNavigation(req)) return raw;
   return undefined;
 }
 
@@ -59,7 +72,8 @@ const proxy: Record<string, ProxyOptions> = Object.fromEntries(
       changeOrigin: true,
       ws: prefix === "ws" || prefix === "jobs",
     };
-    if (SPA_EXACT_PATHS.has(`/${prefix}`)) {
+    const exact = `/${prefix}`;
+    if (SPA_EXACT_PATHS.has(exact) || SPA_EXACT_PATHS_WITH_API.has(exact)) {
       options.bypass = spaExactBypass;
     }
     return [`/${prefix}`, options];
