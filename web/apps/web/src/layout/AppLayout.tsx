@@ -178,6 +178,7 @@ export default function AppLayout() {
                       <DropdownMenuItem key={item.to} asChild>
                         <NavLink
                           to={item.to}
+                          onClick={(e) => onPipelineNavigate(item.to, e)}
                           className="flex w-full cursor-pointer items-center gap-2"
                         >
                           <item.icon className="h-4 w-4" />
