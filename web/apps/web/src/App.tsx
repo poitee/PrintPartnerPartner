@@ -17,6 +17,7 @@ import LoginPage from "./pages/LoginPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import PartsPage from "./pages/PartsPage";
+import PrintersPage from "./pages/PrintersPage";
 import SettingsPage from "./pages/SettingsPage";
 import SourcesPage from "./pages/SourcesPage";
 import WelcomePage from "./pages/WelcomePage";
@@ -97,6 +98,7 @@ export default function App() {
                             element={<PreserveSearchRedirect to="/parts" />}
                           />
 
+                          <Route path="printers" element={<PrintersPage />} />
                           <Route path="settings" element={<SettingsPage />} />
                           <Route path="help" element={<HelpPage />} />
                         </Route>

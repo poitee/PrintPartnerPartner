@@ -1,6 +1,6 @@
 import { type MouseEvent, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { BookOpen, MoreHorizontal, Settings, Sparkles } from "lucide-react";
+import { BookOpen, MoreHorizontal, Printer, Settings, Sparkles } from "lucide-react";
 import CommandPalette from "../components/CommandPalette";
 import AssistantChatSheet from "../components/AssistantChatSheet";
 import ErrorBoundary from "../components/ErrorBoundary";
@@ -35,6 +35,7 @@ import {
   isPartsPath,
   isPlanPath,
   isProgressPath,
+  printersRoute,
   settingsRoute,
 } from "../lib/routes";
 import { cn } from "../lib/utils";
@@ -156,6 +157,7 @@ export default function AppLayout() {
   }, []);
 
   const secondaryMobile = [
+    { to: printersRoute(), label: "Printers", icon: Printer },
     { to: settingsRoute(), label: "Settings", icon: Settings },
     { to: helpRoute(), label: "Help", icon: BookOpen },
   ];
