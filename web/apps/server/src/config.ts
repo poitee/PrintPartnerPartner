@@ -49,7 +49,7 @@ export type ServerConfig = {
   s3Bucket: string | null;
   s3Region: string | null;
   uploadMaxBytes: number;
-  /** Self-host: optional key for /api/v1 automation clients */
+  /** Self-host: API key for /api/v1; required for /api/v1/mcp unless HOST is loopback */
   integrationApiKey: string | null;
   /** When false, skip GitHub / override version checks for app updates */
   updateCheckEnabled: boolean;

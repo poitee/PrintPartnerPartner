@@ -3,6 +3,7 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import type { ServerConfig } from "../config.js";
 import { registerCoreRoutes, type CoreRouteDeps } from "./core-routes.js";
+import { registerMcpHttpRoutes } from "../mcp/http-routes.js";
 
 export async function registerApiV1Plugin(
   app: FastifyInstance,
@@ -13,9 +14,15 @@ export async function registerApiV1Plugin(
     openapi: "/api/v1/openapi.json",
     health: "/health",
     docs: "/api/v1/docs",
+    mcp: "/api/v1/mcp",
   }));
 
   await registerCoreRoutes(app, deps, { apiV1Extensions: true });
+  await registerMcpHttpRoutes(app, {
+    getRepo: () => deps.repo,
+    jobs: deps.jobs,
+    config: deps.config,
+  });
 }
 
 export async function registerOpenApi(app: FastifyInstance, _config: ServerConfig): Promise<void> {

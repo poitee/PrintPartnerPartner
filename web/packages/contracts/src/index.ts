@@ -549,6 +549,8 @@ export type AssistantActionType =
   | "propose_add_source"
   | "import_guide_notes"
   | "propose_exclude_replaced_parts"
+  | "duplicate_plan"
+  | "archive_plan"
   /** Client-executed UI opens — auto-run; do not require Apply. */
   | "ui_navigate"
   | "ui_open_source"

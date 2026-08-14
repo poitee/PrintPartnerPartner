@@ -418,10 +418,6 @@ function BuildPageContent() {
     };
   }, [flushPendingSaves]);
 
-  const openAssistant = () => {
-    window.dispatchEvent(new Event("pp-open-assistant"));
-  };
-
   const attachedSources = useMemo(
     () =>
       sourceCardLayers
@@ -667,7 +663,7 @@ function BuildPageContent() {
               onRolesChange={setRoleFilaments}
               onUpdated={onRoleFilamentsUpdated}
             />
-            <PlanWarningsCard warnings={planWarnings} onAskAssistant={openAssistant} />
+            <PlanWarningsCard warnings={planWarnings} />
           </div>
 
           <section className="space-y-3">

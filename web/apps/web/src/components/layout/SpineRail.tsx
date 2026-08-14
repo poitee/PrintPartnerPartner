@@ -7,7 +7,6 @@ import {
   PanelLeftOpen,
   Printer,
   Settings,
-  Sparkles,
 } from "lucide-react";
 import CreatePlanButton from "../CreatePlanButton";
 import PlanPicker from "../PlanPicker";
@@ -30,9 +29,6 @@ type Props = {
   onToggleCollapsed: () => void;
   stages: WorkflowStage[];
   activeId: WorkflowStageId | null;
-  aiAssistantEnabled: boolean;
-  assistantOpen: boolean;
-  onAssistantOpenChange: (open: boolean) => void;
   onStageNavigate: (to: string, e: MouseEvent<HTMLAnchorElement>) => void;
 };
 
@@ -68,15 +64,12 @@ function SidebarTooltip({
   );
 }
 
-/** Left spine rail: plan picker, workflow stages (incl. Export), assistant + Settings/Help. */
+/** Left spine rail: plan picker, workflow stages (incl. Export), Settings/Help. */
 export default function SpineRail({
   collapsed,
   onToggleCollapsed,
   stages,
   activeId,
-  aiAssistantEnabled,
-  assistantOpen,
-  onAssistantOpenChange,
   onStageNavigate,
 }: Props) {
   const location = useLocation();
@@ -151,30 +144,6 @@ export default function SpineRail({
       </div>
 
       <div className={cn("mt-auto space-y-2 border-t border-border", collapsed ? "p-2" : "p-3")}>
-        {aiAssistantEnabled && (
-          <SidebarTooltip label="Ask assistant" collapsed={collapsed}>
-            <Button
-              type="button"
-              variant="outline"
-              size={collapsed ? "icon" : "sm"}
-              className={cn("w-full", !collapsed && "justify-start gap-2")}
-              onClick={() => onAssistantOpenChange(!assistantOpen)}
-              aria-pressed={assistantOpen}
-              aria-label="Ask assistant"
-            >
-              <Sparkles className="h-4 w-4 shrink-0" />
-              {!collapsed && (
-                <>
-                  <span className="flex-1 text-left">Ask assistant</span>
-                  <kbd className="rounded border border-border px-1 font-mono text-[10px] text-muted-foreground">
-                    ⌘J
-                  </kbd>
-                </>
-              )}
-            </Button>
-          </SidebarTooltip>
-        )}
-
         {!collapsed && (
           <div className="flex flex-wrap gap-x-3 gap-y-1 px-1.5 text-xs text-muted-foreground">
             {footerLinks.map((link) => (
