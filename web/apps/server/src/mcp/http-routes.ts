@@ -6,6 +6,7 @@
  * Pending proposes are bound to the MCP session (mcp-session-id) — one client
  * cannot list/confirm/dismiss another's.
  * Sessions are bounded (max count + idle/absolute TTL); evict closes transport.
+ * New sessions reserve capacity synchronously before async init.
  */
 
 import { randomUUID } from "node:crypto";
@@ -22,6 +23,7 @@ import {
   createProductMcpServer,
   isLoopbackBindHost,
 } from "./product-mcp.js";
+import { createMcpSessionCapacity } from "./http-session-capacity.js";
 
 type McpHttpDeps = {
   getRepo: () => AppRepository;
@@ -43,6 +45,8 @@ export const MCP_HTTP_SESSION_MAX = 64;
 export const MCP_HTTP_SESSION_IDLE_MS = 30 * 60 * 1000;
 /** Evict after this absolute age (ms), even if active. */
 export const MCP_HTTP_SESSION_ABSOLUTE_MS = 8 * 60 * 60 * 1000;
+
+export { createMcpSessionCapacity } from "./http-session-capacity.js";
 
 function extractApiKey(request: FastifyRequest): string | null {
   const header = request.headers.authorization;
@@ -146,6 +150,7 @@ export async function registerMcpHttpRoutes(
 
   /** Per streamable-HTTP session — not process-wide. */
   const sessions = new Map<string, McpSession>();
+  const capacity = createMcpSessionCapacity(sessions, MCP_HTTP_SESSION_MAX);
 
   const touch = (session: McpSession) => {
     session.lastAccessAt = Date.now();
@@ -183,8 +188,9 @@ export async function registerMcpHttpRoutes(
           });
         }
 
-        // After idle/absolute prune: at capacity → refuse (do not unbounded-grow).
-        if (sessions.size >= MCP_HTTP_SESSION_MAX) {
+        // Reserve BEFORE any await so concurrent inits cannot overshoot max.
+        const releaseReservation = capacity.tryReserve();
+        if (!releaseReservation) {
           return reply.status(503).send({
             jsonrpc: "2.0",
             error: {
@@ -209,6 +215,7 @@ export async function registerMcpHttpRoutes(
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
+            // Register session first, then drop reservation (same occupied count).
             sessions.set(id, {
               transport,
               server,
@@ -216,6 +223,7 @@ export async function registerMcpHttpRoutes(
               createdAt: now,
               lastAccessAt: Date.now(),
             });
+            releaseReservation();
           },
         });
         transport.onclose = () => {
@@ -231,11 +239,18 @@ export async function registerMcpHttpRoutes(
               }
             }
           }
+          // Init aborted before onsessioninitialized — free the slot.
+          releaseReservation();
         };
 
-        reply.hijack();
-        await server.connect(transport);
-        await transport.handleRequest(request.raw, reply.raw, request.body);
+        try {
+          reply.hijack();
+          await server.connect(transport);
+          await transport.handleRequest(request.raw, reply.raw, request.body);
+        } finally {
+          // If initialize never registered a session, free the reservation.
+          releaseReservation();
+        }
         return;
       }
 
