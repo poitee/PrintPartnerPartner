@@ -454,8 +454,9 @@ export default function SettingsPage() {
               <div>
                 <CardTitle className="text-base">Appearance</CardTitle>
                 <CardDescription>
-                  Choose light, dark, or match your system preference. Printable checkoff and review
-                  sheets stay light for print fidelity.
+                  Choose light, dark, or match your system preference. In-app Export and
+                  print dialogs follow the theme. Paper checkoff sheets stay light when
+                  printing.
                 </CardDescription>
               </div>
             </div>

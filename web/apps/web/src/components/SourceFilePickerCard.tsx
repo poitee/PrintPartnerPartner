@@ -23,6 +23,7 @@ import {
   importRulesSaveStatusLabel,
   shouldShowImportRulesRetry,
 } from "../lib/importRulesSave";
+import { librarySourceDragId } from "../lib/sourceCategoryDnD";
 import { cn } from "../lib/utils";
 
 type Props = {
@@ -45,6 +46,8 @@ type Props = {
   stlFilter?: string | null;
   /** Bump when copilot re-applies filter/focus. */
   stlFilterFocusSeq?: number;
+  /** Assign this source to a category (Plan compose). */
+  onAssignCategory?: (category: string | null) => void;
 };
 
 function attachedStateLabel(
@@ -95,6 +98,7 @@ export default function SourceFilePickerCard({
   forceExpanded = false,
   stlFilter = null,
   stlFilterFocusSeq = 0,
+  onAssignCategory,
 }: Props) {
   const { formatDate } = useDateFormat();
   const { activeJobs } = useJobContext();
@@ -252,6 +256,17 @@ export default function SourceFilePickerCard({
 
   return (
     <div
+      draggable={!disabled}
+      onDragStart={(e) => {
+        // Don't start a source drag from interactive controls inside the card.
+        const target = e.target as HTMLElement | null;
+        if (target?.closest("input,button,select,textarea,a,[data-no-source-drag]")) {
+          e.preventDefault();
+          return;
+        }
+        e.dataTransfer.setData("text/plain", librarySourceDragId(sourceId));
+        e.dataTransfer.effectAllowed = "move";
+      }}
       className={cn(
         "flex flex-col gap-2.5 rounded-lg border bg-card px-3.5 py-2.5 shadow-[0_1px_2px_rgba(89,115,166,0.06)]",
         updateWarn || syncBusy
@@ -260,7 +275,9 @@ export default function SourceFilePickerCard({
             : "border-amber-300/80 dark:border-amber-700/50"
           : "border-border",
         expanded && dirty && "border-primary/40",
+        !disabled && "cursor-grab active:cursor-grabbing",
       )}
+      title={onAssignCategory ? "Drag onto a category" : undefined}
     >
       <div className="flex flex-wrap items-center gap-2.5 sm:flex-nowrap">
         <SourceCardCover
@@ -275,6 +292,11 @@ export default function SourceFilePickerCard({
               {layerType}
             </Badge>
             <span className="truncate text-[13px] font-semibold">{sourceName}</span>
+            {source ? (
+              <span className="truncate text-[11px] text-muted-foreground">
+                {source.category?.trim() || "Uncategorised"}
+              </span>
+            ) : null}
             {saveStatusLabel && (
               <span
                 className={cn(
@@ -421,6 +443,7 @@ export default function SourceFilePickerCard({
                 onRulesChange={onPendingRulesChange}
                 initialFilter={stlFilter}
                 filterFocusSeq={stlFilterFocusSeq}
+                enableFileCategoryDrag={Boolean(onAssignCategory)}
                 onSelectionStats={(selected, total, duplicates) => {
                   setSelectedCount(selected);
                   setTotalFiles(total);

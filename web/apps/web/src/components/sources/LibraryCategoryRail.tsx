@@ -20,6 +20,7 @@ import { UNCategorized_FILTER } from "./sourceLabels";
 import { categorySwatch } from "../../lib/librarySourceMeta";
 import type { SourceKind } from "./sourceLabels";
 import { SortableDragHandle, SortableShell } from "../dnd/SortableDragHandle";
+import CategoryDropTarget from "./CategoryDropTarget";
 
 export type LibraryAddKind =
   | SourceKind
@@ -43,6 +44,8 @@ type Props = {
   onManageCategories: () => void;
   /** Persist a new flat category order (API has no nesting / parent grouping). */
   onCategoriesReorder?: (categories: string[]) => void;
+  /** Drop a Library source (or file-from-source) onto this category. */
+  onDropSourceCategory?: (sourceId: number, category: string | null) => void;
   onAddSource: (kind: LibraryAddKind) => void;
   className?: string;
 };
@@ -92,11 +95,13 @@ function SortableCategoryNavItem({
   active,
   reorderEnabled,
   onSelect,
+  onDropSourceCategory,
 }: {
   row: CategoryRow;
   active: boolean;
   reorderEnabled: boolean;
   onSelect: () => void;
+  onDropSourceCategory?: (sourceId: number, category: string | null) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: row.id, disabled: !reorderEnabled || !row.sortable });
@@ -106,51 +111,60 @@ function SortableCategoryNavItem({
     transition,
   };
 
+  const dropCategory =
+    row.id === "all" ? undefined : row.id === UNCategorized_FILTER ? null : row.name;
+
   return (
     <SortableShell style={style} isDragging={isDragging} className="rounded-md">
-      <div
-        ref={setNodeRef}
-        className={cn(
-          "flex items-center gap-0.5 rounded-md",
-          active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent/70",
-        )}
+      <CategoryDropTarget
+        category={dropCategory}
+        onDropSource={onDropSourceCategory}
+        className="rounded-md"
       >
-        {reorderEnabled && row.sortable ? (
-          <SortableDragHandle
-            attributes={attributes}
-            listeners={listeners}
-            label={`Reorder category ${row.name}`}
-            className="size-7"
-          />
-        ) : (
-          <span className="w-1.5 shrink-0" aria-hidden />
-        )}
-        <button
-          type="button"
-          onClick={onSelect}
+        <div
+          ref={setNodeRef}
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2.5 text-left transition-colors",
-            reorderEnabled && row.sortable ? "pl-0" : "pl-2.5",
+            "flex items-center gap-0.5 rounded-md",
+            active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent/70",
           )}
         >
-          <span
-            className="h-[7px] w-[7px] shrink-0 rounded-[2px]"
-            style={{ background: row.swatch }}
-            aria-hidden
-          />
-          <span
+          {reorderEnabled && row.sortable ? (
+            <SortableDragHandle
+              attributes={attributes}
+              listeners={listeners}
+              label={`Reorder category ${row.name}`}
+              className="size-7"
+            />
+          ) : (
+            <span className="w-1.5 shrink-0" aria-hidden />
+          )}
+          <button
+            type="button"
+            onClick={onSelect}
             className={cn(
-              "min-w-0 flex-1 truncate text-[12.5px]",
-              active ? "font-semibold" : "font-medium",
+              "flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2.5 text-left transition-colors",
+              reorderEnabled && row.sortable ? "pl-0" : "pl-2.5",
             )}
           >
-            {row.name}
-          </span>
-          <span className="ml-auto font-mono text-[10.5px] tabular-nums text-muted-foreground">
-            {row.count}
-          </span>
-        </button>
-      </div>
+            <span
+              className="h-[7px] w-[7px] shrink-0 rounded-[2px]"
+              style={{ background: row.swatch }}
+              aria-hidden
+            />
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-[12.5px]",
+                active ? "font-semibold" : "font-medium",
+              )}
+            >
+              {row.name}
+            </span>
+            <span className="ml-auto font-mono text-[10.5px] tabular-nums text-muted-foreground">
+              {row.count}
+            </span>
+          </button>
+        </div>
+      </CategoryDropTarget>
     </SortableShell>
   );
 }
@@ -164,6 +178,7 @@ export default function LibraryCategoryRail({
   onCategoryFilterChange,
   onManageCategories,
   onCategoriesReorder,
+  onDropSourceCategory,
   onAddSource,
   className,
 }: Props) {
@@ -185,34 +200,44 @@ export default function LibraryCategoryRail({
     onCategoriesReorder(next);
   };
 
-  const renderStaticRow = (row: CategoryRow, active: boolean) => (
-    <button
-      key={row.id}
-      type="button"
-      onClick={() => onCategoryFilterChange(row.id === "all" ? "all" : row.id)}
-      className={cn(
-        "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors",
-        active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent/70",
-      )}
-    >
-      <span
-        className="h-[7px] w-[7px] shrink-0 rounded-[2px]"
-        style={{ background: row.swatch }}
-        aria-hidden
-      />
-      <span
-        className={cn(
-          "min-w-0 flex-1 truncate text-[12.5px]",
-          active ? "font-semibold" : "font-medium",
-        )}
+  const renderStaticRow = (row: CategoryRow, active: boolean) => {
+    const dropCategory =
+      row.id === "all" ? undefined : row.id === UNCategorized_FILTER ? null : row.name;
+    return (
+      <CategoryDropTarget
+        key={row.id}
+        category={dropCategory}
+        onDropSource={onDropSourceCategory}
+        className="rounded-md"
       >
-        {row.name}
-      </span>
-      <span className="ml-auto font-mono text-[10.5px] tabular-nums text-muted-foreground">
-        {row.count}
-      </span>
-    </button>
-  );
+        <button
+          type="button"
+          onClick={() => onCategoryFilterChange(row.id === "all" ? "all" : row.id)}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors",
+            active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent/70",
+          )}
+        >
+          <span
+            className="h-[7px] w-[7px] shrink-0 rounded-[2px]"
+            style={{ background: row.swatch }}
+            aria-hidden
+          />
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-[12.5px]",
+              active ? "font-semibold" : "font-medium",
+            )}
+          >
+            {row.name}
+          </span>
+          <span className="ml-auto font-mono text-[10.5px] tabular-nums text-muted-foreground">
+            {row.count}
+          </span>
+        </button>
+      </CategoryDropTarget>
+    );
+  };
 
   const nav = (
     <nav className="flex flex-col gap-px" aria-label="Source categories">
@@ -229,6 +254,7 @@ export default function LibraryCategoryRail({
             active={active}
             reorderEnabled
             onSelect={() => onCategoryFilterChange(row.id)}
+            onDropSourceCategory={onDropSourceCategory}
           />
         );
       })}

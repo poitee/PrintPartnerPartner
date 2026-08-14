@@ -244,7 +244,7 @@ export default function PrintersPage() {
                         </Button>
                       ) : (
                         <p className="text-[11px] leading-relaxed text-muted-foreground">
-                          Status only — use Bambu Connect from Export (never Start print).
+                          Use Bambu Connect from Export.
                         </p>
                       )}
                     </div>

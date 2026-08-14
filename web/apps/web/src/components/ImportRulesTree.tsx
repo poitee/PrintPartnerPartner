@@ -24,6 +24,7 @@ import {
 } from "../api/importRulesTree";
 import { suggestRulesFromTopLevelFolders } from "../lib/importRulesSuggest";
 import { findDuplicateBasenames } from "../lib/importRuleConflicts";
+import { libraryFileDragId } from "../lib/sourceCategoryDnD";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { cn } from "../lib/utils";
@@ -41,6 +42,8 @@ type Props = {
   initialFilter?: string | null;
   /** Bump to re-apply initialFilter + focus the search field. */
   filterFocusSeq?: number;
+  /** When set, files are draggable onto category drop targets (assigns this source). */
+  enableFileCategoryDrag?: boolean;
 };
 
 function TreeRows({
@@ -56,6 +59,8 @@ function TreeRows({
   variant,
   collapsedFolders,
   onToggleFolderExpand,
+  projectId,
+  enableFileCategoryDrag,
 }: {
   nodes: StlTreeNode[];
   depth: number;
@@ -69,6 +74,8 @@ function TreeRows({
   variant: "default" | "inline";
   collapsedFolders: Set<string>;
   onToggleFolderExpand: (path: string) => void;
+  projectId: number;
+  enableFileCategoryDrag?: boolean;
 }) {
   const needle = filter.trim().toLowerCase();
   const displayNodes = useMemo(() => sortTreeNodes(nodes, sortBy), [nodes, sortBy]);
@@ -85,12 +92,24 @@ function TreeRows({
             return (
               <li
                 key={node.path}
+                draggable={Boolean(enableFileCategoryDrag) && !disabled}
+                onDragStart={(e) => {
+                  if (!enableFileCategoryDrag) return;
+                  e.stopPropagation();
+                  e.dataTransfer.setData(
+                    "text/plain",
+                    libraryFileDragId(projectId, node.path),
+                  );
+                  e.dataTransfer.effectAllowed = "move";
+                }}
                 className={cn(
                   "flex items-center gap-2 rounded-md py-0.5 pr-1 text-sm transition-colors",
                   isSelected && "bg-primary/10 ring-1 ring-primary/30",
                   !node.checked && "opacity-70",
+                  enableFileCategoryDrag && !disabled && "cursor-grab active:cursor-grabbing",
                 )}
                 style={{ paddingLeft: `${depth * 0.9}rem` }}
+                title={enableFileCategoryDrag ? "Drag onto a category" : undefined}
               >
                 <input
                   type="checkbox"
@@ -185,6 +204,8 @@ function TreeRows({
                     variant={variant}
                     collapsedFolders={collapsedFolders}
                     onToggleFolderExpand={onToggleFolderExpand}
+                    projectId={projectId}
+                    enableFileCategoryDrag={enableFileCategoryDrag}
                   />
                 </ul>
               )}
@@ -223,6 +244,8 @@ function TreeRows({
                 variant={variant}
                 collapsedFolders={collapsedFolders}
                 onToggleFolderExpand={onToggleFolderExpand}
+                projectId={projectId}
+                enableFileCategoryDrag={enableFileCategoryDrag}
               />
             </ul>
           </li>
@@ -243,6 +266,7 @@ export default function ImportRulesTree({
   className,
   initialFilter = null,
   filterFocusSeq = 0,
+  enableFileCategoryDrag = false,
 }: Props) {
   const [nodes, setNodes] = useState<StlTreeNode[]>([]);
   const [total, setTotal] = useState(0);
@@ -534,6 +558,8 @@ export default function ImportRulesTree({
           variant={variant}
           collapsedFolders={collapsedFolders}
           onToggleFolderExpand={toggleFolderExpand}
+          projectId={projectId}
+          enableFileCategoryDrag={enableFileCategoryDrag}
         />
       </ul>
       {total === 0 && (

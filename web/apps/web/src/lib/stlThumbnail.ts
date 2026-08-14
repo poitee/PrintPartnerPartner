@@ -6,9 +6,18 @@ import { fetchWithRetry } from "./fetchWithRetry";
 const SIZE = 256;
 const MESH_MAX_BYTES = 15 * 1024 * 1024;
 const DEFAULT_COLOR = "#c41230";
+/** Cap in-memory STL buffers so color re-renders skip network + parse. */
+const MESH_CACHE_MAX = 48;
 
 let sharedRenderer: THREE.WebGLRenderer | null = null;
 let sharedLoader: STLLoader | null = null;
+
+type CachedMesh = {
+  buffer: ArrayBuffer;
+  lastUsed: number;
+};
+
+const meshBufferCache = new Map<number, CachedMesh>();
 
 /**
  * One reused WebGL context for ALL thumbnails — browsers cap live contexts
@@ -30,6 +39,27 @@ function getRenderer(): THREE.WebGLRenderer {
     sharedRenderer.setSize(SIZE, SIZE, false);
   }
   return sharedRenderer;
+}
+
+function rememberMeshBuffer(partId: number, buffer: ArrayBuffer): void {
+  meshBufferCache.set(partId, { buffer, lastUsed: Date.now() });
+  if (meshBufferCache.size <= MESH_CACHE_MAX) return;
+  let oldestId: number | null = null;
+  let oldestAt = Number.POSITIVE_INFINITY;
+  for (const [id, entry] of meshBufferCache) {
+    if (entry.lastUsed < oldestAt) {
+      oldestAt = entry.lastUsed;
+      oldestId = id;
+    }
+  }
+  if (oldestId != null) meshBufferCache.delete(oldestId);
+}
+
+function cachedMeshBuffer(partId: number): ArrayBuffer | null {
+  const hit = meshBufferCache.get(partId);
+  if (!hit) return null;
+  hit.lastUsed = Date.now();
+  return hit.buffer;
 }
 
 function renderBufferToBlob(buffer: ArrayBuffer, hex: string): Promise<Blob | null> {
@@ -83,25 +113,34 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+async function loadMeshBuffer(partId: number): Promise<ArrayBuffer | null> {
+  const cached = cachedMeshBuffer(partId);
+  if (cached) return cached;
+  let res: Response;
+  try {
+    res = await fetchWithRetry(() => partMeshUrl(partId));
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  const buffer = await res.arrayBuffer();
+  if (buffer.byteLength === 0 || buffer.byteLength > MESH_MAX_BYTES) return null;
+  rememberMeshBuffer(partId, buffer);
+  return buffer;
+}
+
 /**
- * Fetch a part's STL mesh, render it to a PNG once, upload it as the cached
- * thumbnail, and return an object URL for immediate display. Returns null when
- * the mesh is missing or too large for client-side rendering.
+ * Fetch a part's STL mesh (or reuse an in-memory buffer), render a color-accurate
+ * isometric PNG, upload it to warm the server cache, and return an object URL.
+ * Color changes skip the network when the mesh buffer is already cached.
  */
 export function generatePartThumbnail(
   partId: number,
   hex: string | null | undefined,
 ): Promise<string | null> {
   return enqueue(async () => {
-    let res: Response;
-    try {
-      res = await fetchWithRetry(() => partMeshUrl(partId));
-    } catch {
-      return null;
-    }
-    if (!res.ok) return null;
-    const buffer = await res.arrayBuffer();
-    if (buffer.byteLength === 0 || buffer.byteLength > MESH_MAX_BYTES) return null;
+    const buffer = await loadMeshBuffer(partId);
+    if (!buffer) return null;
     let blob: Blob | null;
     try {
       blob = await renderBufferToBlob(buffer, hex ?? DEFAULT_COLOR);
