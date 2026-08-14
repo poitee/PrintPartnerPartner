@@ -2,6 +2,17 @@
  * Quiet desk copy for printer auth/availability failures.
  * Never surface Engine `/api/...` paths in the Progress UI.
  */
+
+/** Strip any `/api/...` path segment (v1, v2, unversioned, etc.). */
+function stripApiPaths(raw: string): string {
+  return raw
+    .replace(/^Engine\s+\/api\/\S+\s+failed:\s*/i, "")
+    .replace(/\/api\/[^\s,;)'"`]+/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s·\-–—:]+|[\s·\-–—:]+$/g, "")
+    .trim();
+}
+
 export function isPrinterAuthUnavailable(message: string | null | undefined): boolean {
   if (!message) return false;
   return /\b401\b/.test(message) || /unauthorized/i.test(message);
@@ -15,12 +26,8 @@ export function quietPrinterLoadError(message: string | null | undefined): {
   if (isPrinterAuthUnavailable(raw)) {
     return { quiet: true, text: "Printers unavailable" };
   }
-  // Strip Engine path prefixes like `Engine /api/v1/... failed: …`
-  const cleaned = raw
-    .replace(/^Engine\s+\/api\/[^\s:]+\s+failed:\s*/i, "")
-    .replace(/\/api\/v1\/[^\s]+/gi, "")
-    .trim();
-  if (!cleaned || cleaned === "401") {
+  const cleaned = stripApiPaths(raw);
+  if (!cleaned || cleaned === "401" || /\/api\//i.test(cleaned)) {
     return { quiet: true, text: "Printers unavailable" };
   }
   return { quiet: false, text: cleaned };
@@ -32,6 +39,7 @@ export function quietPrinterStatusMessage(
   if (!message?.trim()) return null;
   const { quiet, text } = quietPrinterLoadError(message);
   if (quiet) return "Printers unavailable";
-  if (/\/api\//i.test(message)) return text || "Printers unavailable";
-  return message.trim();
+  // Guarantee no Engine /api path leaks into UI titles or job lines.
+  if (/\/api\//i.test(text)) return "Printers unavailable";
+  return text;
 }

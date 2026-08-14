@@ -97,7 +97,7 @@ export function formatPrinterJobLine(
     return filename ? `Complete · ${filename}` : "Complete";
   }
   if (status.state === "idle") return "Idle";
-  const msg = status.message?.trim();
+  const msg = quietPrinterStatusMessage(status.message);
   return msg || status.state;
 }
 

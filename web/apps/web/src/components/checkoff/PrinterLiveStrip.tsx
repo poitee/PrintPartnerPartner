@@ -302,7 +302,7 @@ export default function PrinterLiveStrip({
               "flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border px-3 py-2 text-sm",
               toneClass(tone),
             )}
-            title={status?.message}
+            title={quietPrinterStatusMessage(status?.message) ?? undefined}
           >
             <Printer className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
             <div className="min-w-0 flex-1 leading-snug">
