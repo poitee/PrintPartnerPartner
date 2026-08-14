@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
-import { Copy, Hammer, Layers, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import {
+  Archive,
+  Copy,
+  Hammer,
+  Layers,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import StaleBuildBanner from "../components/StaleBuildBanner";
 import MergeConflictBanner from "../components/MergeConflictBanner";
 import BuildSourcesPanel from "../components/build/BuildSourcesPanel";
@@ -69,6 +77,8 @@ import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { layersEqual } from "../lib/planDataStable";
 import { meshColorForStlPath } from "../lib/rolePreviewColor";
+import { checkoffUnitTotals } from "../lib/checkoffProgress";
+import { canArchivePlan } from "../lib/planPickerGroups";
 
 type BuildLocationState = {
   kitImport?: KitImportJobResult;
@@ -96,8 +106,13 @@ function BuildPageContent() {
   const location = useLocation();
   const { health } = useEngineHealth();
   const { selectedProfileId, reloadProfiles, profiles } = useProfileSelection();
-  const { openCreatePlan, openRenamePlan, openDuplicatePlan, openDeletePlan } =
-    usePlanActions();
+  const {
+    openCreatePlan,
+    openRenamePlan,
+    openDuplicatePlan,
+    openDeletePlan,
+    openArchivePlan,
+  } = usePlanActions();
   const { invalidate: bumpPlanRevision, review, invalidate: reloadReview } = usePlanWorkspace();
   const { busy, runJob } = useJobRunner("recompute");
   const copilot = useCopilotUiOptional();
@@ -417,6 +432,15 @@ function BuildPageContent() {
   const partCount =
     selectedProfile?.part_count ?? review?.totals.included_parts ?? 0;
 
+  const includedForArchive =
+    review?.part_groups.flatMap((g) => g.parts).filter((p) => p.included) ?? [];
+  const archiveTotals = checkoffUnitTotals(includedForArchive);
+  const archiveAllowed = canArchivePlan({
+    archived: Boolean(selectedProfile?.archived_at),
+    totalUnits: archiveTotals.totalUnits,
+    remainingUnits: archiveTotals.remainingUnits,
+  });
+
   const planWarnings = buildPlanWarningLines({
     buildStale,
     attachedSources,
@@ -546,6 +570,15 @@ function BuildPageContent() {
                   <Pencil className="mr-2 h-4 w-4" />
                   Rename
                 </DropdownMenuItem>
+                {archiveAllowed ? (
+                  <DropdownMenuItem
+                    onClick={openArchivePlan}
+                    disabled={selectedProfileId == null}
+                  >
+                    <Archive className="mr-2 h-4 w-4" />
+                    Archive
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem
                   onClick={openDeletePlan}
                   disabled={selectedProfileId == null}

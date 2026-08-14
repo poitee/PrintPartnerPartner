@@ -389,6 +389,10 @@ export type ProfileSummary = {
   part_count: number;
   /** True when plan config changed since the last successful recompute. */
   build_stale: boolean;
+  /** ISO timestamp when archived as a template; null if active. */
+  archived_at: string | null;
+  /** ISO timestamp of last spine selection. */
+  last_used_at: string | null;
 };
 
 export type SourceSummary = {

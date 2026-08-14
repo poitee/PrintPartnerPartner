@@ -50,6 +50,12 @@ export class PostgresDatabase {
       "ALTER TABLE build_profiles ADD COLUMN IF NOT EXISTS last_recomputed_at TEXT",
     );
     await this.pool.query(
+      "ALTER TABLE build_profiles ADD COLUMN IF NOT EXISTS archived_at TEXT",
+    );
+    await this.pool.query(
+      "ALTER TABLE build_profiles ADD COLUMN IF NOT EXISTS last_used_at TEXT",
+    );
+    await this.pool.query(
       `INSERT INTO app_settings (tenant_id, key, value) VALUES ($1, $2, $3)
        ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value`,
       ["default", schemaVersionKey, String(currentSchemaVersion)],

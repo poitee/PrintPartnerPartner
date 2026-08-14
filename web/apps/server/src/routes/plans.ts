@@ -41,9 +41,53 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.patch("/plans/:id", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    const body = request.body as { name?: string };
+    const body = request.body as {
+      name?: string;
+      archived?: boolean;
+      touch_last_used?: boolean;
+    };
     try {
-      return deps.repo.renameProfile(id, String(body.name ?? ""));
+      if (!deps.repo.getProfile(id)) {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      if (body.archived === false) {
+        return reply.status(400).send({
+          detail: "Cannot unarchive; duplicate the archived template instead",
+        });
+      }
+      let profile =
+        typeof body.name === "string" ? deps.repo.renameProfile(id, body.name) : deps.repo.getProfile(id)!;
+      if (body.archived === true) {
+        profile = deps.repo.archiveProfile(id);
+      }
+      if (body.touch_last_used === true) {
+        profile = deps.repo.touchProfileLastUsed(id);
+      }
+      return profile;
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post("/plans/:id/touch", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    try {
+      if (!deps.repo.getProfile(id)) {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      return deps.repo.touchProfileLastUsed(id);
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post("/plans/:id/archive", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    try {
+      if (!deps.repo.getProfile(id)) {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      return deps.repo.archiveProfile(id);
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }
