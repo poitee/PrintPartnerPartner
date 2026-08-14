@@ -473,15 +473,35 @@ export class AppRepository {
     profile: typeof this.schema.buildProfiles.$inferSelect,
     partCount: number,
   ): ProfileSummary {
+    const { totalUnits, remainingUnits } = this.printUnitTotals(profile.id);
     return {
       id: profile.id,
       name: profile.name,
       order_number: profile.orderNumber,
       special_request: profile.specialRequest?.trim() ? profile.specialRequest.trim() : null,
       part_count: partCount,
+      remaining_units: remainingUnits,
+      total_units: totalUnits,
       build_stale: this.isProfileStale(profile),
       archived_at: profile.archivedAt ?? null,
       last_used_at: profile.lastUsedAt ?? null,
+    };
+  }
+
+  /** Included-part print unit totals (same basis as archive remaining=0). */
+  printUnitTotals(profileId: number): { totalUnits: number; remainingUnits: number } {
+    const partRows = this.listPartRows(profileId).filter((p) => p.included);
+    let totalUnits = 0;
+    let printedUnits = 0;
+    const unitsById = this.printUnitsByPartId(profileId);
+    for (const part of partRows) {
+      const qty = Math.max(1, part.quantityEffective);
+      totalUnits += qty;
+      printedUnits += (unitsById.get(part.id) ?? []).filter(Boolean).length;
+    }
+    return {
+      totalUnits,
+      remainingUnits: Math.max(0, totalUnits - printedUnits),
     };
   }
 
@@ -644,16 +664,7 @@ export class AppRepository {
     if (!existing) throw new Error("Profile not found");
     if (existing.archived_at) return existing;
 
-    const partRows = this.listPartRows(id).filter((p) => p.included);
-    let totalUnits = 0;
-    let printedUnits = 0;
-    const unitsById = this.printUnitsByPartId(id);
-    for (const part of partRows) {
-      const qty = Math.max(1, part.quantityEffective);
-      totalUnits += qty;
-      printedUnits += (unitsById.get(part.id) ?? []).filter(Boolean).length;
-    }
-    const remainingUnits = Math.max(0, totalUnits - printedUnits);
+    const { totalUnits, remainingUnits } = this.printUnitTotals(id);
     if (totalUnits <= 0 || remainingUnits > 0) {
       throw new Error("Archive only when print remaining is 0");
     }
