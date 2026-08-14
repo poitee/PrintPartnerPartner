@@ -574,6 +574,7 @@ export class AppRepository {
         tenantId: this.tenantId,
         name: trimmed,
         configModifiedAt: new Date().toISOString(),
+        lastUsedAt: new Date().toISOString(),
       })
       .returning()
       .get();
@@ -626,6 +627,21 @@ export class AppRepository {
     const existing = this.getProfile(id);
     if (!existing) throw new Error("Profile not found");
     if (existing.archived_at) return existing;
+
+    const partRows = this.listPartRows(id).filter((p) => p.included);
+    let totalUnits = 0;
+    let printedUnits = 0;
+    const unitsById = this.printUnitsByPartId(id);
+    for (const part of partRows) {
+      const qty = Math.max(1, part.quantityEffective);
+      totalUnits += qty;
+      printedUnits += (unitsById.get(part.id) ?? []).filter(Boolean).length;
+    }
+    const remainingUnits = Math.max(0, totalUnits - printedUnits);
+    if (totalUnits <= 0 || remainingUnits > 0) {
+      throw new Error("Archive only when print remaining is 0");
+    }
+
     const now = new Date().toISOString();
     this.db
       .update(this.schema.buildProfiles)
