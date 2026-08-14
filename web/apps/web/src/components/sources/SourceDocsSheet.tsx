@@ -11,6 +11,7 @@ import {
 } from "../../api/engine";
 import { useProfileSelection } from "../../context/ProfileContext";
 import { Button } from "../ui/button";
+import { Field, FieldLabel } from "../ui/field";
 import { ScrollArea } from "../ui/scroll-area";
 import {
   Sheet,
@@ -86,12 +87,12 @@ export default function SourceDocsSheet({
               );
             } else {
               setSyncedEmptyHint(
-                "Sync this source to pull README/PDFs from the repository. Curated research and your notes appear under Advisor notes.",
+                "Sync this source to pull README/PDFs from the repository. Curated research and your notes appear under Source notes.",
               );
             }
           } catch {
             setSyncedEmptyHint(
-              "Sync this source to pull README/PDFs from the repository. Curated research and your notes appear under Advisor notes.",
+              "Sync this source to pull README/PDFs from the repository. Curated research and your notes appear under Source notes.",
             );
           }
         }
@@ -101,14 +102,14 @@ export default function SourceDocsSheet({
           setSyncedEmptyHint(
             (prev) =>
               prev ??
-              "No synced docs yet. Advisor notes are available in the other tab — Sync this source to pull README/PDFs.",
+              "No synced docs yet. Source notes are available in the other tab — Sync this source to pull README/PDFs.",
           );
         }
       } catch {
         setDocs([]);
         setNotes([]);
         setSyncedEmptyHint(
-          "Sync this source to pull README/PDFs from the repository. Curated research and your notes appear under Advisor notes.",
+          "Sync this source to pull README/PDFs from the repository. Curated research and your notes appear under Source notes.",
         );
       } finally {
         setLoading(false);
@@ -187,7 +188,7 @@ export default function SourceDocsSheet({
         <SheetHeader>
           <SheetTitle className="truncate">{sourceName}</SheetTitle>
           <SheetDescription>
-            Synced docs from GitHub vs Advisor notes (curated research + yours)
+            Synced docs from GitHub vs Source notes (curated research + yours)
           </SheetDescription>
         </SheetHeader>
         <Tabs
@@ -200,7 +201,7 @@ export default function SourceDocsSheet({
               Synced docs{docs.length > 0 ? ` (${docs.length})` : ""}
             </TabsTrigger>
             <TabsTrigger value="notes">
-              Advisor notes{notes.length > 0 ? ` (${notes.length})` : ""}
+              Source notes{notes.length > 0 ? ` (${notes.length})` : ""}
             </TabsTrigger>
           </TabsList>
           <TabsContent value="synced" className="mt-0 min-h-0 flex-1 overflow-hidden px-4 pb-4">
@@ -214,7 +215,7 @@ export default function SourceDocsSheet({
                 </p>
                 {notes.length > 0 ? (
                   <p>
-                    {notes.length} Advisor note{notes.length === 1 ? "" : "s"} available — switch
+                    {notes.length} Source note{notes.length === 1 ? "" : "s"} available — switch
                     tabs to read them.
                   </p>
                 ) : null}
@@ -263,7 +264,7 @@ export default function SourceDocsSheet({
                 <ul className="space-y-2 p-3 text-sm">
                   {notes.length === 0 && (
                     <li className="text-muted-foreground">
-                      No Advisor notes yet. Import a domain research pack or write one below.
+                      No Source notes yet. Import a domain research pack or write one below.
                     </li>
                   )}
                   {notes.map((n) => (
@@ -300,18 +301,30 @@ export default function SourceDocsSheet({
                 </ul>
               </ScrollArea>
               <div className="space-y-2 rounded-md border border-border p-3">
-                <input
-                  className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-                  placeholder="Note title"
-                  value={noteDraftTitle}
-                  onChange={(e) => setNoteDraftTitle(e.target.value)}
-                />
-                <textarea
-                  className="min-h-[88px] w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-                  placeholder="Markdown notes…"
-                  value={noteDraftBody}
-                  onChange={(e) => setNoteDraftBody(e.target.value)}
-                />
+                <Field>
+                  <FieldLabel className="sr-only" htmlFor="source-note-title">
+                    Note title
+                  </FieldLabel>
+                  <input
+                    id="source-note-title"
+                    className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                    placeholder="Note title"
+                    value={noteDraftTitle}
+                    onChange={(e) => setNoteDraftTitle(e.target.value)}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel className="sr-only" htmlFor="source-note-body">
+                    Note body
+                  </FieldLabel>
+                  <textarea
+                    id="source-note-body"
+                    className="min-h-[88px] w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                    placeholder="Markdown notes…"
+                    value={noteDraftBody}
+                    onChange={(e) => setNoteDraftBody(e.target.value)}
+                  />
+                </Field>
                 <div className="flex gap-2">
                   <Button
                     type="button"

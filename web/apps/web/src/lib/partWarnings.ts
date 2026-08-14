@@ -69,12 +69,21 @@ export function hasPartWarning(part: ReviewPart, review?: PlanReview | null): bo
   return partWarnings(part, review).length > 0;
 }
 
-/** First warning label for card / row notes (mock-style). */
+/**
+ * Card / row note — skips STL missing (shown once as a desk-loop warning with Sync CTA).
+ */
 export function partWarningNote(
   part: ReviewPart,
   review?: PlanReview | null,
 ): string | null {
-  return partWarnings(part, review)[0]?.label ?? null;
+  return (
+    partWarnings(part, review).find((w) => w.kind !== "missing")?.label ?? null
+  );
+}
+
+/** Included parts with missing STL files (desk-loop aggregate). */
+export function countMissingStls(parts: ReviewPart[]): number {
+  return parts.reduce((n, p) => n + (p.included && p.missing ? 1 : 0), 0);
 }
 
 export function countPartWarnings(

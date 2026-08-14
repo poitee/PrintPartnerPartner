@@ -55,11 +55,11 @@ export default function PlanTray() {
   const selected = profiles.find((p) => p.id === selectedProfileId);
   const totals = planPrintTotals(review);
   const sourceCount = review?.layers?.length ?? 0;
-  const warnCount =
-    (review?.issues?.length ?? 0) +
-    (selected?.build_stale ? 1 : 0) +
-    (review?.part_groups.flatMap((g) => g.parts).filter((p) => p.included && p.missing).length ??
-      0);
+  const missingStlCount =
+    review?.part_groups.flatMap((g) => g.parts).filter((p) => p.included && p.missing)
+      .length ?? 0;
+  const otherWarnCount =
+    (review?.issues?.length ?? 0) + (selected?.build_stale ? 1 : 0);
 
   const includedParts = useMemo(() => {
     if (!review) return [];
@@ -175,11 +175,18 @@ export default function PlanTray() {
           </span>
         ) : null}
 
-        {warnCount > 0 ? (
+        {missingStlCount > 0 ? (
           <div className="hidden items-center gap-1.5 rounded-md border border-amber-300/80 bg-amber-50 px-2.5 py-1 dark:border-amber-700/60 dark:bg-amber-950/40 sm:flex">
             <span className="inline-block h-1.5 w-1.5 rotate-45 bg-amber-600 dark:bg-amber-400" />
             <span className="text-[11.5px] text-amber-900 dark:text-amber-200">
-              {warnCount} warning{warnCount === 1 ? "" : "s"}
+              {missingStlCount} STL missing
+            </span>
+          </div>
+        ) : otherWarnCount > 0 ? (
+          <div className="hidden items-center gap-1.5 rounded-md border border-amber-300/80 bg-amber-50 px-2.5 py-1 dark:border-amber-700/60 dark:bg-amber-950/40 sm:flex">
+            <span className="inline-block h-1.5 w-1.5 rotate-45 bg-amber-600 dark:bg-amber-400" />
+            <span className="text-[11.5px] text-amber-900 dark:text-amber-200">
+              {otherWarnCount} warning{otherWarnCount === 1 ? "" : "s"}
             </span>
           </div>
         ) : null}
