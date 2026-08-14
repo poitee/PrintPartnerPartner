@@ -16,7 +16,7 @@ import {
 import { useJobRunner } from "../../hooks/useJobRunner";
 import { incompleteUnitsForSelectedParts } from "../../lib/printerCheckoffUnits";
 import { printerHostTypeLabel, type LiveStripHostType } from "../../lib/printerLiveStrip";
-import { settingsRoute } from "../../lib/routes";
+import { settingsPrintersRoute } from "../../lib/routes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -531,7 +531,7 @@ export default function PrinterSendPanel({
             Send to printer
           </CardTitle>
           <CardDescription className="text-[12.5px] leading-relaxed">
-            Upload already-sliced G-code to a linked Moonraker or PrusaLink host.
+            Export remaining STLs, slice in your slicer, choose the .gcode here.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2.5 pt-1">
@@ -633,10 +633,11 @@ export default function PrinterSendPanel({
           ) : (
             <div className="flex flex-col gap-2">
               <p className="text-[12.5px] leading-relaxed text-muted-foreground">
-                Add a Moonraker or PrusaLink host, then link it to a machine. One Settings path.
+                No linked printers yet. Add a Klipper or Prusa printer in Settings to Send
+                and Start print.
               </p>
               <Button size="sm" variant="outline" asChild className="w-fit">
-                <Link to={settingsRoute()}>Add printer in Settings.</Link>
+                <Link to={settingsPrintersRoute()}>Add printers in Settings</Link>
               </Button>
               {!hasBambuLinked ? (
                 <p className="text-[11px] leading-relaxed text-muted-foreground">

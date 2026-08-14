@@ -9,7 +9,7 @@ import {
   reconcilePrinterCheckoff,
   type PrinterHostStatus,
 } from "../../api/engine";
-import { settingsRoute } from "../../lib/routes";
+import { settingsPrintersRoute } from "../../lib/routes";
 import {
   PRINTER_LIVE_STRIP_POLL_MS,
   formatPrinterHostCaption,
@@ -259,7 +259,7 @@ export default function PrinterLiveStrip({
           Could not load printer status: {loadError}
         </span>
         <Link
-          to={settingsRoute()}
+          to={settingsPrintersRoute()}
           className="shrink-0 text-sm font-medium text-primary underline-offset-2 hover:underline"
         >
           Settings
@@ -319,7 +319,7 @@ export default function PrinterLiveStrip({
             </span>
             {(tone === "offline" || tone === "error") && (
               <Link
-                to={settingsRoute()}
+                to={settingsPrintersRoute()}
                 className="shrink-0 text-xs font-medium underline-offset-2 hover:underline"
               >
                 Check hosts

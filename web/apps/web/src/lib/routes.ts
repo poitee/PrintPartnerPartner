@@ -39,8 +39,21 @@ export function settingsRoute(): string {
   return "/settings";
 }
 
+/** Settings → Printers section (hash scrolls past About). */
+export function settingsPrintersRoute(): string {
+  return "/settings#printers";
+}
+
+export function printersRoute(): string {
+  return "/printers";
+}
+
 export function helpRoute(): string {
   return "/help";
+}
+
+export function isPrintersPath(pathname: string): boolean {
+  return pathname === "/printers";
 }
 
 /** @deprecated Prefer `libraryRoute` — kept for call-site compatibility. */

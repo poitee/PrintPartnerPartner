@@ -26,6 +26,7 @@ import {
   helpRoute,
   isBuildPath,
   isPartsPath,
+  printersRoute,
   reviewRoute,
   settingsRoute,
   sourcesRoute,
@@ -166,6 +167,18 @@ export default function CommandPalette({ onOpenAssistant }: Props) {
         run: () => {
           leaveBuildThen(() => {
             navigate(exportRoute(selectedProfileId));
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "nav-printers",
+        label: "Go to Printers",
+        hint: location.pathname === "/printers" ? "current" : undefined,
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(printersRoute());
             setOpen(false);
           });
         },

@@ -5,6 +5,7 @@ import {
   formatPrinterJobLine,
   formatPrinterLiveLine,
   formatPrinterStatusPill,
+  printerDeskTypeLabel,
   printerHostTypeLabel,
   printerLiveStripTone,
 } from "./printerLiveStrip";
@@ -31,6 +32,14 @@ describe("formatPrinterHostCaption", () => {
       "Shop Voron · Moonraker",
     );
     expect(printerHostTypeLabel("bambu")).toBe("Bambu");
+  });
+});
+
+describe("printerDeskTypeLabel", () => {
+  it("uses desk English", () => {
+    expect(printerDeskTypeLabel("moonraker")).toBe("Klipper");
+    expect(printerDeskTypeLabel("prusalink")).toBe("Prusa");
+    expect(printerDeskTypeLabel("bambu")).toBe("Bambu");
   });
 });
 

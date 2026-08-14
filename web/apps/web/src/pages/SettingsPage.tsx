@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 import {
   CalendarClock,
   KeyRound,
@@ -29,8 +30,7 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { StlNamingSettingsCard } from "../components/settings/StlNamingEditor";
 import AiAssistantSettingsCard from "../components/settings/AiAssistantSettingsCard";
 import IntegrationsSettingsCard from "../components/settings/IntegrationsSettingsCard";
-import PrinterFleetCard from "../components/settings/PrinterFleetCard";
-import PrinterHostsSettingsCard from "../components/settings/PrinterHostsSettingsCard";
+import PrintersSettingsCard from "../components/settings/PrintersSettingsCard";
 import AboutUpdatesCard from "../components/settings/AboutUpdatesCard";
 import AccountPasswordCard from "../components/settings/AccountPasswordCard";
 import ThemePreferenceControl from "../components/ThemePreferenceControl";
@@ -71,7 +71,27 @@ const UPDATE_INTERVAL_OPTIONS = [
   { value: "168", label: "Weekly" },
 ] as const;
 
+function SettingsSection({
+  id,
+  title,
+  children,
+}: {
+  id?: string;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} className="scroll-mt-4 space-y-3">
+      <h2 className="text-sm font-semibold tracking-wide text-muted-foreground">
+        {title}
+      </h2>
+      <div className="space-y-4">{children}</div>
+    </section>
+  );
+}
+
 export default function SettingsPage() {
+  const location = useLocation();
   const { health } = useEngineHealth();
   const { user, multiUser } = useAuth();
   const { format: dateFormat, setFormat: setDateFormat } = useDateFormat();
@@ -114,6 +134,16 @@ export default function SettingsPage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Scroll to hash targets (e.g. /settings#printers) after layout.
+  useEffect(() => {
+    const hash = location.hash.replace(/^#/, "").trim();
+    if (!hash) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash, location.pathname]);
 
   const onAddFilament = async () => {
     if (!newFilamentName.trim()) return;
@@ -198,13 +228,13 @@ export default function SettingsPage() {
     "rounded-md border border-input bg-background px-2 py-1.5 text-sm";
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <RouteBreadcrumbs items={[{ label: "Settings" }]} />
       <PageHeader
         icon={Settings}
         accent
         title="Settings"
-        description="Custom filaments, integrations, STL naming, source categories, and optional GitHub token."
+        description="Printers, library, appearance, AI, and account."
         actions={
           <PageHeaderActions>
             <SupportCta size="sm" className="min-h-10 w-full sm:w-auto" />
@@ -222,253 +252,263 @@ export default function SettingsPage() {
         refreshing={updateCheckRefreshing}
       />
 
-      {multiUser && user?.provider === "email" && <AccountPasswordCard />}
+      <SettingsSection id="printers" title="Printers">
+        <PrintersSettingsCard engineReady={Boolean(health)} />
+      </SettingsSection>
 
-      <Card>
-        <CardHeader accent>
-          <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-brand/10 text-accent-brand">
-              <SunMoon className="h-4 w-4" aria-hidden />
-            </span>
-            <div>
-              <CardTitle className="text-base">Appearance</CardTitle>
-              <CardDescription>
-                Choose light, dark, or match your system preference. Printable checkoff and review
-                sheets stay light for print fidelity.
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <ThemePreferenceControl />
-        </CardContent>
-      </Card>
+      <SettingsSection title="Library">
+        <div id="source-categories">
+          <SourceCategoryManager engineReady={Boolean(health)} />
+        </div>
 
-      <Card>
-        <CardHeader accent>
-          <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info">
-              <RefreshCw className="h-4 w-4" aria-hidden />
-            </span>
-            <div>
-              <CardTitle className="text-base">Source update checks</CardTitle>
-              <CardDescription>
-                Compare synced Git repos to their remotes without pulling. Badges appear on
-                Sources when updates are available.
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">Check interval</span>
-            <Select
-              value={updateIntervalHours}
-              onValueChange={(v) => void onUpdateIntervalChange(v)}
-              disabled={!health || updateIntervalSaving || updateBusy}
-            >
-              <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {UPDATE_INTERVAL_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
+        <StlNamingSettingsCard engineReady={Boolean(health)} />
+
+        <Card className="shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">Custom filaments</CardTitle>
+            <CardDescription>
+              Named colors appear in the filament picker when assigning parts.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {filaments.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No custom filaments yet.</p>
+            ) : (
+              <ul className="filament-list space-y-2">
+                {filaments.map((f) => (
+                  <li key={f.id} className="flex items-center gap-2">
+                    <span
+                      className="swatch inline-block h-5 w-5 rounded border border-border"
+                      style={{ backgroundColor: f.hex }}
+                      title={f.hex}
+                    />
+                    <span className="text-sm">
+                      {f.display_name}{" "}
+                      <span className="text-muted-foreground">({f.hex})</span>
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-auto"
+                      onClick={() => setDeleteFilamentId(f.id)}
+                    >
+                      Delete
+                    </Button>
+                  </li>
                 ))}
-              </SelectContent>
-            </Select>
-          </label>
-          <Button
-            variant="secondary"
-            className="min-h-10 w-full sm:w-auto"
-            onClick={onCheckSourceUpdatesNow}
-            disabled={!health || updateBusy || updateIntervalSaving}
-          >
-            {updateBusy ? "Checking…" : "Check now"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader accent>
-          <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info">
-              <CalendarClock className="h-4 w-4" aria-hidden />
-            </span>
-            <div>
-              <CardTitle className="text-base">Date &amp; time format</CardTitle>
-              <CardDescription>
-                Controls how timestamps like "Last synced" and printed-checklist "Generated"
-                lines are displayed everywhere in the app.
-              </CardDescription>
+              </ul>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                className={inputClass}
+                placeholder="Name"
+                value={newFilamentName}
+                onChange={(e) => setNewFilamentName(e.target.value)}
+              />
+              <input
+                type="color"
+                value={newFilamentHex}
+                onChange={(e) => setNewFilamentHex(e.target.value)}
+                title="Color"
+              />
+              <input
+                className={`hex-input ${inputClass}`}
+                value={newFilamentHex}
+                onChange={(e) => setNewFilamentHex(e.target.value)}
+              />
+              <Button onClick={() => void onAddFilament()}>Add filament</Button>
             </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">Format</span>
-            <Select value={dateFormat} onValueChange={(v) => setDateFormat(v as DateFormatId)}>
-              <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DATE_FORMAT_PRESETS.map((opt) => (
-                  <SelectItem key={opt.id} value={opt.id}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      <Card>
-        <CardHeader accent>
-          <CardTitle className="text-base">Auto update build</CardTitle>
-          <CardDescription>
-            When enabled, Print Partner automatically recomputes small plans a few seconds after
-            file picks or colors change (when the stale banner appears on Build).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <label className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
-            <span className="text-sm font-medium">Auto-recompute stale builds</span>
-            <Switch
-              checked={autoRecompute}
-              disabled={!health || autoRecomputeSaving}
-              onCheckedChange={(checked) => {
-                setAutoRecomputeSaving(true);
-                void saveAutoRecomputeSettings(checked)
-                  .then((s) => setAutoRecompute(s.enabled))
-                  .catch((e) =>
-                    setLoadError(e instanceof Error ? e.message : String(e)),
-                  )
-                  .finally(() => setAutoRecomputeSaving(false));
-              }}
-              aria-label="Auto-recompute stale builds"
-            />
-          </label>
-        </CardContent>
-      </Card>
-
-      <div id="source-categories">
-        <SourceCategoryManager engineReady={Boolean(health)} />
-      </div>
-
-      <StlNamingSettingsCard engineReady={Boolean(health)} />
-
-      <PrinterFleetCard engineReady={Boolean(health)} />
-
-      <PrinterHostsSettingsCard engineReady={Boolean(health)} />
-
-      <AiAssistantSettingsCard engineReady={Boolean(health)} />
-
-      <IntegrationsSettingsCard engineReady={Boolean(health)} />
-
-      <Card>
-        <CardHeader accent>
-          <div className="flex items-start gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-brand/10 text-accent-brand">
-              <KeyRound className="h-4 w-4" aria-hidden />
-            </span>
-            <div>
-              <CardTitle className="text-base">GitHub personal access token</CardTitle>
-              <CardDescription>
-                Optional. Improves GitHub API rate limits when syncing private repos. Token is stored
-                locally in the engine database.
-              </CardDescription>
+        <Card>
+          <CardHeader accent>
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info">
+                <RefreshCw className="h-4 w-4" aria-hidden />
+              </span>
+              <div>
+                <CardTitle className="text-base">Source update checks</CardTitle>
+                <CardDescription>
+                  Compare synced Git repos to their remotes without pulling. Badges appear on
+                  Sources when updates are available.
+                </CardDescription>
+              </div>
             </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {githubPat?.configured && githubPat.masked && (
-            <p className="text-sm text-muted-foreground">
-              Configured: <code className="font-mono text-xs">{githubPat.masked}</code>
-            </p>
-          )}
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">Token</span>
-            <input
-              type="password"
-              className={`${inputClass} w-full max-w-md`}
-              autoComplete="off"
-              placeholder={githubPat?.configured ? "Enter new token to replace" : "ghp_…"}
-              value={patInput}
-              onChange={(e) => setPatInput(e.target.value)}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => void onSaveGitHubPat()}>Save token</Button>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">Check interval</span>
+              <Select
+                value={updateIntervalHours}
+                onValueChange={(v) => void onUpdateIntervalChange(v)}
+                disabled={!health || updateIntervalSaving || updateBusy}
+              >
+                <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {UPDATE_INTERVAL_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
             <Button
               variant="secondary"
-              onClick={() => void onClearGitHubPat()}
-              disabled={!githubPat?.configured}
+              className="min-h-10 w-full sm:w-auto"
+              onClick={onCheckSourceUpdatesNow}
+              disabled={!health || updateBusy || updateIntervalSaving}
             >
-              Clear token
+              {updateBusy ? "Checking…" : "Check now"}
             </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      <Card className="shadow-none">
-        <CardHeader>
-          <CardTitle className="text-base">Custom filaments</CardTitle>
-          <CardDescription>
-            Named colors appear in the filament picker when assigning parts.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {filaments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No custom filaments yet.</p>
-          ) : (
-            <ul className="filament-list space-y-2">
-              {filaments.map((f) => (
-                <li key={f.id} className="flex items-center gap-2">
-                  <span
-                    className="swatch inline-block h-5 w-5 rounded border border-border"
-                    style={{ backgroundColor: f.hex }}
-                    title={f.hex}
-                  />
-                  <span className="text-sm">
-                    {f.display_name}{" "}
-                    <span className="text-muted-foreground">({f.hex})</span>
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto"
-                    onClick={() => setDeleteFilamentId(f.id)}
-                  >
-                    Delete
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              className={inputClass}
-              placeholder="Name"
-              value={newFilamentName}
-              onChange={(e) => setNewFilamentName(e.target.value)}
-            />
-            <input
-              type="color"
-              value={newFilamentHex}
-              onChange={(e) => setNewFilamentHex(e.target.value)}
-              title="Color"
-            />
-            <input
-              className={`hex-input ${inputClass}`}
-              value={newFilamentHex}
-              onChange={(e) => setNewFilamentHex(e.target.value)}
-            />
-            <Button onClick={() => void onAddFilament()}>Add filament</Button>
-          </div>
-        </CardContent>
-      </Card>
+        <Card>
+          <CardHeader accent>
+            <CardTitle className="text-base">Auto update build</CardTitle>
+            <CardDescription>
+              When enabled, Print Partner automatically recomputes small plans a few seconds after
+              file picks or colors change (when the stale banner appears on Build).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <label className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+              <span className="text-sm font-medium">Auto-recompute stale builds</span>
+              <Switch
+                checked={autoRecompute}
+                disabled={!health || autoRecomputeSaving}
+                onCheckedChange={(checked) => {
+                  setAutoRecomputeSaving(true);
+                  void saveAutoRecomputeSettings(checked)
+                    .then((s) => setAutoRecompute(s.enabled))
+                    .catch((e) =>
+                      setLoadError(e instanceof Error ? e.message : String(e)),
+                    )
+                    .finally(() => setAutoRecomputeSaving(false));
+                }}
+                aria-label="Auto-recompute stale builds"
+              />
+            </label>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader accent>
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-brand/10 text-accent-brand">
+                <KeyRound className="h-4 w-4" aria-hidden />
+              </span>
+              <div>
+                <CardTitle className="text-base">GitHub personal access token</CardTitle>
+                <CardDescription>
+                  Optional. Improves GitHub API rate limits when syncing private repos. Token is stored
+                  locally in the engine database.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {githubPat?.configured && githubPat.masked && (
+              <p className="text-sm text-muted-foreground">
+                Configured: <code className="font-mono text-xs">{githubPat.masked}</code>
+              </p>
+            )}
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">Token</span>
+              <input
+                type="password"
+                className={`${inputClass} w-full max-w-md`}
+                autoComplete="off"
+                placeholder={githubPat?.configured ? "Enter new token to replace" : "ghp_…"}
+                value={patInput}
+                onChange={(e) => setPatInput(e.target.value)}
+              />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => void onSaveGitHubPat()}>Save token</Button>
+              <Button
+                variant="secondary"
+                onClick={() => void onClearGitHubPat()}
+                disabled={!githubPat?.configured}
+              >
+                Clear token
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <IntegrationsSettingsCard engineReady={Boolean(health)} />
+      </SettingsSection>
+
+      <SettingsSection title="Appearance">
+        <Card>
+          <CardHeader accent>
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-brand/10 text-accent-brand">
+                <SunMoon className="h-4 w-4" aria-hidden />
+              </span>
+              <div>
+                <CardTitle className="text-base">Appearance</CardTitle>
+                <CardDescription>
+                  Choose light, dark, or match your system preference. Printable checkoff and review
+                  sheets stay light for print fidelity.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ThemePreferenceControl />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader accent>
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-info/10 text-info">
+                <CalendarClock className="h-4 w-4" aria-hidden />
+              </span>
+              <div>
+                <CardTitle className="text-base">Date &amp; time format</CardTitle>
+                <CardDescription>
+                  Controls how timestamps like &quot;Last synced&quot; and printed-checklist &quot;Generated&quot;
+                  lines are displayed everywhere in the app.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">Format</span>
+              <Select value={dateFormat} onValueChange={(v) => setDateFormat(v as DateFormatId)}>
+                <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DATE_FORMAT_PRESETS.map((opt) => (
+                    <SelectItem key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+          </CardContent>
+        </Card>
+      </SettingsSection>
+
+      <SettingsSection title="AI">
+        <AiAssistantSettingsCard engineReady={Boolean(health)} />
+      </SettingsSection>
+
+      {multiUser && user?.provider === "email" ? (
+        <SettingsSection title="Account">
+          <AccountPasswordCard />
+        </SettingsSection>
+      ) : null}
 
       <Dialog
         open={deleteFilamentId != null}

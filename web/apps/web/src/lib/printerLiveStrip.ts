@@ -30,6 +30,20 @@ export function printerHostTypeLabel(type: LiveStripHostType): string {
   }
 }
 
+/** Desk English for status board (not raw API ids). */
+export function printerDeskTypeLabel(type: LiveStripHostType): string {
+  switch (type) {
+    case "moonraker":
+      return "Klipper";
+    case "prusalink":
+      return "Prusa";
+    case "bambu":
+      return "Bambu";
+    default:
+      return type;
+  }
+}
+
 /** `Shop Voron · Moonraker` */
 export function formatPrinterHostCaption(name: string, type: LiveStripHostType): string {
   return `${name} · ${printerHostTypeLabel(type)}`;
