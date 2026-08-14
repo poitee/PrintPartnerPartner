@@ -786,11 +786,11 @@ export async function createProfile(
 
 export async function updateProfile(
   profileId: number,
-  name: string,
+  patch: { name?: string; special_request?: string | null },
 ): Promise<ProfileSummary> {
   return engineFetch(`/plans/${profileId}`, {
     method: "PATCH",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(patch),
   });
 }
 

@@ -7,17 +7,17 @@ describe("groupMergeConflictsByFilename", () => {
       {
         severity: "warning",
         code: "merge_conflict",
-        message: "Merge conflict for widget.stl — exclude duplicates or pick one in Build.",
+        message: "Merge conflict for widget.stl — exclude duplicates on the Plan source cards.",
       },
       {
         severity: "warning",
         code: "merge_conflict",
-        message: "Merge conflict for widget.stl — exclude duplicates or pick one in Build.",
+        message: "Merge conflict for widget.stl — exclude duplicates on the Plan source cards.",
       },
       {
         severity: "warning",
         code: "merge_conflict",
-        message: "Merge conflict for bracket.stl — exclude duplicates or pick one in Build.",
+        message: "Merge conflict for bracket.stl — exclude duplicates on the Plan source cards.",
       },
     ]);
     expect(groups).toEqual([

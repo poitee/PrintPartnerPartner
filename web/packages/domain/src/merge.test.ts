@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { mergeLayers, findActiveSlugConflictKeys, type MergePart } from "./merge.js";
+import {
+  mergeLayers,
+  findActiveSlugConflictKeys,
+  mergeConflictIssueMessage,
+  type MergePart,
+} from "./merge.js";
 import type { ScannedPart } from "./scanner.js";
 
 function part(rel: string, slug: string): ScannedPart {
@@ -130,5 +135,16 @@ describe("findActiveSlugConflictKeys", () => {
       },
     ]);
     expect(keys.size).toBe(0);
+  });
+});
+
+describe("mergeConflictIssueMessage", () => {
+  it("points operators to Plan source cards without Review/Build", () => {
+    const msg = mergeConflictIssueMessage("widget.stl");
+    expect(msg).toBe(
+      "Merge conflict for widget.stl — exclude duplicates on the Plan source cards.",
+    );
+    expect(msg.toLowerCase()).not.toContain("review");
+    expect(msg).not.toMatch(/\bBuild\b/);
   });
 });

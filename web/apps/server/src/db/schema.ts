@@ -37,6 +37,8 @@ export const buildProfiles = sqliteTable(
     tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
     name: text("name").notNull(),
     orderNumber: text("order_number"),
+    /** Quiet operator note shown on Plan + Progress. */
+    specialRequest: text("special_request"),
     configModifiedAt: text("config_modified_at"),
     lastRecomputedAt: text("last_recomputed_at"),
     /** ISO timestamp when plan was archived as a reusable template; null = active. */

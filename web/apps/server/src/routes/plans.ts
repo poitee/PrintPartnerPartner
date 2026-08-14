@@ -43,6 +43,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
     const id = Number((request.params as { id: string }).id);
     const body = request.body as {
       name?: string;
+      special_request?: string | null;
       archived?: boolean;
       touch_last_used?: boolean;
     };
@@ -57,6 +58,12 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       }
       let profile =
         typeof body.name === "string" ? deps.repo.renameProfile(id, body.name) : deps.repo.getProfile(id)!;
+      if (body.special_request !== undefined) {
+        profile = deps.repo.updateProfileSpecialRequest(
+          id,
+          body.special_request == null ? null : String(body.special_request),
+        );
+      }
       if (body.archived === true) {
         profile = deps.repo.archiveProfile(id);
       }

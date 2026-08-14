@@ -28,6 +28,10 @@ import {
   progressRoute,
   libraryRoute,
 } from "../lib/routes";
+import {
+  PARTS_CONFLICT_CTA,
+  PARTS_CONFLICT_HINT,
+} from "../lib/mergeConflictCopy";
 import { countPartWarnings } from "../lib/partWarnings";
 import { partsSummaryLine } from "../lib/partsGroups";
 import { flattenReviewParts } from "../lib/reviewParts";
@@ -228,10 +232,7 @@ export default function PartsPage() {
                       Duplicate parts detected ({mergeConflicts.length} conflict
                       {mergeConflicts.length === 1 ? "" : "s"})
                     </p>
-                    <p className="mt-1 text-muted-foreground">
-                      The same part slug appears more than once — often from overlapping import
-                      rules or duplicate addon layers.
-                    </p>
+                    <p className="mt-1 text-muted-foreground">{PARTS_CONFLICT_HINT}</p>
                     <ul className="mt-2 space-y-1 text-xs">
                       {mergeConflictGroups.map(([filename, count]) => (
                         <li key={filename} className="flex flex-wrap items-center gap-2">
@@ -246,7 +247,7 @@ export default function PartsPage() {
                       to={planRoute(selectedProfileId)}
                       className="mt-2 inline-block text-xs text-primary underline"
                     >
-                      Resolve in Plan
+                      {PARTS_CONFLICT_CTA}
                     </Link>
                   </div>
                 </div>

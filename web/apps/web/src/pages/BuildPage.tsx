@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import StaleBuildBanner from "../components/StaleBuildBanner";
 import MergeConflictBanner from "../components/MergeConflictBanner";
+import PlanSpecialRequestField from "../components/PlanSpecialRequestField";
 import BuildSourcesPanel from "../components/build/BuildSourcesPanel";
 import BuildRecipePanel from "../components/build/BuildRecipePanel";
 import PlanRolesCard from "../components/build/PlanRolesCard";
@@ -152,9 +153,9 @@ function BuildPageContent() {
     pendingConflictCheckRef.current = false;
     if (mergeConflicts.length > 0) {
       toast.warning(
-        `Build updated with ${mergeConflicts.length} duplicate part conflict${
+        `Plan updated with ${mergeConflicts.length} duplicate part conflict${
           mergeConflicts.length === 1 ? "" : "s"
-        } — resolve on Review.`,
+        } — exclude on the source cards below.`,
       );
     }
   }, [review, mergeConflicts.length]);
@@ -593,6 +594,14 @@ function BuildPageContent() {
       />
 
       {selectedProfileId != null && (
+        <PlanSpecialRequestField
+          profileId={selectedProfileId}
+          value={selectedProfile?.special_request}
+          className="max-w-xl"
+        />
+      )}
+
+      {selectedProfileId != null && (
         <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
           Export STLs and Share live on{" "}
           <Link
@@ -611,7 +620,6 @@ function BuildPageContent() {
         <MergeConflictBanner
           conflictCount={mergeConflicts.length}
           groupedByFilename={mergeConflictGroups}
-          profileId={selectedProfileId}
         />
       )}
 
