@@ -9,15 +9,15 @@ import {
   reconcilePrinterCheckoff,
   type PrinterHostStatus,
 } from "../../api/engine";
-import { settingsRoute } from "../../lib/routes";
+import { settingsPrintersRoute } from "../../lib/routes";
 import {
-  PRINTER_LIVE_STRIP_POLL_MS,
   formatPrinterHostCaption,
   formatPrinterJobLine,
   formatPrinterStatusPill,
   printerLiveStripTone,
   type LiveStripHostType,
 } from "../../lib/printerLiveStrip";
+import { usePrinterStatusPollMs } from "../../hooks/usePrinterStatusPollMs";
 import { cn } from "../../lib/utils";
 
 const LIVE_STRIP_HOST_TYPES = new Set<LiveStripHostType>([
@@ -87,7 +87,10 @@ function pillClass(tone: ReturnType<typeof printerLiveStripTone>): string {
 
 /**
  * Sticky Progress banner: live status for fleet machines linked to a printer host.
- * Moonraker/PrusaLink: reconcile may queue verify. Bambu: status poll only.
+ * Moonraker/PrusaLink: reconcile may queue verify after finish (no Progress mutation).
+ * Bambu: status poll only.
+ * CoS lock: never auto-tick Progress units from printing/complete host status —
+ * units stay operator-ticked; Confirm in verify is the only automated path.
  */
 export default function PrinterLiveStrip({
   engineReady,
@@ -106,6 +109,7 @@ export default function PrinterLiveStrip({
   onCheckoffUpdateRef.current = onCheckoffUpdate;
   const onLiveStateChangeRef = useRef(onLiveStateChange);
   onLiveStateChangeRef.current = onLiveStateChange;
+  const pollMs = usePrinterStatusPollMs();
 
   const refreshRoster = useCallback(async () => {
     if (!engineReady) {
@@ -206,7 +210,7 @@ export default function PrinterLiveStrip({
     };
 
     tick();
-    const timer = window.setInterval(tick, PRINTER_LIVE_STRIP_POLL_MS);
+    const timer = window.setInterval(tick, pollMs);
     const onVisibility = () => {
       if (!document.hidden) tick();
     };
@@ -218,7 +222,7 @@ export default function PrinterLiveStrip({
       document.removeEventListener("visibilitychange", onVisibility);
       requestId.current += 1;
     };
-  }, [engineReady, hosts, refreshStatuses]);
+  }, [engineReady, hosts, refreshStatuses, pollMs]);
 
   useEffect(() => {
     const activeIntegrationIds = hosts
@@ -259,7 +263,7 @@ export default function PrinterLiveStrip({
           Could not load printer status: {loadError}
         </span>
         <Link
-          to={settingsRoute()}
+          to={settingsPrintersRoute()}
           className="shrink-0 text-sm font-medium text-primary underline-offset-2 hover:underline"
         >
           Settings
@@ -319,7 +323,7 @@ export default function PrinterLiveStrip({
             </span>
             {(tone === "offline" || tone === "error") && (
               <Link
-                to={settingsRoute()}
+                to={settingsPrintersRoute()}
                 className="shrink-0 text-xs font-medium underline-offset-2 hover:underline"
               >
                 Check hosts

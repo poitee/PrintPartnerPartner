@@ -5,6 +5,7 @@ import {
   Layers,
   PanelLeftClose,
   PanelLeftOpen,
+  Printer,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -20,7 +21,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "../ui/tooltip";
-import { helpRoute, settingsRoute } from "../../lib/routes";
+import { helpRoute, printersRoute, settingsRoute } from "../../lib/routes";
 import { cn } from "../../lib/utils";
 import type { WorkflowStage, WorkflowStageId } from "../../lib/workflowStages";
 
@@ -81,6 +82,12 @@ export default function SpineRail({
   const location = useLocation();
 
   const footerLinks = [
+    {
+      to: printersRoute(),
+      label: "Printers",
+      icon: Printer,
+      match: location.pathname === "/printers",
+    },
     {
       to: settingsRoute(),
       label: "Settings",
