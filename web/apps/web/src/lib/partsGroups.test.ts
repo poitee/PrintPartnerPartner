@@ -47,13 +47,22 @@ describe("groupPartsByRole", () => {
 });
 
 describe("partsSummaryLine", () => {
-  it("includes role counts and warnings", () => {
+  it("includes role counts and non-missing warnings", () => {
     const line = partsSummaryLine(
       [part({ id: 1 }), part({ id: 2, role: "accent", included: true })],
       { primary: 1, accent: 1 },
       3,
     );
     expect(line).toBe("2 parts · 1 primary · 1 accent · 3 warnings");
+  });
+
+  it("omits warnings when count is zero (missing STLs are desk-loop / tray only)", () => {
+    const line = partsSummaryLine(
+      [part({ id: 1, missing: true }), part({ id: 2, role: "accent", missing: true })],
+      { primary: 1, accent: 1 },
+      0,
+    );
+    expect(line).toBe("2 parts · 1 primary · 1 accent");
   });
 });
 
