@@ -24,6 +24,85 @@ export type ProposeCheckoffResult = {
   unmatchedNames: string[];
 };
 
+/** Preview row for Export / Progress proposal chrome (no checkboxes). */
+export type ObjectPreviewRow =
+  | {
+      kind: "matched";
+      part_id: number;
+      filename: string;
+      quantity: number;
+      remaining: number;
+      proposedCount: number;
+    }
+  | {
+      kind: "unlabeled";
+      name: string;
+    };
+
+/** Group matches into mock rows: filename · ×N · M remaining; unmatched → unlabeled. */
+export function buildObjectPreviewRows(
+  result: ProposeCheckoffResult,
+  remainingParts: ReviewPart[],
+): ObjectPreviewRow[] {
+  const byPart = new Map<number, ProposedObjectMatch[]>();
+  for (const m of result.matches) {
+    const list = byPart.get(m.part_id) ?? [];
+    list.push(m);
+    byPart.set(m.part_id, list);
+  }
+  const rows: ObjectPreviewRow[] = [];
+  for (const [partId, list] of byPart) {
+    const part = remainingParts.find((p) => p.id === partId);
+    const quantity = Math.max(1, part?.quantity_effective ?? list.length);
+    const remaining = Math.max(
+      0,
+      quantity - (part?.printed_count ?? 0),
+    );
+    rows.push({
+      kind: "matched",
+      part_id: partId,
+      filename: part?.filename ?? list[0]!.partFilename,
+      quantity,
+      remaining,
+      proposedCount: list.length,
+    });
+  }
+  for (const name of result.unmatchedNames) {
+    rows.push({ kind: "unlabeled", name });
+  }
+  return rows;
+}
+
+/** Build the same preview rows from a Progress checkoff link's units. */
+export function buildPreviewRowsFromUnits(
+  units: PrinterCheckoffUnit[],
+  parts: ReviewPart[],
+  unlabeledNames: string[] = [],
+): ObjectPreviewRow[] {
+  const byPart = new Map<number, number>();
+  for (const u of units) {
+    byPart.set(u.part_id, (byPart.get(u.part_id) ?? 0) + 1);
+  }
+  const rows: ObjectPreviewRow[] = [];
+  for (const [partId, proposedCount] of byPart) {
+    const part = parts.find((p) => p.id === partId);
+    const quantity = Math.max(1, part?.quantity_effective ?? proposedCount);
+    const remaining = Math.max(0, quantity - (part?.printed_count ?? 0));
+    rows.push({
+      kind: "matched",
+      part_id: partId,
+      filename: part?.filename ?? `Part #${partId}`,
+      quantity,
+      remaining,
+      proposedCount,
+    });
+  }
+  for (const name of unlabeledNames) {
+    rows.push({ kind: "unlabeled", name });
+  }
+  return rows;
+}
+
 /** Basename without directory. */
 function basename(path: string): string {
   const norm = path.replace(/\\/g, "/");
@@ -49,7 +128,7 @@ export function stripMeshExtensions(name: string): string {
 export function normalizeObjectKey(name: string): string {
   let s = stripMeshExtensions(name).toLowerCase();
   s = s.replace(/\s*\(\d+\)\s*$/u, "");
-  s = s.replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+  s = s.replace(/[^\w.-]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
   return s;
 }
 
@@ -61,7 +140,7 @@ export function objectStem(name: string): string {
 
 /** Export-remaining style unit filename key: `stem_01` (0-based unit_index → 1-based). */
 export function exportUnitKey(filename: string, unitIndex: number): string {
-  const stem = stripMeshExtensions(filename).toLowerCase().replace(/[^\w.\-]+/g, "_");
+  const stem = stripMeshExtensions(filename).toLowerCase().replace(/[^\w.-]+/g, "_");
   const n = String(unitIndex + 1).padStart(2, "0");
   return normalizeObjectKey(`${stem}_${n}`);
 }

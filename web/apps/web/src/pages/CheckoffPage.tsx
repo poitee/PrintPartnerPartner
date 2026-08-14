@@ -185,6 +185,7 @@ export default function CheckoffPage() {
   });
   const [verifyQueue, setVerifyQueue] = useState<PrintVerifyQueueState>({
     awaitingCount: 0,
+    watchingCount: 0,
     primaryHostName: null,
   });
   /** Farm send-queue has active items — drives idle copy (queue vs Export). */
@@ -267,7 +268,7 @@ export default function CheckoffPage() {
   }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
 
   useEffect(() => {
-    setVerifyQueue({ awaitingCount: 0, primaryHostName: null });
+    setVerifyQueue({ awaitingCount: 0, watchingCount: 0, primaryHostName: null });
   }, [selectedProfileId]);
 
   const onSendQueueActiveCountChange = useCallback((count: number) => {
@@ -372,7 +373,7 @@ export default function CheckoffPage() {
   const progressMode: "printing" | "verify" | "idle" =
     verifyQueue.awaitingCount > 0
       ? "verify"
-      : liveStrip.anyPrinting
+      : liveStrip.anyPrinting || verifyQueue.watchingCount > 0
         ? "printing"
         : "idle";
 
@@ -385,18 +386,13 @@ export default function CheckoffPage() {
 
   /**
    * CoS lock: Progress units are operator-ticked only.
-   * Live strip / job filename may show a printing note; reconcile may queue verify
-   * after the job finishes — never auto-tick or auto-complete units from
-   * printing/complete host status.
+   * PageHeader stays stable — live printing proposal rows carry the printing note.
+   * Never auto-tick from live/complete host status; Confirm is the only apply path.
    */
   const progressDescription =
     includedParts.length === 0
       ? "Mark each unit as you finish it on the shop floor."
-      : progressMode === "printing"
-        ? "Printing live. Remaining parts stay here — confirm when this job finishes."
-        : progressMode === "verify"
-          ? `${verifyQueue.primaryHostName?.trim() || "Printer"} finished. Confirm what landed.`
-          : "Mark remaining units. Verify waits on the next finished print.";
+      : "Verify when a print finishes. Remaining parts stay below.";
 
   const onToggleUnit = useCallback(
     (part: ReviewPart, unitIndex: number) => {
@@ -559,16 +555,6 @@ export default function CheckoffPage() {
             emphasizeSendReady={progressMode === "idle"}
             onActiveCountChange={onSendQueueActiveCountChange}
           />
-          {liveStrip.anyPrinting &&
-          verifyQueue.awaitingCount === 0 &&
-          includedParts.length > 0 ? (
-            <p
-              className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-950 dark:text-sky-100"
-              role="status"
-            >
-              Units stay operator-ticked only; we never auto-complete from printer status.
-            </p>
-          ) : null}
           {progressMode === "idle" &&
           includedParts.length > 0 &&
           Boolean(health?.ok) &&
