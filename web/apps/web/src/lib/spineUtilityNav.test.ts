@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import { spineUtilityNavItems } from "./spineUtilityNav";
 
 describe("spineUtilityNavItems", () => {
-  it("orders Plans first in the utility stack", () => {
+  it("orders Plans · Printers · Settings · Help (not a sixth desk-loop step)", () => {
     expect(spineUtilityNavItems(7).map((item) => item.id)).toEqual([
       "plans",
       "printers",
       "settings",
       "help",
     ]);
+    // Desk-loop stays Library → Plan → Parts → Progress → Export
+    expect(spineUtilityNavItems(7).map((item) => item.path)).not.toContain("/library");
+    expect(spineUtilityNavItems(7).map((item) => item.path)).not.toContain("/plan");
   });
 
   it("labels Plans (not All plans)", () => {
