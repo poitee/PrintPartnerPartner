@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import { useLocation } from "react-router-dom";
-import { toast } from "sonner";
 import type { PlanReview, ReviewPart, RoleFilamentRow, SpoolmanSpoolRow } from "../../api/engine";
 import { fetchRoleFilaments, fetchSpoolmanSpools } from "../../api/engine";
 import { useCopilotUiOptional } from "../../context/CopilotUiContext";
@@ -390,9 +389,6 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
     const timer = window.setTimeout(() => {
       setPendingPreviewId(null);
       window.history.replaceState({}, document.title);
-      toast.message(
-        `Part #${pendingPreviewId} not found yet — Update build or search by name in the kit advisor.`,
-      );
     }, 8000);
     return () => window.clearTimeout(timer);
   }, [pendingPreviewId]);

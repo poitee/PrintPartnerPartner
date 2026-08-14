@@ -303,15 +303,6 @@ export default function PrinterLiveStrip({
               <p className="text-xs font-normal opacity-90">
                 {formatPrinterJobLine(status)}
               </p>
-              {!host.reconcileCheckoff ? (
-                <p className="mt-0.5 text-xs font-normal text-muted-foreground">
-                  Status only. Does not verify from here.
-                </p>
-              ) : status?.state === "idle" ? (
-                <p className="mt-0.5 text-xs font-normal text-muted-foreground">
-                  Ready for queued send.
-                </p>
-              ) : null}
             </div>
             <span
               className={cn(
