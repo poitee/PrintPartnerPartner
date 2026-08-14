@@ -239,7 +239,8 @@ export type PrintOutcomesSummary = {
 
 /**
  * Durable job ↔ Progress units mapping for verify-first checkoff.
- * Created at Export send; host `complete` → awaiting_verify (user confirms).
+ * Created at Export send with immutable profile_id (plan). Host `complete` →
+ * awaiting_verify (user confirms). Plan-only links (no units) bind farm status.
  */
 export type PrinterCheckoffLink = {
   id: string;

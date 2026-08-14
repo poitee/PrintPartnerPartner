@@ -104,9 +104,8 @@ function parseLink(raw: unknown): PrinterCheckoffLink | null {
         .map((n) => n.trim().slice(0, 200))
         .slice(0, 200)
     : undefined;
-  // Unlabeled-only links (empty units, non-empty unlabeled_names) must stay loadable
-  // so Progress can show those names after Send.
-  if (!units.length && !unlabeled_names?.length) return null;
+  // Plan-only links (empty units / unlabeled) stay loadable so Printers farm can
+  // show the bound plan after Send. Unlabeled-only links stay loadable for Progress.
   const id = typeof row.id === "string" ? row.id.trim() : "";
   const integrationId =
     typeof row.integration_id === "string" ? row.integration_id.trim() : "";
@@ -214,8 +213,8 @@ export function createPrinterCheckoffLink(
     ?.filter((n) => typeof n === "string" && n.trim())
     .map((n) => n.trim().slice(0, 200))
     .slice(0, 200);
-  // Allow empty units when unlabeled names are present (unlabeled-only Send).
-  if (!units.length && !unlabeled_names?.length) return null;
+  // GRE-232: allow plan-only links (empty units / unlabeled) so Send stamps plan_id
+  // even when object parse found nothing. Unlabeled-only Send still works.
   const filename = input.filename.trim();
   const integrationId = input.integration_id.trim();
   const printerId = input.printer_id.trim();
