@@ -251,6 +251,8 @@ export type PrinterCheckoffLink = {
   remote_path?: string;
   upload_job_id?: string;
   units: PrinterCheckoffUnit[];
+  /** Parsed object names that did not map to Progress units (visible, not confirmable). */
+  unlabeled_names?: string[];
   /** Units already confirmed/rejected via verify API. */
   resolved_units?: PrintVerifyDecision[];
   state: PrinterCheckoffLinkState;

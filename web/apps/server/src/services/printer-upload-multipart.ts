@@ -20,6 +20,7 @@ export type PrinterUploadMultipartResult = {
   artifact_path: string;
   profile_id?: number;
   checkoff_units_raw?: string;
+  unlabeled_names_raw?: string;
   wait_for_idle?: boolean;
   match?: "pinned" | "compatible";
 };
@@ -58,6 +59,7 @@ export async function parsePrinterUploadMultipart(
   let artifactPath: string | null = null;
   let profileId: number | undefined;
   let checkoffUnitsRaw: string | undefined;
+  let unlabeledNamesRaw: string | undefined;
 
   try {
     for await (const part of request.parts()) {
@@ -85,6 +87,9 @@ export async function parsePrinterUploadMultipart(
         }
         if (part.fieldname === "checkoff_units") {
           checkoffUnitsRaw = value;
+        }
+        if (part.fieldname === "unlabeled_names") {
+          unlabeledNamesRaw = value;
         }
         continue;
       }
@@ -174,6 +179,7 @@ export async function parsePrinterUploadMultipart(
       artifact_path: artifactPath,
       profile_id: profileId,
       checkoff_units_raw: checkoffUnitsRaw,
+      unlabeled_names_raw: unlabeledNamesRaw,
     };
     if (options.allowQueueFields) {
       value.wait_for_idle = waitForIdle;

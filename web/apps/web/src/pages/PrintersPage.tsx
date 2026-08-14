@@ -85,6 +85,8 @@ export default function PrintersPage() {
       const byId = new Map(integrations.map((i) => [i.id, i]));
       const next: LinkedPrinter[] = [];
       for (const machine of fleet) {
+        // Skip disabled fleet rows (plan/machine flag) and disabled hosts.
+        if (machine.enabled === false) continue;
         const id = machine.integration_id?.trim();
         if (!id) continue;
         const host = byId.get(id);

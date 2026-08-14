@@ -14,7 +14,15 @@ import {
   type ReviewPart,
 } from "../../api/engine";
 import { useJobRunner } from "../../hooks/useJobRunner";
-import { incompleteUnitsForSelectedParts } from "../../lib/printerCheckoffUnits";
+import {
+  parseSlicedObjectsFile,
+  type ParseSlicedObjectsResult,
+} from "../../lib/parseSlicedObjects";
+import {
+  buildObjectPreviewRows,
+  proposeCheckoffFromObjects,
+  type ProposeCheckoffResult,
+} from "../../lib/proposeCheckoffFromObjects";
 import { printerHostTypeLabel, type LiveStripHostType } from "../../lib/printerLiveStrip";
 import { usePrinterStatusPollMs } from "../../hooks/usePrinterStatusPollMs";
 import { settingsPrintersRoute } from "../../lib/routes";
@@ -27,12 +35,13 @@ import {
   CardHeader,
   CardTitle,
 } from "../ui/card";
+import ObjectProposalRows from "./ObjectProposalRows";
 
 const PRINTER_ID_STORAGE_KEY = "pp-export-printer-id";
 const BAMBU_PRINTER_ID_STORAGE_KEY = "pp-export-bambu-printer-id";
 
 type Props = {
-  /** Remaining incomplete review parts for track disclosure; may be empty without a plan */
+  /** Remaining incomplete review parts for local object → unit proposal. */
   remainingParts: ReviewPart[];
   profileId: number | null;
   engineReady: boolean;
@@ -68,12 +77,6 @@ function isAllowedBambuConnectFile(name: string): boolean {
     lower.endsWith(".gcode") ||
     lower.endsWith(".gco")
   );
-}
-
-function remainingLabel(part: ReviewPart): string {
-  const total = Math.max(1, part.quantity_effective);
-  const left = Math.max(0, total - (part.printed_count ?? 0));
-  return left === 1 ? "1 unit left" : `${left} units left`;
 }
 
 function statusLabel(status: PrinterHostStatus | undefined): string {
@@ -155,18 +158,19 @@ export default function PrinterSendPanel({
     Record<string, PrinterHostStatus>
   >({});
   const [chosenFile, setChosenFile] = useState<File | null>(null);
-  const [trackOpen, setTrackOpen] = useState(false);
-  const [selectedCheckoffPartIds, setSelectedCheckoffPartIds] = useState<number[]>([]);
+  const [objectParse, setObjectParse] = useState<ParseSlicedObjectsResult | null>(null);
+  const [objectPropose, setObjectPropose] = useState<ProposeCheckoffResult | null>(null);
+  const [parseBusy, setParseBusy] = useState(false);
   const [bambuBusy, setBambuBusy] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bambuFileInputRef = useRef<HTMLInputElement>(null);
   const pendingActionRef = useRef<"send" | "start" | null>(null);
+  const parseGenRef = useRef(0);
 
   const hasLinked = linkedPrinters.length > 0;
   const hasBambuLinked = bambuPrinters.length > 0;
-  const remainingCount = remainingParts.length;
-  const busy = printerUploadJob.busy || bambuBusy;
+  const busy = printerUploadJob.busy || bambuBusy || parseBusy;
 
   useEffect(() => {
     if (!engineReady) return;
@@ -273,13 +277,11 @@ export default function PrinterSendPanel({
     };
   }, [engineReady, linkedPrinters, bambuPrinters, pollMs]);
 
-  const remainingPartIdsKey = remainingParts.map((p) => p.id).join(",");
-
+  // Re-propose when remaining parts change after a successful local parse.
   useEffect(() => {
-    setSelectedCheckoffPartIds(
-      remainingPartIdsKey ? remainingPartIdsKey.split(",").map(Number) : [],
-    );
-  }, [profileId, remainingPartIdsKey]);
+    if (!objectParse || objectParse.unlabeled) return;
+    setObjectPropose(proposeCheckoffFromObjects(objectParse.names, remainingParts));
+  }, [remainingParts, objectParse]);
 
   const selectedHostStatus = useMemo(() => {
     const machine = linkedPrinters.find((p) => p.id === selectedPrinterId);
@@ -293,10 +295,21 @@ export default function PrinterSendPanel({
   const selectedPrinterUnavailable =
     selectedHostStatus?.state === "offline" || selectedHostStatus?.state === "error";
 
-  const checkoffUnits = useMemo(() => {
-    if (!trackOpen || profileId == null) return [];
-    return incompleteUnitsForSelectedParts(remainingParts, selectedCheckoffPartIds);
-  }, [trackOpen, profileId, remainingParts, selectedCheckoffPartIds]);
+  /** Proposed units from local object parse — never auto-ticks Progress. */
+  const proposedUnits = useMemo(() => objectPropose?.units ?? [], [objectPropose]);
+
+  const effectiveCheckoffUnits = useMemo(() => {
+    if (profileId == null) return [];
+    return proposedUnits;
+  }, [profileId, proposedUnits]);
+
+  const previewRows = useMemo(() => {
+    if (!objectPropose) return [];
+    return buildObjectPreviewRows(objectPropose, remainingParts);
+  }, [objectPropose, remainingParts]);
+
+  const hasNamedObjects =
+    objectParse != null && !objectParse.unlabeled && objectParse.names.length > 0;
 
   const onPrinterChange = (id: string) => {
     setSelectedPrinterId(id);
@@ -308,32 +321,10 @@ export default function PrinterSendPanel({
     writeStickyId(BAMBU_PRINTER_ID_STORAGE_KEY, id);
   };
 
-  const toggleCheckoffPart = (partId: number) => {
-    setSelectedCheckoffPartIds((prev) =>
-      prev.includes(partId) ? prev.filter((id) => id !== partId) : [...prev, partId],
-    );
-  };
-
   /** `Shop Voron · Moonraker` when the integration type is known. */
   const printerLabel = (p: PrinterMachine): string => {
     const hostType = hostTypeByPrinterId[p.id];
     return hostType ? `${p.name} · ${printerHostTypeLabel(hostType)}` : p.name;
-  };
-
-  /** Explicit track intent: open disclosure + remaining parts requires a selection. */
-  const assertTrackingOk = (): boolean => {
-    if (!trackOpen || remainingCount === 0) return true;
-    if (profileId == null) {
-      toast.error("Open a plan to track Progress verify");
-      return false;
-    }
-    if (selectedCheckoffPartIds.length === 0 || checkoffUnits.length === 0) {
-      toast.error("Select at least one part to track", {
-        description: "Or collapse the track disclosure to send without Progress verify.",
-      });
-      return false;
-    }
-    return true;
   };
 
   const runUpload = (file: File, start: boolean) => {
@@ -355,10 +346,12 @@ export default function PrinterSendPanel({
       });
       return;
     }
-    if (!assertTrackingOk()) return;
 
     const units =
-      trackOpen && profileId != null && checkoffUnits.length > 0 ? checkoffUnits : undefined;
+      effectiveCheckoffUnits.length > 0 ? effectiveCheckoffUnits : undefined;
+    const unlabeled =
+      objectPropose?.unmatchedNames?.length ? objectPropose.unmatchedNames : undefined;
+    const trackOnProgress = Boolean(units || unlabeled);
     const printerName =
       linkedPrinters.find((p) => p.id === selectedPrinterId)?.name ?? "printer";
 
@@ -368,8 +361,9 @@ export default function PrinterSendPanel({
           file,
           printer_id: selectedPrinterId,
           start,
-          profile_id: units ? profileId ?? undefined : undefined,
+          profile_id: trackOnProgress ? profileId ?? undefined : undefined,
           checkoff_units: units,
+          unlabeled_names: unlabeled,
         }),
       (snap) => {
         if (snap.status === "error") {
@@ -400,6 +394,31 @@ export default function PrinterSendPanel({
     fileInputRef.current?.click();
   };
 
+  const applyObjectParse = async (file: File): Promise<ProposeCheckoffResult | null> => {
+    const gen = ++parseGenRef.current;
+    setParseBusy(true);
+    setObjectParse(null);
+    setObjectPropose(null);
+    try {
+      const parsed = await parseSlicedObjectsFile(file);
+      if (gen !== parseGenRef.current) return null;
+      setObjectParse(parsed);
+      const proposed = proposeCheckoffFromObjects(parsed.names, remainingParts);
+      setObjectPropose(proposed);
+      return proposed;
+    } catch (e) {
+      if (gen !== parseGenRef.current) return null;
+      setObjectParse({ objects: [], names: [], format: "unknown", unlabeled: true });
+      setObjectPropose({ units: [], matches: [], unmatchedNames: [] });
+      toast.error("Could not parse object names", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+      return null;
+    } finally {
+      if (gen === parseGenRef.current) setParseBusy(false);
+    }
+  };
+
   const onFileChosen = (fileList: FileList | null) => {
     const file = fileList?.[0];
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -417,7 +436,20 @@ export default function PrinterSendPanel({
     setChosenFile(file);
     const pending = pendingActionRef.current;
     pendingActionRef.current = null;
-    if (pending) runUpload(file, pending === "start");
+    void (async () => {
+      const proposed = await applyObjectParse(file);
+      // Preview before Send when objects were matched — don't auto-upload past the preview.
+      if (pending) {
+        if (proposed && proposed.units.length > 0) {
+          toast.message("Review proposed Progress units, then Send", {
+            description: "Object names were matched locally. Nothing is ticked yet.",
+          });
+          return;
+        }
+        // Unlabeled / empty propose may proceed without checkoff units.
+        runUpload(file, pending === "start");
+      }
+    })();
   };
 
   const onBambuFileChosen = (fileList: FileList | null) => {
@@ -436,18 +468,29 @@ export default function PrinterSendPanel({
       });
       return;
     }
-    if (!assertTrackingOk()) return;
-
-    const units =
-      trackOpen && profileId != null && checkoffUnits.length > 0 ? checkoffUnits : undefined;
-    setBambuBusy(true);
+    setChosenFile(file);
     void (async () => {
+      let handoffUnits: typeof proposedUnits | undefined;
+      try {
+        const parsed = await parseSlicedObjectsFile(file);
+        setObjectParse(parsed);
+        const proposed = proposeCheckoffFromObjects(parsed.names, remainingParts);
+        setObjectPropose(proposed);
+        if (profileId != null && proposed.units.length > 0) {
+          handoffUnits = proposed.units;
+        }
+      } catch {
+        setObjectParse({ objects: [], names: [], format: "unknown", unlabeled: true });
+        setObjectPropose({ units: [], matches: [], unmatchedNames: [] });
+      }
+
+      setBambuBusy(true);
       try {
         const result = await startBambuConnectHandoff({
           file,
           printer_id: selectedBambuPrinterId,
-          profile_id: units ? profileId ?? undefined : undefined,
-          checkoff_units: units,
+          profile_id: handoffUnits ? profileId ?? undefined : undefined,
+          checkoff_units: handoffUnits,
         });
         if (result.launched) {
           toast.success(result.message, {
@@ -483,47 +526,6 @@ export default function PrinterSendPanel({
       }
     })();
   };
-
-  const showTrackDisclosure =
-    remainingCount > 0 && (hasLinked || hasBambuLinked);
-
-  const trackDisclosure = showTrackDisclosure ? (
-    <details
-      className="rounded-md border border-border/80 bg-muted/30 px-2.5 py-2 text-xs"
-      onToggle={(e) => setTrackOpen((e.target as HTMLDetailsElement).open)}
-    >
-      <summary className="cursor-pointer select-none font-medium leading-snug text-foreground">
-        Track {remainingCount} remaining part{remainingCount === 1 ? "" : "s"} when this print
-        finishes
-        {trackOpen && checkoffUnits.length > 0 ? ` (${checkoffUnits.length})` : ""}
-      </summary>
-      <ul className="mt-2 max-h-28 space-y-1 overflow-y-auto border-t border-border/60 pt-2">
-        {remainingParts.map((part) => {
-          const checked = selectedCheckoffPartIds.includes(part.id);
-          return (
-            <li key={part.id}>
-              <label className="flex cursor-pointer items-start gap-2">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={checked}
-                  disabled={busy}
-                  onChange={() => toggleCheckoffPart(part.id)}
-                />
-                <span className="min-w-0 flex-1 leading-snug">
-                  <span className="font-medium">{part.filename}</span>
-                  <span className="text-muted-foreground">
-                    {" "}
-                    · {remainingLabel(part)}
-                  </span>
-                </span>
-              </label>
-            </li>
-          );
-        })}
-      </ul>
-    </details>
-  ) : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -569,27 +571,32 @@ export default function PrinterSendPanel({
                 </Badge>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                    {chosenFile ? chosenFile.name : "No file chosen"}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => {
-                      pendingActionRef.current = null;
-                      fileInputRef.current?.click();
-                    }}
-                  >
-                    Choose .gcode
-                  </Button>
-                </div>
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  Already sliced in your slicer. We don&apos;t slice in-app.
-                </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                  {chosenFile ? chosenFile.name : "No file chosen"}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || parseBusy}
+                  onClick={() => {
+                    pendingActionRef.current = null;
+                    fileInputRef.current?.click();
+                  }}
+                >
+                  {parseBusy ? "Parsing…" : chosenFile ? "Change" : "Choose .gcode"}
+                </Button>
               </div>
+
+              {objectParse ? (
+                hasNamedObjects ? (
+                  <ObjectProposalRows rows={previewRows} />
+                ) : (
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    No named objects in this file — map on Progress after Send.
+                  </p>
+                )
+              ) : null}
 
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -622,15 +629,13 @@ export default function PrinterSendPanel({
               </div>
 
               <p className="text-[11.5px] leading-relaxed text-muted-foreground">
-                Send uploads the .gcode. Start print begins it now.
+                Send from here to track these parts on Progress.
               </p>
               {selectedPrinterBusy ? (
                 <p className="text-[11.5px] leading-relaxed text-muted-foreground">
                   Printer is busy. Send still works. Or wait until Idle.
                 </p>
               ) : null}
-
-              {trackDisclosure}
             </>
           ) : (
             <div className="flex flex-col gap-2">
@@ -700,7 +705,6 @@ export default function PrinterSendPanel({
               Hands off a sliced .3mf / .gcode via Bambu Connect on this desk. Install Connect
               locally; Docker users download the staged file.
             </p>
-            {!hasLinked ? trackDisclosure : null}
           </CardContent>
         </Card>
       ) : null}

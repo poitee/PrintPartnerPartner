@@ -180,6 +180,8 @@ export type PrinterCheckoffLink = {
   remote_path?: string;
   upload_job_id?: string;
   units: PrinterCheckoffUnit[];
+  /** Parsed object names that did not map — visible on Progress, never in confirm set. */
+  unlabeled_names?: string[];
   resolved_units?: PrintVerifyDecision[];
   state: PrinterCheckoffLinkState;
   host_outcome?: PrinterHostOutcome;
@@ -1443,6 +1445,7 @@ export async function startPrinterUpload(options: {
   start?: boolean;
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
+  unlabeled_names?: string[];
 }): Promise<string> {
   const form = new FormData();
   form.append("file", options.file);
@@ -1453,6 +1456,9 @@ export async function startPrinterUpload(options: {
   }
   if (options.checkoff_units && options.checkoff_units.length > 0) {
     form.append("checkoff_units", JSON.stringify(options.checkoff_units));
+  }
+  if (options.unlabeled_names && options.unlabeled_names.length > 0) {
+    form.append("unlabeled_names", JSON.stringify(options.unlabeled_names));
   }
   const res = await fetch(resolveEngineUrl("/jobs/printer-upload"), {
     method: "POST",
