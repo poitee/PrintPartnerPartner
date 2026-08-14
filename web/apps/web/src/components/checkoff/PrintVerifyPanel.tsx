@@ -66,12 +66,7 @@ function pendingUnits(link: PrinterCheckoffLink) {
 }
 
 function linkPreviewRows(link: PrinterCheckoffLink, parts: ReviewPart[]): ObjectPreviewRow[] {
-  const unlabeled =
-    Array.isArray((link as { unlabeled_names?: unknown }).unlabeled_names)
-      ? ((link as { unlabeled_names?: string[] }).unlabeled_names ?? []).filter(
-          (n) => typeof n === "string" && n.trim(),
-        )
-      : [];
+  const unlabeled = (link.unlabeled_names ?? []).filter((n) => typeof n === "string" && n.trim());
   return buildPreviewRowsFromUnits(pendingUnits(link), parts, unlabeled);
 }
 

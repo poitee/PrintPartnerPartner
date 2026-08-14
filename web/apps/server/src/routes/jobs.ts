@@ -19,7 +19,7 @@ import { runPackPreviewJob } from "../services/plate-workspace.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import { tenantStorage } from "../middleware/tenant-context.js";
 import { extractPendingPdfsForSource } from "../services/source-docs-index.js";
-import { parseCheckoffUnits } from "../services/printer-checkoff.js";
+import { parseCheckoffUnits, parseUnlabeledNames } from "../services/printer-checkoff.js";
 import { sendProblem } from "../lib/api-error.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
 import { getIntegrationConfig } from "../integrations/store.js";
@@ -480,6 +480,10 @@ export class InProcessJobRunner {
         checkoff_units: Array.isArray(payload.checkoff_units)
           ? parseCheckoffUnits(payload.checkoff_units)
           : undefined,
+        unlabeled_names: (() => {
+          const names = parseUnlabeledNames(payload.unlabeled_names);
+          return names.length ? names : undefined;
+        })(),
         upload_job_id: jobId,
       },
       (patch) => this.emit(jobId, patch),
@@ -691,10 +695,13 @@ export async function registerJobRoutes(
           artifact_path,
           profile_id: profileId,
           checkoff_units_raw: checkoffUnitsRaw,
+          unlabeled_names_raw: unlabeledNamesRaw,
         } = parsed.value;
         artifactPath = artifact_path;
 
         const checkoff_units = parseCheckoffUnits(checkoffUnitsRaw);
+        const unlabeledParsed = parseUnlabeledNames(unlabeledNamesRaw);
+        const unlabeled_names = unlabeledParsed.length ? unlabeledParsed : undefined;
         if (checkoff_units.length > 0 && profileId == null) {
           return sendProblem(
             reply,
@@ -765,6 +772,7 @@ export async function registerJobRoutes(
             host_name: integration.name,
             profile_id: profileId,
             checkoff_units,
+            unlabeled_names,
           },
           request.tenantId,
         );

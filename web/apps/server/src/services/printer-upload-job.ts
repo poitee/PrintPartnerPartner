@@ -51,6 +51,8 @@ export type PrinterUploadJobInput = {
   profile_id?: number;
   /** Incomplete Progress units to mark when the host job completes. */
   checkoff_units?: PrinterCheckoffUnit[];
+  /** Object names that did not map — Progress preview only. */
+  unlabeled_names?: string[];
   upload_job_id?: string;
 };
 
@@ -159,6 +161,7 @@ async function runPrinterUploadJobInner(
       remote_path: result.remote_path ?? filename,
       upload_job_id: input.upload_job_id,
       units: checkoffUnits,
+      unlabeled_names: input.unlabeled_names,
       started: Boolean(result.started),
     });
     checkoffLinkId = link?.id;
