@@ -383,6 +383,12 @@ export default function CheckoffPage() {
         ? planName
         : null;
 
+  /**
+   * CoS lock: Progress units are operator-ticked only.
+   * Live strip / job filename may show a printing note; reconcile may queue verify
+   * after the job finishes — never auto-tick or auto-complete units from
+   * printing/complete host status.
+   */
   const progressDescription =
     includedParts.length === 0
       ? "Mark each unit as you finish it on the shop floor."
@@ -560,8 +566,8 @@ export default function CheckoffPage() {
               className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-950 dark:text-sky-100"
               role="status"
             >
-              Printing live. Remaining parts stay here — confirm when this job finishes. We
-              don&apos;t mark parts from a live job.
+              Printing live. Remaining parts stay here — confirm when this job finishes.
+              Units stay operator-ticked only; we never auto-complete from printer status.
             </p>
           ) : null}
           {progressMode === "idle" &&
