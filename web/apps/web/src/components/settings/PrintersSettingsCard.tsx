@@ -32,6 +32,12 @@ import {
   SelectValue,
 } from "../ui/select";
 import { cn } from "../../lib/utils";
+import {
+  PRINTER_STATUS_POLL_SECONDS_OPTIONS,
+  readPrinterStatusPollSeconds,
+  writePrinterStatusPollSeconds,
+  type PrinterStatusPollSeconds,
+} from "../../lib/persistedPrinterStatusPoll";
 
 type Props = {
   engineReady: boolean;
@@ -149,6 +155,9 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
   const [accessCode, setAccessCode] = useState("");
   const [serial, setSerial] = useState("");
   const [presetId, setPresetId] = useState("");
+  const [pollSeconds, setPollSeconds] = useState<PrinterStatusPollSeconds>(() =>
+    readPrinterStatusPollSeconds(),
+  );
 
   const hostsById = useMemo(() => new Map(hosts.map((h) => [h.id, h])), [hosts]);
 
@@ -468,6 +477,33 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
       <CardContent className="space-y-4">
         {loadError && <p className="text-sm text-destructive">{loadError}</p>}
         {message && <p className="text-sm text-muted-foreground">{message}</p>}
+
+        <label className="block max-w-md text-sm">
+          <span className="mb-1 block font-medium">Printer status refresh</span>
+          <span className="mb-1.5 block text-xs text-muted-foreground">
+            How often Progress, Export, and the Printers page ask linked hosts for status while
+            the page is open.
+          </span>
+          <Select
+            value={String(pollSeconds)}
+            onValueChange={(v) => {
+              const next = Number(v) as PrinterStatusPollSeconds;
+              setPollSeconds(next);
+              writePrinterStatusPollSeconds(next);
+            }}
+          >
+            <SelectTrigger className="min-h-10 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PRINTER_STATUS_POLL_SECONDS_OPTIONS.map((s) => (
+                <SelectItem key={s} value={String(s)}>
+                  Every {s} seconds
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
 
         <div className="space-y-2 rounded-md border border-border p-3">
           <p className="text-sm font-medium">Add printer</p>

@@ -23,12 +23,12 @@ import {
 } from "../components/ui/card";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import {
-  PRINTER_LIVE_STRIP_POLL_MS,
   formatPrinterStatusPill,
   printerDeskTypeLabel,
   printerLiveStripTone,
   type LiveStripHostType,
 } from "../lib/printerLiveStrip";
+import { usePrinterStatusPollMs } from "../hooks/usePrinterStatusPollMs";
 import { exportRoute, settingsPrintersRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
 
@@ -62,6 +62,7 @@ function toneBadgeVariant(
 export default function PrintersPage() {
   const { health } = useEngineHealth();
   const engineReady = Boolean(health);
+  const pollMs = usePrinterStatusPollMs();
   const [linked, setLinked] = useState<LinkedPrinter[]>([]);
   const [statusById, setStatusById] = useState<Record<string, PrinterHostStatus>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -143,7 +144,7 @@ export default function PrintersPage() {
     };
 
     tick();
-    const timer = window.setInterval(tick, PRINTER_LIVE_STRIP_POLL_MS);
+    const timer = window.setInterval(tick, pollMs);
     const onVisibility = () => {
       if (!document.hidden) tick();
     };
@@ -155,7 +156,7 @@ export default function PrintersPage() {
       document.removeEventListener("visibilitychange", onVisibility);
       requestId.current += 1;
     };
-  }, [engineReady, linked, refreshStatuses]);
+  }, [engineReady, linked, refreshStatuses, pollMs]);
 
   return (
     <div className="space-y-4">

@@ -387,7 +387,7 @@ export default function CheckoffPage() {
     includedParts.length === 0
       ? "Mark each unit as you finish it on the shop floor."
       : progressMode === "printing"
-        ? "Verify when a print finishes. Remaining parts stay below."
+        ? "Printing live. Remaining parts stay here — confirm when this job finishes."
         : progressMode === "verify"
           ? `${verifyQueue.primaryHostName?.trim() || "Printer"} finished. Confirm what landed.`
           : "Mark remaining units. Verify waits on the next finished print.";
@@ -556,9 +556,12 @@ export default function CheckoffPage() {
           {liveStrip.anyPrinting &&
           verifyQueue.awaitingCount === 0 &&
           includedParts.length > 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Verify appears when this print finishes. We don&apos;t mark parts from a live
-              job.
+            <p
+              className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-950 dark:text-sky-100"
+              role="status"
+            >
+              Printing live. Remaining parts stay here — confirm when this job finishes. We
+              don&apos;t mark parts from a live job.
             </p>
           ) : null}
           {progressMode === "idle" &&
