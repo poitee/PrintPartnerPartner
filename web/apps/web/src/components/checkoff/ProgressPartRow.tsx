@@ -88,7 +88,7 @@ export default function ProgressPartRow({
         )}
       >
         {handle}
-        <PartThumbExpandButton part={part} sizePx={52} onExpand={onPreview} />
+        <PartThumbExpandButton part={part} sizePx={72} onExpand={onPreview} />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span
             className="truncate font-mono text-xs"
@@ -145,8 +145,8 @@ export default function ProgressPartRow({
       )}
     >
       {handle}
-      <PartThumbExpandButton part={part} sizePx={40} onExpand={onPreview} />
-      <div className="flex w-[min(100%,20rem)] min-w-0 flex-col gap-0.5">
+      <PartThumbExpandButton part={part} sizePx={72} onExpand={onPreview} />
+      <div className="flex w-[min(100%,20rem)] min-w-0 flex-col gap-0.5 self-center">
         <span
           className="truncate font-mono text-xs"
           title={part.relative_path || part.filename}

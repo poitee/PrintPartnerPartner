@@ -22,7 +22,7 @@ function source(partial: Partial<SourceSummary> & Pick<SourceSummary, "id" | "na
 }
 
 describe("buildPlanWarningLines", () => {
-  it("flags upstream updates and unassigned roles", () => {
+  it("flags upstream updates; skips soft role noise", () => {
     const lines = buildPlanWarningLines({
       buildStale: false,
       attachedSources: [
@@ -67,7 +67,7 @@ describe("buildPlanWarningLines", () => {
       } as PlanReview,
     });
     expect(lines.some((l) => l.includes("updated upstream"))).toBe(true);
-    expect(lines.some((l) => l.includes("no filament role"))).toBe(true);
+    expect(lines.some((l) => l.includes("no filament role"))).toBe(false);
   });
 
   it("falls back to stale when no upstream badge", () => {

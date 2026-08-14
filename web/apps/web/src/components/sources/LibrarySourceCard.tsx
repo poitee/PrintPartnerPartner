@@ -13,6 +13,7 @@ import {
 import { cn } from "../../lib/utils";
 import type { LibraryCardMeta } from "../../lib/librarySourceMeta";
 import { sourceCategoryLabel } from "../../lib/sourceCategoryAssignment";
+import { librarySourceDragId } from "../../lib/sourceCategoryDnD";
 import { kindLabel } from "./sourceLabels";
 import SourceCategoryAssignSubmenu from "./SourceCategoryAssignSubmenu";
 
@@ -83,10 +84,17 @@ export default function LibrarySourceCard({
 }: Props) {
   return (
     <article
+      draggable={!busy}
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", librarySourceDragId(source.id));
+        e.dataTransfer.effectAllowed = "move";
+      }}
       className={cn(
         "overflow-hidden rounded-lg border bg-card shadow-[0_1px_2px_rgba(89,115,166,0.06)] transition-colors",
         borderClass(meta.borderTone),
+        !busy && "cursor-grab active:cursor-grabbing",
       )}
+      title="Drag onto a category"
     >
       <button
         type="button"
