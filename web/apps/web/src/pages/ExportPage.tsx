@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FileArchive } from "lucide-react";
+import DeskNextStep from "../components/layout/DeskNextStep";
 import PageHeader from "../components/layout/PageHeader";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import ExportActionCards from "../components/export/ExportActionCards";
@@ -10,11 +11,14 @@ import PrinterSendPanel from "../components/export/PrinterSendPanel";
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
+import { fetchRoleFilaments, type RoleFilamentRow } from "../api/engine";
 import { useJobContext } from "../context/JobContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useSourcesQuery } from "../queries/sources";
+import { checkoffUnitTotals } from "../lib/checkoffProgress";
+import { deskNextStepLine } from "../lib/deskNextStep";
 import { flattenReviewParts } from "../lib/reviewParts";
 import { partsRoute, planRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
@@ -33,6 +37,7 @@ export default function ExportPage() {
   const { data: sources = [] } = useSourcesQuery();
   const { activeJobs } = useJobContext();
   const [shareOpen, setShareOpen] = useState(false);
+  const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
 
   const showRecent = hasExportJobs(activeJobs);
 
@@ -49,6 +54,26 @@ export default function ExportPage() {
     () => includedParts.filter((p) => p.missing),
     [includedParts],
   );
+  const remainingUnits = checkoffUnitTotals(includedParts).remainingUnits;
+  const exportNextStep = deskNextStepLine("export", { remainingUnits });
+
+  useEffect(() => {
+    if (!health?.ok || selectedProfileId == null) {
+      setRoleFilaments([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchRoleFilaments(selectedProfileId)
+      .then((rows) => {
+        if (!cancelled) setRoleFilaments(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setRoleFilaments([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [health?.ok, selectedProfileId, revision]);
 
   useEffect(() => {
     if (!health?.ok || selectedProfileId == null) return;
@@ -77,6 +102,7 @@ export default function ExportPage() {
         title="Export"
         description="Send already-sliced G-code from your slicer. STL and 3MF below are slicer input."
       />
+      <DeskNextStep>{exportNextStep}</DeskNextStep>
 
       {!health ? (
         <Card>
@@ -140,7 +166,10 @@ export default function ExportPage() {
                 )}
               >
                 <div className="min-w-0">
-                  <ExportActionCards onShare={() => setShareOpen(true)} />
+                  <ExportActionCards
+                    onShare={() => setShareOpen(true)}
+                    roleFilaments={roleFilaments}
+                  />
                 </div>
                 {showRecent ? <ExportRecentPanel /> : null}
               </div>

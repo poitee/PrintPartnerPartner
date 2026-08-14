@@ -1,4 +1,5 @@
 import type { PrinterHostStatus } from "../api/engine";
+import { quietPrinterStatusMessage } from "./printerErrorCopy";
 
 export type LiveStripHostType = "moonraker" | "prusalink" | "bambu";
 
@@ -76,7 +77,7 @@ export function formatPrinterJobLine(
 
   if (status.state === "offline") return "Offline";
   if (status.state === "error") {
-    const detail = status.message?.trim();
+    const detail = quietPrinterStatusMessage(status.message) ?? status.message?.trim();
     return detail ? `Error · ${detail}` : "Error";
   }
   if (status.state === "printing" || status.state === "paused") {
@@ -96,7 +97,7 @@ export function formatPrinterJobLine(
     return filename ? `Complete · ${filename}` : "Complete";
   }
   if (status.state === "idle") return "Idle";
-  const msg = status.message?.trim();
+  const msg = quietPrinterStatusMessage(status.message);
   return msg || status.state;
 }
 

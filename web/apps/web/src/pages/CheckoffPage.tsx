@@ -20,6 +20,7 @@ import StaleBuildBanner from "../components/StaleBuildBanner";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
+import DeskNextStep from "../components/layout/DeskNextStep";
 import EmptyState from "../components/layout/EmptyState";
 import PlanSpecialRequestLine from "../components/PlanSpecialRequestLine";
 import PrinterLiveStrip, {
@@ -35,6 +36,8 @@ import PartThumbExpandButton from "../components/parts/PartThumbExpandButton";
 import SpoolRemainingBadge from "../components/SpoolRemainingBadge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
+import { SegmentedControl } from "../components/ui/segmented-control";
+import { Spinner } from "../components/ui/spinner";
 import {
   startRecompute,
   type ReviewPart,
@@ -47,6 +50,7 @@ import {
   lastCompletedUnit,
   nextUnitToComplete,
 } from "../lib/checkoffProgress";
+import { deskNextStepLine } from "../lib/deskNextStep";
 import {
   getProgressRowsForPlan,
   loadPersistedCheckoffUi,
@@ -495,6 +499,10 @@ export default function CheckoffPage() {
       ? "Mark each unit as you finish it on the shop floor."
       : "Verify when a print finishes. Remaining parts stay below.";
 
+  const progressNextStep = deskNextStepLine("progress", {
+    remainingUnits: totals.remainingUnits,
+  });
+
   const onToggleUnit = useCallback(
     (part: ReviewPart, unitIndex: number) => {
       const next = !part.print_units[unitIndex];
@@ -525,7 +533,7 @@ export default function CheckoffPage() {
         <EmptyState
           icon={ClipboardCheck}
           title="No plan selected"
-          description="Choose a build plan to track print progress on the shop floor."
+          description="Pick a plan to track remaining print work."
           action={{
             label: "Open Plan",
             onClick: () => navigate(planRoute(null)),
@@ -538,7 +546,7 @@ export default function CheckoffPage() {
         <EmptyState
           icon={ClipboardCheck}
           title="No parts yet"
-          description="Update the plan, then review parts before tracking progress."
+          description="Pick a plan, then track remaining on Progress."
           action={{
             label: "Open Plan",
             onClick: () => navigate(planRoute(selectedProfileId)),
@@ -587,7 +595,7 @@ export default function CheckoffPage() {
                 disabled={selectedProfileId == null || filtered.length === 0}
               >
                 <Printer className="mr-1 h-4 w-4" />
-                Print
+                Print sheet
               </Button>
               <Button className="min-h-10 w-full sm:w-auto" asChild>
                 <Link to={exportRoute(selectedProfileId)}>Export hub</Link>
@@ -595,6 +603,8 @@ export default function CheckoffPage() {
             </PageHeaderActions>
           }
         />
+
+        <DeskNextStep className="no-print">{progressNextStep}</DeskNextStep>
 
         <PlanSpecialRequestLine note={specialRequest} />
 
@@ -668,34 +678,19 @@ export default function CheckoffPage() {
           />
           <div
             className={cn(
-              "checkoff-filter-group",
-              isMobileLayout
-                ? "flex w-full flex-wrap gap-2"
-                : "inline-flex overflow-hidden rounded-md border border-border",
+              isMobileLayout ? "w-full" : "shrink-0",
             )}
-            role="group"
-            aria-label="Filter"
           >
-            {FILTER_MODES.map(({ mode, label }) => (
-              <Button
-                key={mode}
-                size="sm"
-                className={cn(
-                  isMobileLayout
-                    ? "min-h-10 rounded-full px-3.5"
-                    : "min-h-8 rounded-none border-0 px-3 shadow-none",
-                  filter === mode && isMobileLayout && "border-primary/40 bg-primary/10 text-primary",
-                  filter === mode && !isMobileLayout && "bg-primary/10 text-primary",
-                  filter !== mode && isMobileLayout && "border border-border bg-background text-muted-foreground",
-                )}
-                variant={filter === mode ? "secondary" : "ghost"}
-                aria-pressed={filter === mode}
-                onClick={() => setFilter(mode)}
-                disabled={toggleBusy}
-              >
-                {label}
-              </Button>
-            ))}
+            <SegmentedControl
+              aria-label="Filter"
+              className={cn(isMobileLayout ? "w-full" : undefined)}
+              value={filter}
+              onValueChange={(value) => setFilter(value)}
+              options={FILTER_MODES.map(({ mode, label }) => ({
+                value: mode,
+                label,
+              }))}
+            />
           </div>
           {!isMobileLayout && (
             <>
@@ -735,18 +730,36 @@ export default function CheckoffPage() {
             </p>
           </CardContent>
         </Card>
-      ) : loading && !review ? (
-        <Card className="no-print">
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Loading progress…</p>
-          </CardContent>
-        </Card>
       ) : (
         <>
           {/*
-            GRE-223: list visibility uses filteredRows (parts + bags), not parts-only.
-            Bags stay visible when filters hide all parts; Add stays when a plan is selected.
+            GRE-223 / GRE-226: Add bag/sort stays visible whenever a plan is selected —
+            including while review is still loading. Not gated on health strip or filter.
           */}
+          {selectedProfileId != null ? (
+            <div className="no-print">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="mb-2 h-9 px-3"
+                disabled={toggleBusy}
+                onClick={onAddBagBar}
+              >
+                Add bag/sort
+              </Button>
+            </div>
+          ) : null}
+
+          {loading && !review ? (
+            <Card className="no-print">
+              <CardContent className="flex items-center gap-2 pt-6">
+                <Spinner className="size-4" />
+                <p className="text-sm text-muted-foreground">Loading progress…</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
           {filteredRows.length === 0 ? (
             <div className="no-print">{renderEmpty()}</div>
           ) : (
@@ -801,22 +814,7 @@ export default function CheckoffPage() {
             </DndContext>
           )}
 
-          {selectedProfileId != null ? (
-            <div className="no-print">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="mt-1 h-8 px-2 text-xs text-muted-foreground"
-                disabled={toggleBusy}
-                onClick={onAddBagBar}
-              >
-                Add bag/sort
-              </Button>
-            </div>
-          ) : null}
-
-          {/* Printable sheet — paper tokens; only this node prints. */}
+          {/* Printable sheet — paper tokens; only this node prints. Label: Print sheet. */}
           {filtered.length > 0 ? (
             <article
               ref={sheetRef}
@@ -877,6 +875,8 @@ export default function CheckoffPage() {
               ))}
             </article>
           ) : null}
+            </>
+          )}
         </>
       )}
 

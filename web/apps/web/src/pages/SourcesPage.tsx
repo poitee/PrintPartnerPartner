@@ -33,6 +33,7 @@ import {
   type CopilotSourceTab,
 } from "../context/CopilotUiContext";
 import EmptyState from "../components/layout/EmptyState";
+import DeskNextStep from "../components/layout/DeskNextStep";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import GlobalStlSearch from "../components/sources/GlobalStlSearch";
 import LibraryCategoryRail, {
@@ -67,6 +68,13 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { Input } from "../components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from "../components/ui/input-group";
+import { Field, FieldLabel } from "../components/ui/field";
 import { Label } from "../components/ui/label";
 import {
   Select,
@@ -77,6 +85,7 @@ import {
 } from "../components/ui/select";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
+import { deskNextStepLine } from "../lib/deskNextStep";
 import {
   attachedSourceIds,
   buildLibraryCardMeta,
@@ -410,6 +419,10 @@ export default function SourcesPage() {
     if (!selectedPlan || attachedCount === 0) return srcLabel;
     return `${srcLabel} · ${attachedCount} attached to ${selectedPlan.name}`;
   }, [sources.length, selectedPlan, attachedCount]);
+
+  const libraryNextStep = deskNextStepLine("library", {
+    sourceCount: sources.length,
+  });
 
   const openDetail = (
     source: SourceSummary,
@@ -856,6 +869,7 @@ export default function SourcesPage() {
             <div className="min-w-0 flex-1">
               <h1 className="text-xl font-semibold tracking-tight">Library</h1>
               <p className="text-[12.5px] text-muted-foreground">{headerSubtitle}</p>
+              <DeskNextStep className="mt-1">{libraryNextStep}</DeskNextStep>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -1067,7 +1081,7 @@ export default function SourcesPage() {
               <EmptyState
                 icon={FolderGit2}
                 title="No sources yet"
-                description="Add a GitHub repo, local folder, or Printables/MakerWorld URL to get started."
+                description="Add a source to start the desk loop."
                 action={{ label: "Add source", onClick: () => openAddWizard() }}
               />
             ) : filtered.length === 0 ? (
@@ -1291,19 +1305,45 @@ export default function SourcesPage() {
             ) : (
               <>
                 <div className="space-y-1 md:col-span-2">
-                  <Label htmlFor="source-url">URL</Label>
-                  <Input
-                    id="source-url"
-                    value={form.url}
-                    onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-                    placeholder={
-                      form.source_kind === "printables"
-                        ? "https://www.printables.com/model/…"
-                        : form.source_kind === "makerworld"
-                          ? "https://makerworld.com/en/models/…"
-                          : "https://github.com/org/repo.git"
-                    }
-                  />
+                  <Field>
+                    <FieldLabel htmlFor="source-url">URL</FieldLabel>
+                    <InputGroup className="mt-1">
+                      <InputGroupAddon align="inline-start">
+                        <InputGroupText>
+                          {(form.url.match(/^(https?):\/\//i)?.[1]?.toLowerCase() ===
+                          "http"
+                            ? "http"
+                            : "https") + "://"}
+                        </InputGroupText>
+                      </InputGroupAddon>
+                      <InputGroupInput
+                        id="source-url"
+                        value={form.url.replace(/^https?:\/\//i, "")}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          if (!raw) {
+                            setForm((f) => ({ ...f, url: "" }));
+                            return;
+                          }
+                          if (/^https?:\/\//i.test(raw)) {
+                            setForm((f) => ({ ...f, url: raw }));
+                            return;
+                          }
+                          const existing = form.url.match(/^(https?):\/\//i)?.[1];
+                          const scheme =
+                            existing?.toLowerCase() === "http" ? "http" : "https";
+                          setForm((f) => ({ ...f, url: `${scheme}://${raw}` }));
+                        }}
+                        placeholder={
+                          form.source_kind === "printables"
+                            ? "www.printables.com/model/…"
+                            : form.source_kind === "makerworld"
+                              ? "makerworld.com/en/models/…"
+                              : "github.com/org/repo.git"
+                        }
+                      />
+                    </InputGroup>
+                  </Field>
                 </div>
                 {(form.source_kind === "printables" ||
                   form.source_kind === "makerworld") && (

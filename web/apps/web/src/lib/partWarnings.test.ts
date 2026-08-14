@@ -69,7 +69,8 @@ describe("partWarnings", () => {
     });
     const kinds = partWarnings(p, emptyReview).map((w) => w.kind);
     expect(kinds).toEqual(["missing", "no_role", "qty_unparsed"]);
-    expect(partWarningNote(p, emptyReview)).toBe("STL missing");
+    // Card notes skip STL missing — desk-loop banner owns that CTA.
+    expect(partWarningNote(p, emptyReview)).toBe("no role assigned");
   });
 
   it("ignores qty when override is set or auto matches", () => {

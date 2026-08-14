@@ -18,6 +18,7 @@ import BuildRecipePanel from "../components/build/BuildRecipePanel";
 import PlanRolesCard from "../components/build/PlanRolesCard";
 import PlanWarningsCard from "../components/build/PlanWarningsCard";
 import PlanCategoryDropStrip from "../components/build/PlanCategoryDropStrip";
+import DeskNextStep from "../components/layout/DeskNextStep";
 import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -66,7 +67,9 @@ import {
 import { buildRoute, exportRoute, libraryRoute } from "../lib/routes";
 import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { takeKitImportResult } from "../lib/kitImportStash";
+import { deskNextStepLine } from "../lib/deskNextStep";
 import { buildPlanWarningLines, planHeaderSubtitle } from "../lib/planWarnings";
+import { planHasUnsetRoleColors } from "../lib/roleColorSet";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanActions } from "../context/PlanActionsContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
@@ -445,6 +448,13 @@ function BuildPageContent() {
     roleFilaments,
   });
 
+  const colorsUnset = planHasUnsetRoleColors(roleFilaments);
+  const planNextStep = deskNextStepLine("plan", {
+    attachedSourceCount: sourceCardLayers.length,
+    partCount,
+    colorsUnset,
+  });
+
   const headerSubtitle = planHeaderSubtitle({
     profile: selectedProfile,
     sourceCount: sourceCardLayers.length,
@@ -537,6 +547,7 @@ function BuildPageContent() {
               className="min-h-10 w-full sm:w-auto"
               onClick={() => void onUpdateBuild()}
               disabled={selectedProfileId == null || busy || !health}
+              loading={busy}
             >
               {busy ? "Rebuilding…" : "Rebuild plan"}
             </Button>
@@ -588,6 +599,8 @@ function BuildPageContent() {
           </PageHeaderActions>
         }
       />
+
+      <DeskNextStep>{planNextStep}</DeskNextStep>
 
       {selectedProfileId != null && (
         <PlanSpecialRequestField
@@ -660,6 +673,7 @@ function BuildPageContent() {
               profileId={selectedProfileId}
               disabled={!health || busy}
               refreshKey={filamentRefreshKey}
+              roleFilaments={roleFilaments}
               onRolesChange={setRoleFilaments}
               onUpdated={onRoleFilamentsUpdated}
             />

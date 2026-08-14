@@ -54,7 +54,6 @@ No new app shell. Patterns already exist:
 | Pattern | File |
 |---------|------|
 | Spoolman multi-row list | [`web/apps/web/src/components/settings/IntegrationsSettingsCard.tsx`](../../web/apps/web/src/components/settings/IntegrationsSettingsCard.tsx) |
-| AI-style accent card | [`web/apps/web/src/components/settings/AiAssistantSettingsCard.tsx`](../../web/apps/web/src/components/settings/AiAssistantSettingsCard.tsx) |
 | Export card grid | [`web/apps/web/src/components/export/ExportActionCards.tsx`](../../web/apps/web/src/components/export/ExportActionCards.tsx) |
 | JobTray | [`web/apps/web/src/components/JobTray.tsx`](../../web/apps/web/src/components/JobTray.tsx) |
 | Progress shop-floor UI | [`web/apps/web/src/pages/CheckoffPage.tsx`](../../web/apps/web/src/pages/CheckoffPage.tsx) |

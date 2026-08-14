@@ -147,7 +147,7 @@ describe("source docs intelligence", () => {
     });
   });
 
-  it("get_source_docs returns hint when docs empty but Advisor notes exist", async () => {
+  it("get_source_docs returns hint when docs empty but Source notes exist", async () => {
     const source = repo.createSource({
       name: "NotesOnly",
       url: "https://github.com/example/notes-only",
@@ -170,7 +170,7 @@ describe("source docs intelligence", () => {
       expect(gathered.buckets.advisor_notes).toBe(1);
       expect(gathered.notes[0]?.bucket).toBe("advisor_notes");
       expect(gathered.hint).toMatch(/Sync/i);
-      expect(gathered.hint).toMatch(/Advisor notes/i);
+      expect(gathered.hint).toMatch(/Source notes/i);
     }
   });
 });
