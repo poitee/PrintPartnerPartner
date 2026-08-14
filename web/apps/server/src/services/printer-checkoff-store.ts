@@ -36,6 +36,8 @@ export type CreatePrinterCheckoffLinkInput = {
   remote_path?: string;
   upload_job_id?: string;
   units: PrinterCheckoffUnit[];
+  /** Object names that did not map to units — preview only, never confirmable. */
+  unlabeled_names?: string[];
   /** Upload & start — allow complete with cleared filename before first poll. */
   started?: boolean;
 };
@@ -116,6 +118,13 @@ function parseLink(raw: unknown): PrinterCheckoffLink | null {
           ? "failed"
           : undefined;
 
+  const unlabeled_names = Array.isArray(row.unlabeled_names)
+    ? row.unlabeled_names
+        .filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+        .map((n) => n.trim().slice(0, 200))
+        .slice(0, 200)
+    : undefined;
+
   return {
     id,
     profile_id: profileId,
@@ -135,6 +144,7 @@ function parseLink(raw: unknown): PrinterCheckoffLink | null {
         ? row.upload_job_id.trim()
         : undefined,
     units,
+    unlabeled_names: unlabeled_names?.length ? unlabeled_names : undefined,
     resolved_units: parseResolved(row.resolved_units),
     state,
     host_outcome,
@@ -217,12 +227,17 @@ export function createPrinterCheckoffLink(
       remote_path: input.remote_path?.trim() || undefined,
       upload_job_id: input.upload_job_id?.trim() || undefined,
       units,
+      unlabeled_names: input.unlabeled_names
+        ?.filter((n) => typeof n === "string" && n.trim())
+        .map((n) => n.trim().slice(0, 200))
+        .slice(0, 200),
       state: "watching",
       host_outcome: "unknown",
       saw_active: false,
       started: Boolean(input.started),
       created_at: new Date().toISOString(),
     };
+    if (!link.unlabeled_names?.length) delete link.unlabeled_names;
     const all = loadPrinterCheckoffLinks(repo);
     all.push(link);
     savePrinterCheckoffLinks(repo, all);

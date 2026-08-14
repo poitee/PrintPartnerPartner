@@ -349,6 +349,8 @@ export default function PrinterSendPanel({
 
     const units =
       effectiveCheckoffUnits.length > 0 ? effectiveCheckoffUnits : undefined;
+    const unlabeled =
+      objectPropose?.unmatchedNames?.length ? objectPropose.unmatchedNames : undefined;
     const printerName =
       linkedPrinters.find((p) => p.id === selectedPrinterId)?.name ?? "printer";
 
@@ -360,6 +362,7 @@ export default function PrinterSendPanel({
           start,
           profile_id: units ? profileId ?? undefined : undefined,
           checkoff_units: units,
+          unlabeled_names: units ? unlabeled : undefined,
         }),
       (snap) => {
         if (snap.status === "error") {
