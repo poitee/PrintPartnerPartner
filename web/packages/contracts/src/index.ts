@@ -389,6 +389,10 @@ export type ProfileSummary = {
   /** Quiet operator note (e.g. contact customer before printing). */
   special_request: string | null;
   part_count: number;
+  /** Included print units still unmarked on Progress. */
+  remaining_units: number;
+  /** Included print units (quantity sum) for this plan. */
+  total_units: number;
   /** True when plan config changed since the last successful recompute. */
   build_stale: boolean;
   /** ISO timestamp when archived as a template; null if active. */

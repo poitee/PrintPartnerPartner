@@ -14,6 +14,7 @@ const SPA_PATHS = new Set([
   "/settings",
   "/help",
   "/plan",
+  "/plans",
   "/plate",
   "/print",
 ]);
