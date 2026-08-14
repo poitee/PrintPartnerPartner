@@ -265,7 +265,7 @@ export default function PrintVerifyPanel({
         </div>
       ))}
 
-      {/* DURING print: named-object rows + per-row printing — no Confirm/Reject. */}
+      {/* DURING print: named-object rows + per-row printing only — no Confirm/Reject. */}
       {showWatching
         ? watchingForDisplay.map((link) => {
             const rows = linkPreviewRows(link, parts);
@@ -278,11 +278,9 @@ export default function PrintVerifyPanel({
                 aria-label={`Printing proposed parts from ${link.filename}`}
               >
                 <div className="min-w-0 space-y-2">
-                  <p className="text-base font-semibold text-foreground">Confirm these parts</p>
                   <p className="text-sm text-muted-foreground">
                     Proposed from{" "}
                     <span className="font-mono text-foreground">{link.filename}</span>
-                    . Confirm marks them printed. Reject leaves them remaining.
                   </p>
                   <ObjectProposalRows rows={rows} printing />
                 </div>
