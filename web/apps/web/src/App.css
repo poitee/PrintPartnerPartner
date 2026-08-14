@@ -1083,7 +1083,6 @@
 .checkoff-sheet {
   background: var(--paper-bg);
   color: var(--paper-fg);
-  color-scheme: light;
   max-width: 880px;
   margin: 0 auto 2rem;
   padding: 2.5rem 2.75rem;
@@ -1643,6 +1642,24 @@
     margin: 1.2cm;
   }
 
+  /* Only the paper checkoff sheet prints — hide app chrome / empty wrappers. */
+  body * {
+    visibility: hidden !important;
+  }
+
+  .checkoff-sheet,
+  .checkoff-sheet * {
+    visibility: visible !important;
+  }
+
+  .checkoff-sheet {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+  }
+
   html,
   body {
     background: #ffffff !important;
@@ -1658,10 +1675,10 @@
     --paper-surface: #f9fafb;
     --paper-surface-hover: #f3f4f6;
     box-shadow: none;
-    margin: 0;
     max-width: none;
     padding: 0;
     border-radius: 0;
+    color-scheme: light;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }

@@ -217,6 +217,11 @@
     overflow-x: hidden;
   }
 
+  /* In-app dialogs/sheets follow the app theme (not forced light). */
+  .dark [role="dialog"] {
+    color-scheme: dark;
+  }
+
   h1 {
     @apply text-foreground font-bold tracking-tight text-balance;
     letter-spacing: -0.025em;

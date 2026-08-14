@@ -6,7 +6,7 @@ type Props = {
   className?: string;
 };
 
-/** Non-blocking Plan warnings panel — loud but passable (mock density). */
+/** Desk-loop Plan warnings (stale / blockers) — short copy. */
 export default function PlanWarningsCard({ warnings, onAskAssistant, className }: Props) {
   if (warnings.length === 0) return null;
 
@@ -23,7 +23,7 @@ export default function PlanWarningsCard({ warnings, onAskAssistant, className }
           aria-hidden
         />
         <span className="text-[12.5px] font-semibold text-amber-950 dark:text-amber-100">
-          {warnings.length} thing{warnings.length === 1 ? "" : "s"} worth a look
+          Update build
         </span>
         {onAskAssistant ? (
           <button
@@ -49,9 +49,6 @@ export default function PlanWarningsCard({ warnings, onAskAssistant, className }
           </li>
         ))}
       </ul>
-      <p className="mt-auto text-[11.5px] text-amber-900/70 dark:text-amber-200/70">
-        Nothing is blocked — you can build and export as is.
-      </p>
     </div>
   );
 }

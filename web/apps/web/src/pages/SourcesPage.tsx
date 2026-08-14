@@ -87,6 +87,7 @@ import {
   matchesSourceCategoryFilter,
   sourceCategoryLabel,
 } from "../lib/sourceCategoryAssignment";
+import { librarySourceDragId } from "../lib/sourceCategoryDnD";
 import {
   loadPersistedSourcesUi,
   savePersistedSourcesUi,
@@ -769,11 +770,18 @@ export default function SourcesPage() {
     return (
       <div
         key={s.id}
+        draggable={!busy}
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", librarySourceDragId(s.id));
+          e.dataTransfer.effectAllowed = "move";
+        }}
         className={cn(
           "flex flex-col gap-2 rounded-lg border bg-card px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center",
           meta.borderTone === "update" && "border-amber-500/50",
           meta.borderTone === "syncing" && "border-sky-400/70",
+          !busy && "cursor-grab active:cursor-grabbing",
         )}
+        title="Drag onto a category"
       >
         <button
           type="button"
@@ -836,6 +844,10 @@ export default function SourcesPage() {
           onCategoryFilterChange={setCategoryFilter}
           onManageCategories={() => setCategoriesSheetOpen(true)}
           onCategoriesReorder={(next) => void onCategoriesReorder(next)}
+          onDropSourceCategory={(sourceId, category) => {
+            const source = sources.find((s) => s.id === sourceId);
+            if (source) void assignSourceCategory(source, category);
+          }}
           onAddSource={onLibraryAdd}
         />
 

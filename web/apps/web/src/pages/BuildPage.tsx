@@ -8,6 +8,7 @@ import BuildSourcesPanel from "../components/build/BuildSourcesPanel";
 import BuildRecipePanel from "../components/build/BuildRecipePanel";
 import PlanRolesCard from "../components/build/PlanRolesCard";
 import PlanWarningsCard from "../components/build/PlanWarningsCard";
+import PlanCategoryDropStrip from "../components/build/PlanCategoryDropStrip";
 import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -40,11 +41,13 @@ import {
   deleteProfileLayer,
   fetchAutoRecomputeSettings,
   fetchPlanLayers,
+  fetchSourceCategories,
   fetchSources,
   fetchStlNaming,
   replaceProfileLayer,
   setProfileBaseLayer,
   startRecompute,
+  updateSource,
   type ProfileLayer,
   type RoleFilamentRow,
   type SourceSummary,
@@ -109,6 +112,7 @@ function BuildPageContent() {
   const [pendingBaseSourceId, setPendingBaseSourceId] = useState("");
   const [kitImportSetup, setKitImportSetup] = useState<KitImportJobResult | null>(null);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
+  const [categories, setCategories] = useState<string[]>([]);
   const [filamentRefreshKey, setFilamentRefreshKey] = useState(0);
   const [autoRecomputeEnabled, setAutoRecomputeEnabled] = useState(true);
   const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
@@ -214,16 +218,40 @@ function BuildPageContent() {
   const loadProfileData = useCallback(async (profileId: number) => {
     setLoadError(null);
     try {
-      const [layerRows, sourceRows] = await Promise.all([
+      const [layerRows, sourceRows, categoryRows] = await Promise.all([
         fetchPlanLayers(profileId),
         fetchSources(),
+        fetchSourceCategories().catch(() => [] as string[]),
       ]);
       setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
       setSources(sourceRows);
+      setCategories(categoryRows);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
   }, []);
+
+  const assignSourceCategory = useCallback(
+    async (sourceId: number, category: string | null) => {
+      const source = sources.find((s) => s.id === sourceId);
+      if (!source) return;
+      const previous = source.category ?? null;
+      const next = category?.trim() || null;
+      if (previous === next) return;
+      try {
+        const updated = await updateSource(sourceId, { category: next });
+        setSources((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+        toast.success(
+          next
+            ? `Moved “${updated.name}” to ${next}`
+            : `Moved “${updated.name}” to Uncategorised`,
+        );
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [sources],
+  );
 
   useEffect(() => {
     const previousId = previousSelectedProfileIdRef.current;
@@ -252,13 +280,15 @@ function BuildPageContent() {
     let cancelled = false;
     void (async () => {
       try {
-        const [layerRows, sourceRows] = await Promise.all([
+        const [layerRows, sourceRows, categoryRows] = await Promise.all([
           fetchPlanLayers(selectedProfileId),
           fetchSources(),
+          fetchSourceCategories().catch(() => [] as string[]),
         ]);
         if (cancelled) return;
         setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
         setSources(sourceRows);
+        setCategories(categoryRows);
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : String(e));
@@ -671,6 +701,12 @@ function BuildPageContent() {
             )}
 
             <div className="flex flex-col gap-2">
+              <PlanCategoryDropStrip
+                categories={categories}
+                onDropSourceCategory={(sourceId, category) =>
+                  void assignSourceCategory(sourceId, category)
+                }
+              />
               {sourceCardLayers.map((row, index) => {
                 const focusMatchesSource =
                   kitFocus != null &&
@@ -695,6 +731,9 @@ function BuildPageContent() {
                     stlFilter={focusMatchesSource ? kitFocus?.stlFilter ?? null : null}
                     stlFilterFocusSeq={focusMatchesSource ? kitFocus?.seq ?? 0 : 0}
                     onChangeSource={(projectId) => void onChangeLayerProject(row.layer, projectId)}
+                    onAssignCategory={(category) =>
+                      void assignSourceCategory(row.sourceId, category)
+                    }
                     onRemove={
                       row.layerType === "addon"
                         ? () => void onRemoveLayer(row.layer)
@@ -762,7 +801,14 @@ function BuildPageContent() {
 
       <SourceCategorySheet
         open={categoriesSheetOpen}
-        onOpenChange={setCategoriesSheetOpen}
+        onOpenChange={(open) => {
+          setCategoriesSheetOpen(open);
+          if (!open) {
+            void fetchSourceCategories()
+              .then(setCategories)
+              .catch(() => {});
+          }
+        }}
         engineReady={Boolean(health)}
       />
     </div>

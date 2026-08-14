@@ -47,16 +47,21 @@ import {
   nextUnitToComplete,
 } from "../lib/checkoffProgress";
 import {
+  getProgressRowsForPlan,
   loadPersistedCheckoffUi,
   savePersistedCheckoffUi,
+  withProgressRowsForPlan,
   type CheckoffFilterMode,
+  type PersistedProgressRow,
 } from "../lib/persistedCheckoffUi";
+import { moveItemById } from "../lib/reorderList";
 import {
-  mergeVisibleReorder,
-  moveItemById,
-  reconcileOrder,
-  sortByPreferredOrder,
-} from "../lib/reorderList";
+  mergeVisibleProgressReorder,
+  newBagBarId,
+  progressRowSortableId,
+  reconcileProgressRows,
+  type ProgressRowRef,
+} from "../lib/progressListOrder";
 import { flattenReviewParts } from "../lib/reviewParts";
 import { useCopilotUiOptional } from "../context/CopilotUiContext";
 import { useProfileSelection } from "../context/ProfileContext";
@@ -172,9 +177,24 @@ export default function CheckoffPage() {
   const [continuousPrintLayout, setContinuousPrintLayout] = useState(
     persistedUi.continuousPrintLayout,
   );
-  const [partOrderByPlanId, setPartOrderByPlanId] = useState(
-    () => persistedUi.partOrderByPlanId,
-  );
+  const [progressRowsByPlanId, setProgressRowsByPlanId] = useState<
+    Record<string, PersistedProgressRow[]>
+  >(() => {
+    const initial: Record<string, PersistedProgressRow[]> = {
+      ...persistedUi.progressRowsByPlanId,
+    };
+    for (const key of Object.keys(persistedUi.partOrderByPlanId)) {
+      if (!initial[key]?.length) {
+        initial[key] = getProgressRowsForPlan(persistedUi, Number(key));
+      }
+    }
+    for (const key of Object.keys(persistedUi.bagBarsByPlanId)) {
+      if (!initial[key]?.length) {
+        initial[key] = getProgressRowsForPlan(persistedUi, Number(key));
+      }
+    }
+    return initial;
+  });
   const [previewPart, setPreviewPart] = useState<ReviewPart | null>(null);
   const [printPrep, setPrintPrep] = useState(false);
   const [verifyRefreshKey, setVerifyRefreshKey] = useState(0);
@@ -188,8 +208,7 @@ export default function CheckoffPage() {
     watchingCount: 0,
     primaryHostName: null,
   });
-  /** Farm send-queue has active items — drives idle copy (queue vs Export). */
-  const [sendQueueHasItems, setSendQueueHasItems] = useState(false);
+  /** Farm send-queue active count (panel still reports; idle banner removed). */
   const sheetRef = useRef<HTMLElement>(null);
   const location = useLocation();
   const copilot = useCopilotUiOptional();
@@ -232,9 +251,6 @@ export default function CheckoffPage() {
     const timer = window.setTimeout(() => {
       setPendingPreviewId(null);
       window.history.replaceState({}, document.title);
-      toast.message(
-        `Part #${pendingPreviewId} not found yet — Update build or ask the kit advisor to search parts.`,
-      );
     }, 8000);
     return () => window.clearTimeout(timer);
   }, [pendingPreviewId]);
@@ -271,18 +287,21 @@ export default function CheckoffPage() {
     setVerifyQueue({ awaitingCount: 0, watchingCount: 0, primaryHostName: null });
   }, [selectedProfileId]);
 
-  const onSendQueueActiveCountChange = useCallback((count: number) => {
-    setSendQueueHasItems(count > 0);
-  }, []);
-
   useEffect(() => {
-    savePersistedCheckoffUi({
+    let next = loadPersistedCheckoffUi();
+    next = {
+      ...next,
       filter,
       compactMode,
       continuousPrintLayout,
-      partOrderByPlanId,
-    });
-  }, [filter, compactMode, continuousPrintLayout, partOrderByPlanId]);
+    };
+    for (const [planKey, rows] of Object.entries(progressRowsByPlanId)) {
+      const planId = Number(planKey);
+      if (!Number.isFinite(planId)) continue;
+      next = withProgressRowsForPlan(next, planId, rows);
+    }
+    savePersistedCheckoffUi(next);
+  }, [filter, compactMode, continuousPrintLayout, progressRowsByPlanId]);
 
   const planName =
     profiles.find((p) => p.id === selectedProfileId)?.name ??
@@ -310,18 +329,28 @@ export default function CheckoffPage() {
     return flattenReviewParts(review.part_groups).filter((p) => p.included);
   }, [review]);
 
-  const planPartOrder = useMemo(() => {
-    const preferred =
+  const partsById = useMemo(() => {
+    const map = new Map<number, ReviewPart>();
+    for (const p of includedParts) map.set(p.id, p);
+    return map;
+  }, [includedParts]);
+
+  const planProgressRows = useMemo(() => {
+    const preferred: ProgressRowRef[] =
       selectedProfileId == null
         ? []
-        : (partOrderByPlanId[String(selectedProfileId)] ?? []);
-    return reconcileOrder(
+        : (progressRowsByPlanId[String(selectedProfileId)] ?? []);
+    const bags = preferred
+      .filter((r): r is Extract<ProgressRowRef, { kind: "bag" }> => r.kind === "bag")
+      .map((r) => ({ id: r.id, label: r.label }));
+    return reconcileProgressRows(
       preferred,
       includedParts.map((p) => p.id),
+      bags,
     );
-  }, [includedParts, partOrderByPlanId, selectedProfileId]);
+  }, [includedParts, progressRowsByPlanId, selectedProfileId]);
 
-  const filtered = useMemo(() => {
+  const filteredParts = useMemo(() => {
     let rows = includedParts;
     if (filter === "missing") rows = rows.filter((p) => p.missing);
     if (filter === "done") rows = rows.filter((p) => !p.missing);
@@ -334,28 +363,93 @@ export default function CheckoffPage() {
           (p.filament_display || "").toLowerCase().includes(q),
       );
     }
-    return sortByPreferredOrder(rows, planPartOrder, (p) => p.id);
-  }, [includedParts, filter, search, planPartOrder]);
+    return rows;
+  }, [includedParts, filter, search]);
+
+  /** Visible Progress rows: bags always show; parts respect Remaining/Done/search. */
+  const filteredRows = useMemo(() => {
+    const visibleParts = new Set(filteredParts.map((p) => p.id));
+    const searching = search.trim().length > 0;
+    return planProgressRows.filter((row) => {
+      if (row.kind === "part") return visibleParts.has(row.id);
+      if (searching) {
+        return row.label.toLowerCase().includes(search.trim().toLowerCase());
+      }
+      return true;
+    });
+  }, [filteredParts, planProgressRows, search]);
+
+  /** Ordered parts for print sheet / totals helpers. */
+  const filtered = useMemo(() => {
+    const out: ReviewPart[] = [];
+    for (const row of filteredRows) {
+      if (row.kind !== "part") continue;
+      const part = partsById.get(row.id);
+      if (part) out.push(part);
+    }
+    return out;
+  }, [filteredRows, partsById]);
+
+  const setPlanProgressRows = useCallback(
+    (rows: ProgressRowRef[]) => {
+      if (selectedProfileId == null) return;
+      setProgressRowsByPlanId((prev) => ({
+        ...prev,
+        [String(selectedProfileId)]: rows,
+      }));
+    },
+    [selectedProfileId],
+  );
 
   const onProgressDragEnd = useCallback(
     (event: DragEndEvent) => {
       if (selectedProfileId == null) return;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      const visibleBefore = filtered.map((p) => p.id);
-      const visibleAfter = moveItemById(
+      const visibleBefore = filteredRows;
+      const visibleIds = visibleBefore.map(progressRowSortableId);
+      const movedIds = moveItemById(visibleIds, String(active.id), String(over.id));
+      if (movedIds === visibleIds) return;
+      const byId = new Map(visibleBefore.map((r) => [progressRowSortableId(r), r]));
+      const visibleAfter = movedIds
+        .map((id) => byId.get(id))
+        .filter((r): r is ProgressRowRef => r != null);
+      const nextOrder = mergeVisibleProgressReorder(
+        planProgressRows,
         visibleBefore,
-        Number(active.id),
-        Number(over.id),
+        visibleAfter,
       );
-      if (visibleAfter === visibleBefore) return;
-      const nextOrder = mergeVisibleReorder(planPartOrder, visibleBefore, visibleAfter);
-      setPartOrderByPlanId((prev) => ({
-        ...prev,
-        [String(selectedProfileId)]: nextOrder,
-      }));
+      setPlanProgressRows(nextOrder);
     },
-    [filtered, planPartOrder, selectedProfileId],
+    [filteredRows, planProgressRows, selectedProfileId, setPlanProgressRows],
+  );
+
+  const onAddBagBar = useCallback(() => {
+    if (selectedProfileId == null) return;
+    const bags = planProgressRows.filter((r) => r.kind === "bag");
+    const nextLabel = `Bag ${bags.length + 1}`;
+    setPlanProgressRows([
+      ...planProgressRows,
+      { kind: "bag", id: newBagBarId(), label: nextLabel },
+    ]);
+  }, [planProgressRows, selectedProfileId, setPlanProgressRows]);
+
+  const onBagLabelChange = useCallback(
+    (bagId: string, label: string) => {
+      setPlanProgressRows(
+        planProgressRows.map((row) =>
+          row.kind === "bag" && row.id === bagId ? { ...row, label } : row,
+        ),
+      );
+    },
+    [planProgressRows, setPlanProgressRows],
+  );
+
+  const onRemoveBagBar = useCallback(
+    (bagId: string) => {
+      setPlanProgressRows(planProgressRows.filter((row) => !(row.kind === "bag" && row.id === bagId)));
+    },
+    [planProgressRows, setPlanProgressRows],
   );
 
   const grouped = useMemo(() => groupCheckoffParts(filtered), [filtered]);
@@ -553,18 +647,7 @@ export default function CheckoffPage() {
           <PrinterSendQueuePanel
             engineReady={Boolean(health?.ok)}
             emphasizeSendReady={progressMode === "idle"}
-            onActiveCountChange={onSendQueueActiveCountChange}
           />
-          {progressMode === "idle" &&
-          includedParts.length > 0 &&
-          Boolean(health?.ok) &&
-          selectedProfileId != null ? (
-            <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-              {sendQueueHasItems
-                ? "Nothing to verify. Queued .gcode waits here until you Send ready, then confirm when it finishes."
-                : "Nothing to verify. Send a sliced .gcode from Export, then confirm here when it finishes."}
-            </div>
-          ) : null}
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <input
             type="search"
@@ -660,31 +743,65 @@ export default function CheckoffPage() {
             onDragEnd={onProgressDragEnd}
           >
             <SortableContext
-              items={filtered.map((p) => p.id)}
+              items={filteredRows.map(progressRowSortableId)}
               strategy={verticalListSortingStrategy}
             >
               <div
                 className="no-print flex flex-col gap-2 sm:gap-2"
                 aria-label="Reorderable progress parts"
               >
-                {filtered.map((part) => (
-                  <SortableProgressPart
-                    key={part.id}
-                    part={part}
-                    mobile={isMobileLayout}
-                    busy={busyPartId === part.id || toggleBusy}
-                    disabled={toggleBusy}
-                    onToggleUnit={onToggleUnit}
-                    onIncrement={onIncrement}
-                    onDecrement={onDecrement}
-                    onPreview={setPreviewPart}
-                  />
-                ))}
+                {filteredRows.map((row) => {
+                  if (row.kind === "bag") {
+                    return (
+                      <SortableProgressPart
+                        key={progressRowSortableId(row)}
+                        kind="bag"
+                        bagId={row.id}
+                        label={row.label}
+                        mobile={isMobileLayout}
+                        busy={toggleBusy}
+                        disabled={toggleBusy}
+                        onLabelChange={(label) => onBagLabelChange(row.id, label)}
+                        onRemove={() => onRemoveBagBar(row.id)}
+                      />
+                    );
+                  }
+                  const part = partsById.get(row.id);
+                  if (!part) return null;
+                  return (
+                    <SortableProgressPart
+                      key={progressRowSortableId(row)}
+                      kind="part"
+                      part={part}
+                      mobile={isMobileLayout}
+                      busy={busyPartId === part.id || toggleBusy}
+                      disabled={toggleBusy}
+                      onToggleUnit={onToggleUnit}
+                      onIncrement={onIncrement}
+                      onDecrement={onDecrement}
+                      onPreview={setPreviewPart}
+                    />
+                  );
+                })}
               </div>
             </SortableContext>
           </DndContext>
+          {selectedProfileId != null && includedParts.length > 0 ? (
+            <div className="no-print">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-1 h-8 px-2 text-xs text-muted-foreground"
+                disabled={toggleBusy}
+                onClick={onAddBagBar}
+              >
+                Add bag bar
+              </Button>
+            </div>
+          ) : null}
 
-          {/* Printable sheet — paper tokens; off-screen until print (thumbs still load). */}
+          {/* Printable sheet — paper tokens; only this node prints. */}
           <article
             ref={sheetRef}
             aria-hidden={!printPrep}
@@ -693,7 +810,7 @@ export default function CheckoffPage() {
               compactMode && "compact",
               printPrep && continuousPrintLayout && "checkoff-sheet-print-continuous",
               printPrep
-                ? "pointer-events-none absolute top-0 -left-[9999px] w-[880px] print:pointer-events-auto print:static print:left-auto print:w-auto"
+                ? "pointer-events-none fixed top-0 left-0 -z-10 w-[880px] opacity-0 print:pointer-events-auto print:relative print:z-auto print:w-auto print:opacity-100"
                 : "hidden print:block",
             )}
           >

@@ -3,10 +3,8 @@ import { toast } from "sonner";
 import { Check, X } from "lucide-react";
 import {
   dismissPrinterCheckoff,
-  fetchPrintOutcomesSummary,
   fetchPrinterCheckoffLinks,
   verifyPrinterCheckoff,
-  type PrintOutcomesSummary,
   type PrintRejectReason,
   type PrinterCheckoffLink,
   type ReviewPart,
@@ -91,7 +89,6 @@ export default function PrintVerifyPanel({
   const [watchingLinks, setWatchingLinks] = useState<PrinterCheckoffLink[]>([]);
   const [links, setLinks] = useState<PrinterCheckoffLink[]>([]);
   const [failedLinks, setFailedLinks] = useState<PrinterCheckoffLink[]>([]);
-  const [summary, setSummary] = useState<PrintOutcomesSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [rejectTarget, setRejectTarget] = useState<{
     linkId: string;
@@ -108,20 +105,17 @@ export default function PrintVerifyPanel({
       setWatchingLinks([]);
       setLinks([]);
       setFailedLinks([]);
-      setSummary(null);
       return;
     }
     try {
-      const [watching, awaiting, failed, outcomes] = await Promise.all([
+      const [watching, awaiting, failed] = await Promise.all([
         fetchPrinterCheckoffLinks({ state: "watching", profile_id: profileId }),
         fetchPrinterCheckoffLinks({ state: "awaiting_verify", profile_id: profileId }),
         fetchPrinterCheckoffLinks({ state: "host_failed", profile_id: profileId }),
-        fetchPrintOutcomesSummary(profileId),
       ]);
       setWatchingLinks(watching.links);
       setLinks(awaiting.links);
       setFailedLinks(failed.links);
-      setSummary(outcomes);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -227,17 +221,10 @@ export default function PrintVerifyPanel({
   const watchingForDisplay = watchingLinks.length > 0 ? watchingLinks : suppressedAwaiting;
   const showWatching = watchingForDisplay.length > 0;
   const showVerify = actionableLinks.length > 0;
-  const showSummary = summary != null && summary.total_rejected > 0;
 
-  if (!showFailed && !showVerify && !showWatching && !showSummary) {
+  if (!showFailed && !showVerify && !showWatching) {
     return null;
   }
-
-  const topReasons = summary
-    ? Object.entries(summary.by_reason)
-        .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
-        .slice(0, 3)
-    : [];
 
   return (
     <div className={cn("flex flex-col gap-2 print:hidden", className)}>
@@ -381,18 +368,6 @@ export default function PrintVerifyPanel({
               Cancel
             </Button>
           </div>
-        </div>
-      )}
-
-      {showSummary && topReasons.length > 0 && (
-        <div className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Recent print issues: </span>
-          {topReasons.map(([reason, count], i) => (
-            <span key={reason}>
-              {i > 0 ? " · " : ""}
-              {REJECT_REASONS.find((r) => r.value === reason)?.label ?? reason} ({count})
-            </span>
-          ))}
         </div>
       )}
     </div>

@@ -441,9 +441,6 @@ export default function PrinterSendPanel({
       // Preview before Send when objects were matched — don't auto-upload past the preview.
       if (pending) {
         if (proposed && proposed.units.length > 0) {
-          toast.message("Review proposed Progress units, then Send", {
-            description: "Object names were matched locally. Nothing is ticked yet.",
-          });
           return;
         }
         // Unlabeled / empty propose may proceed without checkoff units.
@@ -702,8 +699,7 @@ export default function PrinterSendPanel({
               {bambuBusy ? "Handing off…" : "Open in Bambu Connect"}
             </Button>
             <p className="text-[11.5px] leading-relaxed text-muted-foreground">
-              Hands off a sliced .3mf / .gcode via Bambu Connect on this desk. Install Connect
-              locally; Docker users download the staged file.
+              Opens Bambu Connect with the sliced file. Does not start a print from here.
             </p>
           </CardContent>
         </Card>

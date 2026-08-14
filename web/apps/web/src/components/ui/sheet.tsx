@@ -33,7 +33,7 @@ const SheetContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed inset-y-0 z-50 flex h-full w-full max-w-xl flex-col bg-card shadow-xl duration-200",
+        "fixed inset-y-0 z-50 flex h-full w-full max-w-xl flex-col border-border bg-card text-card-foreground shadow-xl duration-200",
         side === "left"
           ? "left-0 border-r"
           : "right-0 border-l",
