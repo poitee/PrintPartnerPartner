@@ -7,45 +7,47 @@ import {
   type ReactNode,
 } from "react";
 
+type PlanIdHandler = (planId?: number) => void;
+
 type PlanActionsContextValue = {
   openCreatePlan: () => void;
-  openRenamePlan: () => void;
-  openDuplicatePlan: () => void;
-  openDeletePlan: () => void;
-  openArchivePlan: () => void;
+  openRenamePlan: PlanIdHandler;
+  openDuplicatePlan: PlanIdHandler;
+  openDeletePlan: PlanIdHandler;
+  openArchivePlan: PlanIdHandler;
   registerOpenCreate: (fn: (() => void) | null) => void;
-  registerOpenRename: (fn: (() => void) | null) => void;
-  registerOpenDuplicate: (fn: (() => void) | null) => void;
-  registerOpenDelete: (fn: (() => void) | null) => void;
-  registerOpenArchive: (fn: (() => void) | null) => void;
+  registerOpenRename: (fn: PlanIdHandler | null) => void;
+  registerOpenDuplicate: (fn: PlanIdHandler | null) => void;
+  registerOpenDelete: (fn: PlanIdHandler | null) => void;
+  registerOpenArchive: (fn: PlanIdHandler | null) => void;
 };
 
 const PlanActionsContext = createContext<PlanActionsContextValue | null>(null);
 
 export function PlanActionsProvider({ children }: { children: ReactNode }) {
   const openCreateRef = useRef<(() => void) | null>(null);
-  const openRenameRef = useRef<(() => void) | null>(null);
-  const openDuplicateRef = useRef<(() => void) | null>(null);
-  const openDeleteRef = useRef<(() => void) | null>(null);
-  const openArchiveRef = useRef<(() => void) | null>(null);
+  const openRenameRef = useRef<PlanIdHandler | null>(null);
+  const openDuplicateRef = useRef<PlanIdHandler | null>(null);
+  const openDeleteRef = useRef<PlanIdHandler | null>(null);
+  const openArchiveRef = useRef<PlanIdHandler | null>(null);
 
   const registerOpenCreate = useCallback((fn: (() => void) | null) => {
     openCreateRef.current = fn;
   }, []);
 
-  const registerOpenRename = useCallback((fn: (() => void) | null) => {
+  const registerOpenRename = useCallback((fn: PlanIdHandler | null) => {
     openRenameRef.current = fn;
   }, []);
 
-  const registerOpenDuplicate = useCallback((fn: (() => void) | null) => {
+  const registerOpenDuplicate = useCallback((fn: PlanIdHandler | null) => {
     openDuplicateRef.current = fn;
   }, []);
 
-  const registerOpenDelete = useCallback((fn: (() => void) | null) => {
+  const registerOpenDelete = useCallback((fn: PlanIdHandler | null) => {
     openDeleteRef.current = fn;
   }, []);
 
-  const registerOpenArchive = useCallback((fn: (() => void) | null) => {
+  const registerOpenArchive = useCallback((fn: PlanIdHandler | null) => {
     openArchiveRef.current = fn;
   }, []);
 
@@ -53,20 +55,20 @@ export function PlanActionsProvider({ children }: { children: ReactNode }) {
     openCreateRef.current?.();
   }, []);
 
-  const openRenamePlan = useCallback(() => {
-    openRenameRef.current?.();
+  const openRenamePlan = useCallback((planId?: number) => {
+    openRenameRef.current?.(typeof planId === "number" ? planId : undefined);
   }, []);
 
-  const openDuplicatePlan = useCallback(() => {
-    openDuplicateRef.current?.();
+  const openDuplicatePlan = useCallback((planId?: number) => {
+    openDuplicateRef.current?.(typeof planId === "number" ? planId : undefined);
   }, []);
 
-  const openDeletePlan = useCallback(() => {
-    openDeleteRef.current?.();
+  const openDeletePlan = useCallback((planId?: number) => {
+    openDeleteRef.current?.(typeof planId === "number" ? planId : undefined);
   }, []);
 
-  const openArchivePlan = useCallback(() => {
-    openArchiveRef.current?.();
+  const openArchivePlan = useCallback((planId?: number) => {
+    openArchiveRef.current?.(typeof planId === "number" ? planId : undefined);
   }, []);
 
   const value = useMemo(
@@ -97,7 +99,9 @@ export function PlanActionsProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <PlanActionsContext.Provider value={value}>{children}</PlanActionsContext.Provider>
+    <PlanActionsContext.Provider value={value}>
+      {children}
+    </PlanActionsContext.Provider>
   );
 }
 
