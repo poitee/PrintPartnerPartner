@@ -5,6 +5,7 @@
  * Fail-closed: PRINT_PARTNER_API_KEY is required unless HOST is loopback.
  * Pending proposes are bound to the MCP session (mcp-session-id) — one client
  * cannot list/confirm/dismiss another's.
+ * Sessions are bounded (max count + idle/absolute TTL); evict closes transport.
  */
 
 import { randomUUID } from "node:crypto";
@@ -32,7 +33,16 @@ type McpSession = {
   transport: StreamableHTTPServerTransport;
   server: Server;
   pending: Map<string, AssistantProposedAction>;
+  createdAt: number;
+  lastAccessAt: number;
 };
+
+/** Max concurrent HTTP MCP sessions per process. */
+export const MCP_HTTP_SESSION_MAX = 64;
+/** Evict after this much idle time (ms). */
+export const MCP_HTTP_SESSION_IDLE_MS = 30 * 60 * 1000;
+/** Evict after this absolute age (ms), even if active. */
+export const MCP_HTTP_SESSION_ABSOLUTE_MS = 8 * 60 * 60 * 1000;
 
 function extractApiKey(request: FastifyRequest): string | null {
   const header = request.headers.authorization;
@@ -69,6 +79,63 @@ export function assertMcpHttpAllowed(
   return true;
 }
 
+function closeSession(session: McpSession): void {
+  try {
+    void session.transport.close();
+  } catch {
+    /* ignore */
+  }
+  try {
+    void session.server.close();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Drop expired sessions and enforce max count (oldest lastAccess first).
+ * Exported for unit tests.
+ */
+export function pruneMcpSessions(
+  sessions: Map<string, McpSession>,
+  now = Date.now(),
+  opts?: {
+    max?: number;
+    idleMs?: number;
+    absoluteMs?: number;
+  },
+): number {
+  const max = opts?.max ?? MCP_HTTP_SESSION_MAX;
+  const idleMs = opts?.idleMs ?? MCP_HTTP_SESSION_IDLE_MS;
+  const absoluteMs = opts?.absoluteMs ?? MCP_HTTP_SESSION_ABSOLUTE_MS;
+  let evicted = 0;
+
+  for (const [id, session] of sessions) {
+    const idle = now - session.lastAccessAt >= idleMs;
+    const absolute = now - session.createdAt >= absoluteMs;
+    if (idle || absolute) {
+      sessions.delete(id);
+      closeSession(session);
+      evicted += 1;
+    }
+  }
+
+  if (sessions.size > max) {
+    const ranked = [...sessions.entries()].sort(
+      (a, b) => a[1].lastAccessAt - b[1].lastAccessAt,
+    );
+    while (sessions.size > max && ranked.length) {
+      const [id, session] = ranked.shift()!;
+      if (!sessions.has(id)) continue;
+      sessions.delete(id);
+      closeSession(session);
+      evicted += 1;
+    }
+  }
+
+  return evicted;
+}
+
 export async function registerMcpHttpRoutes(
   app: FastifyInstance,
   deps: McpHttpDeps,
@@ -80,11 +147,17 @@ export async function registerMcpHttpRoutes(
   /** Per streamable-HTTP session — not process-wide. */
   const sessions = new Map<string, McpSession>();
 
+  const touch = (session: McpSession) => {
+    session.lastAccessAt = Date.now();
+  };
+
   const mcpAuth = async (request: FastifyRequest, reply: FastifyReply) => {
     if (!assertMcpHttpAllowed(deps.config, request, reply)) return reply;
   };
 
   app.post("/mcp", { preHandler: mcpAuth }, async (request, reply) => {
+    pruneMcpSessions(sessions);
+
     const sessionHeader = request.headers["mcp-session-id"];
     const sessionId =
       typeof sessionHeader === "string" && sessionHeader.trim()
@@ -110,7 +183,20 @@ export async function registerMcpHttpRoutes(
           });
         }
 
+        // After idle/absolute prune: at capacity → refuse (do not unbounded-grow).
+        if (sessions.size >= MCP_HTTP_SESSION_MAX) {
+          return reply.status(503).send({
+            jsonrpc: "2.0",
+            error: {
+              code: -32000,
+              message: "MCP session limit reached; retry later",
+            },
+            id: null,
+          });
+        }
+
         const pending = new Map<string, AssistantProposedAction>();
+        const now = Date.now();
         const server = createProductMcpServer({
           getRepo: deps.getRepo,
           jobs: deps.jobs,
@@ -123,12 +209,28 @@ export async function registerMcpHttpRoutes(
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
-            sessions.set(id, { transport, server, pending });
+            sessions.set(id, {
+              transport,
+              server,
+              pending,
+              createdAt: now,
+              lastAccessAt: Date.now(),
+            });
           },
         });
         transport.onclose = () => {
           const sid = transport.sessionId;
-          if (sid) sessions.delete(sid);
+          if (sid) {
+            const sess = sessions.get(sid);
+            sessions.delete(sid);
+            if (sess) {
+              try {
+                void sess.server.close();
+              } catch {
+                /* ignore */
+              }
+            }
+          }
         };
 
         reply.hijack();
@@ -137,6 +239,7 @@ export async function registerMcpHttpRoutes(
         return;
       }
 
+      touch(existing);
       reply.hijack();
       await existing.transport.handleRequest(request.raw, reply.raw, request.body);
     } catch (err) {
@@ -159,6 +262,7 @@ export async function registerMcpHttpRoutes(
   });
 
   app.get("/mcp", { preHandler: mcpAuth }, async (request, reply) => {
+    pruneMcpSessions(sessions);
     const sessionHeader = request.headers["mcp-session-id"];
     const sessionId =
       typeof sessionHeader === "string" && sessionHeader.trim()
@@ -172,11 +276,13 @@ export async function registerMcpHttpRoutes(
         id: null,
       });
     }
+    touch(session);
     reply.hijack();
     await session.transport.handleRequest(request.raw, reply.raw);
   });
 
   app.delete("/mcp", { preHandler: mcpAuth }, async (request, reply) => {
+    pruneMcpSessions(sessions);
     const sessionHeader = request.headers["mcp-session-id"];
     const sessionId =
       typeof sessionHeader === "string" && sessionHeader.trim()
@@ -193,5 +299,10 @@ export async function registerMcpHttpRoutes(
     reply.hijack();
     await session.transport.handleRequest(request.raw, reply.raw);
     sessions.delete(sessionId);
+    try {
+      void session.server.close();
+    } catch {
+      /* ignore */
+    }
   });
 }
