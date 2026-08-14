@@ -702,12 +702,12 @@ export async function registerJobRoutes(
         const checkoff_units = parseCheckoffUnits(checkoffUnitsRaw);
         const unlabeledParsed = parseUnlabeledNames(unlabeledNamesRaw);
         const unlabeled_names = unlabeledParsed.length ? unlabeledParsed : undefined;
-        if (checkoff_units.length > 0 && profileId == null) {
+        if ((checkoff_units.length > 0 || unlabeled_names) && profileId == null) {
           return sendProblem(
             reply,
             400,
             "Bad Request",
-            "profile_id is required when checkoff_units are provided",
+            "profile_id is required when checkoff_units or unlabeled_names are provided",
           );
         }
         if (profileId != null && !jobs.getRepo().getProfile(profileId)) {

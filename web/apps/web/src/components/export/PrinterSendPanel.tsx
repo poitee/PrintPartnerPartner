@@ -351,6 +351,7 @@ export default function PrinterSendPanel({
       effectiveCheckoffUnits.length > 0 ? effectiveCheckoffUnits : undefined;
     const unlabeled =
       objectPropose?.unmatchedNames?.length ? objectPropose.unmatchedNames : undefined;
+    const trackOnProgress = Boolean(units || unlabeled);
     const printerName =
       linkedPrinters.find((p) => p.id === selectedPrinterId)?.name ?? "printer";
 
@@ -360,9 +361,9 @@ export default function PrinterSendPanel({
           file,
           printer_id: selectedPrinterId,
           start,
-          profile_id: units ? profileId ?? undefined : undefined,
+          profile_id: trackOnProgress ? profileId ?? undefined : undefined,
           checkoff_units: units,
-          unlabeled_names: units ? unlabeled : undefined,
+          unlabeled_names: unlabeled,
         }),
       (snap) => {
         if (snap.status === "error") {

@@ -145,9 +145,12 @@ async function runPrinterUploadJobInner(
   });
 
   const checkoffUnits = input.checkoff_units ?? [];
+  const unlabeledNames = Array.isArray(input.unlabeled_names)
+    ? input.unlabeled_names.filter((n) => typeof n === "string" && n.trim())
+    : [];
   let checkoffLinkId: string | undefined;
   if (
-    checkoffUnits.length > 0 &&
+    (checkoffUnits.length > 0 || unlabeledNames.length > 0) &&
     typeof input.profile_id === "number" &&
     Number.isInteger(input.profile_id) &&
     input.profile_id > 0
@@ -161,7 +164,7 @@ async function runPrinterUploadJobInner(
       remote_path: result.remote_path ?? filename,
       upload_job_id: input.upload_job_id,
       units: checkoffUnits,
-      unlabeled_names: input.unlabeled_names,
+      unlabeled_names: unlabeledNames.length ? unlabeledNames : undefined,
       started: Boolean(result.started),
     });
     checkoffLinkId = link?.id;
