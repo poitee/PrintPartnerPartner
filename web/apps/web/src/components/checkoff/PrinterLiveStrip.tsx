@@ -87,7 +87,10 @@ function pillClass(tone: ReturnType<typeof printerLiveStripTone>): string {
 
 /**
  * Sticky Progress banner: live status for fleet machines linked to a printer host.
- * Moonraker/PrusaLink: reconcile may queue verify. Bambu: status poll only.
+ * Moonraker/PrusaLink: reconcile may queue verify after finish (no Progress mutation).
+ * Bambu: status poll only.
+ * CoS lock: never auto-tick Progress units from printing/complete host status —
+ * units stay operator-ticked; Confirm in verify is the only automated path.
  */
 export default function PrinterLiveStrip({
   engineReady,
