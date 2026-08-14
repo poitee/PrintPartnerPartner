@@ -1,6 +1,9 @@
 /**
  * Shared product MCP handlers (stdio + streamable HTTP).
  * Mutating tools only propose; confirm_apply / dismiss_proposed_action apply.
+ *
+ * Callers pass a pending map scoped to one MCP process (stdio) or one HTTP
+ * MCP session — never a shared cross-client map.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -26,7 +29,7 @@ export const META_TOOLS = [
   {
     name: "list_pending_actions",
     description:
-      "List proposed mutations waiting for confirm_apply (same as SPA Apply cards).",
+      "List proposed mutations waiting for confirm_apply in this MCP session (same confirm-to-apply semantics as Apply cards).",
     inputSchema: { type: "object" as const, properties: {} },
   },
   {
@@ -87,13 +90,19 @@ export type ProductMcpDeps = {
   config: ServerConfig;
   /** Optional default plan when tool args omit plan_id. */
   defaultPlanId?: number | null;
-  /** Shared pending map so HTTP requests share confirm_apply state. */
+  /**
+   * Pending proposes for this MCP session / stdio process only.
+   * HTTP mounts one map per streamable-HTTP session.
+   */
   pending: Map<string, AssistantProposedAction>;
+  /** Optional tenant for jobs started via confirm_apply. */
+  tenantId?: string;
 };
 
 export function createProductMcpServer(deps: ProductMcpDeps): Server {
   const { getRepo, jobs, config, pending } = deps;
   const defaultPlanId = deps.defaultPlanId ?? null;
+  const tenantId = deps.tenantId;
 
   function toolCtx(): ToolContext {
     const repo = getRepo();
@@ -203,6 +212,7 @@ export function createProductMcpServer(deps: ProductMcpDeps): Server {
         const result = await applyAssistantAction(toApply, {
           repo: getRepo(),
           jobs,
+          tenantId,
         });
         if (result.ok) pending.delete(id);
         return {
@@ -238,5 +248,7 @@ export function createProductMcpServer(deps: ProductMcpDeps): Server {
   return server;
 }
 
-/** Process-wide pending proposes for HTTP MCP (one writer = app process). */
-export const httpMcpPending = new Map<string, AssistantProposedAction>();
+export function isLoopbackBindHost(host: string): boolean {
+  const h = host.trim().toLowerCase();
+  return h === "127.0.0.1" || h === "::1" || h === "localhost";
+}
