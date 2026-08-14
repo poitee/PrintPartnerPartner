@@ -730,18 +730,11 @@ export default function CheckoffPage() {
             </p>
           </CardContent>
         </Card>
-      ) : loading && !review ? (
-        <Card className="no-print">
-          <CardContent className="flex items-center gap-2 pt-6">
-            <Spinner className="size-4" />
-            <p className="text-sm text-muted-foreground">Loading progress…</p>
-          </CardContent>
-        </Card>
       ) : (
         <>
           {/*
             GRE-223 / GRE-226: Add bag/sort stays visible whenever a plan is selected —
-            not gated on health strip, filter emptiness, or loading.
+            including while review is still loading. Not gated on health strip or filter.
           */}
           {selectedProfileId != null ? (
             <div className="no-print">
@@ -758,6 +751,15 @@ export default function CheckoffPage() {
             </div>
           ) : null}
 
+          {loading && !review ? (
+            <Card className="no-print">
+              <CardContent className="flex items-center gap-2 pt-6">
+                <Spinner className="size-4" />
+                <p className="text-sm text-muted-foreground">Loading progress…</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <>
           {filteredRows.length === 0 ? (
             <div className="no-print">{renderEmpty()}</div>
           ) : (
@@ -873,6 +875,8 @@ export default function CheckoffPage() {
               ))}
             </article>
           ) : null}
+            </>
+          )}
         </>
       )}
 

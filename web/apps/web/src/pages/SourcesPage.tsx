@@ -1309,19 +1309,30 @@ export default function SourcesPage() {
                     <FieldLabel htmlFor="source-url">URL</FieldLabel>
                     <InputGroup className="mt-1">
                       <InputGroupAddon align="inline-start">
-                        <InputGroupText>https://</InputGroupText>
+                        <InputGroupText>
+                          {(form.url.match(/^(https?):\/\//i)?.[1]?.toLowerCase() ===
+                          "http"
+                            ? "http"
+                            : "https") + "://"}
+                        </InputGroupText>
                       </InputGroupAddon>
                       <InputGroupInput
                         id="source-url"
                         value={form.url.replace(/^https?:\/\//i, "")}
                         onChange={(e) => {
                           const raw = e.target.value.trim();
-                          const withScheme = raw
-                            ? raw.match(/^https?:\/\//i)
-                              ? raw
-                              : `https://${raw}`
-                            : "";
-                          setForm((f) => ({ ...f, url: withScheme }));
+                          if (!raw) {
+                            setForm((f) => ({ ...f, url: "" }));
+                            return;
+                          }
+                          if (/^https?:\/\//i.test(raw)) {
+                            setForm((f) => ({ ...f, url: raw }));
+                            return;
+                          }
+                          const existing = form.url.match(/^(https?):\/\//i)?.[1];
+                          const scheme =
+                            existing?.toLowerCase() === "http" ? "http" : "https";
+                          setForm((f) => ({ ...f, url: `${scheme}://${raw}` }));
                         }}
                         placeholder={
                           form.source_kind === "printables"
