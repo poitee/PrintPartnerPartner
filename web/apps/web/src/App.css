@@ -1085,7 +1085,6 @@
   background: var(--paper-bg);
   color: var(--paper-fg);
   max-width: none;
-  width: 100%;
   margin: 0 0 2rem;
   padding: 2.5rem 2.75rem;
   border-radius: 6px;

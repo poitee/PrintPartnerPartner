@@ -274,7 +274,11 @@ export default function CheckoffPage() {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
     });
     const sheet = sheetRef.current;
-    if (sheet) await waitForSheetThumbnails(sheet);
+    if (!sheet) {
+      setPrintPrep(false);
+      return;
+    }
+    await waitForSheetThumbnails(sheet);
     window.print();
   }, []);
 
@@ -580,7 +584,7 @@ export default function CheckoffPage() {
                 variant="ghost"
                 className="min-h-10 w-full sm:w-auto"
                 onClick={() => void onPrint()}
-                disabled={selectedProfileId == null || includedParts.length === 0}
+                disabled={selectedProfileId == null || filtered.length === 0}
               >
                 <Printer className="mr-1 h-4 w-4" />
                 Print
