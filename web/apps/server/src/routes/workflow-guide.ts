@@ -15,7 +15,7 @@ The active plan is shared across Plan, Parts, Progress, and Export.
 
 Register GitHub repos, local folders, or zip archives. Assign **categories**, set **import rules** (which folders contain STLs), and **sync** to download files. The source library shows sync status and **update available** badges when upstream repos change. Use the global STL search box to find files by name or path across every synced repo.
 
-## 2. Build
+## 2. Plan
 
 Open **Plan** for the active plan:
 
@@ -28,11 +28,11 @@ Open **Plan** for the active plan:
 - **Share build** — export a \`.print-partner-kit\` zip to share plan config (not STLs).
 - **Export STLs** — export from Plan or Parts, grouped by color only or color + source directory.
 
-## 3. Review
+## 3. Parts
 
 Confirm a **validation summary** grouped by role and filament. Browse the full included-parts list with **3D STL previews**, edit quantities, and fix issues (cards link back to Plan when needed). **Export STLs** writes parts organized by role and folder structure.
 
-## 4. Checkoff
+## 4. Progress
 
 Track **per-unit print progress** on the shop floor (saved per plan). Filter to remaining or done parts, search, print an HTML checklist, and **Export remaining** STL units from this plan's checkoff for the next print batch. On-scroll **3D thumbnails** render client-side for each part.
 
@@ -40,7 +40,7 @@ Track **per-unit print progress** on the shop floor (saved per plan). Filter to 
 
 - **⌘K / Ctrl+K** — command palette for sync, recompute, exports, and navigation.
 - **Theme** — light, dark, or system via the sidebar or header; the left sidebar can be **collapsed** to an icon rail (toggle at the bottom).
-- **Progress widget** — the sidebar shows a first-run checklist until you complete Sources through Checkoff once; it then hides automatically.
+- **Progress widget** — the sidebar shows a first-run checklist until you complete Sources through Progress once; it then hides automatically.
 - **Save / Import colors** — export role colors as JSON on Plan; **Advanced** menu has reset and thumbnail recovery options.
 - **Share build** — export plan config as a \`.print-partner-kit\` zip (not STLs).
 - **Spoolman** — connect in Settings → Integrations for live filament inventory on Plan and spool weights in Parts / Progress. See the Spoolman integration doc in the repo.

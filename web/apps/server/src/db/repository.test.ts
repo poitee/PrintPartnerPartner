@@ -2,19 +2,36 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getDb, SqliteDatabase } from "./client.js";
+import { getDb, SqliteDatabase, type DrizzleDb } from "./client.js";
 import { AppRepository } from "./repository.js";
+import * as schema from "./schema.js";
 
-function withRepo(fn: (repo: AppRepository) => void) {
+function withRepo(fn: (repo: AppRepository, db: DrizzleDb) => void) {
   const dir = mkdtempSync(join(tmpdir(), "pp-db-"));
   const sqlite = new SqliteDatabase(dir);
   sqlite.connect();
   try {
-    fn(new AppRepository(getDb(sqlite), undefined, sqlite.reposDir));
+    fn(new AppRepository(getDb(sqlite), undefined, sqlite.reposDir), getDb(sqlite));
   } finally {
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+function insertIncludedPart(db: DrizzleDb, profileId: number, filename = "bracket.stl") {
+  return db
+    .insert(schema.parts)
+    .values({
+      tenantId: "default",
+      profileId,
+      matchKey: filename,
+      relativePath: filename,
+      filename,
+      quantityEffective: 1,
+      included: true,
+    })
+    .returning()
+    .get()!;
 }
 
 describe("AppRepository", () => {
@@ -31,14 +48,17 @@ describe("AppRepository", () => {
       const plan = repo.createProfile("My Plan");
       expect(plan.name).toBe("My Plan");
       expect(plan.archived_at).toBeNull();
-      expect(plan.last_used_at).toBeNull();
+      expect(plan.last_used_at).toBeTruthy();
       expect(repo.listProfiles()).toHaveLength(1);
     });
   });
 
-  it("archives a plan and keeps it listed without unarchive", () => {
-    withRepo((repo) => {
-      const plan = repo.createProfile("Done kit");
+  it("rejects archive when remaining units are not zero", () => {
+    withRepo((repo, db) => {
+      const plan = repo.createProfile("In progress");
+      const part = insertIncludedPart(db, plan.id);
+      expect(() => repo.archiveProfile(plan.id)).toThrow(/remaining/i);
+      repo.patchPartProgress(part.id, 0, true);
       const archived = repo.archiveProfile(plan.id);
       expect(archived.archived_at).toBeTruthy();
       expect(repo.listProfiles().find((p) => p.id === plan.id)?.archived_at).toBeTruthy();
@@ -47,8 +67,10 @@ describe("AppRepository", () => {
   });
 
   it("touches last_used_at and duplicates as a fresh non-archived spine plan", () => {
-    withRepo((repo) => {
+    withRepo((repo, db) => {
       const plan = repo.createProfile("Template");
+      const part = insertIncludedPart(db, plan.id);
+      repo.patchPartProgress(part.id, 0, true);
       repo.archiveProfile(plan.id);
       const touched = repo.touchProfileLastUsed(plan.id);
       expect(touched.last_used_at).toBeTruthy();

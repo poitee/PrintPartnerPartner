@@ -81,8 +81,11 @@ export function useTouchProfileLastUsedMutation() {
   return useMutation({
     mutationFn: (id: number) => touchProfileLastUsed(id),
     onSuccess: (updated) => {
+      // Merge only last_used_at so a delayed touch cannot clobber archived_at.
       qc.setQueryData<ProfileSummary[]>(queryKeys.profiles, (prev) =>
-        upsertProfile(prev, updated),
+        (prev ?? []).map((p) =>
+          p.id === updated.id ? { ...p, last_used_at: updated.last_used_at } : p,
+        ),
       );
     },
   });
