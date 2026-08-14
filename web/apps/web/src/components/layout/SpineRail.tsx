@@ -78,7 +78,7 @@ function SidebarTooltip({
   );
 }
 
-/** Left spine rail: plan picker, workflow stages (incl. Export), Settings/Help. */
+/** Left spine rail: plan picker, desk-loop stages, stage-weight utility (Plans·Printers·Settings·Help). */
 export default function SpineRail({
   collapsed,
   onToggleCollapsed,
@@ -88,7 +88,7 @@ export default function SpineRail({
 }: Props) {
   const location = useLocation();
   const { selectedProfileId } = useProfileSelection();
-  const footerLinks = spineUtilityNavItems(selectedProfileId).map((item) => ({
+  const utilityLinks = spineUtilityNavItems(selectedProfileId).map((item) => ({
     ...item,
     icon: UTILITY_ICONS[item.id],
     match: location.pathname === item.path,
@@ -140,44 +140,60 @@ export default function SpineRail({
         />
 
         <Separator className={cn(collapsed && "mx-1")} />
+
+        {/* Stage-weight utility rows (not desk-loop / WorkflowProgress). Flush via onStageNavigate. */}
+        <nav
+          className={cn("flex flex-col", collapsed && "gap-1")}
+          aria-label="Utility"
+        >
+          {utilityLinks.map((link) => {
+            if (collapsed) {
+              return (
+                <SidebarTooltip key={link.id} label={link.label} collapsed>
+                  <NavLink
+                    to={link.to}
+                    onClick={(e) => onStageNavigate(link.to, e)}
+                    className={cn(
+                      "relative flex items-center justify-center rounded-md p-2.5 transition-colors",
+                      link.match
+                        ? "bg-primary/12 text-primary"
+                        : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                    )}
+                    aria-label={link.label}
+                  >
+                    <link.icon className="h-4 w-4" />
+                  </NavLink>
+                </SidebarTooltip>
+              );
+            }
+            return (
+              <NavLink
+                key={link.id}
+                to={link.to}
+                onClick={(e) => onStageNavigate(link.to, e)}
+                className={cn(
+                  "relative flex items-center gap-2.5 rounded-md px-2.5 py-2 transition-colors",
+                  link.match
+                    ? "bg-primary/12 text-primary"
+                    : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                )}
+              >
+                <link.icon className="h-4 w-4 shrink-0" />
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 text-[13px] font-medium",
+                    link.match && "font-semibold",
+                  )}
+                >
+                  {link.label}
+                </span>
+              </NavLink>
+            );
+          })}
+        </nav>
       </div>
 
       <div className={cn("mt-auto space-y-2 border-t border-border", collapsed ? "p-2" : "p-3")}>
-        {!collapsed && (
-          <div className="flex flex-wrap gap-x-3 gap-y-1 px-1.5 text-xs text-muted-foreground">
-            {footerLinks.map((link) => (
-              <NavLink
-                key={link.label}
-                to={link.to}
-                onClick={(e) => onStageNavigate(link.to, e)}
-                className={cn(
-                  "font-medium transition-colors hover:text-foreground",
-                  link.match && "text-primary",
-                )}
-              >
-                {link.label}
-              </NavLink>
-            ))}
-          </div>
-        )}
-
-        {collapsed &&
-          footerLinks.map((link) => (
-            <SidebarTooltip key={link.label} label={link.label} collapsed>
-              <NavLink
-                to={link.to}
-                onClick={(e) => onStageNavigate(link.to, e)}
-                className={cn(
-                  "flex items-center justify-center rounded-md p-2.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground",
-                  link.match && "bg-primary/12 text-primary",
-                )}
-                aria-label={link.label}
-              >
-                <link.icon className="h-4 w-4" />
-              </NavLink>
-            </SidebarTooltip>
-          ))}
-
         {!collapsed && (
           <>
             <div className="px-1">
