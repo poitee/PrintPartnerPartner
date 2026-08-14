@@ -3,7 +3,6 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   BookOpen,
   Layers,
-  List,
   PanelLeftClose,
   PanelLeftOpen,
   Printer,
@@ -21,7 +20,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "../ui/tooltip";
-import { helpRoute, plansRoute, printersRoute, settingsRoute } from "../../lib/routes";
+import {
+  spineUtilityNavItems,
+  type SpineUtilityId,
+} from "../../lib/spineUtilityNav";
 import { cn } from "../../lib/utils";
 import type { WorkflowStage, WorkflowStageId } from "../../lib/workflowStages";
 import { useProfileSelection } from "../../context/ProfileContext";
@@ -32,6 +34,16 @@ type Props = {
   stages: WorkflowStage[];
   activeId: WorkflowStageId | null;
   onStageNavigate: (to: string, e: MouseEvent<HTMLAnchorElement>) => void;
+};
+
+const UTILITY_ICONS: Record<
+  SpineUtilityId,
+  typeof Layers
+> = {
+  plans: Layers,
+  printers: Printer,
+  settings: Settings,
+  help: BookOpen,
 };
 
 function BrandMark({ className }: { className?: string }) {
@@ -76,28 +88,11 @@ export default function SpineRail({
 }: Props) {
   const location = useLocation();
   const { selectedProfileId } = useProfileSelection();
-  const allPlansTo = plansRoute(selectedProfileId);
-
-  const footerLinks = [
-    {
-      to: printersRoute(),
-      label: "Printers",
-      icon: Printer,
-      match: location.pathname === "/printers",
-    },
-    {
-      to: settingsRoute(),
-      label: "Settings",
-      icon: Settings,
-      match: location.pathname === "/settings",
-    },
-    {
-      to: helpRoute(),
-      label: "Help",
-      icon: BookOpen,
-      match: location.pathname === "/help",
-    },
-  ];
+  const footerLinks = spineUtilityNavItems(selectedProfileId).map((item) => ({
+    ...item,
+    icon: UTILITY_ICONS[item.id],
+    match: location.pathname === item.path,
+  }));
 
   return (
     <aside
@@ -123,16 +118,6 @@ export default function SpineRail({
           <div className="space-y-2 rounded-md border border-border bg-muted/30 p-2">
             <PlanPicker className="w-full" />
             <CreatePlanButton className="w-full" variant="outline" size="sm" />
-            <NavLink
-              to={allPlansTo}
-              onClick={(e) => onStageNavigate(allPlansTo, e)}
-              className={cn(
-                "block px-1 text-xs text-muted-foreground transition-colors hover:text-foreground",
-                location.pathname === "/plans" && "text-primary",
-              )}
-            >
-              All plans
-            </NavLink>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-1">
@@ -143,19 +128,6 @@ export default function SpineRail({
             </SidebarTooltip>
             <SidebarTooltip label="Create plan" collapsed>
               <CreatePlanButton size="icon" showLabel={false} variant="ghost" className="mx-auto" />
-            </SidebarTooltip>
-            <SidebarTooltip label="All plans" collapsed>
-              <NavLink
-                to={allPlansTo}
-                onClick={(e) => onStageNavigate(allPlansTo, e)}
-                className={cn(
-                  "flex items-center justify-center rounded-md p-2.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground",
-                  location.pathname === "/plans" && "bg-primary/12 text-primary",
-                )}
-                aria-label="All plans"
-              >
-                <List className="h-4 w-4" />
-              </NavLink>
             </SidebarTooltip>
           </div>
         )}
@@ -177,6 +149,7 @@ export default function SpineRail({
               <NavLink
                 key={link.label}
                 to={link.to}
+                onClick={(e) => onStageNavigate(link.to, e)}
                 className={cn(
                   "font-medium transition-colors hover:text-foreground",
                   link.match && "text-primary",
@@ -193,6 +166,7 @@ export default function SpineRail({
             <SidebarTooltip key={link.label} label={link.label} collapsed>
               <NavLink
                 to={link.to}
+                onClick={(e) => onStageNavigate(link.to, e)}
                 className={cn(
                   "flex items-center justify-center rounded-md p-2.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground",
                   link.match && "bg-primary/12 text-primary",
