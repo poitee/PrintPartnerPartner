@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bagRowId,
+  defaultBagBarLabel,
   mergeVisibleProgressReorder,
   newBagBarId,
   parseProgressRowId,
@@ -75,5 +76,11 @@ describe("progressListOrder", () => {
 
   it("creates bag ids", () => {
     expect(newBagBarId().length).toBeGreaterThan(4);
+  });
+
+  it("labels new bag/sort bars Bag 1, Bag 2, …", () => {
+    expect(defaultBagBarLabel(0)).toBe("Bag 1");
+    expect(defaultBagBarLabel(1)).toBe("Bag 2");
+    expect(defaultBagBarLabel(3)).toBe("Bag 4");
   });
 });
