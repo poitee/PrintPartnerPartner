@@ -209,7 +209,7 @@ export default function PlanTray() {
               navigate(to);
             }}
           >
-            Export hub
+            Export {'>'}
           </Button>
           <Button size="sm" className="h-8" asChild>
             <Link to={planRoute(selectedProfileId)}>Open plan →</Link>

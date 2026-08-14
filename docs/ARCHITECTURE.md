@@ -84,22 +84,23 @@ Long-running work — repo sync, plan recompute, STL pack export, HTML checklist
 
 ```mermaid
 flowchart LR
-  Sources[Sources] --> Build[Build]
-  Build --> Review[Review]
-  Review --> Checkoff[Checkoff]
-  Sources -->|sync| DB[(App DB)]
-  Build -->|recompute| DB
-  Review -->|export STLs| FS[exports/]
-  Checkoff -->|export missing STLs| FS
-  Checkoff -->|progress| DB
+  Library[Library] --> Plan[Plan]
+  Plan --> Parts[Parts]
+  Parts --> Progress[Progress]
+  Progress --> Export[Export]
+  Library -->|sync| DB[(App DB)]
+  Plan -->|recompute| DB
+  Export -->|export STLs| FS[exports/]
+  Progress -->|progress| DB
 ```
 
-1. **Sources** — register GitHub/local/zip sources; categories; import rules; cross-repo STL search; update-available badges.
-2. **Build** — set role filament colors, attach sources, pick files and quantities, update build; inline repo Docs viewer; kit/manifest options; export STLs or share a plan bundle.
-3. **Review** — validation summary by role/filament; full parts list with 3D previews; export STLs by role and folder.
-4. **Checkoff** — per-unit progress (saved per plan), printable checklist, and missing-STL export.
+1. **Library** — register GitHub/local/zip sources; categories; import rules; cross-repo STL search; update-available badges.
+2. **Plan** — set role filament colors, attach sources, pick files and quantities, rebuild plan; inline repo Docs viewer; kit/manifest options.
+3. **Parts** — validation summary by role/filament; full parts list with 3D previews.
+4. **Progress** — per-unit progress (saved per plan), printable checklist, and missing-STL export.
+5. **Export** — STL packs, share bundles, checklist HTML, 3MF, and printer send.
 
-Plan management (header **Create build**, **Manage builds** on Build, sidebar **Builds**) is separate from this pipeline; the active plan is shared across Build, Review, and Checkoff.
+Plan switching lives in the spine **PlanPicker**; create/rename/duplicate/delete open from Create plan or the Plan page overflow menu. The active plan is shared across Plan, Parts, Progress, and Export.
 
 ## Kit advisor (assistant as tool host)
 

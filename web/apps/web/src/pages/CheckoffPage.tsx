@@ -21,8 +21,12 @@ import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import EmptyState from "../components/layout/EmptyState";
-import PrinterLiveStrip from "../components/checkoff/PrinterLiveStrip";
-import PrintVerifyPanel from "../components/checkoff/PrintVerifyPanel";
+import PrinterLiveStrip, {
+  type PrinterLiveStripState,
+} from "../components/checkoff/PrinterLiveStrip";
+import PrintVerifyPanel, {
+  type PrintVerifyQueueState,
+} from "../components/checkoff/PrintVerifyPanel";
 import PrinterSendQueuePanel from "../components/export/PrinterSendQueuePanel";
 import SortableProgressPart from "../components/checkoff/SortableProgressPart";
 import PartPreviewDialog from "../components/parts/PartPreviewDialog";
@@ -140,7 +144,7 @@ function CheckoffSheetRow({
 }
 
 const FILTER_MODES: { mode: CheckoffFilterMode; label: string }[] = [
-  { mode: "missing", label: "Missing" },
+  { mode: "missing", label: "Remaining" },
   { mode: "done", label: "Done" },
   { mode: "all", label: "All" },
 ];
@@ -174,6 +178,17 @@ export default function CheckoffPage() {
   const [previewPart, setPreviewPart] = useState<ReviewPart | null>(null);
   const [printPrep, setPrintPrep] = useState(false);
   const [verifyRefreshKey, setVerifyRefreshKey] = useState(0);
+  const [liveStrip, setLiveStrip] = useState<PrinterLiveStripState>({
+    anyPrinting: false,
+    activeIntegrationIds: [],
+    hostCount: 0,
+  });
+  const [verifyQueue, setVerifyQueue] = useState<PrintVerifyQueueState>({
+    awaitingCount: 0,
+    primaryHostName: null,
+  });
+  /** Farm send-queue has active items — drives idle copy (queue vs Export). */
+  const [sendQueueHasItems, setSendQueueHasItems] = useState(false);
   const sheetRef = useRef<HTMLElement>(null);
   const location = useLocation();
   const copilot = useCopilotUiOptional();
@@ -250,6 +265,14 @@ export default function CheckoffPage() {
       void reload(selectedProfileId);
     }
   }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
+
+  useEffect(() => {
+    setVerifyQueue({ awaitingCount: 0, primaryHostName: null });
+  }, [selectedProfileId]);
+
+  const onSendQueueActiveCountChange = useCallback((count: number) => {
+    setSendQueueHasItems(count > 0);
+  }, []);
 
   useEffect(() => {
     savePersistedCheckoffUi({
@@ -340,6 +363,35 @@ export default function CheckoffPage() {
   const loadError = workspaceError;
   const toggleBusy = busyPartId != null;
 
+  const suppressIntegrationIds = useMemo(
+    () => new Set(liveStrip.activeIntegrationIds),
+    [liveStrip.activeIntegrationIds],
+  );
+
+  /** Prefer verify when any finished job awaits; printing only when nothing to confirm. */
+  const progressMode: "printing" | "verify" | "idle" =
+    verifyQueue.awaitingCount > 0
+      ? "verify"
+      : liveStrip.anyPrinting
+        ? "printing"
+        : "idle";
+
+  const progressEyebrow =
+    selectedProfileId != null && includedParts.length > 0
+      ? `${planName} · ${includedParts.length} part${includedParts.length === 1 ? "" : "s"}`
+      : selectedProfileId != null
+        ? planName
+        : null;
+
+  const progressDescription =
+    includedParts.length === 0
+      ? "Mark each unit as you finish it on the shop floor."
+      : progressMode === "printing"
+        ? "Verify when a print finishes. Remaining parts stay below."
+        : progressMode === "verify"
+          ? `${verifyQueue.primaryHostName?.trim() || "Printer"} finished. Confirm what landed.`
+          : "Mark remaining units. Verify waits on the next finished print.";
+
   const onToggleUnit = useCallback(
     (part: ReviewPart, unitIndex: number) => {
       const next = !part.print_units[unitIndex];
@@ -420,12 +472,9 @@ export default function CheckoffPage() {
         <PageHeader
           icon={CheckSquare}
           accent
+          eyebrow={progressEyebrow}
           title="Progress"
-          description={
-            includedParts.length > 0
-              ? `${printedLine} · saved to this plan`
-              : "Mark each unit as you finish it on the shop floor."
-          }
+          description={progressDescription}
           actions={
             <PageHeaderActions>
               <Button
@@ -481,22 +530,47 @@ export default function CheckoffPage() {
         <div className="checkoff-sticky flex flex-col gap-2">
           <PrinterLiveStrip
             engineReady={Boolean(health?.ok)}
+            onLiveStateChange={setLiveStrip}
             onCheckoffUpdate={(profileId) => {
               if (selectedProfileId != null && profileId === selectedProfileId) {
                 setVerifyRefreshKey((k) => k + 1);
               }
             }}
           />
-          <PrinterSendQueuePanel engineReady={Boolean(health?.ok)} />
           <PrintVerifyPanel
             engineReady={Boolean(health?.ok)}
             profileId={selectedProfileId}
             parts={includedParts}
             refreshKey={verifyRefreshKey}
+            suppressIntegrationIds={suppressIntegrationIds}
+            onQueueChange={setVerifyQueue}
             onVerified={() => {
               if (selectedProfileId != null) void reload(selectedProfileId);
             }}
           />
+          <PrinterSendQueuePanel
+            engineReady={Boolean(health?.ok)}
+            emphasizeSendReady={progressMode === "idle"}
+            onActiveCountChange={onSendQueueActiveCountChange}
+          />
+          {liveStrip.anyPrinting &&
+          verifyQueue.awaitingCount === 0 &&
+          includedParts.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Verify appears when this print finishes. We don&apos;t mark parts from a live
+              job.
+            </p>
+          ) : null}
+          {progressMode === "idle" &&
+          includedParts.length > 0 &&
+          Boolean(health?.ok) &&
+          selectedProfileId != null ? (
+            <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+              {sendQueueHasItems
+                ? "Nothing to verify. Queued .gcode waits here until you Send ready, then confirm when it finishes."
+                : "Nothing to verify. Send a sliced .gcode from Export, then confirm here when it finishes."}
+            </div>
+          ) : null}
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <input
             type="search"

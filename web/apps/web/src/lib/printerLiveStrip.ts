@@ -1,5 +1,10 @@
 import type { PrinterHostStatus } from "../api/engine";
 
+export type LiveStripHostType = "moonraker" | "prusalink" | "bambu";
+
+/** Poll linked hosts for Progress — avoid hammering LAN printers. */
+export const PRINTER_LIVE_STRIP_POLL_MS = 5_000;
+
 /** Format optional ETA for the Progress live strip. */
 export function formatEtaSeconds(etaSeconds: number | undefined | null): string | null {
   if (etaSeconds == null || !Number.isFinite(etaSeconds) || etaSeconds < 0) return null;
@@ -10,6 +15,24 @@ export function formatEtaSeconds(etaSeconds: number | undefined | null): string 
   const h = Math.floor(m / 60);
   const rem = m % 60;
   return rem > 0 ? `~${h}h ${rem}m` : `~${h}h`;
+}
+
+export function printerHostTypeLabel(type: LiveStripHostType): string {
+  switch (type) {
+    case "moonraker":
+      return "Moonraker";
+    case "prusalink":
+      return "PrusaLink";
+    case "bambu":
+      return "Bambu";
+    default:
+      return type;
+  }
+}
+
+/** `Shop Voron · Moonraker` */
+export function formatPrinterHostCaption(name: string, type: LiveStripHostType): string {
+  return `${name} · ${printerHostTypeLabel(type)}`;
 }
 
 export function printerLiveStripTone(
@@ -29,27 +52,24 @@ export function printerLiveStripTone(
 }
 
 /**
- * One-line summary for a linked host on Progress.
- * Example: `Shop Voron · Printing frame_x.gcode · 34% · ETA ~12m`
+ * Job line for the Progress live strip (name/type shown separately).
+ * Example: `Printing frame_x.gcode · 34% · ETA ~12m`
  */
-export function formatPrinterLiveLine(opts: {
-  name: string;
-  status: PrinterHostStatus | null | undefined;
-}): string {
-  const { name, status } = opts;
-  if (!status) return `${name} · …`;
+export function formatPrinterJobLine(
+  status: PrinterHostStatus | null | undefined,
+): string {
+  if (!status) return "…";
 
-  if (status.state === "offline") {
-    return `${name} · Offline`;
-  }
+  if (status.state === "offline") return "Offline";
   if (status.state === "error") {
     const detail = status.message?.trim();
-    return detail ? `${name} · Error · ${detail}` : `${name} · Error`;
+    return detail ? `Error · ${detail}` : "Error";
   }
   if (status.state === "printing" || status.state === "paused") {
-    const parts = [name, status.state === "paused" ? "Paused" : "Printing"];
+    const verb = status.state === "paused" ? "Paused" : "Printing";
     const filename = status.filename?.trim();
-    if (filename) parts.push(filename);
+    const head = filename ? `${verb} ${filename}` : verb;
+    const parts = [head];
     if (status.progress != null && Number.isFinite(status.progress)) {
       parts.push(`${Math.round(status.progress)}%`);
     }
@@ -59,11 +79,45 @@ export function formatPrinterLiveLine(opts: {
   }
   if (status.state === "complete") {
     const filename = status.filename?.trim();
-    return filename ? `${name} · Complete · ${filename}` : `${name} · Complete`;
+    return filename ? `Complete · ${filename}` : "Complete";
   }
-  if (status.state === "idle") {
-    return `${name} · Idle`;
-  }
+  if (status.state === "idle") return "Idle";
   const msg = status.message?.trim();
-  return msg ? `${name} · ${msg}` : `${name} · ${status.state}`;
+  return msg || status.state;
+}
+
+/** Compact status pill, e.g. `Printing 42%` / `Idle` / `Offline`. */
+export function formatPrinterStatusPill(
+  status: PrinterHostStatus | null | undefined,
+): string {
+  if (!status) return "…";
+  if (status.state === "printing" || status.state === "paused") {
+    const label = status.state === "paused" ? "Paused" : "Printing";
+    if (status.progress != null && Number.isFinite(status.progress)) {
+      return `${label} ${Math.round(status.progress)}%`;
+    }
+    return label;
+  }
+  if (status.state === "complete") return "Complete";
+  if (status.state === "idle") return "Idle";
+  if (status.state === "offline") return "Offline";
+  if (status.state === "error") return "Error";
+  return status.state;
+}
+
+/**
+ * One-line summary for a linked host on Progress (legacy / tests).
+ * Example: `Shop Voron · Printing frame_x.gcode · 34% · ETA ~12m`
+ */
+export function formatPrinterLiveLine(opts: {
+  name: string;
+  status: PrinterHostStatus | null | undefined;
+}): string {
+  const { name, status } = opts;
+  if (!status) return `${name} · …`;
+  const job = formatPrinterJobLine(status);
+  if (status.state === "printing" || status.state === "paused") {
+    return `${name} · ${job}`;
+  }
+  return `${name} · ${job}`;
 }

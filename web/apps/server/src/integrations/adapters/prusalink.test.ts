@@ -133,6 +133,62 @@ describe("prusalinkAdapter", () => {
     }
   });
 
+  it("uploadFile accepts { path } via createReadStream", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "pl-upload-"));
+    const path = join(dir, "disk.gcode");
+    writeFileSync(path, "; streamed");
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(digest401())
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 201,
+          headers: new Headers(),
+          arrayBuffer: async () => new ArrayBuffer(0),
+          text: async () => "",
+        });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await prusalinkAdapter.uploadFile!(
+        {
+          base_url: "http://127.0.0.1",
+          username: "",
+          password: "printer-key",
+        },
+        { path },
+        "disk.gcode",
+        { start: false },
+      );
+      expect(result.ok).toBe(true);
+
+      const putAuthed = fetchMock.mock.calls.find(
+        (call) =>
+          (call[1] as RequestInit | undefined)?.method === "PUT" &&
+          new Headers((call[1] as RequestInit).headers).has("Authorization"),
+      );
+      expect(putAuthed).toBeTruthy();
+      const stream = putAuthed![1]!.body as import("node:fs").ReadStream;
+      expect(typeof stream.pipe).toBe("function");
+      // createReadStream opens lazily; wait so finally can delete without ENOENT.
+      await new Promise<void>((resolve, reject) => {
+        stream.once("open", () => {
+          stream.destroy();
+          resolve();
+        });
+        stream.once("error", reject);
+      });
+      const headers = new Headers((putAuthed![1] as RequestInit).headers);
+      expect(headers.get("Content-Length")).toBe(String(Buffer.byteLength("; streamed")));
+      expect(headers.get("Print-After-Upload")).toBe("?0");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("getStatus maps PRINTING progress and prefers /job filename", async () => {
     const fetchMock = vi
       .fn()

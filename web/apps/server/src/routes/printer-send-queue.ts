@@ -1,6 +1,4 @@
-import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
-import { basename } from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { AppRepository } from "../db/repository.js";
 import type { IntegrationPort } from "../integrations/store.js";
@@ -19,10 +17,7 @@ import {
   dispatchPrinterSendQueueItem,
   drainPrinterSendQueue,
 } from "../services/printer-send-queue.js";
-import {
-  isAllowedPrinterUploadFilename,
-  streamPrinterUploadArtifact,
-} from "../services/printer-upload-job.js";
+import { parsePrinterUploadMultipart } from "../services/printer-upload-multipart.js";
 import type { InProcessJobRunner } from "./jobs.js";
 
 type RouteDeps = {
@@ -67,84 +62,33 @@ export async function registerPrinterSendQueueRoutes(
     "/printer-send-queue",
     { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
     async (request, reply) => {
-      let printerId = "";
-      let start = false;
-      let waitForIdle = true;
-      let match: "pinned" | "compatible" = "pinned";
-      let filename = "print.gcode";
       let artifactPath: string | null = null;
-      let profileId: number | undefined;
-      let checkoffUnitsRaw: string | undefined;
 
       try {
-        for await (const part of request.parts()) {
-          if (part.type === "field") {
-            const value = String(await part.value);
-            if (part.fieldname === "printer_id") printerId = value.trim();
-            if (part.fieldname === "start") {
-              const raw = value.toLowerCase();
-              start = raw === "1" || raw === "true" || raw === "yes";
-            }
-            if (part.fieldname === "wait_for_idle") {
-              const raw = value.toLowerCase();
-              waitForIdle = !(raw === "0" || raw === "false" || raw === "no");
-            }
-            if (part.fieldname === "match") {
-              const raw = value.trim().toLowerCase();
-              if (raw === "compatible") match = "compatible";
-              else if (raw === "pinned") match = "pinned";
-            }
-            if (part.fieldname === "profile_id") {
-              const n = Number(value);
-              if (Number.isInteger(n) && n > 0) profileId = n;
-            }
-            if (part.fieldname === "checkoff_units") {
-              checkoffUnitsRaw = value;
-            }
-            continue;
-          }
-          if (part.type !== "file") continue;
-          if (part.fieldname !== "file" && part.fieldname !== "gcode") {
-            part.file.resume();
-            continue;
-          }
-          if (artifactPath) {
-            part.file.resume();
-            return sendProblem(reply, 400, "Bad Request", "Only one G-code file is allowed");
-          }
-          filename = (part.filename || "print.gcode").replace(/\\/g, "/");
-          try {
-            artifactPath = await streamPrinterUploadArtifact(
-              deps.jobs.getExportsDir(),
-              randomUUID(),
-              basename(filename),
-              part.file,
-            );
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            if (/size limit/i.test(message)) {
-              return sendProblem(reply, 413, "Payload Too Large", message);
-            }
-            throw err;
-          }
-        }
-
-        if (!printerId) {
-          return sendProblem(reply, 400, "Bad Request", "printer_id is required");
-        }
-        if (!artifactPath) {
-          return sendProblem(reply, 400, "Bad Request", "G-code file required");
-        }
-
-        const baseName = basename(filename);
-        if (!isAllowedPrinterUploadFilename(baseName)) {
+        const parsed = await parsePrinterUploadMultipart(request, {
+          exportsDir: deps.jobs.getExportsDir(),
+          allowQueueFields: true,
+        });
+        if (!parsed.ok) {
           return sendProblem(
             reply,
-            400,
-            "Bad Request",
-            "Only .gcode / .bgcode / .gco files can be queued",
+            parsed.error.status,
+            parsed.error.title,
+            parsed.error.detail,
           );
         }
+
+        const {
+          printer_id: printerId,
+          start,
+          filename: baseName,
+          artifact_path,
+          profile_id: profileId,
+          checkoff_units_raw: checkoffUnitsRaw,
+          wait_for_idle: waitForIdle = true,
+          match = "pinned",
+        } = parsed.value;
+        artifactPath = artifact_path;
 
         const checkoff_units = parseCheckoffUnits(checkoffUnitsRaw);
         if (checkoff_units.length > 0 && profileId == null) {

@@ -19,17 +19,14 @@ import { runPackPreviewJob } from "../services/plate-workspace.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import { tenantStorage } from "../middleware/tenant-context.js";
 import { extractPendingPdfsForSource } from "../services/source-docs-index.js";
-import {
-  isAllowedPrinterUploadFilename,
-  runPrinterUploadJob,
-  streamPrinterUploadArtifact,
-} from "../services/printer-upload-job.js";
-import { reconcileSendQueueJobResult } from "../services/printer-send-queue.js";
 import { parseCheckoffUnits } from "../services/printer-checkoff.js";
 import { sendProblem } from "../lib/api-error.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
 import { getIntegrationConfig } from "../integrations/store.js";
 import { loadFleet } from "../services/printer-fleet.js";
+import { parsePrinterUploadMultipart } from "../services/printer-upload-multipart.js";
+import { runPrinterUploadJob } from "../services/printer-upload-job.js";
+import { reconcileSendQueueJobResult } from "../services/printer-send-queue.js";
 
 export type JobHandler = (
   jobId: string,
@@ -672,73 +669,30 @@ export async function registerJobRoutes(
     "/jobs/printer-upload",
     { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
     async (request, reply) => {
-      let printerId = "";
-      let start = false;
-      let filename = "print.gcode";
       let artifactPath: string | null = null;
-      let profileId: number | undefined;
-      let checkoffUnitsRaw: string | undefined;
 
       try {
-        for await (const part of request.parts()) {
-          if (part.type === "field") {
-            const value = String(await part.value);
-            if (part.fieldname === "printer_id") printerId = value.trim();
-            if (part.fieldname === "start") {
-              const raw = value.toLowerCase();
-              start = raw === "1" || raw === "true" || raw === "yes";
-            }
-            if (part.fieldname === "profile_id") {
-              const n = Number(value);
-              if (Number.isInteger(n) && n > 0) profileId = n;
-            }
-            if (part.fieldname === "checkoff_units") {
-              checkoffUnitsRaw = value;
-            }
-            continue;
-          }
-          if (part.type !== "file") continue;
-          if (part.fieldname !== "file" && part.fieldname !== "gcode") {
-            part.file.resume();
-            continue;
-          }
-          if (artifactPath) {
-            part.file.resume();
-            return sendProblem(reply, 400, "Bad Request", "Only one G-code file is allowed");
-          }
-          filename = (part.filename || "print.gcode").replace(/\\/g, "/");
-          try {
-            artifactPath = await streamPrinterUploadArtifact(
-              jobs.getExportsDir(),
-              crypto.randomUUID(),
-              basename(filename),
-              part.file,
-            );
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            if (/size limit/i.test(message)) {
-              return sendProblem(reply, 413, "Payload Too Large", message);
-            }
-            throw err;
-          }
-        }
-
-        if (!printerId) {
-          return sendProblem(reply, 400, "Bad Request", "printer_id is required");
-        }
-        if (!artifactPath) {
-          return sendProblem(reply, 400, "Bad Request", "G-code file required");
-        }
-
-        const baseName = basename(filename);
-        if (!isAllowedPrinterUploadFilename(baseName)) {
+        const parsed = await parsePrinterUploadMultipart(request, {
+          exportsDir: jobs.getExportsDir(),
+        });
+        if (!parsed.ok) {
           return sendProblem(
             reply,
-            400,
-            "Bad Request",
-            "Only .gcode / .bgcode files can be sent to a printer",
+            parsed.error.status,
+            parsed.error.title,
+            parsed.error.detail,
           );
         }
+
+        const {
+          printer_id: printerId,
+          start,
+          filename: baseName,
+          artifact_path,
+          profile_id: profileId,
+          checkoff_units_raw: checkoffUnitsRaw,
+        } = parsed.value;
+        artifactPath = artifact_path;
 
         const checkoff_units = parseCheckoffUnits(checkoffUnitsRaw);
         if (checkoff_units.length > 0 && profileId == null) {

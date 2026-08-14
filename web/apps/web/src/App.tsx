@@ -10,7 +10,6 @@ import { AuthProvider } from "./context/AuthContext";
 import AuthGate from "./components/AuthGate";
 import AppLayout from "./layout/AppLayout";
 import BuildPage from "./pages/BuildPage";
-import BuildsPage from "./pages/BuildsPage";
 import CheckoffPage from "./pages/CheckoffPage";
 import ExportPage from "./pages/ExportPage";
 import HelpPage from "./pages/HelpPage";
@@ -64,7 +63,10 @@ export default function App() {
                             element={<PreserveSearchRedirect to="/library" />}
                           />
 
-                          <Route path="builds" element={<BuildsPage />} />
+                          <Route
+                            path="builds"
+                            element={<PreserveSearchRedirect to="/plan" />}
+                          />
                           <Route path="plan" element={<BuildPage />} />
                           <Route
                             path="build"

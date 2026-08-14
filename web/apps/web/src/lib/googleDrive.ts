@@ -16,6 +16,11 @@ const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart";
 const DRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
 const GIS_LOAD_TIMEOUT_MS = 15_000;
+/** Marks a GIS <script> that already fired its (one-shot) load event. */
+const GIS_LOADED_ATTR = "data-pp-gis-loaded";
+/** Brief poll window for a script that loaded but hasn't attached oauth2 yet. */
+const GIS_LATE_POLL_MS = 200;
+const GIS_LATE_POLL_ATTEMPTS = 10;
 
 type TokenClient = {
   requestAccessToken: (opts?: { prompt?: string }) => void;
@@ -72,14 +77,17 @@ function loadGis(): Promise<void> {
     let settled = false;
     /** Script this attempt is waiting on; removed on failure so retries can recreate. */
     let watchedScript: HTMLScriptElement | null = null;
+    let pollTimer: number | null = null;
     const reset = () => {
       watchedScript?.remove();
       gisLoad = null;
+      if (pollTimer != null) window.clearInterval(pollTimer);
     };
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
       window.clearTimeout(timeoutId);
+      if (pollTimer != null) window.clearInterval(pollTimer);
       fn();
     };
     const succeed = () => {
@@ -109,7 +117,25 @@ function loadGis(): Promise<void> {
         return;
       }
       watchedScript = existing;
-      existing.addEventListener("load", () => succeed());
+      if (existing.getAttribute(GIS_LOADED_ATTR) === "1") {
+        // This script's 'load' event already fired once (it won't fire again) but
+        // oauth2 still isn't attached — poll briefly instead of hanging until the
+        // full timeout, then fail fast so the caller can retry.
+        let attempts = 0;
+        pollTimer = window.setInterval(() => {
+          attempts += 1;
+          if (w.google?.accounts?.oauth2) {
+            succeed();
+          } else if (attempts >= GIS_LATE_POLL_ATTEMPTS) {
+            fail(new Error("Google Identity Services unavailable after load"));
+          }
+        }, GIS_LATE_POLL_MS);
+        return;
+      }
+      existing.addEventListener("load", () => {
+        existing.setAttribute(GIS_LOADED_ATTR, "1");
+        succeed();
+      });
       existing.addEventListener("error", () => fail(new Error("Failed to load Google Identity")));
       return;
     }
@@ -117,7 +143,10 @@ function loadGis(): Promise<void> {
     watchedScript = script;
     script.src = GIS_SRC;
     script.async = true;
-    script.onload = () => succeed();
+    script.onload = () => {
+      script.setAttribute(GIS_LOADED_ATTR, "1");
+      succeed();
+    };
     script.onerror = () => fail(new Error("Failed to load Google Identity"));
     document.head.appendChild(script);
   });
