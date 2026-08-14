@@ -36,8 +36,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { Field, FieldLabel } from "./ui/field";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { Spinner } from "./ui/spinner";
 import { cn } from "../lib/utils";
 import { filterFilamentSpools, formatSpoolOptionLabel } from "../lib/spoolPickerUtils";
 import {
@@ -195,13 +197,15 @@ function RoleColorRow({
         compact ? "gap-2.5 py-0.5" : "gap-3 rounded-lg border border-border bg-background px-3 py-2.5",
       )}
     >
+      <Field className="min-w-0 flex-1 gap-0">
+      <FieldLabel className="sr-only">{label} color</FieldLabel>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <button
             type="button"
             disabled={busy}
             className={cn(
-              "flex flex-1 items-center rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
+              "flex w-full flex-1 items-center rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
               compact ? "gap-2.5" : "gap-3",
             )}
             aria-label={`Change ${label} color`}
@@ -395,6 +399,7 @@ function RoleColorRow({
           </div>
         </PopoverContent>
       </Popover>
+      </Field>
     </li>
   );
 }
@@ -661,7 +666,12 @@ export default function RoleFilamentPicker({
   }, [catalog]);
 
   if (!loaded) {
-    return <p className="text-sm text-muted-foreground">Loading role colors…</p>;
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Spinner className="size-3.5" />
+        Loading role colors…
+      </p>
+    );
   }
 
   if (rows.length === 0) {

@@ -49,7 +49,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   initialTab?: DetailTab;
   highlightPath?: string | null;
-  /** Optional keyword filter for Synced docs / Advisor notes lists (from copilot ui_open_docs). */
+  /** Optional keyword filter for Synced docs / Source notes lists (from copilot ui_open_docs). */
   docsQuery?: string | null;
   busy?: boolean;
   categories?: string[];
@@ -375,7 +375,7 @@ export default function SourceDetailSheet({
                   Synced docs{filteredDocs.length > 0 ? ` (${filteredDocs.length})` : ""}
                 </TabsTrigger>
                 <TabsTrigger value="notes">
-                  Advisor notes{filteredNotes.length > 0 ? ` (${filteredNotes.length})` : ""}
+                  Source notes{filteredNotes.length > 0 ? ` (${filteredNotes.length})` : ""}
                 </TabsTrigger>
               </TabsList>
               {queryNorm ? (
@@ -389,8 +389,8 @@ export default function SourceDetailSheet({
                     </p>
                     {notes.length > 0 ? (
                       <p>
-                        {notes.length} Advisor note{notes.length === 1 ? "" : "s"} available — open
-                        the Advisor notes tab. Empty Synced docs does not mean import failed.
+                        {notes.length} Source note{notes.length === 1 ? "" : "s"} available — open
+                        the Source notes tab. Empty Synced docs does not mean import failed.
                       </p>
                     ) : !source.last_synced_at ? (
                       <p>This source has not been synced yet.</p>
@@ -437,12 +437,12 @@ export default function SourceDetailSheet({
               <TabsContent value="notes" className="mt-0 min-h-0 flex-1 overflow-hidden">
                 {notes.length === 0 ? (
                   <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
-                    No Advisor notes yet. Import a domain research pack (workflow / pitfalls /
-                    quotes) or add notes from the kit advisor.
+                    No Source notes yet. Import a domain research pack (workflow / pitfalls /
+                    quotes) or add Source notes.
                   </p>
                 ) : filteredNotes.length === 0 ? (
                   <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
-                    No Advisor notes match “{docsQuery}”.
+                    No Source notes match “{docsQuery}”.
                   </p>
                 ) : (
                   <div className="grid h-full gap-4 md:grid-cols-[160px_1fr]">

@@ -17,6 +17,7 @@ import {
   printerLiveStripTone,
   type LiveStripHostType,
 } from "../../lib/printerLiveStrip";
+import { quietPrinterLoadError, quietPrinterStatusMessage } from "../../lib/printerErrorCopy";
 import { usePrinterStatusPollMs } from "../../hooks/usePrinterStatusPollMs";
 import { cn } from "../../lib/utils";
 
@@ -182,11 +183,12 @@ export default function PrinterLiveStrip({
           }
           return [h.integrationId, status] as const;
         } catch (e) {
+          const raw = e instanceof Error ? e.message : String(e);
           return [
             h.integrationId,
             {
               state: "offline" as const,
-              message: e instanceof Error ? e.message : String(e),
+              message: quietPrinterStatusMessage(raw) ?? "Printers unavailable",
             },
           ] as const;
         }
@@ -250,17 +252,24 @@ export default function PrinterLiveStrip({
   if (!engineReady) return null;
 
   if (loadError) {
+    const { quiet, text } = quietPrinterLoadError(loadError);
     return (
       <div
         className={cn(
-          "flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm print:hidden",
+          "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm print:hidden",
+          quiet
+            ? "border-border bg-muted/50 text-muted-foreground"
+            : "border-destructive/30 bg-destructive/5",
           className,
         )}
         role="status"
       >
-        <Printer className="h-4 w-4 shrink-0 text-destructive" aria-hidden />
-        <span className="min-w-0 flex-1 text-destructive">
-          Could not load printer status: {loadError}
+        <Printer
+          className={cn("h-4 w-4 shrink-0", quiet ? "opacity-70" : "text-destructive")}
+          aria-hidden
+        />
+        <span className={cn("min-w-0 flex-1", !quiet && "text-destructive")}>
+          {quiet ? text : `Could not load printer status: ${text}`}
         </span>
         <Link
           to={settingsPrintersRoute()}

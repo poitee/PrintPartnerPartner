@@ -576,6 +576,7 @@ export default function PrinterSendPanel({
                   size="sm"
                   variant="outline"
                   disabled={busy || parseBusy}
+                  loading={parseBusy}
                   onClick={() => {
                     pendingActionRef.current = null;
                     fileInputRef.current?.click();

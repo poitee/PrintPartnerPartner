@@ -126,28 +126,28 @@ function buildSourceDocsHint(options: {
 
   if (query && syncedCount === 0 && notesCount === 0 && !liveReadme) {
     if (hadDocsBeforeFilter > 0 || hadNotesBeforeFilter > 0) {
-      return `No docs/notes matched query “${query}”. Try a broader query, or open Synced docs / Advisor notes without a filter.`;
+      return `No docs/notes matched query “${query}”. Try a broader query, or open Synced docs / Source notes without a filter.`;
     }
   }
 
   if (syncedCount === 0 && notesCount > 0 && !lastSyncedAt) {
-    return "No synced docs yet — Advisor notes are available. Sync this source to pull README/PDFs from GitHub into Synced docs.";
+    return "No synced docs yet — Source notes are available. Sync this source to pull README/PDFs from GitHub into Synced docs.";
   }
 
   if (syncedCount === 0 && notesCount > 0 && lastSyncedAt) {
-    return "Synced tree has no markdown/PDF docs, but Advisor notes are available. Re-sync if you expected README/docs in the repo.";
+    return "Synced tree has no markdown/PDF docs, but Source notes are available. Re-sync if you expected README/docs in the repo.";
   }
 
   if (syncedCount === 0 && notesCount === 0 && !liveReadme && !lastSyncedAt) {
-    return "No synced docs or Advisor notes. Sync this source to pull README/PDFs, or import the domain research pack to create Advisor notes.";
+    return "No synced docs or Source notes. Sync this source to pull README/PDFs, or import the domain research pack to create Source notes.";
   }
 
   if (syncedCount === 0 && notesCount === 0 && !liveReadme && lastSyncedAt) {
-    return "No markdown/PDF docs found after sync, and no Advisor notes. Check the repo for README.md / docs/, or import domain research notes.";
+    return "No markdown/PDF docs found after sync, and no Source notes. Check the repo for README.md / docs/, or import domain research notes.";
   }
 
   if (pdfPending > 0) {
-    return `${pdfPending} PDF(s) are pending text extraction — content may appear after extraction finishes. Synced markdown and Advisor notes (if any) are available now.`;
+    return `${pdfPending} PDF(s) are pending text extraction — content may appear after extraction finishes. Synced markdown and Source notes (if any) are available now.`;
   }
 
   if (syncedCount === 0 && liveReadme) {
