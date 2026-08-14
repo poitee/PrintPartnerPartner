@@ -149,7 +149,7 @@ export default function BuildRecipePanel({ profileId }: Props) {
           <div>
             <h3 className="mb-1 text-xs font-medium text-foreground">Decision trail</h3>
             {recent.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No decisions logged yet. Apply or dismiss advisor actions to build a trail.</p>
+              <p className="text-xs text-muted-foreground">No decisions logged yet.</p>
             ) : (
               <ol className="max-h-48 space-y-1.5 overflow-y-auto text-xs">
                 {recent.map((d) => (
