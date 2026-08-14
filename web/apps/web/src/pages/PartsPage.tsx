@@ -33,7 +33,7 @@ import {
   PARTS_CONFLICT_CTA,
   PARTS_CONFLICT_HINT,
 } from "../lib/mergeConflictCopy";
-import { countMissingStls, countPartWarnings } from "../lib/partWarnings";
+import { countMissingStls, countNonMissingPartWarnings } from "../lib/partWarnings";
 import { partsSummaryLine } from "../lib/partsGroups";
 import { deskNextStepLine } from "../lib/deskNextStep";
 import { flattenReviewParts } from "../lib/reviewParts";
@@ -136,7 +136,7 @@ export default function PartsPage() {
   const summaryLine = useMemo(() => {
     if (!review) return null;
     const parts = flattenReviewParts(review.part_groups);
-    const warnCount = countPartWarnings(
+    const warnCount = countNonMissingPartWarnings(
       parts.filter((p) => p.included),
       review,
     );
