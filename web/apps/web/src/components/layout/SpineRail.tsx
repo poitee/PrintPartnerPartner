@@ -1,5 +1,5 @@
 import { type MouseEvent, type ReactNode } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   BookOpen,
   Layers,
@@ -123,15 +123,16 @@ export default function SpineRail({
           <div className="space-y-2 rounded-md border border-border bg-muted/30 p-2">
             <PlanPicker className="w-full" />
             <CreatePlanButton className="w-full" variant="outline" size="sm" />
-            <Link
+            <NavLink
               to={allPlansTo}
+              onClick={(e) => onStageNavigate(allPlansTo, e)}
               className={cn(
                 "block px-1 text-xs text-muted-foreground transition-colors hover:text-foreground",
                 location.pathname === "/plans" && "text-primary",
               )}
             >
               All plans
-            </Link>
+            </NavLink>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-1">
@@ -146,6 +147,7 @@ export default function SpineRail({
             <SidebarTooltip label="All plans" collapsed>
               <NavLink
                 to={allPlansTo}
+                onClick={(e) => onStageNavigate(allPlansTo, e)}
                 className={cn(
                   "flex items-center justify-center rounded-md p-2.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground",
                   location.pathname === "/plans" && "bg-primary/12 text-primary",
