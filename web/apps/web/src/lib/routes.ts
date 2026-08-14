@@ -35,6 +35,11 @@ export function buildsRoute(profileId?: number | null): string {
   return withProfile("/builds", profileId ?? null);
 }
 
+/** Plans list (manage / switch) — not a desk-loop spine step. */
+export function plansRoute(profileId?: number | null): string {
+  return withProfile("/plans", profileId ?? null);
+}
+
 export function settingsRoute(): string {
   return "/settings";
 }
@@ -97,6 +102,10 @@ export function isBuildsPath(pathname: string): boolean {
   return pathname === "/builds";
 }
 
+export function isPlansPath(pathname: string): boolean {
+  return pathname === "/plans";
+}
+
 export function isPartsPath(pathname: string): boolean {
   return pathname === "/parts" || pathname === "/review";
 }
@@ -132,6 +141,7 @@ export function isPlanWorkflowPath(pathname: string): boolean {
     isLibraryPath(pathname) ||
     isPlanPath(pathname) ||
     isBuildsPath(pathname) ||
+    isPlansPath(pathname) ||
     isPartsPath(pathname) ||
     isProgressPath(pathname) ||
     isExportPath(pathname) ||

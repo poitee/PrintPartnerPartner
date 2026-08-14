@@ -3,6 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   BookOpen,
   Layers,
+  List,
   PanelLeftClose,
   PanelLeftOpen,
   Printer,
@@ -20,9 +21,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "../ui/tooltip";
-import { helpRoute, printersRoute, settingsRoute } from "../../lib/routes";
+import { helpRoute, plansRoute, printersRoute, settingsRoute } from "../../lib/routes";
 import { cn } from "../../lib/utils";
 import type { WorkflowStage, WorkflowStageId } from "../../lib/workflowStages";
+import { useProfileSelection } from "../../context/ProfileContext";
 
 type Props = {
   collapsed: boolean;
@@ -73,6 +75,8 @@ export default function SpineRail({
   onStageNavigate,
 }: Props) {
   const location = useLocation();
+  const { selectedProfileId } = useProfileSelection();
+  const allPlansTo = plansRoute(selectedProfileId);
 
   const footerLinks = [
     {
@@ -119,6 +123,16 @@ export default function SpineRail({
           <div className="space-y-2 rounded-md border border-border bg-muted/30 p-2">
             <PlanPicker className="w-full" />
             <CreatePlanButton className="w-full" variant="outline" size="sm" />
+            <NavLink
+              to={allPlansTo}
+              onClick={(e) => onStageNavigate(allPlansTo, e)}
+              className={cn(
+                "block px-1 text-xs text-muted-foreground transition-colors hover:text-foreground",
+                location.pathname === "/plans" && "text-primary",
+              )}
+            >
+              All plans
+            </NavLink>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-1">
@@ -129,6 +143,19 @@ export default function SpineRail({
             </SidebarTooltip>
             <SidebarTooltip label="Create plan" collapsed>
               <CreatePlanButton size="icon" showLabel={false} variant="ghost" className="mx-auto" />
+            </SidebarTooltip>
+            <SidebarTooltip label="All plans" collapsed>
+              <NavLink
+                to={allPlansTo}
+                onClick={(e) => onStageNavigate(allPlansTo, e)}
+                className={cn(
+                  "flex items-center justify-center rounded-md p-2.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground",
+                  location.pathname === "/plans" && "bg-primary/12 text-primary",
+                )}
+                aria-label="All plans"
+              >
+                <List className="h-4 w-4" />
+              </NavLink>
             </SidebarTooltip>
           </div>
         )}

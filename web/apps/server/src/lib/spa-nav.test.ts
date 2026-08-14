@@ -6,6 +6,7 @@ describe("isSpaClientPath", () => {
     expect(isSpaClientPath("/sources")).toBe(true);
     expect(isSpaClientPath("/build?profile=3")).toBe(true);
     expect(isSpaClientPath("/builds")).toBe(true);
+    expect(isSpaClientPath("/plans")).toBe(true);
     expect(isSpaClientPath("/login")).toBe(true);
     expect(isSpaClientPath("/forgot-password")).toBe(true);
     expect(isSpaClientPath("/reset-password")).toBe(true);

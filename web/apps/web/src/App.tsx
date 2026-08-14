@@ -17,6 +17,7 @@ import LoginPage from "./pages/LoginPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import PartsPage from "./pages/PartsPage";
+import PlansPage from "./pages/PlansPage";
 import PrintersPage from "./pages/PrintersPage";
 import SettingsPage from "./pages/SettingsPage";
 import SourcesPage from "./pages/SourcesPage";
@@ -68,6 +69,7 @@ export default function App() {
                             path="builds"
                             element={<PreserveSearchRedirect to="/plan" />}
                           />
+                          <Route path="plans" element={<PlansPage />} />
                           <Route path="plan" element={<BuildPage />} />
                           <Route
                             path="build"

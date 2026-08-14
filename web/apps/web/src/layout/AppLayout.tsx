@@ -1,6 +1,6 @@
 import { type MouseEvent, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { BookOpen, MoreHorizontal, Printer, Settings } from "lucide-react";
+import { BookOpen, Layers, MoreHorizontal, Printer, Settings } from "lucide-react";
 import CommandPalette from "../components/CommandPalette";
 import ErrorBoundary from "../components/ErrorBoundary";
 import JobTray from "../components/JobTray";
@@ -34,6 +34,7 @@ import {
   isPartsPath,
   isPlanPath,
   isProgressPath,
+  plansRoute,
   printersRoute,
   settingsRoute,
 } from "../lib/routes";
@@ -119,6 +120,7 @@ export default function AppLayout() {
       isProgressPath(location.pathname));
 
   const secondaryMobile = [
+    { to: plansRoute(selectedProfileId), label: "All plans", icon: Layers },
     { to: printersRoute(), label: "Printers", icon: Printer },
     { to: settingsRoute(), label: "Settings", icon: Settings },
     { to: helpRoute(), label: "Help", icon: BookOpen },
@@ -176,6 +178,7 @@ export default function AppLayout() {
                       <DropdownMenuItem key={item.to} asChild>
                         <NavLink
                           to={item.to}
+                          onClick={(e) => onPipelineNavigate(item.to, e)}
                           className="flex w-full cursor-pointer items-center gap-2"
                         >
                           <item.icon className="h-4 w-4" />
