@@ -225,7 +225,7 @@ function BuildPageContent() {
       ]);
       setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
       setSources(sourceRows);
-      if (categoryRows.length) setCategories(categoryRows);
+      setCategories(categoryRows);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
@@ -280,13 +280,15 @@ function BuildPageContent() {
     let cancelled = false;
     void (async () => {
       try {
-        const [layerRows, sourceRows] = await Promise.all([
+        const [layerRows, sourceRows, categoryRows] = await Promise.all([
           fetchPlanLayers(selectedProfileId),
           fetchSources(),
+          fetchSourceCategories().catch(() => [] as string[]),
         ]);
         if (cancelled) return;
         setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
         setSources(sourceRows);
+        setCategories(categoryRows);
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : String(e));
