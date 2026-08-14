@@ -29,15 +29,15 @@ import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
 import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import { useWorkflowStages } from "../hooks/useWorkflowStages";
 import {
-  helpRoute,
   isBuildPath,
   isPartsPath,
   isPlanPath,
   isProgressPath,
-  plansRoute,
-  printersRoute,
-  settingsRoute,
 } from "../lib/routes";
+import {
+  spineUtilityNavItems,
+  type SpineUtilityId,
+} from "../lib/spineUtilityNav";
 import { cn } from "../lib/utils";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
@@ -47,6 +47,14 @@ import PlanPicker from "../components/PlanPicker";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { readSidebarCollapsed, writeSidebarCollapsed } from "../lib/persistedSidebarUi";
 import { TooltipProvider } from "../components/ui/tooltip";
+
+const UTILITY_ICONS: Record<SpineUtilityId, typeof Layers> = {
+  plans: Layers,
+  printers: Printer,
+  settings: Settings,
+  help: BookOpen,
+};
+
 export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -119,12 +127,10 @@ export default function AppLayout() {
       isPartsPath(location.pathname) ||
       isProgressPath(location.pathname));
 
-  const secondaryMobile = [
-    { to: plansRoute(selectedProfileId), label: "All plans", icon: Layers },
-    { to: printersRoute(), label: "Printers", icon: Printer },
-    { to: settingsRoute(), label: "Settings", icon: Settings },
-    { to: helpRoute(), label: "Help", icon: BookOpen },
-  ];
+  const secondaryMobile = spineUtilityNavItems(selectedProfileId).map((item) => ({
+    ...item,
+    icon: UTILITY_ICONS[item.id],
+  }));
 
   return (
     <TooltipProvider delayDuration={300}>
