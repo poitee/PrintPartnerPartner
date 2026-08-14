@@ -54,6 +54,22 @@ export function parseCheckoffUnits(raw: unknown): PrinterCheckoffUnit[] {
   return out;
 }
 
+/** Parse optional unlabeled object-name list from multipart / JSON payload. */
+export function parseUnlabeledNames(raw: unknown): string[] {
+  if (typeof raw === "string") {
+    try {
+      return parseUnlabeledNames(JSON.parse(raw) as unknown);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+    .map((n) => n.trim().slice(0, 200))
+    .slice(0, 200);
+}
+
 export function unitKey(partId: number, unitIndex: number): string {
   return `${partId}:${unitIndex}`;
 }

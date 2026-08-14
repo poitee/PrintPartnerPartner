@@ -195,4 +195,39 @@ describe("printer checkoff verify-first flow", () => {
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("unlabeled-only link persists and reloads with empty units", () => {
+    const { dir, sqlite, repo, plan } = setupPlan();
+    const link = createPrinterCheckoffLink(repo, {
+      profile_id: plan.id,
+      integration_id: "int-trident",
+      printer_id: "printer-1",
+      host_name: "Trident",
+      filename: "mystery.gcode",
+      units: [],
+      unlabeled_names: ["Object_A", "Object_B"],
+    });
+    expect(link).not.toBeNull();
+    expect(link!.units).toEqual([]);
+    expect(link!.unlabeled_names).toEqual(["Object_A", "Object_B"]);
+    expect(link!.state).toBe("watching");
+
+    const loaded = getPrinterCheckoffLink(repo, link!.id);
+    expect(loaded?.unlabeled_names).toEqual(["Object_A", "Object_B"]);
+    expect(loaded?.units).toEqual([]);
+
+    expect(
+      createPrinterCheckoffLink(repo, {
+        profile_id: plan.id,
+        integration_id: "int-trident",
+        printer_id: "printer-1",
+        host_name: "Trident",
+        filename: "empty.gcode",
+        units: [],
+      }),
+    ).toBeNull();
+
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

@@ -36,6 +36,8 @@ export type CreatePrinterCheckoffLinkInput = {
   remote_path?: string;
   upload_job_id?: string;
   units: PrinterCheckoffUnit[];
+  /** Object names that did not map to units — preview only, never confirmable. */
+  unlabeled_names?: string[];
   /** Upload & start — allow complete with cleared filename before first poll. */
   started?: boolean;
 };
@@ -96,7 +98,15 @@ function parseLink(raw: unknown): PrinterCheckoffLink | null {
   }
   const state = normalizeState(rawState as PrinterCheckoffLinkState);
   const units = Array.isArray(row.units) ? row.units.filter(isUnit) : [];
-  if (!units.length) return null;
+  const unlabeled_names = Array.isArray(row.unlabeled_names)
+    ? row.unlabeled_names
+        .filter((n): n is string => typeof n === "string" && n.trim().length > 0)
+        .map((n) => n.trim().slice(0, 200))
+        .slice(0, 200)
+    : undefined;
+  // Unlabeled-only links (empty units, non-empty unlabeled_names) must stay loadable
+  // so Progress can show those names after Send.
+  if (!units.length && !unlabeled_names?.length) return null;
   const id = typeof row.id === "string" ? row.id.trim() : "";
   const integrationId =
     typeof row.integration_id === "string" ? row.integration_id.trim() : "";
@@ -135,6 +145,7 @@ function parseLink(raw: unknown): PrinterCheckoffLink | null {
         ? row.upload_job_id.trim()
         : undefined,
     units,
+    unlabeled_names: unlabeled_names?.length ? unlabeled_names : undefined,
     resolved_units: parseResolved(row.resolved_units),
     state,
     host_outcome,
@@ -199,7 +210,12 @@ export function createPrinterCheckoffLink(
   input: CreatePrinterCheckoffLinkInput,
 ): PrinterCheckoffLink | null {
   const units = input.units.filter(isUnit);
-  if (!units.length) return null;
+  const unlabeled_names = input.unlabeled_names
+    ?.filter((n) => typeof n === "string" && n.trim())
+    .map((n) => n.trim().slice(0, 200))
+    .slice(0, 200);
+  // Allow empty units when unlabeled names are present (unlabeled-only Send).
+  if (!units.length && !unlabeled_names?.length) return null;
   const filename = input.filename.trim();
   const integrationId = input.integration_id.trim();
   const printerId = input.printer_id.trim();
@@ -217,12 +233,14 @@ export function createPrinterCheckoffLink(
       remote_path: input.remote_path?.trim() || undefined,
       upload_job_id: input.upload_job_id?.trim() || undefined,
       units,
+      unlabeled_names,
       state: "watching",
       host_outcome: "unknown",
       saw_active: false,
       started: Boolean(input.started),
       created_at: new Date().toISOString(),
     };
+    if (!link.unlabeled_names?.length) delete link.unlabeled_names;
     const all = loadPrinterCheckoffLinks(repo);
     all.push(link);
     savePrinterCheckoffLinks(repo, all);
