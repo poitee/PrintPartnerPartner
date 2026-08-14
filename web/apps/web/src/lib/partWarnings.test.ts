@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PlanReview, ReviewPart } from "../api/engine";
 import {
+  countNonMissingPartWarnings,
   countPartWarnings,
   filenameImpliedQty,
   hasPartWarning,
@@ -112,5 +113,25 @@ describe("partWarnings", () => {
     const p = part({ id: 4, filename: "dup.stl" });
     expect(partWarnings(p, review).map((w) => w.kind)).toContain("merge_conflict");
     expect(countPartWarnings([p], review)).toBe(1);
+  });
+});
+
+describe("countNonMissingPartWarnings", () => {
+  it("ignores parts whose only issue is STL missing", () => {
+    const parts = [
+      part({ id: 1, missing: true }),
+      part({ id: 2, missing: true, filename: "b.stl" }),
+    ];
+    expect(countPartWarnings(parts, emptyReview)).toBe(2);
+    expect(countNonMissingPartWarnings(parts, emptyReview)).toBe(0);
+  });
+
+  it("counts parts with real (non-missing) warnings", () => {
+    const parts = [
+      part({ id: 1, missing: true }),
+      part({ id: 2, role: null, filename: "b.stl" }),
+      part({ id: 3, missing: true, role: null, filename: "c.stl" }),
+    ];
+    expect(countNonMissingPartWarnings(parts, emptyReview)).toBe(2);
   });
 });
