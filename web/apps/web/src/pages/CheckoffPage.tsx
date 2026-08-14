@@ -566,7 +566,6 @@ export default function CheckoffPage() {
               className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-950 dark:text-sky-100"
               role="status"
             >
-              Printing live. Remaining parts stay here — confirm when this job finishes.
               Units stay operator-ticked only; we never auto-complete from printer status.
             </p>
           ) : null}
