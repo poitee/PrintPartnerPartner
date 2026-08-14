@@ -113,6 +113,62 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * Read a response body with a hard byte budget so oversized meshes never
+ * materialize in memory. Rejects when Content-Length exceeds the cap before
+ * reading; for chunked bodies, aborts once the budget is exhausted.
+ */
+async function readResponseBounded(
+  res: Response,
+  maxBytes: number,
+): Promise<ArrayBuffer | null> {
+  const declared = res.headers.get("content-length");
+  if (declared != null) {
+    const n = Number(declared);
+    if (Number.isFinite(n) && (n <= 0 || n > maxBytes)) return null;
+  }
+
+  if (!res.body) {
+    // Fallback for environments without streams — still check length after.
+    try {
+      const buffer = await res.arrayBuffer();
+      if (buffer.byteLength === 0 || buffer.byteLength > maxBytes) return null;
+      return buffer;
+    } catch {
+      return null;
+    }
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    await reader.cancel().catch(() => undefined);
+    return null;
+  }
+
+  if (total === 0) return null;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out.buffer;
+}
+
 async function loadMeshBuffer(partId: number): Promise<ArrayBuffer | null> {
   const cached = cachedMeshBuffer(partId);
   if (cached) return cached;
@@ -123,8 +179,8 @@ async function loadMeshBuffer(partId: number): Promise<ArrayBuffer | null> {
     return null;
   }
   if (!res.ok) return null;
-  const buffer = await res.arrayBuffer();
-  if (buffer.byteLength === 0 || buffer.byteLength > MESH_MAX_BYTES) return null;
+  const buffer = await readResponseBounded(res, MESH_MAX_BYTES);
+  if (!buffer) return null;
   rememberMeshBuffer(partId, buffer);
   return buffer;
 }
