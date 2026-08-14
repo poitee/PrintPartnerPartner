@@ -21,6 +21,7 @@ import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import EmptyState from "../components/layout/EmptyState";
+import PlanSpecialRequestLine from "../components/PlanSpecialRequestLine";
 import PrinterLiveStrip, {
   type PrinterLiveStripState,
 } from "../components/checkoff/PrinterLiveStrip";
@@ -307,6 +308,8 @@ export default function CheckoffPage() {
     profiles.find((p) => p.id === selectedProfileId)?.name ??
     review?.plan_name ??
     "Progress";
+  const specialRequest =
+    profiles.find((p) => p.id === selectedProfileId)?.special_request ?? null;
   const buildStale = profiles.find((p) => p.id === selectedProfileId)?.build_stale ?? false;
 
   const onUpdateBuild = () => {
@@ -588,6 +591,8 @@ export default function CheckoffPage() {
             </PageHeaderActions>
           }
         />
+
+        <PlanSpecialRequestLine note={specialRequest} />
 
         <StaleBuildBanner
           stale={buildStale}

@@ -81,4 +81,27 @@ describe("AppRepository", () => {
       expect(copy.name).toBe("Next customer");
     });
   });
+
+  it("persists special_request on the plan and copies it on duplicate", () => {
+    withRepo((repo) => {
+      const plan = repo.createProfile("Desk job");
+      expect(plan.special_request).toBeNull();
+
+      const updated = repo.updateProfileSpecialRequest(
+        plan.id,
+        "contact customer before printing",
+      );
+      expect(updated.special_request).toBe("contact customer before printing");
+      expect(repo.getProfile(plan.id)?.special_request).toBe(
+        "contact customer before printing",
+      );
+
+      const cleared = repo.updateProfileSpecialRequest(plan.id, "  ");
+      expect(cleared.special_request).toBeNull();
+
+      repo.updateProfileSpecialRequest(plan.id, "bag separately");
+      const copy = repo.duplicateProfile(plan.id, "Desk job copy");
+      expect(copy.special_request).toBe("bag separately");
+    });
+  });
 });

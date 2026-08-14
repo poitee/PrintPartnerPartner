@@ -37,6 +37,11 @@ export type SlugConflictPart = {
   partSlug?: string;
 };
 
+/** Desk-loop issue text: resolve by excluding on Plan source cards (not Parts/Review). */
+export function mergeConflictIssueMessage(filename: string): string {
+  return `Merge conflict for ${filename} — exclude duplicates on the Plan source cards.`;
+}
+
 /** Included parts that share a slug but not the same match key (active merge conflicts). */
 export function findActiveSlugConflictKeys(
   parts: SlugConflictPart[],
