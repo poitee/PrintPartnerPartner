@@ -170,15 +170,16 @@ export function createProductMcpServer(deps: ProductMcpDeps): Server {
 
       if (name === "confirm_apply") {
         const id = String(args.action_id ?? "");
+        // Reserve before any await so concurrent confirms cannot double-apply.
         const action = pending.get(id);
-        if (!action) {
+        if (!action || !pending.delete(id)) {
           return {
             content: [
               {
                 type: "text" as const,
                 text: JSON.stringify({
                   ok: false,
-                  error: "Unknown or already applied/dismissed action_id",
+                  error: "Unknown, in-flight, or already applied/dismissed action_id",
                   action_id: id,
                 }),
               },
@@ -187,6 +188,7 @@ export function createProductMcpServer(deps: ProductMcpDeps): Server {
           };
         }
         if (isAssistantUiAction(action.type)) {
+          pending.set(id, action);
           return {
             content: [
               {
@@ -209,16 +211,24 @@ export function createProductMcpServer(deps: ProductMcpDeps): Server {
                 },
               }
             : action;
-        const result = await applyAssistantAction(toApply, {
-          repo: getRepo(),
-          jobs,
-          tenantId,
-        });
-        if (result.ok) pending.delete(id);
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-          ...(result.ok ? {} : { isError: true }),
-        };
+        try {
+          const result = await applyAssistantAction(toApply, {
+            repo: getRepo(),
+            jobs,
+            tenantId,
+          });
+          if (!result.ok) {
+            // Restore so the client can retry or dismiss.
+            pending.set(id, action);
+          }
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+            ...(result.ok ? {} : { isError: true }),
+          };
+        } catch (applyErr) {
+          pending.set(id, action);
+          throw applyErr;
+        }
       }
 
       const known = productToolSpecs().some((t) => t.name === name);

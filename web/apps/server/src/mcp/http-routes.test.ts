@@ -1,14 +1,16 @@
 /**
  * HTTP MCP smoke: fail-closed auth, session init, env restore.
+ * Session map bounds: idle/absolute expiry + max count (close on evict).
  */
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, createPorts } from "../app.js";
 import { loadConfig } from "../config.js";
 import { isLoopbackBindHost } from "./product-mcp.js";
+import { pruneMcpSessions } from "./http-routes.js";
 
 describe("HTTP MCP /api/v1/mcp", () => {
   let dataDir: string;
@@ -126,3 +128,70 @@ describe("HTTP MCP /api/v1/mcp", () => {
     await ports.db.close();
   });
 });
+
+describe("pruneMcpSessions", () => {
+  function mkSession(id: string, createdAt: number, lastAccessAt: number) {
+    const transportClose = vi.fn();
+    const serverClose = vi.fn();
+    return {
+      id,
+      session: {
+        transport: { close: transportClose },
+        server: { close: serverClose },
+        pending: new Map(),
+        createdAt,
+        lastAccessAt,
+      },
+      transportClose,
+      serverClose,
+    };
+  }
+
+  it("evicts idle and absolute-expired sessions and closes transport", () => {
+    const now = 1_000_000;
+    const idle = mkSession("idle", now - 100, now - 500);
+    const absolute = mkSession("abs", now - 10_000, now - 1);
+    const live = mkSession("live", now - 100, now - 1);
+    const sessions = new Map<string, (typeof idle)["session"]>([
+      ["idle", idle.session],
+      ["abs", absolute.session],
+      ["live", live.session],
+    ]);
+
+    const evicted = pruneMcpSessions(sessions as never, now, {
+      max: 64,
+      idleMs: 200,
+      absoluteMs: 5_000,
+    });
+    expect(evicted).toBe(2);
+    expect(sessions.has("live")).toBe(true);
+    expect(sessions.has("idle")).toBe(false);
+    expect(sessions.has("abs")).toBe(false);
+    expect(idle.transportClose).toHaveBeenCalled();
+    expect(absolute.transportClose).toHaveBeenCalled();
+    expect(live.transportClose).not.toHaveBeenCalled();
+  });
+
+  it("enforces max count by evicting oldest lastAccess first", () => {
+    const now = 1_000_000;
+    const a = mkSession("a", now, now - 30);
+    const b = mkSession("b", now, now - 20);
+    const c = mkSession("c", now, now - 10);
+    const sessions = new Map<string, (typeof a)["session"]>([
+      ["a", a.session],
+      ["b", b.session],
+      ["c", c.session],
+    ]);
+
+    const evicted = pruneMcpSessions(sessions as never, now, {
+      max: 2,
+      idleMs: 60_000,
+      absoluteMs: 60_000,
+    });
+    expect(evicted).toBe(1);
+    expect([...sessions.keys()].sort()).toEqual(["b", "c"]);
+    expect(a.transportClose).toHaveBeenCalled();
+    expect(b.transportClose).not.toHaveBeenCalled();
+  });
+});
+
