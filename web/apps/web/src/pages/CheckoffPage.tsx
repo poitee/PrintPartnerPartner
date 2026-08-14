@@ -814,18 +814,19 @@ export default function CheckoffPage() {
             </DndContext>
           )}
 
-          {/* Printable sheet — paper tokens; only this node prints. Label: Print sheet. */}
+          {/* Printable sheet — paper tokens; print-only on Progress (GRE-233). Label: Print sheet. */}
           {filtered.length > 0 ? (
             <article
               ref={sheetRef}
               aria-hidden={!printPrep}
               className={cn(
-                "checkoff-sheet",
+                "checkoff-sheet checkoff-sheet-print-only",
                 compactMode && "compact",
-                printPrep && continuousPrintLayout && "checkoff-sheet-print-continuous",
+                continuousPrintLayout && "checkoff-sheet-print-continuous",
+                printPrep && "is-print-prep",
                 printPrep
                   ? "pointer-events-none fixed top-0 left-0 -z-10 w-[880px] opacity-0 print:pointer-events-auto print:relative print:z-auto print:w-auto print:opacity-100"
-                  : "hidden print:block",
+                  : null,
               )}
             >
               <header className="sheet-header">
