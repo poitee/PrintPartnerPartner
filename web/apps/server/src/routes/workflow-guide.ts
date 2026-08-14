@@ -37,7 +37,7 @@ Confirm a **validation summary** grouped by role and filament. Browse the full i
 
 ## 4. Checkoff
 
-Track **per-unit print progress** on the shop floor (saved per plan). Filter to missing or done parts, search, print an HTML checklist, and **Export missing STLs** for the next print batch. On-scroll **3D thumbnails** render client-side for each part.
+Track **per-unit print progress** on the shop floor (saved per plan). Filter to remaining or done parts, search, print an HTML checklist, and **Export remaining** STL units from this plan's checkoff for the next print batch. On-scroll **3D thumbnails** render client-side for each part.
 
 ## Tips
 

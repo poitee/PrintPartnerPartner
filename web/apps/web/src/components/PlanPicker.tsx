@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, ChevronsUpDown, Copy, Hammer, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronsUpDown, Layers, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { buildRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
@@ -20,7 +20,6 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator,
 } from "./ui/command";
 import {
   Dialog,
@@ -36,6 +35,8 @@ import { Switch } from "./ui/switch";
 type Props = {
   disabled?: boolean;
   className?: string;
+  /** Icon-only trigger for the collapsed spine rail. */
+  compact?: boolean;
 };
 
 type SwitchPrompt = {
@@ -44,8 +45,8 @@ type SwitchPrompt = {
   actionLabel: "created" | "duplicated";
 };
 
-/** Header plan combobox with inline CRUD. */
-export default function PlanPicker({ disabled, className }: Props) {
+/** Spine/mobile plan switcher (CRUD dialogs opened via PlanActionsContext). */
+export default function PlanPicker({ disabled, className, compact = false }: Props) {
   const navigate = useNavigate();
   const { profiles, selectedProfileId, setSelectedProfileId, loading } =
     useProfileSelection();
@@ -53,7 +54,12 @@ export default function PlanPicker({ disabled, className }: Props) {
   const updateMutation = useUpdateProfileMutation();
   const deleteMutation = useDeleteProfileMutation();
   const duplicateMutation = useDuplicateProfileMutation();
-  const { registerOpenCreate } = usePlanActions();
+  const {
+    registerOpenCreate,
+    registerOpenRename,
+    registerOpenDuplicate,
+    registerOpenDelete,
+  } = usePlanActions();
 
   const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -82,83 +88,32 @@ export default function PlanPicker({ disabled, className }: Props) {
     return () => registerOpenCreate(null);
   }, [registerOpenCreate]);
 
-  const actionsGroup = (
-    <CommandGroup heading="Actions">
-      <CommandItem
-        value="create-build"
-        onSelect={() => {
-          setOpen(false);
-          setCreateOpen(true);
-        }}
-      >
-        <Plus className="mr-2 h-4 w-4" />
-        Create build…
-      </CommandItem>
-      {selectedProfileId != null && (
-        <>
-          <CommandItem
-            value="rename-plan"
-            onSelect={() => {
-              setOpen(false);
-              setRenameOpen(true);
-            }}
-          >
-            <Hammer className="mr-2 h-4 w-4" />
-            Rename…
-          </CommandItem>
-          <CommandItem
-            value="duplicate-plan"
-            onSelect={() => {
-              setOpen(false);
-              setDuplicateName(`${selected?.name ?? "Plan"} (copy)`);
-              setDuplicateClearCheckoff(false);
-              setDuplicateOpen(true);
-            }}
-          >
-            <Copy className="mr-2 h-4 w-4" />
-            Duplicate…
-          </CommandItem>
-          <CommandItem
-            value="delete-plan"
-            onSelect={() => {
-              setOpen(false);
-              setDeleteOpen(true);
-            }}
-          >
-            <Trash2 className="mr-2 h-4 w-4" />
-            Delete…
-          </CommandItem>
-        </>
-      )}
-    </CommandGroup>
-  );
+  useEffect(() => {
+    registerOpenRename(() => {
+      if (selectedProfileId == null) return;
+      setRenameName(selected?.name ?? "");
+      setRenameOpen(true);
+    });
+    return () => registerOpenRename(null);
+  }, [registerOpenRename, selectedProfileId, selected?.name]);
 
-  const plansGroup = (
-    <CommandGroup heading="Plans">
-      {profiles.map((p) => (
-        <CommandItem
-          key={p.id}
-          value={p.name}
-          onSelect={() => {
-            setSelectedProfileId(p.id);
-            setOpen(false);
-          }}
-        >
-          <Check
-            className={cn(
-              "mr-2 h-4 w-4",
-              selectedProfileId === p.id ? "opacity-100" : "opacity-0",
-            )}
-          />
-          <span className="truncate">{p.name}</span>
-          <span className="ml-auto text-xs text-muted-foreground">
-            {p.part_count}
-            {p.build_stale ? " · stale" : ""}
-          </span>
-        </CommandItem>
-      ))}
-    </CommandGroup>
-  );
+  useEffect(() => {
+    registerOpenDuplicate(() => {
+      if (selectedProfileId == null) return;
+      setDuplicateName(`${selected?.name ?? "Plan"} (copy)`);
+      setDuplicateClearCheckoff(false);
+      setDuplicateOpen(true);
+    });
+    return () => registerOpenDuplicate(null);
+  }, [registerOpenDuplicate, selectedProfileId, selected?.name]);
+
+  useEffect(() => {
+    registerOpenDelete(() => {
+      if (selectedProfileId == null) return;
+      setDeleteOpen(true);
+    });
+    return () => registerOpenDelete(null);
+  }, [registerOpenDelete, selectedProfileId]);
 
   const shouldAskToSwitch = () => {
     if (selectedProfileId == null) return false;
@@ -243,55 +198,100 @@ export default function PlanPicker({ disabled, className }: Props) {
     selected != null
       ? `${selected.name} (${selected.part_count} parts)`
       : profiles.length === 0
-        ? "Create your first build"
+        ? "Create your first plan"
         : "Select plan";
 
   return (
     <>
       {profiles.length === 0 ? (
         <Button
-          variant="outline"
+          variant={compact ? "ghost" : "outline"}
+          size={compact ? "icon" : "default"}
           disabled={disabled || loading || busy}
-          className={cn("min-w-0 justify-between font-normal", className)}
+          className={cn(
+            compact ? "text-muted-foreground" : "min-w-0 justify-between font-normal",
+            className,
+          )}
           onClick={() => setCreateOpen(true)}
-          aria-label="Create build"
+          aria-label="Create plan"
         >
-          <span className="truncate">{label}</span>
-          <Plus className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          {compact ? (
+            <Plus className="h-4 w-4" />
+          ) : (
+            <>
+              <span className="truncate">{label}</span>
+              <Plus className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </>
+          )}
         </Button>
       ) : (
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            role="combobox"
-            aria-expanded={open}
-            aria-label="Select plan"
-            disabled={disabled || loading || busy}
-            className={cn("min-w-0 justify-between font-normal", className)}
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant={compact ? "ghost" : "outline"}
+              size={compact ? "icon" : "default"}
+              role="combobox"
+              aria-expanded={open}
+              aria-label="Select plan"
+              disabled={disabled || loading || busy}
+              className={cn(
+                compact ? "text-muted-foreground" : "min-w-0 justify-between font-normal",
+                className,
+              )}
+            >
+              {compact ? (
+                <Layers className="h-4 w-4" />
+              ) : (
+                <>
+                  <span className="truncate">{label}</span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </>
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            className="w-[min(100vw-2rem,320px)] p-0"
+            align={compact ? "start" : "end"}
+            side={compact ? "right" : "bottom"}
           >
-            <span className="truncate">{label}</span>
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-[min(100vw-2rem,320px)] p-0" align="end">
-          <Command>
-            <CommandInput placeholder="Search plans…" />
-            <CommandList>
-              <CommandEmpty>No plans found.</CommandEmpty>
-              {plansGroup}
-              <CommandSeparator />
-              {actionsGroup}
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
+            <Command>
+              <CommandInput placeholder="Search plans…" />
+              <CommandList>
+                <CommandEmpty>No plans found.</CommandEmpty>
+                <CommandGroup heading="Plans">
+                  {profiles.map((p) => (
+                    <CommandItem
+                      key={p.id}
+                      value={p.name}
+                      onSelect={() => {
+                        setSelectedProfileId(p.id);
+                        setOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          selectedProfileId === p.id ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <span className="truncate">{p.name}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {p.part_count}
+                        {p.build_stale ? " · stale" : ""}
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
       )}
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Create build</DialogTitle>
+            <DialogTitle>Create plan</DialogTitle>
           </DialogHeader>
           <div className="space-y-1">
             <Label htmlFor="plan-create-name">Plan name</Label>
@@ -404,10 +404,7 @@ export default function PlanPicker({ disabled, className }: Props) {
               : ""}
           </p>
           <div className="flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => setSwitchPrompt(null)}
-            >
+            <Button variant="secondary" onClick={() => setSwitchPrompt(null)}>
               Stay on current
             </Button>
             <Button

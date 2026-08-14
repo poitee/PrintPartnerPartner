@@ -4,7 +4,8 @@ import type {
   PrinterHostStatus,
   PrinterUploadResult,
 } from "@print-partner/contracts";
-import type { IntegrationAdapter } from "../store.js";
+import { createReadStream, statSync } from "node:fs";
+import type { IntegrationAdapter, PrinterUploadSource } from "../store.js";
 import { assertSafeOutboundUrl } from "../../lib/outbound-url.js";
 import { buildDigestAuthorization, parseWwwAuthenticate } from "../digest-auth.js";
 
@@ -326,7 +327,7 @@ export const prusalinkAdapter: IntegrationAdapter = {
 
   async uploadFile(
     config: IntegrationConfig,
-    bytes: Uint8Array,
+    source: PrinterUploadSource,
     filename: string,
     options?: { start?: boolean },
   ): Promise<PrinterUploadResult> {
@@ -351,15 +352,26 @@ export const prusalinkAdapter: IntegrationAdapter = {
 
     try {
       const start = Boolean(options?.start);
+      let body: Buffer | import("node:fs").ReadStream;
+      let contentLength: number;
+      const streamFromDisk = !(source instanceof Uint8Array);
+      if (!streamFromDisk) {
+        body = Buffer.from(source);
+        contentLength = source.byteLength;
+      } else {
+        contentLength = statSync(source.path).size;
+        body = createReadStream(source.path);
+      }
       const res = await prusalinkFetch(uploadUrl, config, {
         method: "PUT",
         headers: {
           "Content-Type": "application/octet-stream",
-          "Content-Length": String(bytes.byteLength),
+          "Content-Length": String(contentLength),
           "Print-After-Upload": start ? "?1" : "?0",
           Overwrite: "?1",
         },
-        body: Buffer.from(bytes),
+        body: body as RequestInit["body"],
+        ...(streamFromDisk ? ({ duplex: "half" } as object) : {}),
         signal: AbortSignal.timeout(120_000),
       });
 

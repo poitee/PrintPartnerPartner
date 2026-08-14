@@ -10,7 +10,7 @@ type Props = {
   showLabel?: boolean;
 };
 
-/** Opens the header plan picker's create dialog. */
+/** Opens the spine plan picker's create dialog. */
 export default function CreatePlanButton({
   variant = "secondary",
   size = "sm",
@@ -27,10 +27,10 @@ export default function CreatePlanButton({
       size={size}
       className={cn("shrink-0", className)}
       onClick={openCreatePlan}
-      aria-label="Create build"
+      aria-label="Create plan"
     >
       <Plus className={cn("h-4 w-4", showLabel && !iconOnly && "mr-1.5")} />
-      {showLabel && !iconOnly ? "Create build" : null}
+      {showLabel && !iconOnly ? "Create plan" : null}
     </Button>
   );
 }

@@ -60,9 +60,13 @@ export type ManifestApplyResult = {
   errors: ManifestParseIssue[];
 };
 
+/** Neutralize spreadsheet formula injection (=, +, -, @, tab, CR) with a leading quote. */
+export function neutralizeFormulaPrefix(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 function escapeCsvCell(value: string): string {
-  // Neutralize spreadsheet formula injection (=, +, -, @, tab, CR).
-  const cell = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  const cell = neutralizeFormulaPrefix(value);
   if (/[",\r\n]/.test(cell)) {
     return `"${cell.replace(/"/g, '""')}"`;
   }

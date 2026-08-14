@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { FileArchive } from "lucide-react";
 import PageHeader from "../components/layout/PageHeader";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import ExportActionCards from "../components/export/ExportActionCards";
 import ExportRecentPanel, { hasExportJobs } from "../components/export/ExportRecentPanel";
 import PartsManifestTransfer from "../components/export/PartsManifestTransfer";
+import PrinterSendPanel from "../components/export/PrinterSendPanel";
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
-import EmptyState from "../components/layout/EmptyState";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { useJobContext } from "../context/JobContext";
@@ -20,10 +20,12 @@ import { partsRoute, planRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
 
 /**
- * Export hub — consolidates STL / checklist / share / 3MF / parts-manifest actions.
+ * Export — always shows the printer Send panel (works with external / hand-sliced
+ * G-code, no plan required). Slicer-input file cards (STL, 3MF, share, manifest)
+ * stay plan-gated below. Farm-queue verbs (Send ready / Send now / Remove) live on
+ * Progress, not here.
  */
 export default function ExportPage() {
-  const navigate = useNavigate();
   const { health, error: engineError } = useEngineHealth();
   const { selectedProfileId, profiles } = useProfileSelection();
   const { review, invalidate, loading, reload, revision, loadedRevision, error: planError } =
@@ -43,8 +45,8 @@ export default function ExportPage() {
     if (!review) return [];
     return flattenReviewParts(review.part_groups).filter((p) => p.included);
   }, [review]);
-  const missingCount = useMemo(
-    () => includedParts.filter((p) => p.missing).length,
+  const remainingParts = useMemo(
+    () => includedParts.filter((p) => p.missing),
     [includedParts],
   );
 
@@ -55,14 +57,10 @@ export default function ExportPage() {
     }
   }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
 
-  const headerMeta =
+  const planIdentity =
     planName && includedParts.length > 0
-      ? `${planName} · ${includedParts.length} parts${
-          missingCount > 0 ? ` · ${missingCount} missing` : ""
-        }`
-      : planName
-        ? planName
-        : null;
+      ? `${planName} · ${includedParts.length} part${includedParts.length === 1 ? "" : "s"}`
+      : planName;
 
   return (
     <div className="space-y-4">
@@ -75,12 +73,9 @@ export default function ExportPage() {
       <PageHeader
         icon={FileArchive}
         accent
-        title="Export hub"
-        description={
-          headerMeta
-            ? `Everything that leaves Print Partner, in one place · ${headerMeta}`
-            : "Everything that leaves Print Partner, in one place"
-        }
+        eyebrow={planIdentity}
+        title="Export"
+        description="Send already-sliced G-code from your slicer. STL and 3MF below are slicer input."
       />
 
       {!health ? (
@@ -93,58 +88,70 @@ export default function ExportPage() {
             </p>
           </CardContent>
         </Card>
-      ) : selectedProfileId == null ? (
-        <EmptyState
-          icon={FileArchive}
-          title="No plan selected"
-          description="Choose a plan first, then export STLs, checklists, or a share bundle."
-          action={{
-            label: "Open Plan",
-            onClick: () => navigate(planRoute(null)),
-          }}
-        />
-      ) : loading && !review ? (
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Loading plan…</p>
-          </CardContent>
-        </Card>
-      ) : planError && !review ? (
-        <Card>
-          <CardContent className="pt-6 space-y-3">
-            <p className="text-sm text-destructive">
-              Could not load this plan: {planError}
-            </p>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                if (selectedProfileId != null) void reload(selectedProfileId);
-              }}
-            >
-              Retry
-            </Button>
-          </CardContent>
-        </Card>
       ) : (
         <>
-          <div
-            className={cn(
-              "grid gap-4",
-              showRecent && "lg:grid-cols-[minmax(0,1fr)_minmax(16rem,18.75rem)]",
-            )}
-          >
-            <div className="min-w-0">
-              <ExportActionCards onShare={() => setShareOpen(true)} />
-            </div>
-            {showRecent ? <ExportRecentPanel /> : null}
-          </div>
-
-          <PartsManifestTransfer
-            review={review}
-            sources={sources}
-            onApplied={() => void invalidate()}
+          <PrinterSendPanel
+            remainingParts={remainingParts}
+            profileId={selectedProfileId}
+            engineReady={Boolean(health.ok)}
           />
+
+          <div className="space-y-3">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Slicer input
+            </p>
+
+            {selectedProfileId == null ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">
+                    Open a plan to export STLs, a 3MF, a share bundle, or a parts manifest.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : loading && !review ? (
+              <Card>
+                <CardContent className="pt-6">
+                  <p className="text-sm text-muted-foreground">Loading plan…</p>
+                </CardContent>
+              </Card>
+            ) : planError && !review ? (
+              <Card>
+                <CardContent className="pt-6 space-y-3">
+                  <p className="text-sm text-destructive">
+                    Could not load this plan: {planError}
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      if (selectedProfileId != null) void reload(selectedProfileId);
+                    }}
+                  >
+                    Retry
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div
+                className={cn(
+                  "grid gap-4",
+                  showRecent && "lg:grid-cols-[minmax(0,1fr)_minmax(16rem,18.75rem)]",
+                )}
+              >
+                <div className="min-w-0">
+                  <ExportActionCards onShare={() => setShareOpen(true)} />
+                </div>
+                {showRecent ? <ExportRecentPanel /> : null}
+              </div>
+            )}
+
+            <PartsManifestTransfer
+              review={review}
+              sources={sources}
+              onApplied={() => void invalidate()}
+            />
+          </div>
 
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" size="sm" asChild>

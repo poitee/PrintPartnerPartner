@@ -4,7 +4,7 @@ import type {
   PrinterHostStatus,
   PrinterUploadResult,
 } from "@print-partner/contracts";
-import type { IntegrationAdapter } from "../store.js";
+import type { IntegrationAdapter, PrinterUploadSource } from "../store.js";
 import { assertSafeOutboundUrl } from "../../lib/outbound-url.js";
 
 function normalizeBaseUrl(raw: unknown): string | null {
@@ -195,7 +195,7 @@ export const moonrakerAdapter: IntegrationAdapter = {
 
   async uploadFile(
     config: IntegrationConfig,
-    bytes: Uint8Array,
+    source: PrinterUploadSource,
     filename: string,
     options?: { start?: boolean },
   ): Promise<PrinterUploadResult> {
@@ -206,7 +206,13 @@ export const moonrakerAdapter: IntegrationAdapter = {
     const safeName = filename.replace(/[/\\]/g, "_").trim() || "print.gcode";
     try {
       const form = new FormData();
-      form.append("file", new Blob([Buffer.from(bytes)]), safeName);
+      if (source instanceof Uint8Array) {
+        form.append("file", new Blob([Buffer.from(source)]), safeName);
+      } else {
+        const { openAsBlob } = await import("node:fs");
+        const blob = await openAsBlob(source.path);
+        form.append("file", blob, safeName);
+      }
       form.append("root", "gcodes");
 
       const uploadUrl = `${baseUrl}/server/files/upload`;

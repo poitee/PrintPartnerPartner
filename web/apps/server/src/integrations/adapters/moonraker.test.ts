@@ -197,4 +197,33 @@ describe("moonrakerAdapter", () => {
     expect(result.started).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("uploadFile accepts { path } via openAsBlob", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "mr-upload-"));
+    const path = join(dir, "from_disk.gcode");
+    writeFileSync(path, "; from disk");
+    try {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({}),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await moonrakerAdapter.uploadFile!(
+        { base_url: "http://127.0.0.1:7125" },
+        { path },
+        "from_disk.gcode",
+        { start: false },
+      );
+      expect(result.ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const init = fetchMock.mock.calls[0]![1] as RequestInit;
+      expect(init.body).toBeInstanceOf(FormData);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

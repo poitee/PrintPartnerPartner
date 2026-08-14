@@ -13,16 +13,21 @@ import { cn } from "../../lib/utils";
 type Props = {
   engineReady: boolean;
   refreshKey?: number;
+  /** When true (Progress), show Send ready / Send now. Default true. */
+  allowDispatch?: boolean;
+  /** Idle Progress: Send ready is the primary operator move. */
+  emphasizeSendReady?: boolean;
+  /** Reports active queue length so Progress can choose idle copy. */
+  onActiveCountChange?: (count: number) => void;
   className?: string;
 };
 
 function stateLabel(item: PrinterSendQueueItem): string {
   switch (item.state) {
     case "queued":
-      if (item.match === "compatible") {
-        return item.wait_for_idle ? "Waiting for matching Idle" : "Queued (any match)";
-      }
-      return item.wait_for_idle ? "Waiting for Idle" : "Queued";
+      if (item.wait_for_idle) return "Waiting for Idle";
+      if (item.match === "compatible") return "Idle match";
+      return "Queued";
     case "sending":
       return "Sending…";
     case "error":
@@ -37,12 +42,16 @@ function stateLabel(item: PrinterSendQueueItem): string {
 }
 
 /**
- * Thin Phase F queue list — Export enqueue surface and Progress operator view.
- * Hides when empty. Same actions everywhere: Send ready, Send now, Remove.
+ * Farm send-queue operator surface for Progress.
+ * Hides when empty. Send ready / Send now / Remove when allowDispatch.
+ * Export Send panel does not mount this — Export only has Send / Start print.
  */
 export default function PrinterSendQueuePanel({
   engineReady,
   refreshKey = 0,
+  allowDispatch = true,
+  emphasizeSendReady = false,
+  onActiveCountChange,
   className,
 }: Props) {
   const [items, setItems] = useState<PrinterSendQueueItem[]>([]);
@@ -76,6 +85,10 @@ export default function PrinterSendQueuePanel({
     return () => window.clearInterval(timer);
   }, [engineReady, reload]);
 
+  useEffect(() => {
+    onActiveCountChange?.(engineReady ? items.length : 0);
+  }, [engineReady, items.length, onActiveCountChange]);
+
   if (!engineReady || items.length === 0) return null;
 
   return (
@@ -89,30 +102,32 @@ export default function PrinterSendQueuePanel({
     >
       <div className="mb-1.5 flex flex-wrap items-center gap-2">
         <p className="min-w-0 flex-1 font-medium text-foreground">Send queue</p>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 text-xs"
-          disabled={busyId != null}
-          onClick={() => {
-            setBusyId("drain");
-            void (async () => {
-              try {
-                const { results } = await drainPrinterSendQueue();
-                const ok = results.filter((r) => r.job_id).length;
-                if (ok > 0) toast.success(`Started ${ok} queued send${ok === 1 ? "" : "s"}`);
-                else toast.message("No idle printers ready for queued jobs");
-                await reload();
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : String(e));
-              } finally {
-                setBusyId(null);
-              }
-            })();
-          }}
-        >
-          Send ready
-        </Button>
+        {allowDispatch ? (
+          <Button
+            size="sm"
+            variant={emphasizeSendReady ? "default" : "outline"}
+            className="h-7 text-xs"
+            disabled={busyId != null}
+            onClick={() => {
+              setBusyId("drain");
+              void (async () => {
+                try {
+                  const { results } = await drainPrinterSendQueue();
+                  const ok = results.filter((r) => r.job_id).length;
+                  if (ok > 0) toast.success(`Started ${ok} queued send${ok === 1 ? "" : "s"}`);
+                  else toast.message("No idle printers ready for queued jobs");
+                  await reload();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setBusyId(null);
+                }
+              })();
+            }}
+          >
+            Send ready
+          </Button>
+        ) : null}
       </div>
       <ul className="space-y-1.5">
         {items.map((item) => (
@@ -133,28 +148,30 @@ export default function PrinterSendQueuePanel({
             </span>
             {(item.state === "queued" || item.state === "error") && (
               <>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  className="h-7 text-xs"
-                  disabled={busyId != null}
-                  onClick={() => {
-                    setBusyId(item.id);
-                    void (async () => {
-                      try {
-                        await dispatchPrinterSendQueueItem({ id: item.id, force: true });
-                        toast.success(`Sending ${item.filename}`);
-                        await reload();
-                      } catch (e) {
-                        toast.error(e instanceof Error ? e.message : String(e));
-                      } finally {
-                        setBusyId(null);
-                      }
-                    })();
-                  }}
-                >
-                  Send now
-                </Button>
+                {allowDispatch ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-7 text-xs"
+                    disabled={busyId != null}
+                    onClick={() => {
+                      setBusyId(item.id);
+                      void (async () => {
+                        try {
+                          await dispatchPrinterSendQueueItem({ id: item.id, force: true });
+                          toast.success(`Sending ${item.filename}`);
+                          await reload();
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : String(e));
+                        } finally {
+                          setBusyId(null);
+                        }
+                      })();
+                    }}
+                  >
+                    Send now
+                  </Button>
+                ) : null}
                 <Button
                   size="sm"
                   variant="ghost"

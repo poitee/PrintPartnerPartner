@@ -713,7 +713,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
             }
             options={[
               { value: "all", label: "Print: all" },
-              { value: "missing", label: "Missing" },
+              { value: "missing", label: "Remaining" },
               { value: "partial", label: "Partial" },
               { value: "complete", label: "Complete" },
             ]}

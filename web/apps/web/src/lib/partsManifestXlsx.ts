@@ -7,6 +7,7 @@
 import JSZip from "jszip";
 import {
   PARTS_MANIFEST_HEADERS,
+  neutralizeFormulaPrefix,
   parseManifestTable,
   type ManifestParseIssue,
   type PartsManifestRow,
@@ -57,7 +58,10 @@ function sheetXml(rows: PartsManifestRow[]): string {
       const cXml = cells
         .map((val, cIdx) => {
           const ref = `${colLetter(cIdx)}${rIdx + 1}`;
-          return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(val)}</t></is></c>`;
+          // Header row has no formula-prefix risk; data rows get the same
+          // formula-injection guard as the CSV export path.
+          const safe = rIdx === 0 ? val : neutralizeFormulaPrefix(val);
+          return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(safe)}</t></is></c>`;
         })
         .join("");
       return `<row r="${rIdx + 1}">${cXml}</row>`;

@@ -1,37 +1,21 @@
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronDown } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  enqueuePrinterSend,
-  drainPrinterSendQueue,
-  fetchIntegrationStatus,
-  fetchIntegrations,
   fetchPrinters,
-  startBambuConnectHandoff,
-  bambuConnectDownloadUrl,
   startExport3mf,
-  startExportChecklistHtml,
   startExportStlPack,
-  startPrinterUpload,
-  type IntegrationSummary,
-  type PrinterHostStatus,
-  type PrinterMachine,
-  type ReviewPart,
   type StlPackGroupBy,
 } from "../../api/engine";
-import PrinterSendQueuePanel from "./PrinterSendQueuePanel";
 import { useEngineHealth } from "../../hooks/useEngineHealth";
 import { useJobRunner } from "../../hooks/useJobRunner";
 import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../../context/ProfileContext";
-import { completeExportDownload } from "../../lib/exportActions";
+import { checkoffUnitTotals } from "../../lib/checkoffProgress";
 import { handleExport3mfJobDone } from "../../lib/export3mfJobResult";
 import { handleStlPackExportJobDone } from "../../lib/exportStlJobResult";
-import { incompleteUnitsForSelectedParts } from "../../lib/printerCheckoffUnits";
 import { flattenReviewParts } from "../../lib/reviewParts";
-import { progressRoute, settingsRoute } from "../../lib/routes";
-import { cn } from "../../lib/utils";
+import { settingsRoute } from "../../lib/routes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -54,268 +38,29 @@ type Props = {
   onShare: () => void;
 };
 
-function isAllowedGcode(name: string): boolean {
-  const lower = name.toLowerCase();
-  return lower.endsWith(".gcode") || lower.endsWith(".bgcode") || lower.endsWith(".gco");
-}
-
-function isAllowedBambuConnectFile(name: string): boolean {
-  const lower = name.toLowerCase();
-  return (
-    lower.endsWith(".gcode.3mf") ||
-    lower.endsWith(".3mf") ||
-    lower.endsWith(".gcode") ||
-    lower.endsWith(".gco")
-  );
-}
-
-function remainingLabel(part: ReviewPart): string {
-  const total = Math.max(1, part.quantity_effective);
-  const left = Math.max(0, total - (part.printed_count ?? 0));
-  return left === 1 ? "1 unit left" : `${left} units left`;
-}
-
-function statusLabel(status: PrinterHostStatus | undefined): string {
-  if (!status) return "…";
-  switch (status.state) {
-    case "idle":
-      return "Idle";
-    case "printing":
-      return status.progress != null ? `Printing ${Math.round(status.progress)}%` : "Printing";
-    case "paused":
-      return "Paused";
-    case "complete":
-      return "Complete";
-    case "error":
-      return "Error";
-    case "offline":
-      return "Offline";
-    default:
-      return status.state;
-  }
-}
-
-function pickPreferredPrinterId(
-  printers: PrinterMachine[],
-  statusByIntegration: Record<string, PrinterHostStatus>,
-  prev: string,
-): string {
-  const prevMachine = prev ? printers.find((p) => p.id === prev) : undefined;
-  if (prevMachine) {
-    const integrationId = prevMachine.integration_id?.trim();
-    // Once we have a status for the current pick, keep the user's selection.
-    if (integrationId && statusByIntegration[integrationId]) return prev;
-  }
-  const idle = printers.find((p) => {
-    const id = p.integration_id?.trim();
-    return id && statusByIntegration[id]?.state === "idle";
-  });
-  return idle?.id ?? prevMachine?.id ?? printers[0]?.id ?? "";
-}
-
 /**
- * Export hub card grid — one-click / dropdown actions matching the workflow mock.
+ * Slicer-input file cards for Export — STLs (all + remaining from this plan's
+ * Progress checkoff), 3MF, share bundle. Sending to a printer lives in
+ * PrinterSendPanel above. Farm-queue verbs (Send ready / Send now / Remove)
+ * live on Progress, not here.
  */
 export default function ExportActionCards({ onShare }: Props) {
   const { health } = useEngineHealth();
   const { selectedProfileId } = useProfileSelection();
-  const { review, reload } = usePlanWorkspace();
+  const { review } = usePlanWorkspace();
   const exportStlJob = useJobRunner("stl-export");
   const export3mfJob = useJobRunner("export-3mf");
-  const exportJob = useJobRunner("export");
-  const printerUploadJob = useJobRunner("printer-upload");
-
-  const [linkedPrinters, setLinkedPrinters] = useState<PrinterMachine[]>([]);
-  const [bambuPrinters, setBambuPrinters] = useState<PrinterMachine[]>([]);
-  const [selectedPrinterId, setSelectedPrinterId] = useState<string>("");
-  const [selectedBambuPrinterId, setSelectedBambuPrinterId] = useState<string>("");
-  const [hostStatusByIntegration, setHostStatusByIntegration] = useState<
-    Record<string, PrinterHostStatus>
-  >({});
-  const [autoCheckoff, setAutoCheckoff] = useState(true);
-  const [selectedCheckoffPartIds, setSelectedCheckoffPartIds] = useState<number[]>([]);
-  const [queueRefreshKey, setQueueRefreshKey] = useState(0);
-  const [queueBusy, setQueueBusy] = useState(false);
-  const [bambuBusy, setBambuBusy] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const bambuFileInputRef = useRef<HTMLInputElement>(null);
-  const pendingStartRef = useRef(false);
-  const pendingModeRef = useRef<"send" | "queue">("send");
-  const pendingMatchRef = useRef<"pinned" | "compatible">("pinned");
 
   const hasBlockers = review?.has_blockers ?? false;
   const includedParts = review
     ? flattenReviewParts(review.part_groups).filter((p) => p.included)
     : [];
   const includedCount = includedParts.length;
-  const missingParts = includedParts.filter((p) => p.missing);
-  const missingCount = missingParts.length;
-  const exportBusy =
-    exportStlJob.busy || exportJob.busy || export3mfJob.busy || printerUploadJob.busy;
+  const remainingUnits = checkoffUnitTotals(includedParts).remainingUnits;
+  const exportBusy = exportStlJob.busy || export3mfJob.busy;
   const canRun = selectedProfileId != null && Boolean(health) && Boolean(review);
   const canExportParts = canRun && !hasBlockers && includedCount > 0;
-  const hasLinked = linkedPrinters.length > 0;
-  const hasBambuLinked = bambuPrinters.length > 0;
-
-  useEffect(() => {
-    if (!health) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const [printers, integrations] = await Promise.all([
-          fetchPrinters(),
-          fetchIntegrations(),
-        ]);
-        if (cancelled) return;
-        const byId = new Map<string, IntegrationSummary>(
-          integrations.map((i) => [i.id, i]),
-        );
-        const sendTypes = new Set(["moonraker", "prusalink"]);
-        const linkedForSend = printers.filter((p) => {
-          const id = p.integration_id?.trim();
-          if (!id) return false;
-          const host = byId.get(id);
-          return Boolean(host && sendTypes.has(host.type) && host.config.enabled !== false);
-        });
-        const linkedBambu = printers.filter((p) => {
-          const id = p.integration_id?.trim();
-          if (!id) return false;
-          const host = byId.get(id);
-          return Boolean(host && host.type === "bambu" && host.config.enabled !== false);
-        });
-        setLinkedPrinters(linkedForSend);
-        setBambuPrinters(linkedBambu);
-        setSelectedPrinterId((prev) =>
-          prev && linkedForSend.some((p) => p.id === prev)
-            ? prev
-            : linkedForSend[0]?.id ?? "",
-        );
-        setSelectedBambuPrinterId((prev) =>
-          prev && linkedBambu.some((p) => p.id === prev)
-            ? prev
-            : linkedBambu[0]?.id ?? "",
-        );
-      } catch {
-        if (cancelled) return;
-        setLinkedPrinters([]);
-        setBambuPrinters([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [health]);
-
-  // Thin Phase F: poll linked send + Bambu hosts for Idle/Busy labels.
-  useEffect(() => {
-    if (!health || (linkedPrinters.length === 0 && bambuPrinters.length === 0)) {
-      setHostStatusByIntegration({});
-      return;
-    }
-    let cancelled = false;
-    const sendIntegrationIds = [
-      ...new Set(
-        linkedPrinters
-          .map((p) => p.integration_id?.trim())
-          .filter((id): id is string => Boolean(id)),
-      ),
-    ];
-    const integrationIds = [
-      ...new Set([
-        ...sendIntegrationIds,
-        ...bambuPrinters
-          .map((p) => p.integration_id?.trim())
-          .filter((id): id is string => Boolean(id)),
-      ]),
-    ];
-
-    const tick = async () => {
-      if (cancelled || document.hidden) return;
-      const entries = await Promise.all(
-        integrationIds.map(async (id) => {
-          try {
-            return [id, await fetchIntegrationStatus(id)] as const;
-          } catch (e) {
-            return [
-              id,
-              {
-                state: "offline" as const,
-                message: e instanceof Error ? e.message : String(e),
-              },
-            ] as const;
-          }
-        }),
-      );
-      if (cancelled) return;
-      const next = Object.fromEntries(entries);
-      setHostStatusByIntegration(next);
-      setSelectedPrinterId((prev) => pickPreferredPrinterId(linkedPrinters, next, prev));
-      const sendStatuses = sendIntegrationIds
-        .map((id) => next[id])
-        .filter(Boolean) as PrinterHostStatus[];
-      const hasIdle = sendStatuses.some((s) => s.state === "idle" || s.state === "complete");
-      if (hasIdle) {
-        void drainPrinterSendQueue()
-          .then(({ results }) => {
-            if (results.some((r) => r.job_id)) {
-              setQueueRefreshKey((k) => k + 1);
-            }
-          })
-          .catch(() => {
-            /* ignore drain errors during status poll */
-          });
-      }
-    };
-
-    void tick();
-    const timer = window.setInterval(() => void tick(), 5_000);
-    const onVisibility = () => {
-      if (!document.hidden) void tick();
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [health, linkedPrinters, bambuPrinters]);
-
-  const missingPartIdsKey = missingParts.map((p) => p.id).join(",");
-
-  useEffect(() => {
-    setSelectedCheckoffPartIds(
-      missingPartIdsKey ? missingPartIdsKey.split(",").map(Number) : [],
-    );
-  }, [review?.profile_id, missingPartIdsKey]);
-
-  const linkedChip = useMemo(() => {
-    const n = linkedPrinters.length + bambuPrinters.length;
-    if (n === 0) return "no linked hosts";
-    return n === 1 ? "1 linked printer" : `${n} linked printers`;
-  }, [linkedPrinters.length, bambuPrinters.length]);
-
-  const selectedHostStatus = useMemo(() => {
-    const machine = linkedPrinters.find((p) => p.id === selectedPrinterId);
-    const integrationId = machine?.integration_id?.trim();
-    if (!integrationId) return undefined;
-    return hostStatusByIntegration[integrationId];
-  }, [hostStatusByIntegration, linkedPrinters, selectedPrinterId]);
-
-  const selectedPrinterBusy =
-    selectedHostStatus?.state === "printing" || selectedHostStatus?.state === "paused";
-  const selectedPrinterUnavailable =
-    selectedHostStatus?.state === "offline" || selectedHostStatus?.state === "error";
-
-  const checkoffUnits = useMemo(() => {
-    if (!autoCheckoff || selectedProfileId == null) return [];
-    return incompleteUnitsForSelectedParts(missingParts, selectedCheckoffPartIds);
-  }, [autoCheckoff, missingParts, selectedCheckoffPartIds, selectedProfileId]);
-
-  const toggleCheckoffPart = (partId: number) => {
-    setSelectedCheckoffPartIds((prev) =>
-      prev.includes(partId) ? prev.filter((id) => id !== partId) : [...prev, partId],
-    );
-  };
+  const canExportRemaining = canExportParts && remainingUnits > 0;
 
   const onExportStls = (groupBy: StlPackGroupBy) => {
     if (selectedProfileId == null) return;
@@ -327,35 +72,18 @@ export default function ExportActionCards({ onShare }: Props) {
     );
   };
 
-  const onExportMissing = (groupBy: StlPackGroupBy) => {
+  const onExportRemaining = (groupBy: StlPackGroupBy) => {
     if (selectedProfileId == null) return;
-    void exportJob.runJob(
+    void exportStlJob.runJob(
       () =>
         startExportStlPack(selectedProfileId, {
           missing_only: true,
           group_by: groupBy,
         }),
       (snap) => {
-        handleStlPackExportJobDone("Missing-parts STL", snap, {
+        handleStlPackExportJobDone("Export remaining", snap, {
           pathField: "root_path",
         });
-        if (snap.status === "done" && selectedProfileId != null) {
-          void reload(selectedProfileId);
-        }
-      },
-    );
-  };
-
-  const onExportChecklist = () => {
-    if (selectedProfileId == null) return;
-    void exportJob.runJob(
-      () => startExportChecklistHtml(selectedProfileId),
-      (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "Checklist export failed");
-          return;
-        }
-        completeExportDownload("Checklist HTML", snap.result);
       },
     );
   };
@@ -388,198 +116,12 @@ export default function ExportActionCards({ onShare }: Props) {
     })();
   };
 
-  const openFilePicker = (
-    startAfterUpload: boolean,
-    mode: "send" | "queue" = "send",
-    match: "pinned" | "compatible" = "pinned",
-  ) => {
-    if (!hasLinked || !selectedPrinterId) {
-      toast.error("No linked printer", {
-        description: "Link a Moonraker or PrusaLink host in Settings first.",
-      });
-      return;
-    }
-    if (mode === "send" && startAfterUpload && selectedPrinterBusy) {
-      toast.error("Printer is busy", {
-        description: "Pick an Idle printer, use Upload, or Queue for idle.",
-      });
-      return;
-    }
-    if (mode === "send" && startAfterUpload && selectedPrinterUnavailable) {
-      toast.error("Printer not ready", {
-        description: selectedHostStatus?.message?.trim() || "Host is offline or in error.",
-      });
-      return;
-    }
-    pendingStartRef.current = startAfterUpload;
-    pendingModeRef.current = mode;
-    pendingMatchRef.current = match;
-    fileInputRef.current?.click();
-  };
-
-  const onFileChosen = (fileList: FileList | null) => {
-    const file = fileList?.[0];
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    if (!file) return;
-    if (!isAllowedGcode(file.name)) {
-      toast.error("Wrong file type", {
-        description: "Choose a sliced .gcode, .gco, or .bgcode file.",
-      });
-      return;
-    }
-    if (!selectedPrinterId) {
-      toast.error("No linked printer", {
-        description: "Link a Moonraker or PrusaLink host in Settings first.",
-      });
-      return;
-    }
-    const start = pendingStartRef.current;
-    const mode = pendingModeRef.current;
-    const match = pendingMatchRef.current;
-    const printerName =
-      linkedPrinters.find((p) => p.id === selectedPrinterId)?.name ?? "printer";
-    const units =
-      autoCheckoff && selectedProfileId != null && checkoffUnits.length > 0
-        ? checkoffUnits
-        : undefined;
-    if (autoCheckoff && missingCount > 0 && (!units || units.length === 0)) {
-      toast.message("Sending without Progress verify tracking", {
-        description: "Select at least one missing part, or turn the checkbox off.",
-      });
-    }
-
-    if (mode === "queue") {
-      setQueueBusy(true);
-      void (async () => {
-        try {
-          const { item } = await enqueuePrinterSend({
-            file,
-            printer_id: selectedPrinterId,
-            start,
-            wait_for_idle: true,
-            match,
-            profile_id: units ? selectedProfileId ?? undefined : undefined,
-            checkoff_units: units,
-          });
-          const targetLabel =
-            match === "compatible"
-              ? `any idle ${printerName} bed match`
-              : printerName;
-          toast.success(`Queued ${item.filename} for ${targetLabel}`, {
-            description: start
-              ? "Will upload & start when a matching printer is Idle."
-              : "Will upload when Idle (or tap Send ready).",
-          });
-          setQueueRefreshKey((k) => k + 1);
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : String(e));
-        } finally {
-          setQueueBusy(false);
-        }
-      })();
-      return;
-    }
-
-    void printerUploadJob.runJob(
-      () =>
-        startPrinterUpload({
-          file,
-          printer_id: selectedPrinterId,
-          start,
-          profile_id: units ? selectedProfileId ?? undefined : undefined,
-          checkoff_units: units,
-        }),
-      (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "Send to printer failed");
-          return;
-        }
-        const mapped =
-          typeof snap.result?.checkoff_units === "number"
-            ? snap.result.checkoff_units
-            : units?.length ?? 0;
-        if (mapped > 0) {
-          toast.success(snap.message || `Sent ${file.name} to ${printerName}`, {
-            description: `Will queue ${mapped} Progress unit${mapped === 1 ? "" : "s"} for verify when the print finishes.`,
-          });
-        } else {
-          toast.success(snap.message || `Sent ${file.name} to ${printerName}`);
-        }
-      },
-    );
-  };
-
-  const onBambuFileChosen = (fileList: FileList | null) => {
-    const file = fileList?.[0];
-    if (bambuFileInputRef.current) bambuFileInputRef.current.value = "";
-    if (!file) return;
-    if (!isAllowedBambuConnectFile(file.name)) {
-      toast.error("Wrong file type", {
-        description: "Choose a sliced .3mf or .gcode file for Bambu Connect.",
-      });
-      return;
-    }
-    if (!selectedBambuPrinterId) {
-      toast.error("No linked Bambu printer", {
-        description: "Link a Bambu host in Settings first.",
-      });
-      return;
-    }
-    const units =
-      autoCheckoff && selectedProfileId != null && checkoffUnits.length > 0
-        ? checkoffUnits
-        : undefined;
-    setBambuBusy(true);
-    void (async () => {
-      try {
-        const result = await startBambuConnectHandoff({
-          file,
-          printer_id: selectedBambuPrinterId,
-          profile_id: units ? selectedProfileId ?? undefined : undefined,
-          checkoff_units: units,
-        });
-        if (result.launched) {
-          toast.success(result.message, {
-            description: result.checkoff_link_id
-              ? "Progress verify will wait for this print to finish on the linked Bambu."
-              : "Confirm the import in Bambu Connect.",
-          });
-        } else {
-          toast.message(result.message, {
-            description: "Copy the Connect URL or download the staged file.",
-            action: {
-              label: "Copy URL",
-              onClick: () => {
-                void navigator.clipboard.writeText(result.connect_url);
-              },
-            },
-          });
-          if (result.in_container && result.download_path) {
-            window.open(bambuConnectDownloadUrl(result.download_path), "_blank");
-          }
-        }
-        if (!result.launched && !result.in_container) {
-          try {
-            window.location.href = result.connect_url;
-          } catch {
-            /* custom scheme may be blocked in some browsers */
-          }
-        }
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : String(e));
-      } finally {
-        setBambuBusy(false);
-      }
-    })();
-  };
-
   const cards = [
     {
       key: "stls",
       title: "Export STLs",
       description: "Every included part, organised by role and source folder.",
       chips: ["by role", "flat or nested"] as const,
-      highlight: false,
       body: (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -620,29 +162,35 @@ export default function ExportActionCards({ onShare }: Props) {
       ),
     },
     {
-      key: "missing",
-      title: "Export missing STLs",
-      description: "Only what is still unprinted, ready to hand to the next batch.",
+      key: "remaining",
+      title: `Export remaining ${remainingUnits}`,
+      description:
+        "Unprinted STL units from this plan's Progress checkoff — not shop-bin stock.",
       chips: [
-        missingCount > 0 ? `${missingCount} parts` : "none missing",
-        "zip",
+        remainingUnits > 0
+          ? `${remainingUnits} unit${remainingUnits === 1 ? "" : "s"}`
+          : "none remaining",
+        "this plan",
       ] as const,
-      highlight: missingCount > 0,
       body: (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               size="sm"
-              disabled={!canExportParts || exportBusy || missingCount === 0}
+              disabled={!canExportRemaining || exportBusy}
               className="gap-1"
             >
-              {exportJob.busy ? "Exporting…" : "Export missing"}
+              {exportStlJob.busy
+                ? "Exporting…"
+                : remainingUnits > 0
+                  ? `Export remaining ${remainingUnits}`
+                  : "Export remaining"}
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-64">
             <DropdownMenuLabel>Group exported files by</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => onExportMissing("color_dir")}>
+            <DropdownMenuItem onClick={() => onExportRemaining("color_dir")}>
               <div className="flex flex-col">
                 <span>Color + directory</span>
                 <span className="text-xs text-muted-foreground">
@@ -651,11 +199,11 @@ export default function ExportActionCards({ onShare }: Props) {
               </div>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onExportMissing("color")}>
+            <DropdownMenuItem onClick={() => onExportRemaining("color")}>
               <div className="flex flex-col">
                 <span>Color only</span>
                 <span className="text-xs text-muted-foreground">
-                  Flatten all directories (e.g. Primary/file.stl)
+                  Flatten all folders (e.g. Primary/file.stl)
                 </span>
               </div>
             </DropdownMenuItem>
@@ -664,63 +212,10 @@ export default function ExportActionCards({ onShare }: Props) {
       ),
     },
     {
-      key: "print",
-      title: "Print checklist",
-      description: "Paper sheet with thumbnails and tick boxes per unit.",
-      chips: ["Progress sheet", "browser print"] as const,
-      highlight: false,
-      body:
-        includedCount === 0 ? (
-          <Button size="sm" variant="outline" disabled>
-            Open Progress to print
-          </Button>
-        ) : (
-          <Button size="sm" variant="outline" asChild>
-            <Link to={progressRoute(selectedProfileId)}>Open Progress to print</Link>
-          </Button>
-        ),
-    },
-    {
-      key: "html",
-      title: "Export checklist HTML",
-      description: "Self-contained page you can open on a tablet by the printer.",
-      chips: ["single file", "offline"] as const,
-      highlight: false,
-      body: (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!canRun || exportBusy || hasBlockers || includedCount === 0}
-          onClick={onExportChecklist}
-        >
-          {exportJob.busy ? "Exporting…" : "Export HTML"}
-        </Button>
-      ),
-    },
-    {
-      key: "share",
-      title: "Share plan bundle",
-      description:
-        "Sources, picks, roles and quantities — no STLs. Someone else can rebuild it.",
-      chips: ["no STLs", "link or file"] as const,
-      highlight: false,
-      body: (
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={selectedProfileId == null}
-          onClick={onShare}
-        >
-          Create bundle
-        </Button>
-      ),
-    },
-    {
       key: "3mf",
       title: "Export 3MF",
       description: "Plated, per role, ready to open in your slicer.",
       chips: ["by role", "per plate"] as const,
-      highlight: false,
       body: (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -764,204 +259,20 @@ export default function ExportActionCards({ onShare }: Props) {
       ),
     },
     {
-      key: "send",
-      title: "Send to printer",
+      key: "share",
+      title: "Share plan",
       description:
-        "Moonraker/PrusaLink: upload .gcode. Bambu: hand off sliced .3mf/.gcode via official Bambu Connect (no MQTT print-start).",
-      chips: [linkedChip, "upload", "queue", "Connect", "Progress verify"] as const,
-      highlight: hasLinked || hasBambuLinked,
+        "Sources, picks, roles and quantities — no STLs. Someone else can rebuild it.",
+      chips: ["no STLs", "link or file"] as const,
       body: (
-        <div className="flex w-full flex-col gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".gcode,.bgcode,.gco,application/octet-stream"
-            className="hidden"
-            onChange={(e) => onFileChosen(e.target.files)}
-          />
-          <input
-            ref={bambuFileInputRef}
-            type="file"
-            accept=".3mf,.gcode,.gco,application/octet-stream"
-            className="hidden"
-            onChange={(e) => onBambuFileChosen(e.target.files)}
-          />
-          {(hasLinked || hasBambuLinked) &&
-          missingCount > 0 &&
-          selectedProfileId != null ? (
-            <div className="rounded-md border border-border/80 bg-muted/30 px-2.5 py-2 text-xs">
-              <label className="flex cursor-pointer items-start gap-2">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={autoCheckoff}
-                  disabled={exportBusy || bambuBusy}
-                  onChange={(e) => setAutoCheckoff(e.target.checked)}
-                />
-                <span className="leading-snug text-foreground">
-                  Track for Progress verify when this print finishes
-                  {autoCheckoff && checkoffUnits.length > 0
-                    ? ` (${checkoffUnits.length})`
-                    : ""}
-                </span>
-              </label>
-              {autoCheckoff ? (
-                <ul className="mt-2 max-h-28 space-y-1 overflow-y-auto border-t border-border/60 pt-2">
-                  {missingParts.map((part) => {
-                    const checked = selectedCheckoffPartIds.includes(part.id);
-                    return (
-                      <li key={part.id}>
-                        <label className="flex cursor-pointer items-start gap-2">
-                          <input
-                            type="checkbox"
-                            className="mt-0.5"
-                            checked={checked}
-                            disabled={exportBusy || bambuBusy}
-                            onChange={() => toggleCheckoffPart(part.id)}
-                          />
-                          <span className="min-w-0 flex-1 leading-snug">
-                            <span className="font-medium">{part.filename}</span>
-                            <span className="text-muted-foreground">
-                              {" "}
-                              · {remainingLabel(part)}
-                            </span>
-                          </span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
-          {hasLinked ? (
-            <>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Moonraker / PrusaLink
-              </p>
-              <select
-                className="min-h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                value={selectedPrinterId}
-                disabled={exportBusy}
-                aria-label="Target printer"
-                onChange={(e) => setSelectedPrinterId(e.target.value)}
-              >
-                {linkedPrinters.map((p) => {
-                  const integrationId = p.integration_id?.trim() ?? "";
-                  const label = statusLabel(hostStatusByIntegration[integrationId]);
-                  return (
-                    <option key={p.id} value={p.id}>
-                      {p.name} · {label}
-                    </option>
-                  );
-                })}
-              </select>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={exportBusy || queueBusy || !selectedPrinterId}
-                  onClick={() => openFilePicker(false)}
-                >
-                  {printerUploadJob.busy ? "Sending…" : "Upload"}
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={
-                    exportBusy ||
-                    queueBusy ||
-                    !selectedPrinterId ||
-                    selectedPrinterBusy ||
-                    selectedPrinterUnavailable
-                  }
-                  title={
-                    selectedPrinterBusy
-                      ? "Printer is busy — pick Idle, Upload, or Queue for idle"
-                      : selectedPrinterUnavailable
-                        ? "Printer offline or error"
-                        : undefined
-                  }
-                  onClick={() => openFilePicker(true)}
-                >
-                  Upload & start
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={exportBusy || queueBusy || !selectedPrinterId}
-                  onClick={() => openFilePicker(true, "queue", "pinned")}
-                >
-                  {queueBusy ? "Queuing…" : "Queue for idle"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={exportBusy || queueBusy || !selectedPrinterId}
-                  title="Send to any idle Moonraker/PrusaLink with the same bed size; prefers loaded filament that matches tracked Progress parts"
-                  onClick={() => openFilePicker(true, "queue", "compatible")}
-                >
-                  Any matching idle
-                </Button>
-              </div>
-              {selectedPrinterBusy ? (
-                <p className="text-xs text-muted-foreground">
-                  Selected printer is busy. Use Upload, Queue for idle, or Any matching idle;
-                  Upload &amp; start stays blocked until Idle. Queued jobs also appear on
-                  Progress.
-                </p>
-              ) : null}
-              <PrinterSendQueuePanel
-                engineReady={Boolean(health)}
-                refreshKey={queueRefreshKey}
-              />
-            </>
-          ) : null}
-          {hasBambuLinked ? (
-            <>
-              <p className="mt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Bambu Connect
-              </p>
-              <select
-                className="min-h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                value={selectedBambuPrinterId}
-                disabled={exportBusy || bambuBusy}
-                aria-label="Bambu printer for Connect handoff"
-                onChange={(e) => setSelectedBambuPrinterId(e.target.value)}
-              >
-                {bambuPrinters.map((p) => {
-                  const integrationId = p.integration_id?.trim() ?? "";
-                  const label = statusLabel(hostStatusByIntegration[integrationId]);
-                  return (
-                    <option key={p.id} value={p.id}>
-                      {p.name} · {label}
-                    </option>
-                  );
-                })}
-              </select>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={exportBusy || bambuBusy || !selectedBambuPrinterId}
-                title="Stages the file and opens bambu-connect:// on this machine when possible"
-                onClick={() => bambuFileInputRef.current?.click()}
-              >
-                {bambuBusy ? "Handing off…" : "Open in Bambu Connect"}
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Install Bambu Connect on this desk. Self-host can launch the URL scheme; Docker
-                users download the staged file (set BAMBU_CONNECT_HOST_PATH_MAP if Connect should
-                see the volume path). MQTT print-start is not used.
-              </p>
-            </>
-          ) : null}
-          {!hasLinked && !hasBambuLinked ? (
-            <div className="flex w-full flex-col gap-2">
-              <Button size="sm" variant="outline" asChild>
-                <Link to={settingsRoute()}>Manage printers in Settings…</Link>
-              </Button>
-            </div>
-          ) : null}
-        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={selectedProfileId == null}
+          onClick={onShare}
+        >
+          Create bundle
+        </Button>
       ),
     },
   ];
@@ -969,13 +280,7 @@ export default function ExportActionCards({ onShare }: Props) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {cards.map((card) => (
-        <Card
-          key={card.key}
-          className={cn(
-            "flex flex-col border-border shadow-sm",
-            card.highlight && "border-primary/40",
-          )}
-        >
+        <Card key={card.key} className="flex flex-col border-border shadow-sm">
           <CardHeader className="space-y-2 pb-2">
             <CardTitle className="text-[13.5px] font-semibold leading-snug">
               {card.title}
