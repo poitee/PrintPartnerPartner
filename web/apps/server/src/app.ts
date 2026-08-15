@@ -90,7 +90,17 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
   registerApiKeyAuth(app, config);
 
   await app.register(cors, { origin: config.corsOrigin, credentials: true });
-  await app.register(rateLimit, { global: false });
+  // Register rate limiting with smart defaults
+  // Global: 1000 requests per minute per IP
+  // Health check: allowed via allowList
+  // Static files still handled separately
+  await app.register(rateLimit, {
+    max: 1000,
+    timeWindow: "1 minute",
+    cache: 10000, // Store limit info for max 10k IPs
+    allowList: ["/health"], // Skip rate limiting for health checks
+    redis: undefined, // Use in-memory store for single-instance deployments
+  });
   await app.register(websocket);
   await app.register(multipart, { limits: { fileSize: config.uploadMaxBytes } });
 
