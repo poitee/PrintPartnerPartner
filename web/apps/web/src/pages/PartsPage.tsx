@@ -11,6 +11,7 @@ import {
   XCircle,
 } from "lucide-react";
 import StaleBuildBanner from "../components/StaleBuildBanner";
+import StlSyncBanner from "../components/StlSyncBanner";
 import DeskNextStep from "../components/layout/DeskNextStep";
 import EmptyState from "../components/layout/EmptyState";
 import PageHeader from "../components/layout/PageHeader";
@@ -40,6 +41,7 @@ import { flattenReviewParts } from "../lib/reviewParts";
 import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
+import { useStlAutoSync } from "../context/StlAutoSyncContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 
@@ -64,6 +66,8 @@ export default function PartsPage() {
     revision,
     loadedRevision,
   } = usePlanWorkspace();
+  const { banner: stlBanner, runSync: runStlSync, busy: stlSyncBusy } =
+    useStlAutoSync();
   const recomputeJob = useJobRunner("recompute");
   const syncJob = useJobRunner("sync");
   const sheetRef = useRef<ReviewPartsSheetHandle>(null);
@@ -112,7 +116,10 @@ export default function PartsPage() {
     "Parts";
 
   const blockers = useMemo(
-    () => review?.issues.filter((i) => i.severity === "blocker") ?? [],
+    () =>
+      review?.issues.filter(
+        (i) => i.severity === "blocker" && i.code !== "missing_stl",
+      ) ?? [],
     [review],
   );
   const warnings = useMemo(
@@ -157,30 +164,6 @@ export default function PartsPage() {
   const onPrint = useCallback(() => {
     void sheetRef.current?.print();
   }, []);
-
-  const syncAllMissingSources = () => {
-    const ids = [
-      ...new Set(
-        (review?.layers ?? [])
-          .filter((l) => l.project_id != null)
-          .map((l) => l.project_id!),
-      ),
-    ];
-    if (ids.length === 0) {
-      // Fall back to Library when there is nothing to sync from layers.
-      return;
-    }
-    void syncJob.runJob(
-      () => startSync(ids),
-      (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "Sync failed");
-          return;
-        }
-        if (selectedProfileId != null) void reload(selectedProfileId);
-      },
-    );
-  };
 
   return (
     <div className="space-y-4">
@@ -257,35 +240,11 @@ export default function PartsPage() {
         </Card>
       ) : review ? (
         <>
-          {missingStlCount > 0 && (
-            <div
-              className="flex gap-2 rounded-md border border-warning bg-warning/15 px-3 py-2.5 text-sm"
-              role="alert"
-            >
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden />
-              <div>
-                <p className="font-medium">
-                  {missingStlCount} STL missing
-                </p>
-                <p className="mt-1 text-muted-foreground">
-                  Sync sources to pull missing files for this plan.
-                </p>
-                <div className="mt-2 flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-primary underline"
-                    onClick={syncAllMissingSources}
-                    disabled={syncJob.busy}
-                  >
-                    {syncJob.busy ? "Syncing…" : "Sync sources"}
-                  </button>
-                  <Link to={libraryRoute()} className="text-xs text-primary underline">
-                    Go to Library
-                  </Link>
-                </div>
-              </div>
-            </div>
-          )}
+          <StlSyncBanner
+            mode={stlBanner}
+            onSync={runStlSync}
+            syncDisabled={stlSyncBusy || syncJob.busy}
+          />
 
           {(mergeConflicts.length > 0 || blockers.length > 0 || warnings.length > 0) && (
             <section className="section-card space-y-3">
@@ -343,9 +302,9 @@ export default function PartsPage() {
                               type="button"
                               className="text-xs text-primary underline"
                               onClick={syncUnsyncedLayers}
-                              disabled={syncJob.busy}
+                              disabled={stlSyncBusy || syncJob.busy}
                             >
-                              {syncJob.busy ? "Syncing…" : "Sync sources"}
+                              {stlSyncBusy || syncJob.busy ? "Syncing…" : "Sync sources"}
                             </button>
                           )}
                       </div>
@@ -377,9 +336,9 @@ export default function PartsPage() {
                                 type="button"
                                 className="text-xs text-primary underline"
                                 onClick={syncUnsyncedLayers}
-                                disabled={syncJob.busy}
+                                disabled={stlSyncBusy || syncJob.busy}
                               >
-                                {syncJob.busy ? "Syncing…" : "Sync sources"}
+                                {stlSyncBusy || syncJob.busy ? "Syncing…" : "Sync sources"}
                               </button>
                             )}
                         </div>

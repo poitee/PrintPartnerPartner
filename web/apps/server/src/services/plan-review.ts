@@ -11,6 +11,12 @@ import type { FilamentResolveContext } from "./filament-resolve.js";
 import type { AppRepository } from "../db/repository.js";
 import type { PartDbRow } from "../db/repository.js";
 import { conflictsForStack } from "./interaction-graph.js";
+import { resolvePartFilamentHex } from "./filament-catalog.js";
+import { resolvePartStl } from "./part-paths.js";
+import {
+  cachedPngIfExists,
+  globalThumbnailPath,
+} from "../lib/thumbnails.js";
 
 export type PlanReviewIssue = {
   severity: "blocker" | "warning";
@@ -24,6 +30,8 @@ export type PlanReviewOptions = {
   filamentContext?: FilamentResolveContext;
   /** Optional data dir for domain-pack interaction graph. */
   dataDir?: string | null;
+  /** When set, each part gets `thumb_empty` from the on-disk thumbnail cache. */
+  thumbsDir?: string | null;
 };
 
 function filamentLabel(
@@ -229,9 +237,27 @@ export function buildPlanReview(
     /* domain pack optional */
   }
 
-  const grouped = new Map<string, typeof enrichedParts>();
+  // Enrich with on-disk STL / thumbnail flags (distinct from checkoff `missing`).
+  const thumbsDir = options.thumbsDir?.trim() || null;
+  const enrichedWithFiles = enrichedParts.map((part) => {
+    const row = repo.getPartRow(part.id);
+    const stlPath = row ? resolvePartStl(repo, row) : null;
+    const stl_missing = Boolean(part.included) && !stlPath;
+    let thumb_empty = false;
+    if (!stl_missing && stlPath && thumbsDir && part.included) {
+      const hex = resolvePartFilamentHex(row!);
+      const role = row!.role || "primary";
+      const cached = cachedPngIfExists(
+        globalThumbnailPath(thumbsDir, stlPath, role, hex),
+      );
+      thumb_empty = !cached;
+    }
+    return { ...part, stl_missing, thumb_empty };
+  });
+
+  const grouped = new Map<string, typeof enrichedWithFiles>();
   const sourceByFolder = new Map<string, string | null>();
-  for (const part of enrichedParts) {
+  for (const part of enrichedWithFiles) {
     const folder = folderKeyFromRelativePath(part.relative_path || part.filename);
     if (!grouped.has(folder)) grouped.set(folder, []);
     grouped.get(folder)!.push(part);
