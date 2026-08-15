@@ -23,10 +23,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends dumb-init && \
     rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for application (uid 1000, gid 1000)
-RUN groupadd -r -g 1000 ppuser && \
-    useradd -r -u 1000 -g ppuser -d /home/ppuser -s /sbin/nologin -c "Print Partner user" ppuser && \
+# Check if user/group already exists first (they may exist in base image)
+RUN if ! id ppuser >/dev/null 2>&1; then \
+      groupadd -r -g 1000 ppuser 2>/dev/null || groupadd -r ppuser; \
+      useradd -r -g ppuser -d /home/ppuser -s /sbin/nologin -c "Print Partner user" ppuser; \
+    fi && \
     mkdir -p /home/ppuser && \
-    chown -R ppuser:ppuser /home/ppuser
+    chown -R ppuser:ppuser /home/ppuser 2>/dev/null || true
 
 WORKDIR /app/web
 ENV NODE_ENV=production
