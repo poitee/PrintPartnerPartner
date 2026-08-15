@@ -450,7 +450,12 @@ export type PartRow = {
 export type ReviewPart = PartRow & {
   print_units: boolean[];
   printed_count: number;
+  /** Checkoff: not fully printed yet. */
   missing: boolean;
+  /** On-disk STL absent for an included part (GRE-235). */
+  stl_missing?: boolean;
+  /** Included part has STL but no cached thumbnail PNG (GRE-235). */
+  thumb_empty?: boolean;
   filament_display: string;
 };
 

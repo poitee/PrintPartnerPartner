@@ -9,6 +9,8 @@ import { useFlushBuildPageSaves } from "../hooks/useFlushBuildPageSaves";
 import { exportRoute, isExportPath, isPlanPath, planRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { planPrintTotals } from "../lib/workflowStages";
+import { countMissingStls } from "../lib/stlAutoSync";
+import { useStlAutoSync } from "../context/StlAutoSyncContext";
 
 const PLAN_TRAY_EXPANDED_KEY = "print-partner.plan-tray.expanded.v1";
 const TRAY_THUMB_LIMIT = 6;
@@ -50,16 +52,18 @@ export default function PlanTray() {
   const flushBuildSaves = useFlushBuildPageSaves();
   const { profiles, selectedProfileId } = useProfileSelection();
   const { review, loading } = usePlanWorkspace();
+  const { busy: stlSyncBusy } = useStlAutoSync();
   const [expanded, setExpanded] = useState(readExpanded);
 
   const selected = profiles.find((p) => p.id === selectedProfileId);
   const totals = planPrintTotals(review);
   const sourceCount = review?.layers?.length ?? 0;
-  const missingStlCount =
-    review?.part_groups.flatMap((g) => g.parts).filter((p) => p.included && p.missing)
-      .length ?? 0;
+  const missingStlCount = review
+    ? countMissingStls(review.part_groups.flatMap((g) => g.parts))
+    : 0;
   const otherWarnCount =
-    (review?.issues?.length ?? 0) + (selected?.build_stale ? 1 : 0);
+    (review?.issues?.filter((i) => i.code !== "missing_stl").length ?? 0) +
+    (selected?.build_stale ? 1 : 0);
 
   const includedParts = useMemo(() => {
     if (!review) return [];
@@ -175,7 +179,7 @@ export default function PlanTray() {
           </span>
         ) : null}
 
-        {missingStlCount > 0 ? (
+        {stlSyncBusy ? null : missingStlCount > 0 ? (
           <div className="hidden items-center gap-1.5 rounded-md border border-amber-300/80 bg-amber-50 px-2.5 py-1 dark:border-amber-700/60 dark:bg-amber-950/40 sm:flex">
             <span className="inline-block h-1.5 w-1.5 rotate-45 bg-amber-600 dark:bg-amber-400" />
             <span className="text-[11.5px] text-amber-900 dark:text-amber-200">

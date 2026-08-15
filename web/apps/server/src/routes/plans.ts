@@ -213,6 +213,8 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
     return buildPlanReview(deps.repo, id, {
       includeExcluded: include_excluded,
       filamentContext: ctx,
+      dataDir: deps.dataDir,
+      thumbsDir: deps.thumbsDir,
     });
   });
 

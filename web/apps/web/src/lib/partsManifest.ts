@@ -247,7 +247,7 @@ function sourceLinkForPart(
 
 function notesForPart(part: ReviewPart, review: PlanReview): string {
   const bits: string[] = [];
-  if (part.missing) bits.push("missing_stl");
+  if (part.stl_missing) bits.push("missing_stl");
   if (!part.included) bits.push("excluded");
   for (const issue of review.issues) {
     if (issue.message.includes(part.filename)) bits.push(issue.code);
