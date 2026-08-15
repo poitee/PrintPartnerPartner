@@ -3,6 +3,7 @@ import type { ServerConfig } from "../config.js";
 import type { AppPorts } from "../ports/index.js";
 import { pingBundle } from "../db/database.js";
 import type { SaasDbStore } from "../adapters/saas/index.js";
+import { getVersionInfo, getBuildSemver } from "../lib/version.js";
 
 export async function registerHealthRoutes(
   app: FastifyInstance,
@@ -34,6 +35,8 @@ export async function registerHealthRoutes(
     return {
       ok: dbOk,
       version: config.version,
+      semver: getBuildSemver(),
+      build: getVersionInfo(),
       deploy_mode: config.deployMode,
       multi_user: config.multiUser,
       data_dir: config.dataDir,
@@ -48,6 +51,10 @@ export async function registerHealthRoutes(
         ...(config.smtpConfigured ? ["password_reset_email"] : []),
         "mcp_http",
         ...(config.googleClientId ? ["google_drive_manifest"] : []),
+        "backups",
+        "logging",
+        "api_key_management",
+        "webhook_security",
       ],
       db: {
         connected: dbOk,
