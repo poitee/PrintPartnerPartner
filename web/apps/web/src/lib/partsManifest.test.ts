@@ -95,6 +95,21 @@ describe("partsManifest CSV", () => {
     expect(rows[0]!.printed_count).toBe("1");
   });
 
+  it("dedupes missing_stl when both stl_missing and a matching issue are set", () => {
+    const review = sampleReview();
+    review.part_groups[0]!.parts[0]!.stl_missing = true;
+    review.issues = [
+      {
+        severity: "blocker",
+        code: "missing_stl",
+        message: "STL not found on disk: x_extrusion.stl",
+        link_hint: "sources",
+      },
+    ];
+    const rows = buildPartsManifestRows({ review, sources: sampleSources });
+    expect(rows[0]!.notes).toBe("missing_stl");
+  });
+
   it("round-trips CSV parse", () => {
     const rows = buildPartsManifestRows({ review: sampleReview(), sources: sampleSources });
     const parsed = parseManifestCsv(rowsToCsv(rows));

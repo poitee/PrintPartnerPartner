@@ -243,7 +243,7 @@ export default function PartsPage() {
           <StlSyncBanner
             mode={stlBanner}
             onSync={runStlSync}
-            syncDisabled={stlSyncBusy}
+            syncDisabled={stlSyncBusy || syncJob.busy}
           />
 
           {(mergeConflicts.length > 0 || blockers.length > 0 || warnings.length > 0) && (

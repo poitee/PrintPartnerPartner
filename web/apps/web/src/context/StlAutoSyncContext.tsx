@@ -103,19 +103,29 @@ export function StlAutoSyncProvider({ children }: { children: ReactNode }) {
       runInFlightRef.current = true;
       setFailed(false);
 
-      const finishOk = async () => {
-        if (selectedProfileId != null) {
-          await reload(selectedProfileId);
-          if (needThumbs) await regenThumbs(selectedProfileId);
-        }
+      const clearInFlight = () => {
         setLocalBusy(false);
         runInFlightRef.current = false;
       };
 
       const finishFail = () => {
         setFailed(true);
-        setLocalBusy(false);
-        runInFlightRef.current = false;
+        clearInFlight();
+      };
+
+      const finishOk = async () => {
+        try {
+          if (selectedProfileId != null) {
+            await reload(selectedProfileId);
+            if (needThumbs) await regenThumbs(selectedProfileId);
+          }
+        } catch {
+          finishFail();
+          return;
+        } finally {
+          // Always unlock so a later Sync is not stuck no-op'ing.
+          if (runInFlightRef.current) clearInFlight();
+        }
       };
 
       if (needSync) {
@@ -126,10 +136,11 @@ export function StlAutoSyncProvider({ children }: { children: ReactNode }) {
           try {
             if (needThumbs) await regenThumbs(selectedProfileId);
             await reload(selectedProfileId);
-            setLocalBusy(false);
-            runInFlightRef.current = false;
           } catch {
             finishFail();
+            return;
+          } finally {
+            if (runInFlightRef.current) clearInFlight();
           }
           return;
         }
@@ -151,10 +162,11 @@ export function StlAutoSyncProvider({ children }: { children: ReactNode }) {
       setLocalBusy(true);
       try {
         await regenThumbs(selectedProfileId);
-        setLocalBusy(false);
-        runInFlightRef.current = false;
       } catch {
         finishFail();
+        return;
+      } finally {
+        if (runInFlightRef.current) clearInFlight();
       }
     },
     [
