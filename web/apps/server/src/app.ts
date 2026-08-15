@@ -15,6 +15,7 @@ import {
   type InProcessJobRunner,
 } from "./routes/jobs.js";
 import { registerCoreRoutes } from "./routes/core-routes.js";
+import { registerBackupRoutes } from "./routes/backups.js";
 import { registerApiV1Plugin, registerOpenApi, registerOpenApiJsonRoutes } from "./routes/api-v1.js";
 import { registerAuthRoutes, registerTenantMiddleware } from "./routes/auth.js";
 import { registerApiKeyAuth } from "./middleware/api-key.js";
@@ -112,6 +113,12 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     const getRepo = () => repository;
     const jobs = (ports.jobs as InProcessJobRunner) ?? createJobRunner(getRepo, config.dataDir);
 
+    // Extract SQLite instance for backup/restore
+    let sqlite = null;
+    if ("sqlite" in ports.db) {
+      sqlite = (ports.db as SelfHostDbStore).sqlite ?? null;
+    }
+
     const coreDeps = {
       repo: repository,
       reposDir: ports.reposDir ?? join(config.dataDir, "repos"),
@@ -125,6 +132,14 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     };
 
     await registerCoreRoutes(app, coreDeps);
+    
+    // Register backup routes (available regardless of auth mode)
+    await registerBackupRoutes(app, {
+      dataDir: config.dataDir,
+      sqlite,
+      appVersion: config.version,
+    });
+    
     await app.register(async (v1) => {
       await registerApiV1Plugin(v1, coreDeps);
     }, { prefix: "/api/v1" });
