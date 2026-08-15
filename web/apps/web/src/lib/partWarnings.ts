@@ -1,4 +1,5 @@
 import type { PlanReview, ReviewPart } from "../api/engine";
+import { isStlMissing } from "./stlAutoSync";
 
 export type PartWarningKind =
   | "missing"
@@ -50,7 +51,7 @@ export function partWarnings(
   review?: PlanReview | null,
 ): PartWarning[] {
   const out: PartWarning[] = [];
-  if (part.missing) {
+  if (isStlMissing(part)) {
     out.push({ kind: "missing", label: "STL missing" });
   }
   if (!part.role) {
@@ -82,9 +83,7 @@ export function partWarningNote(
 }
 
 /** Included parts with missing STL files (desk-loop aggregate). */
-export function countMissingStls(parts: ReviewPart[]): number {
-  return parts.reduce((n, p) => n + (p.included && p.missing ? 1 : 0), 0);
-}
+export { countMissingStls } from "./stlAutoSync";
 
 export function countPartWarnings(
   parts: ReviewPart[],

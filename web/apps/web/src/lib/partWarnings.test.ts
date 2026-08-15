@@ -27,6 +27,8 @@ function part(overrides: Partial<ReviewPart> & { id: number }): ReviewPart {
     print_units: [false],
     printed_count: 0,
     missing: false,
+    stl_missing: false,
+    thumb_empty: false,
     filament_display: "PLA",
     ...overrides,
   };
@@ -64,7 +66,7 @@ describe("partWarnings", () => {
       id: 1,
       filename: "[a]_feet_x4.stl",
       role: null,
-      missing: true,
+      stl_missing: true,
       quantity_auto: 1,
       quantity_effective: 1,
     });
@@ -72,6 +74,11 @@ describe("partWarnings", () => {
     expect(kinds).toEqual(["missing", "no_role", "qty_unparsed"]);
     // Card notes skip STL missing — desk-loop banner owns that CTA.
     expect(partWarningNote(p, emptyReview)).toBe("no role assigned");
+  });
+
+  it("does not treat checkoff missing as STL missing", () => {
+    const p = part({ id: 9, missing: true, stl_missing: false });
+    expect(partWarnings(p, emptyReview).map((w) => w.kind)).not.toContain("missing");
   });
 
   it("ignores qty when override is set or auto matches", () => {
@@ -119,8 +126,8 @@ describe("partWarnings", () => {
 describe("countNonMissingPartWarnings", () => {
   it("ignores parts whose only issue is STL missing", () => {
     const parts = [
-      part({ id: 1, missing: true }),
-      part({ id: 2, missing: true, filename: "b.stl" }),
+      part({ id: 1, stl_missing: true }),
+      part({ id: 2, stl_missing: true, filename: "b.stl" }),
     ];
     expect(countPartWarnings(parts, emptyReview)).toBe(2);
     expect(countNonMissingPartWarnings(parts, emptyReview)).toBe(0);
@@ -128,9 +135,9 @@ describe("countNonMissingPartWarnings", () => {
 
   it("counts parts with real (non-missing) warnings", () => {
     const parts = [
-      part({ id: 1, missing: true }),
+      part({ id: 1, stl_missing: true }),
       part({ id: 2, role: null, filename: "b.stl" }),
-      part({ id: 3, missing: true, role: null, filename: "c.stl" }),
+      part({ id: 3, stl_missing: true, role: null, filename: "c.stl" }),
     ];
     expect(countNonMissingPartWarnings(parts, emptyReview)).toBe(2);
   });
