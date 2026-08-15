@@ -33,11 +33,12 @@ export async function registerRequestLoggingMiddleware(app: FastifyInstance): Pr
       severity = "debug";
     }
 
-    // Skip health checks and static files from verbose logging
+    // Skip noise: health checks, static files, polling endpoints
     const isHealthCheck = request.url === "/health";
     const isStaticFile = /\.(js|css|png|jpg|gif|svg|woff|woff2|ttf|eot)$/i.test(request.url);
+    const isPollingEndpoint = /\/(printer-send-queue|filaments)/.test(request.url);
     
-    if (isHealthCheck || isStaticFile) {
+    if (isHealthCheck || isStaticFile || isPollingEndpoint) {
       return;
     }
 
