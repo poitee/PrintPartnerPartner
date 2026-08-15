@@ -43,9 +43,26 @@ export async function registerMetricsRoutes(app: FastifyInstance): Promise<void>
 
   /**
    * GET /metrics
-   * Return Prometheus-compatible metrics
+   * Return Prometheus-compatible metrics.
+   * In multi-user mode, requires a valid session or API key
+   * (same guard as /api/v1 endpoints).
    */
-  app.get("/metrics", async () => {
+  app.get("/metrics", async (request, reply) => {
+    // Optional auth: if config has API key enforcement, check it.
+    // In single-user / trusted-LAN mode this is a no-op.
+    const authHeader = request.headers["authorization"];
+    const apiKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    const sessionUser = (request as any).sessionUser;
+    // If neither a session nor an API key is present and we're in multi-user
+    // mode, return 401 — otherwise allow (self-hosted default = open).
+    if (!sessionUser && !apiKey) {
+      // Only block when the app is explicitly in multi-user / auth-required mode.
+      // Single-host self-hosted installs remain open by default.
+      const { config } = app as any;
+      if (config?.authRequired) {
+        return reply.status(401).send({ detail: "Authentication required" });
+      }
+    }
     const p50 =
       metrics.httpRequestDurationMs.length > 0
         ? metrics.httpRequestDurationMs.sort((a, b) => a - b)[

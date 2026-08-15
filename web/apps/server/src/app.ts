@@ -193,6 +193,15 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
         root: config.staticDir,
         prefix: "/",
         wildcard: false,
+        // Vite content-hashes all asset filenames (index-AbCdEf.js) so they
+        // are safe to cache forever. index.html must NOT be cached (no hash).
+        setHeaders: (reply, filePath) => {
+          if (/\/assets\/[^/]+\.[a-f0-9]{8,}\.(js|css|woff2?|png|svg|webp)$/i.test(filePath)) {
+            void reply.header("Cache-Control", "public, max-age=31536000, immutable");
+          } else {
+            void reply.header("Cache-Control", "no-cache");
+          }
+        },
       });
       app.setNotFoundHandler((request, reply) => {
         if (

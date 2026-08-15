@@ -32,6 +32,9 @@ import IntegrationsSettingsCard from "../components/settings/IntegrationsSetting
 import PrintersSettingsCard from "../components/settings/PrintersSettingsCard";
 import AboutUpdatesCard from "../components/settings/AboutUpdatesCard";
 import AccountPasswordCard from "../components/settings/AccountPasswordCard";
+import BackupManagementCard from "../components/settings/BackupManagementCard";
+import ApiKeyManagementCard from "../components/settings/ApiKeyManagementCard";
+import LoggingManagementCard from "../components/settings/LoggingManagementCard";
 import ThemePreferenceControl from "../components/ThemePreferenceControl";
 import SourceCategoryManager from "../components/sources/SourceCategoryManager";
 import { Button } from "../components/ui/button";
@@ -505,6 +508,12 @@ export default function SettingsPage() {
           <AccountPasswordCard />
         </SettingsSection>
       ) : null}
+
+      <SettingsSection id="data" title="Data & System">
+        <BackupManagementCard />
+        <ApiKeyManagementCard />
+        <LoggingManagementCard />
+      </SettingsSection>
 
       <Dialog
         open={deleteFilamentId != null}
