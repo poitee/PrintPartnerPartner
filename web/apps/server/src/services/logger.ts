@@ -41,26 +41,12 @@ class WorkflowLogger {
   constructor(config: LoggerConfig) {
     this.config = config;
     
-    // Use pino-pretty only in production/development, not in tests
-    const pinoConfig: Parameters<typeof pino>[0] = {
-      level: config.minSeverity,
-    };
-
-    // Only add transport if we're not in test environment
-    if (process.env.NODE_ENV !== "test") {
-      pinoConfig.transport = {
-        target: "pino-pretty",
-        options: {
-          colorize: true,
-          singleLine: false,
-          translateTime: "HH:MM:ss Z",
-          ignore: "pid,hostname",
-        },
-      };
-    }
-
+    // Use simple pino configuration without pretty-printing
+    // (pino-pretty is not available in production containers)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.pinoLogger = pino(pinoConfig) as any;
+    this.pinoLogger = pino({
+      level: config.minSeverity,
+    }) as any;
   }
 
   /**
