@@ -702,15 +702,16 @@ export async function registerJobRoutes(
         const checkoff_units = parseCheckoffUnits(checkoffUnitsRaw);
         const unlabeledParsed = parseUnlabeledNames(unlabeledNamesRaw);
         const unlabeled_names = unlabeledParsed.length ? unlabeledParsed : undefined;
-        if ((checkoff_units.length > 0 || unlabeled_names) && profileId == null) {
+        // GRE-232: Send must bind to a plan (active spine). No plan → reject.
+        if (profileId == null) {
           return sendProblem(
             reply,
             400,
             "Bad Request",
-            "profile_id is required when checkoff_units or unlabeled_names are provided",
+            "Pick a plan to bind this send (profile_id required)",
           );
         }
-        if (profileId != null && !jobs.getRepo().getProfile(profileId)) {
+        if (!jobs.getRepo().getProfile(profileId)) {
           return sendProblem(reply, 404, "Not Found", "Profile not found");
         }
 

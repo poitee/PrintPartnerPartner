@@ -120,7 +120,7 @@ export async function registerBambuConnectRoutes(
             if (raw === "0" || raw === "false" || raw === "no") launchField = false;
             else if (raw === "1" || raw === "true" || raw === "yes") launchField = true;
           }
-          if (part.fieldname === "profile_id") {
+          if (part.fieldname === "profile_id" || part.fieldname === "plan_id") {
             const n = Number(value);
             if (Number.isInteger(n) && n > 0) profileId = n;
           }
@@ -181,14 +181,15 @@ export async function registerBambuConnectRoutes(
       }
 
       const checkoff_units = parseCheckoffUnits(checkoffUnitsRaw);
-      if (checkoff_units.length > 0 && profileId == null) {
+      // GRE-232: Bambu handoff stamps plan_id; require an active spine plan.
+      if (profileId == null) {
         return reject(
           400,
           "Bad Request",
-          "profile_id is required when checkoff_units are provided",
+          "Pick a plan to bind this send (profile_id required)",
         );
       }
-      if (profileId != null && !deps.repo.getProfile(profileId)) {
+      if (!deps.repo.getProfile(profileId)) {
         return reject(404, "Not Found", "Profile not found");
       }
 
@@ -234,12 +235,8 @@ export async function registerBambuConnectRoutes(
       }
 
       let checkoff_link_id: string | undefined;
-      if (
-        checkoff_units.length > 0 &&
-        profileId != null &&
-        integrationId &&
-        fleetPrinterId
-      ) {
+      // GRE-232: stamp plan_id at Bambu handoff whenever a plan is bound.
+      if (profileId != null && integrationId && fleetPrinterId) {
         const link = createPrinterCheckoffLink(deps.repo, {
           profile_id: profileId,
           integration_id: integrationId,

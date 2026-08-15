@@ -91,15 +91,16 @@ export async function registerPrinterSendQueueRoutes(
         artifactPath = artifact_path;
 
         const checkoff_units = parseCheckoffUnits(checkoffUnitsRaw);
-        if (checkoff_units.length > 0 && profileId == null) {
+        // GRE-232: queued sends also stamp plan_id at enqueue time.
+        if (profileId == null) {
           return sendProblem(
             reply,
             400,
             "Bad Request",
-            "profile_id is required when checkoff_units are provided",
+            "Pick a plan to bind this send (profile_id required)",
           );
         }
-        if (profileId != null && !deps.repo.getProfile(profileId)) {
+        if (!deps.repo.getProfile(profileId)) {
           return sendProblem(reply, 404, "Not Found", "Profile not found");
         }
 
