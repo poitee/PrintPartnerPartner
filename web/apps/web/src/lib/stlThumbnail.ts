@@ -105,13 +105,49 @@ function renderBufferToBlob(buffer: ArrayBuffer, hex: string): Promise<Blob | nu
   });
 }
 
-// Serialize render work; the single renderer cannot run two renders at once.
-let chain: Promise<unknown> = Promise.resolve();
-function enqueue<T>(task: () => Promise<T>): Promise<T> {
-  const run = chain.then(task, task);
-  chain = run.catch(() => undefined);
-  return run;
+/**
+ * Concurrent render queue with max workers.
+ * Browsers cap WebGL contexts (~16), and a single renderer can still handle
+ * multiple renders via queueing. We use a max of 4 concurrent workers to
+ * balance performance vs. memory usage.
+ */
+class RenderQueue {
+  private pending: Array<{
+    task: () => Promise<unknown>;
+    resolve: (value: unknown) => void;
+    reject: (error: unknown) => void;
+  }> = [];
+  private active = 0;
+  private readonly maxConcurrent = 4;
+
+  enqueue<T>(task: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.pending.push({
+        task: task as () => Promise<unknown>,
+        resolve: resolve as (v: unknown) => void,
+        reject,
+      });
+      this.process();
+    });
+  }
+
+  private process() {
+    while (this.active < this.maxConcurrent && this.pending.length > 0) {
+      const item = this.pending.shift();
+      if (!item) break;
+      this.active++;
+      item
+        .task()
+        .then(item.resolve, item.reject)
+        .finally(() => {
+          this.active--;
+          this.process();
+        });
+    }
+  }
 }
+
+const renderQueue = new RenderQueue();
 
 /**
  * Read a response body with a hard byte budget so oversized meshes never
@@ -194,7 +230,7 @@ export function generatePartThumbnail(
   partId: number,
   hex: string | null | undefined,
 ): Promise<string | null> {
-  return enqueue(async () => {
+  return renderQueue.enqueue(async () => {
     const buffer = await loadMeshBuffer(partId);
     if (!buffer) return null;
     let blob: Blob | null;
