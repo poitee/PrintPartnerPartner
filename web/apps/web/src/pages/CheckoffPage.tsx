@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -23,13 +23,14 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import DeskNextStep from "../components/layout/DeskNextStep";
 import EmptyState from "../components/layout/EmptyState";
 import PlanSpecialRequestLine from "../components/PlanSpecialRequestLine";
-import PrinterLiveStrip, {
-  type PrinterLiveStripState,
-} from "../components/checkoff/PrinterLiveStrip";
+// Lazy: PrinterLiveStrip starts polling on mount — defer until rendered
+const PrinterLiveStrip = lazy(() => import("../components/checkoff/PrinterLiveStrip"));
+import type { PrinterLiveStripState } from "../components/checkoff/PrinterLiveStrip";
 import PrintVerifyPanel, {
   type PrintVerifyQueueState,
 } from "../components/checkoff/PrintVerifyPanel";
-import PrinterSendQueuePanel from "../components/export/PrinterSendQueuePanel";
+// Lazy: PrinterSendQueuePanel (heavy printer queue UI)
+const PrinterSendQueuePanel = lazy(() => import("../components/export/PrinterSendQueuePanel"));
 import SortableProgressPart from "../components/checkoff/SortableProgressPart";
 import PartPreviewDialog from "../components/parts/PartPreviewDialog";
 import PartThumbExpandButton from "../components/parts/PartThumbExpandButton";
@@ -643,15 +644,17 @@ export default function CheckoffPage() {
         )}
 
         <div className="checkoff-sticky flex flex-col gap-2">
-          <PrinterLiveStrip
-            engineReady={Boolean(health?.ok)}
-            onLiveStateChange={setLiveStrip}
-            onCheckoffUpdate={(profileId) => {
-              if (selectedProfileId != null && profileId === selectedProfileId) {
-                setVerifyRefreshKey((k) => k + 1);
-              }
-            }}
-          />
+          <Suspense fallback={null}>
+            <PrinterLiveStrip
+              engineReady={Boolean(health?.ok)}
+              onLiveStateChange={setLiveStrip}
+              onCheckoffUpdate={(profileId) => {
+                if (selectedProfileId != null && profileId === selectedProfileId) {
+                  setVerifyRefreshKey((k) => k + 1);
+                }
+              }}
+            />
+          </Suspense>
           <PrintVerifyPanel
             engineReady={Boolean(health?.ok)}
             profileId={selectedProfileId}
@@ -663,10 +666,12 @@ export default function CheckoffPage() {
               if (selectedProfileId != null) void reload(selectedProfileId);
             }}
           />
-          <PrinterSendQueuePanel
-            engineReady={Boolean(health?.ok)}
-            emphasizeSendReady={progressMode === "idle"}
-          />
+          <Suspense fallback={null}>
+            <PrinterSendQueuePanel
+              engineReady={Boolean(health?.ok)}
+              emphasizeSendReady={progressMode === "idle"}
+            />
+          </Suspense>
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <input
             type="search"
