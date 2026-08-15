@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
-import { partMeshUrl, uploadPartThumbnail } from "../api/engine";
-import { fetchWithRetry } from "./fetchWithRetry";
+import { partMeshUrl, uploadPartThumbnail } from "../api/engine.js";
+import { fetchWithRetry } from "./fetchWithRetry.js";
+import { getCachedMeshBuffer, cacheMeshBuffer } from "./meshCache.js";
 
 const SIZE = 256;
 const MESH_MAX_BYTES = 15 * 1024 * 1024;
@@ -206,8 +207,18 @@ async function readResponseBounded(
 }
 
 async function loadMeshBuffer(partId: number): Promise<ArrayBuffer | null> {
-  const cached = cachedMeshBuffer(partId);
-  if (cached) return cached;
+  // Check in-memory cache first (fast)
+  const memCached = cachedMeshBuffer(partId);
+  if (memCached) return memCached;
+
+  // Check IndexedDB (persistent across sessions, slow)
+  const dbCached = await getCachedMeshBuffer(partId);
+  if (dbCached) {
+    rememberMeshBuffer(partId, dbCached);
+    return dbCached;
+  }
+
+  // Fall back to network
   let res: Response;
   try {
     res = await fetchWithRetry(() => partMeshUrl(partId));
@@ -217,7 +228,11 @@ async function loadMeshBuffer(partId: number): Promise<ArrayBuffer | null> {
   if (!res.ok) return null;
   const buffer = await readResponseBounded(res, MESH_MAX_BYTES);
   if (!buffer) return null;
+
+  // Store in both caches
   rememberMeshBuffer(partId, buffer);
+  void cacheMeshBuffer(partId, buffer).catch(() => {});
+
   return buffer;
 }
 
