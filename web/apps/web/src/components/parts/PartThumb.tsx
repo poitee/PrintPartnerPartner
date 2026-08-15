@@ -13,6 +13,9 @@ const DEFAULT_THUMB_PX = 96;
  * PNG first; the server returns a 1x1 transparent placeholder when nothing is
  * cached, in which case we fall back to rendering the STL client-side (which
  * also uploads the render to warm the server cache).
+ *
+ * Fix #6: passes a priority to the render queue so parts that are already
+ * visible on screen jump ahead of parts still off-screen.
  */
 export default function PartThumb({
   partId,
@@ -34,6 +37,8 @@ export default function PartThumb({
   const ref = useRef<HTMLDivElement>(null);
   const [src, setSrc] = useState<string | null>(null);
   const [visible, setVisible] = useState(eager);
+  // Fix #6: track whether the element is already intersecting (for priority)
+  const [intersecting, setIntersecting] = useState(eager);
   const cacheVersion = useSyncExternalStore(
     subscribeThumbnailCache,
     getThumbnailCacheVersion,
@@ -41,7 +46,10 @@ export default function PartThumb({
   );
 
   useEffect(() => {
-    if (eager) setVisible(true);
+    if (eager) {
+      setVisible(true);
+      setIntersecting(true);
+    }
   }, [eager]);
 
   useEffect(() => {
@@ -51,6 +59,7 @@ export default function PartThumb({
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) {
           setVisible(true);
+          setIntersecting(true);
           observer.disconnect();
         }
       },
@@ -66,9 +75,12 @@ export default function PartThumb({
     let objectUrl: string | null = null;
     let probe: HTMLImageElement | null = null;
 
+    // Fix #6: visible parts get priority 1, off-screen buffered parts get 0
+    const priority = intersecting ? 1 : 0;
+
     // Client STL render fallback; uploads the PNG so the server cache warms.
     const renderClientSide = () => {
-      void generatePartThumbnail(partId, tintHex).then((url) => {
+      void generatePartThumbnail(partId, tintHex, { priority }).then((url) => {
         if (cancelled) {
           if (url) URL.revokeObjectURL(url);
           return;
@@ -107,7 +119,7 @@ export default function PartThumb({
       }
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [visible, partId, tintHex, cacheVersion]);
+  }, [visible, intersecting, partId, tintHex, cacheVersion]);
 
   const px = sizePx ?? (compact ? 56 : DEFAULT_THUMB_PX);
   const label = fallbackLabel?.trim().slice(0, 3) || null;
