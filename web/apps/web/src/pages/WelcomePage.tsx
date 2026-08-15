@@ -74,7 +74,7 @@ export default function WelcomePage() {
       <header className="space-y-1 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">Welcome to Print Partner</h1>
         <p className="text-sm text-muted-foreground">
-          Self-hosted workflow for layered STL kits — Library → Plan → Parts → Progress → Export.
+          Self-hosted workflow for layered STL kits.
         </p>
       </header>
 

@@ -145,8 +145,7 @@ export default function AppLayout() {
 
           <div className="flex min-w-0 flex-1 flex-col">
             <header
-              className="flex flex-col gap-2 border-b border-border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 print:hidden"
-              style={{ background: "var(--gradient-header)" }}
+              className="flex flex-col gap-2 border-b border-border bg-card px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-5 print:hidden"
             >
               <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
                 {showPlanInHeader && activePlanName ? (
