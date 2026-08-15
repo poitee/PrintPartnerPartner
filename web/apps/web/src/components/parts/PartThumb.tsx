@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { partThumbnailUrl } from "../../api/engine";
 import { generatePartThumbnail } from "../../lib/stlThumbnail";
 import {
@@ -17,7 +17,7 @@ const DEFAULT_THUMB_PX = 96;
  * Fix #6: passes a priority to the render queue so parts that are already
  * visible on screen jump ahead of parts still off-screen.
  */
-export default function PartThumb({
+export default memo(function PartThumb({
   partId,
   tintHex,
   compact,
@@ -144,4 +144,4 @@ export default function PartThumb({
       )}
     </div>
   );
-}
+});

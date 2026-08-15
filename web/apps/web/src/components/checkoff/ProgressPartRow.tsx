@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
 import { Minus, Plus } from "lucide-react";
 import type { ReviewPart } from "../../api/engine";
@@ -52,8 +53,11 @@ const toneBarClass: Record<ReturnType<typeof partProgressTone>, string> = {
 /**
  * Screen Progress row — thumb, path, filament swatch, bar, −/+ steppers
  * (matches Workflow mock Progress / phone checkoff density).
+ *
+ * Memoised so checking off one unit only re-renders the affected row,
+ * not all 145 rows in the list.
  */
-export default function ProgressPartRow({
+const ProgressPartRow = memo(function ProgressPartRow({
   part,
   busy,
   compact = false,
@@ -211,4 +215,6 @@ export default function ProgressPartRow({
       </div>
     </article>
   );
-}
+});
+
+export default ProgressPartRow;

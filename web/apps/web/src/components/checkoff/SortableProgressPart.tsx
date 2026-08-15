@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { ReviewPart } from "../../api/engine";
@@ -32,7 +33,7 @@ type BagProps = {
 
 type Props = PartProps | BagProps;
 
-export default function SortableProgressPart(props: Props) {
+export default memo(function SortableProgressPart(props: Props) {
   const sortableId = props.kind === "part" ? partRowId(props.part.id) : bagRowId(props.bagId);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({
@@ -84,4 +85,4 @@ export default function SortableProgressPart(props: Props) {
       </div>
     </SortableShell>
   );
-}
+});
