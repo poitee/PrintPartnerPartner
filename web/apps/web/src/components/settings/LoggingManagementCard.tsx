@@ -66,7 +66,10 @@ export default function LoggingManagementCard() {
   useEffect(() => {
     loadConfig();
     loadStats();
-    const interval = setInterval(loadStats, 5000);
+    // Poll stats every 5s, but pause when the tab is hidden
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "hidden") void loadStats();
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 

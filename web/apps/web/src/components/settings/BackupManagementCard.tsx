@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { Download, RefreshCw, Trash2, AlertCircle } from "lucide-react";
 import {
   Card,
@@ -36,7 +36,7 @@ export default function BackupManagementCard() {
   const [showRestoreDialog, setShowRestoreDialog] = useState(false);
   const [restoring, setRestoring] = useState(false);
 
-  const loadBackups = async () => {
+  const loadBackups = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -49,11 +49,15 @@ export default function BackupManagementCard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadBackups();
-  }, []);
+    // Refresh when the tab regains focus
+    const onFocus = () => void loadBackups();
+    document.addEventListener("visibilitychange", onFocus);
+    return () => document.removeEventListener("visibilitychange", onFocus);
+  }, [loadBackups]);
 
   const handleCreateBackup = async () => {
     setLoading(true);

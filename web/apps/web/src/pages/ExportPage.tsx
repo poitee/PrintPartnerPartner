@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FileArchive } from "lucide-react";
 import DeskNextStep from "../components/layout/DeskNextStep";
@@ -7,7 +7,8 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import ExportActionCards from "../components/export/ExportActionCards";
 import ExportRecentPanel, { hasExportJobs } from "../components/export/ExportRecentPanel";
 import PartsManifestTransfer from "../components/export/PartsManifestTransfer";
-import PrinterSendPanel from "../components/export/PrinterSendPanel";
+// Lazy: PrinterSendPanel pulls in heavy printer integration + dnd-kit
+const PrinterSendPanel = lazy(() => import("../components/export/PrinterSendPanel"));
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
@@ -115,12 +116,14 @@ export default function ExportPage() {
         </Card>
       ) : (
         <>
-          <PrinterSendPanel
-            remainingParts={remainingParts}
-            profileId={selectedProfileId}
-            planName={planName}
-            engineReady={Boolean(health.ok)}
-          />
+          <Suspense fallback={<div className="h-32 animate-pulse rounded-lg bg-muted" />}>
+            <PrinterSendPanel
+              remainingParts={remainingParts}
+              profileId={selectedProfileId}
+              planName={planName}
+              engineReady={Boolean(health.ok)}
+            />
+          </Suspense>
 
           <div className="space-y-3">
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">

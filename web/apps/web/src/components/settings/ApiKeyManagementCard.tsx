@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { Copy, Eye, EyeOff, Plus, RotateCw, Trash2, AlertCircle } from "lucide-react";
 import {
   Card,
@@ -36,7 +36,7 @@ export default function ApiKeyManagementCard() {
   const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const loadKeys = async () => {
+  const loadKeys = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -49,11 +49,14 @@ export default function ApiKeyManagementCard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadKeys();
-  }, []);
+    const onFocus = () => void loadKeys();
+    document.addEventListener("visibilitychange", onFocus);
+    return () => document.removeEventListener("visibilitychange", onFocus);
+  }, [loadKeys]);
 
   const handleCreateKey = async () => {
     setLoading(true);
