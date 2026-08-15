@@ -133,12 +133,46 @@ describe("buildPlanReview", () => {
     const part = repo.listParts(plan.id).parts[0]!;
     repo.patchPart(part.id, { quantity_override: 2 });
 
-    const review = buildPlanReview(repo, plan.id);
+    const thumbsDir = join(dir, "thumbs");
+    mkdirSync(thumbsDir, { recursive: true });
+    const review = buildPlanReview(repo, plan.id, { thumbsDir });
     const reviewPart = review.part_groups.flatMap((g) => g.parts)[0]!;
     expect(reviewPart.print_units).toEqual([false, false]);
     expect(reviewPart.printed_count).toBe(0);
     expect(reviewPart.missing).toBe(true);
     expect(reviewPart.quantity_effective).toBe(2);
+    expect(reviewPart.stl_missing).toBe(false);
+    expect(reviewPart.thumb_empty).toBe(true);
+
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("marks stl_missing when the file is absent on disk", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-review-stl-miss-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+
+    const source = repo.createSource({ name: "Repo", url: "https://github.com/a/b" });
+    const repoPath = join(dir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "parts"), { recursive: true });
+    writeFileSync(join(repoPath, "parts", "widget.stl"), "solid");
+    repo.updateSource(source.id, { local_path: repoPath });
+    repo.updateImportRules(source.id, ["parts/"]);
+
+    const plan = repo.createProfile("MissingStlPlan", source.id);
+    repo.recomputeProfile(plan.id);
+    // Remove the file after compose so the part row remains but disk is empty.
+    rmSync(join(repoPath, "parts", "widget.stl"));
+
+    const thumbsDir = join(dir, "thumbs");
+    mkdirSync(thumbsDir, { recursive: true });
+    const review = buildPlanReview(repo, plan.id, { thumbsDir });
+    const reviewPart = review.part_groups.flatMap((g) => g.parts)[0]!;
+    expect(reviewPart.stl_missing).toBe(true);
+    expect(reviewPart.thumb_empty).toBe(false);
+    expect(review.issues.some((i) => i.code === "missing_stl")).toBe(true);
 
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });

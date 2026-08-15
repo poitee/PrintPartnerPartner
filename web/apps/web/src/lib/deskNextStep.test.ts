@@ -36,8 +36,20 @@ describe("deskNextStep", () => {
     ).toBe(DESK_NEXT_STEP.plan);
   });
 
-  it("hides progress/export when nothing remaining", () => {
-    expect(deskNextStepVisible("progress", { remainingUnits: 0 })).toBe(false);
-    expect(deskNextStepVisible("export", { remainingUnits: 12 })).toBe(true);
+  it("hides parts next-step when no conflicts and no missing STLs", () => {
+    expect(
+      deskNextStepVisible("parts", {
+        partCount: 10,
+        mergeConflictCount: 0,
+        missingStlCount: 0,
+      }),
+    ).toBe(false);
+    expect(
+      deskNextStepVisible("parts", {
+        partCount: 10,
+        mergeConflictCount: 0,
+        missingStlCount: 2,
+      }),
+    ).toBe(true);
   });
 });

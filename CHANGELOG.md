@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Auto-sync missing STLs + background thumbs (GRE-235)** — when a plan is selected (or Parts opens / compose applies) and STLs are missing or thumbs are empty, one coordinated job syncs sources then regenerates thumbnails. Parts shows Spinner + “Syncing STLs…” while running; Sync remains as retry on failure or if files are still gone. Review parts expose `stl_missing` / `thumb_empty` (distinct from checkoff `missing`).
 - **HTTP MCP attach (GRE-225)** — streamable HTTP at `/api/v1/mcp`; `PRINT_PARTNER_API_KEY` required unless `HOST` is loopback; pending proposes are per MCP session; Cursor plugin at `cursor-plugin/print-partner`; tools `get_remaining`, `duplicate_plan`, `archive_plan` (confirm-to-apply). Connect guide: `docs/assistant-mcp.md`.
 
 ### Removed

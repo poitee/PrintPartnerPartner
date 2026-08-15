@@ -3,6 +3,7 @@ import { PlanActionsProvider } from "./context/PlanActionsContext";
 import { JobProvider } from "./context/JobContext";
 import { ProfileProvider } from "./context/ProfileContext";
 import { PlanWorkspaceProvider } from "./context/PlanWorkspaceContext";
+import { StlAutoSyncProvider } from "./context/StlAutoSyncContext";
 import { ImportRulesSaveProvider } from "./context/ImportRulesSaveContext";
 import { KitManifestSaveProvider } from "./context/KitManifestSaveContext";
 import { SaveStatusProvider } from "./context/SaveStatusContext";
@@ -48,6 +49,7 @@ export default function App() {
         <ProfileProvider>
           <PlanActionsProvider>
             <PlanWorkspaceProvider>
+              <StlAutoSyncProvider>
               <SaveStatusProvider>
                 <ImportRulesSaveProvider>
                   <KitManifestSaveProvider>
@@ -109,6 +111,7 @@ export default function App() {
                   </KitManifestSaveProvider>
                 </ImportRulesSaveProvider>
               </SaveStatusProvider>
+              </StlAutoSyncProvider>
             </PlanWorkspaceProvider>
           </PlanActionsProvider>
         </ProfileProvider>

@@ -2086,7 +2086,12 @@ export type PlanReviewTotals = {
 export type ReviewPart = PartRow & {
   printed_count: number;
   print_units: boolean[];
+  /** Checkoff: not fully printed yet (printed_count < qty). */
   missing: boolean;
+  /** On-disk STL absent for an included part (GRE-235). */
+  stl_missing?: boolean;
+  /** Included part has STL but no cached thumbnail PNG (GRE-235). */
+  thumb_empty?: boolean;
   filament_display: string;
   filament_hex?: string | null;
   spool_summary?: Array<{ remaining_g: number; spool_id: number }>;
