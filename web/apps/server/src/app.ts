@@ -16,9 +16,11 @@ import {
 } from "./routes/jobs.js";
 import { registerCoreRoutes } from "./routes/core-routes.js";
 import { registerBackupRoutes } from "./routes/backups.js";
+import { registerLoggingRoutes } from "./routes/logging.js";
 import { registerApiV1Plugin, registerOpenApi, registerOpenApiJsonRoutes } from "./routes/api-v1.js";
 import { registerAuthRoutes, registerTenantMiddleware } from "./routes/auth.js";
 import { registerApiKeyAuth } from "./middleware/api-key.js";
+import { registerRequestLoggingMiddleware } from "./middleware/request-logging.js";
 import { validateProductionConfig } from "./config.js";
 import { setRequestTenantId } from "./middleware/tenant-context.js";
 import fastifyStatic from "@fastify/static";
@@ -77,6 +79,9 @@ function resolveAuthStore(ports: RuntimePorts, config: ServerConfig): AuthStore 
 export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
   const app = Fastify({ logger: true, bodyLimit: config.uploadMaxBytes });
   const authStore = resolveAuthStore(ports, config);
+
+  // Register request logging middleware early
+  await registerRequestLoggingMiddleware(app);
 
   await app.register(cookie);
   registerTenantMiddleware(app, config, authStore);
@@ -139,6 +144,9 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
       sqlite,
       appVersion: config.version,
     });
+    
+    // Register logging routes
+    await registerLoggingRoutes(app);
     
     await app.register(async (v1) => {
       await registerApiV1Plugin(v1, coreDeps);
