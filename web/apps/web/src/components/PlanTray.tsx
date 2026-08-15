@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import PartThumb from "./parts/PartThumb";
+// Lazy: pulls in three.js only after the app shell renders, keeping it
+// out of the initial 913 KB index bundle.
+const PartThumb = lazy(() => import("./parts/PartThumb"));
 import { Button } from "./ui/button";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../context/ProfileContext";
@@ -150,13 +152,15 @@ export default function PlanTray() {
                 className="relative block shrink-0"
                 title={`${part.filename} ×${part.quantity_effective}`}
               >
-                <PartThumb
-                  partId={part.id}
-                  tintHex={part.filament_hex}
-                  sizePx={TRAY_THUMB_PX}
-                  eager
-                  fallbackLabel={partFilenameInitials(part.filename)}
-                />
+                <Suspense fallback={<span style={{ display: "block", width: TRAY_THUMB_PX, height: TRAY_THUMB_PX }} />}>
+                  <PartThumb
+                    partId={part.id}
+                    tintHex={part.filament_hex}
+                    sizePx={TRAY_THUMB_PX}
+                    eager
+                    fallbackLabel={partFilenameInitials(part.filename)}
+                  />
+                </Suspense>
                 <span className="absolute -bottom-0.5 -right-0.5 z-[1] rounded bg-foreground px-0.5 font-mono text-[9px] font-medium leading-tight text-background">
                   {part.quantity_effective}
                 </span>
