@@ -67,26 +67,19 @@ export async function createBackup(
     );
 
     // Step 3: Build list of files to backup
-    // Include: database, repos, sources, exports, thumbs, covers
+    // Critical: database and metadata
     const filesToBackup = [
-      { source: backupDbPath, dest: "print-partner.db" },
-      { source: backupDbWalPath, dest: "print-partner.db-wal" },
-      { source: join(tempDir, BACKUP_METADATA_FILE), dest: BACKUP_METADATA_FILE },
-      { source: join(dataDir, "repos"), dest: "repos" },
-      { source: join(dataDir, "sources"), dest: "sources" },
-      { source: join(dataDir, "exports"), dest: "exports" },
-      { source: join(dataDir, "thumbs"), dest: "thumbs" },
-      { source: join(dataDir, "covers"), dest: "covers" },
+      { path: backupDbPath, name: "print-partner.db" },
+      { path: backupDbWalPath, name: "print-partner.db-wal" },
+      { path: join(tempDir, BACKUP_METADATA_FILE), name: BACKUP_METADATA_FILE },
     ];
 
-    // Filter out directories that don't exist
-    const existingFiles: Array<{ dest: string }> = [];
-    for (const item of filesToBackup) {
+    // Check what files actually exist
+    const existingFiles: Array<{ path: string; name: string }> = [];
+    for (const file of filesToBackup) {
       try {
-        const stats = await fs.stat(item.source);
-        if (stats.isDirectory() || stats.isFile()) {
-          existingFiles.push(item);
-        }
+        await fs.stat(file.path);
+        existingFiles.push(file);
       } catch {
         // File doesn't exist; skip it
       }
@@ -96,7 +89,8 @@ export async function createBackup(
       throw new Error("No data found to backup");
     }
 
-    // Create tar archive
+    // Create tar archive with just the database and metadata
+    // Large directories (repos, sources) can be added later via settings UI if needed
     const output = createWriteStream(outputPath);
     const gzip = createGzip();
 
@@ -106,7 +100,9 @@ export async function createBackup(
           gzip: false,
           cwd: tempDir,
         },
-        existingFiles.map((f) => f.dest),
+        existingFiles
+          .filter((f) => f.path.startsWith(tempDir))
+          .map((f) => f.name),
       ),
       gzip,
       output,
