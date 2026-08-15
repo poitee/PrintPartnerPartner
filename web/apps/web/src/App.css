@@ -1092,23 +1092,7 @@
   font-family: system-ui, sans-serif;
 }
 
-/* Screen-only: softer sheet in dark app theme (print stays pure white below). */
-@media screen {
-  .dark .checkoff-sheet {
-    --paper-bg: #f0ebe3;
-    --paper-bg-screen-dark: #ebe4d9;
-    --paper-fg: #1c1917;
-    --paper-muted: #78716c;
-    --paper-muted-fg: #44403c;
-    --paper-border: #d6d3d1;
-    --paper-border-strong: #a8a29e;
-    --paper-surface: #faf8f5;
-    --paper-surface-hover: #f5f2ed;
-    --paper-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-    background: var(--paper-bg-screen-dark, var(--paper-bg));
-    border: 1px solid var(--paper-border);
-  }
-}
+/* GRE-234: no cream sheet on screen — paper tokens stay GRE-233 white. */
 
 /* GRE-233: Progress Print sheet is print-only — desk loop is the screen UI.
    `.is-print-prep` briefly mounts off-screen so thumbs can load before window.print. */
