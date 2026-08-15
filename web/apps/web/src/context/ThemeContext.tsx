@@ -20,7 +20,7 @@ function readStoredPreference(): ThemePreference {
   } catch {
     /* ignore */
   }
-  return "system";
+  return "dark";
 }
 
 function systemPrefersDark(): boolean {

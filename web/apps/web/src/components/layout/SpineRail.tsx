@@ -46,17 +46,20 @@ const UTILITY_ICONS: Record<
   help: BookOpen,
 };
 
-function BrandMark({ className }: { className?: string }) {
+function LayeredSheetMark({ className }: { className?: string }) {
   return (
-    <span
-      className={cn(
-        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-accent-brand text-primary-foreground shadow-sm",
-        className,
-      )}
-      aria-hidden
+    <svg
+      className={cn("text-primary", className)}
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      aria-hidden="true"
+      focusable="false"
     >
-      <Layers className="h-4 w-4" />
-    </span>
+      {/* Two offset 10×12 rounded rects — layered-sheet mark (not printer / not PP). */}
+      <rect x="1" y="5" width="10" height="12" rx="2" fill="currentColor" opacity="0.45" />
+      <rect x="7" y="2" width="10" height="12" rx="2" fill="currentColor" />
+    </svg>
   );
 }
 
@@ -103,12 +106,14 @@ export default function SpineRail({
     >
       <div className={cn("border-b border-border", collapsed ? "px-2 py-3" : "px-4 py-4")}>
         <div className={cn("flex items-center gap-2.5", collapsed && "justify-center")}>
-          <BrandMark />
-          {!collapsed && (
-            <div className="min-w-0">
-              <h1 className="text-base font-semibold tracking-tight">Print Partner</h1>
-              <p className="text-xs text-muted-foreground">Library → Plan → Parts → Progress → Export</p>
-            </div>
+          {collapsed ? (
+            <LayeredSheetMark />
+          ) : (
+            <h1
+              className="font-serif text-[15px] font-semibold tracking-[-0.01em] text-foreground"
+            >
+              Print Partner
+            </h1>
           )}
         </div>
       </div>

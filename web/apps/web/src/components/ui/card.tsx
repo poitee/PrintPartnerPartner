@@ -25,7 +25,7 @@ const CardHeader = React.forwardRef<HTMLDivElement, CardHeaderProps>(
       ref={ref}
       className={cn(
         "flex flex-col space-y-1.5 p-4",
-        accent && "border-b border-border/60 bg-gradient-to-r from-primary/5 to-accent-brand/5",
+        accent && "border-b border-border/60 bg-muted/40",
         className,
       )}
       {...props}
