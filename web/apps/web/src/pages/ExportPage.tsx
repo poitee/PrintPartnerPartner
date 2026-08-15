@@ -24,10 +24,9 @@ import { partsRoute, planRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
 
 /**
- * Export — always shows the printer Send panel (works with external / hand-sliced
- * G-code, no plan required). Slicer-input file cards (STL, 3MF, share, manifest)
- * stay plan-gated below. Farm-queue verbs (Send ready / Send now / Remove) live on
- * Progress, not here.
+ * Export — printer Send panel binds to the active spine plan (GRE-232).
+ * Slicer-input file cards (STL, 3MF, share, manifest) stay plan-gated below.
+ * Farm-queue verbs (Send ready / Send now / Remove) live on Progress, not here.
  */
 export default function ExportPage() {
   const { health, error: engineError } = useEngineHealth();
@@ -119,6 +118,7 @@ export default function ExportPage() {
           <PrinterSendPanel
             remainingParts={remainingParts}
             profileId={selectedProfileId}
+            planName={planName}
             engineReady={Boolean(health.ok)}
           />
 

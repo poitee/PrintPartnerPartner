@@ -7,6 +7,7 @@ import type { AppRepository } from "../db/repository.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
 import { getIntegrationConfig } from "../integrations/store.js";
 import { createPrinterCheckoffLink } from "./printer-checkoff-store.js";
+import { resolvePlanIdForPrinterFetch } from "./printer-plan-bind.js";
 import { loadFleet } from "./printer-fleet.js";
 
 const ALLOWED_EXTENSIONS = new Set([".gcode", ".bgcode", ".gco"]);
@@ -149,14 +150,13 @@ async function runPrinterUploadJobInner(
     ? input.unlabeled_names.filter((n) => typeof n === "string" && n.trim())
     : [];
   let checkoffLinkId: string | undefined;
-  if (
-    (checkoffUnits.length > 0 || unlabeledNames.length > 0) &&
-    typeof input.profile_id === "number" &&
-    Number.isInteger(input.profile_id) &&
-    input.profile_id > 0
-  ) {
+  // GRE-232: stamp plan_id (profile_id) at send — immutable after create.
+  // Spine change must not rebind; create even when object parse found no units.
+  // Fetch-from-printer uses the same resolve helper (stored wins; unbound → spine).
+  const planId = resolvePlanIdForPrinterFetch(input.profile_id, null);
+  if (planId != null) {
     const link = createPrinterCheckoffLink(repo, {
-      profile_id: input.profile_id,
+      profile_id: planId,
       integration_id: integrationId,
       printer_id: machine.id,
       host_name: hostLabel,

@@ -216,16 +216,20 @@ describe("printer checkoff verify-first flow", () => {
     expect(loaded?.unlabeled_names).toEqual(["Object_A", "Object_B"]);
     expect(loaded?.units).toEqual([]);
 
-    expect(
-      createPrinterCheckoffLink(repo, {
-        profile_id: plan.id,
-        integration_id: "int-trident",
-        printer_id: "printer-1",
-        host_name: "Trident",
-        filename: "empty.gcode",
-        units: [],
-      }),
-    ).toBeNull();
+    // GRE-232: plan-only bind (no units / unlabeled) is allowed so Send stamps plan_id.
+    const planOnly = createPrinterCheckoffLink(repo, {
+      profile_id: plan.id,
+      integration_id: "int-trident",
+      printer_id: "printer-1",
+      host_name: "Trident",
+      filename: "empty.gcode",
+      units: [],
+    });
+    expect(planOnly).not.toBeNull();
+    expect(planOnly!.units).toEqual([]);
+    expect(planOnly!.unlabeled_names).toBeUndefined();
+    expect(planOnly!.profile_id).toBe(plan.id);
+    expect(getPrinterCheckoffLink(repo, planOnly!.id)?.profile_id).toBe(plan.id);
 
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });

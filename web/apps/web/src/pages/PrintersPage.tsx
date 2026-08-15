@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Printer } from "lucide-react";
 import {
   fetchIntegrationStatus,
   fetchIntegrations,
+  fetchPrinterCheckoffLinks,
   fetchPrinters,
   type IntegrationSummary,
+  type PrinterCheckoffLink,
   type PrinterHostStatus,
   type PrinterMachine,
 } from "../api/engine";
@@ -22,12 +24,17 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import { useEngineHealth } from "../hooks/useEngineHealth";
+import { useProfileSelection } from "../context/ProfileContext";
 import {
   formatPrinterStatusPill,
   printerDeskTypeLabel,
   printerLiveStripTone,
   type LiveStripHostType,
 } from "../lib/printerLiveStrip";
+import {
+  findPlanNameForLiveJob,
+  liveJobPlanCaption,
+} from "../lib/printerPlanBind";
 import { usePrinterStatusPollMs } from "../hooks/usePrinterStatusPollMs";
 import { exportRoute, settingsPrintersRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
@@ -61,26 +68,38 @@ function toneBadgeVariant(
 
 export default function PrintersPage() {
   const { health } = useEngineHealth();
+  const { profiles } = useProfileSelection();
   const engineReady = Boolean(health);
   const pollMs = usePrinterStatusPollMs();
   const [linked, setLinked] = useState<LinkedPrinter[]>([]);
   const [statusById, setStatusById] = useState<Record<string, PrinterHostStatus>>({});
+  const [checkoffLinks, setCheckoffLinks] = useState<PrinterCheckoffLink[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const requestId = useRef(0);
   const linkedRef = useRef(linked);
   linkedRef.current = linked;
 
+  const planNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const p of profiles) map.set(p.id, p.name);
+    return map;
+  }, [profiles]);
+
   const refreshRoster = useCallback(async () => {
     if (!engineReady) {
       setLinked([]);
       setStatusById({});
+      setCheckoffLinks([]);
       setLoadError(null);
       return;
     }
     try {
-      const [fleet, integrations] = await Promise.all([
+      const [fleet, integrations, checkoff] = await Promise.all([
         fetchPrinters(),
         fetchIntegrations(),
+        fetchPrinterCheckoffLinks()
+          .then((r) => r)
+          .catch(() => null),
       ]);
       const byId = new Map(integrations.map((i) => [i.id, i]));
       const next: LinkedPrinter[] = [];
@@ -99,37 +118,49 @@ export default function PrintersPage() {
         });
       }
       setLinked(next);
+      // Keep last successful links on transient failure (avoid flashing "No plan.").
+      if (checkoff) setCheckoffLinks(checkoff.links ?? []);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
       setLinked([]);
+      setCheckoffLinks([]);
     }
   }, [engineReady]);
 
   const refreshStatuses = useCallback(async (rows: LinkedPrinter[]) => {
     const id = ++requestId.current;
     if (!rows.length) {
-      if (id === requestId.current) setStatusById({});
+      if (id === requestId.current) {
+        setStatusById({});
+        setCheckoffLinks([]);
+      }
       return;
     }
     const integrationIds = [...new Set(rows.map((r) => r.host.id))];
-    const entries = await Promise.all(
-      integrationIds.map(async (integrationId) => {
-        try {
-          return [integrationId, await fetchIntegrationStatus(integrationId)] as const;
-        } catch (e) {
-          return [
-            integrationId,
-            {
-              state: "offline" as const,
-              message: e instanceof Error ? e.message : String(e),
-            },
-          ] as const;
-        }
-      }),
-    );
+    const [entries, checkoff] = await Promise.all([
+      Promise.all(
+        integrationIds.map(async (integrationId) => {
+          try {
+            return [integrationId, await fetchIntegrationStatus(integrationId)] as const;
+          } catch (e) {
+            return [
+              integrationId,
+              {
+                state: "offline" as const,
+                message: e instanceof Error ? e.message : String(e),
+              },
+            ] as const;
+          }
+        }),
+      ),
+      fetchPrinterCheckoffLinks()
+        .then((r) => r)
+        .catch(() => null),
+    ]);
     if (id !== requestId.current) return;
     setStatusById(Object.fromEntries(entries));
+    if (checkoff) setCheckoffLinks(checkoff.links ?? []);
   }, []);
 
   useEffect(() => {
@@ -229,9 +260,28 @@ export default function PrintersPage() {
                   </CardHeader>
                   <CardContent className="space-y-2 pt-0">
                     {filename ? (
-                      <p className="truncate font-mono text-xs text-muted-foreground" title={filename}>
-                        {filename}
-                      </p>
+                      (() => {
+                        const planCaption = liveJobPlanCaption(
+                          findPlanNameForLiveJob({
+                            printerId: printer.id,
+                            filename,
+                            links: checkoffLinks,
+                            planNameById,
+                          }),
+                        );
+                        return (
+                          <p
+                            className="truncate font-mono text-xs text-muted-foreground"
+                            title={`${filename} · ${planCaption}`}
+                          >
+                            {filename}
+                            <span className="font-sans text-muted-foreground/80">
+                              {" · "}
+                              {planCaption}
+                            </span>
+                          </p>
+                        );
+                      })()
                     ) : (
                       <p className="text-xs text-muted-foreground">
                         {status?.message?.trim() || "No active job"}

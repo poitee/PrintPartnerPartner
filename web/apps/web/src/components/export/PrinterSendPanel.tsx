@@ -36,6 +36,9 @@ import {
   CardTitle,
 } from "../ui/card";
 import ObjectProposalRows from "./ObjectProposalRows";
+import {
+  sendPlanBindCopy,
+} from "../../lib/printerPlanBind";
 
 const PRINTER_ID_STORAGE_KEY = "pp-export-printer-id";
 const BAMBU_PRINTER_ID_STORAGE_KEY = "pp-export-bambu-printer-id";
@@ -44,6 +47,8 @@ type Props = {
   /** Remaining incomplete review parts for local object → unit proposal. */
   remainingParts: ReviewPart[];
   profileId: number | null;
+  /** Active spine plan name for quiet “For [Plan].” bind line. */
+  planName?: string | null;
   engineReady: boolean;
 };
 
@@ -138,10 +143,12 @@ const SEND_HOST_TYPES = new Set<LiveStripHostType>(["moonraker", "prusalink"]);
 export default function PrinterSendPanel({
   remainingParts,
   profileId,
+  planName = null,
   engineReady,
 }: Props) {
   const printerUploadJob = useJobRunner("printer-upload");
   const pollMs = usePrinterStatusPollMs();
+  const planBind = sendPlanBindCopy(planName ?? null);
 
   const [linkedPrinters, setLinkedPrinters] = useState<PrinterMachine[]>([]);
   const [bambuPrinters, setBambuPrinters] = useState<PrinterMachine[]>([]);
@@ -328,6 +335,10 @@ export default function PrinterSendPanel({
   };
 
   const runUpload = (file: File, start: boolean) => {
+    if (!planBind.canSend || profileId == null) {
+      toast.error("Pick a plan to bind this send.");
+      return;
+    }
     if (!selectedPrinterId) {
       toast.error("No linked printer", {
         description: "Add a Moonraker or PrusaLink host in Settings, then link it to a machine.",
@@ -351,7 +362,6 @@ export default function PrinterSendPanel({
       effectiveCheckoffUnits.length > 0 ? effectiveCheckoffUnits : undefined;
     const unlabeled =
       objectPropose?.unmatchedNames?.length ? objectPropose.unmatchedNames : undefined;
-    const trackOnProgress = Boolean(units || unlabeled);
     const printerName =
       linkedPrinters.find((p) => p.id === selectedPrinterId)?.name ?? "printer";
 
@@ -361,7 +371,8 @@ export default function PrinterSendPanel({
           file,
           printer_id: selectedPrinterId,
           start,
-          profile_id: trackOnProgress ? profileId ?? undefined : undefined,
+          // GRE-232: always stamp active spine plan at send (immutable after).
+          profile_id: profileId,
           checkoff_units: units,
           unlabeled_names: unlabeled,
         }),
@@ -465,6 +476,10 @@ export default function PrinterSendPanel({
       });
       return;
     }
+    if (!planBind.canSend || profileId == null) {
+      toast.error("Pick a plan to bind this send.");
+      return;
+    }
     setChosenFile(file);
     void (async () => {
       let handoffUnits: typeof proposedUnits | undefined;
@@ -473,7 +488,7 @@ export default function PrinterSendPanel({
         setObjectParse(parsed);
         const proposed = proposeCheckoffFromObjects(parsed.names, remainingParts);
         setObjectPropose(proposed);
-        if (profileId != null && proposed.units.length > 0) {
+        if (proposed.units.length > 0) {
           handoffUnits = proposed.units;
         }
       } catch {
@@ -486,7 +501,8 @@ export default function PrinterSendPanel({
         const result = await startBambuConnectHandoff({
           file,
           printer_id: selectedBambuPrinterId,
-          profile_id: handoffUnits ? profileId ?? undefined : undefined,
+          // GRE-232: stamp active spine plan at handoff.
+          profile_id: profileId,
           checkoff_units: handoffUnits,
         });
         if (result.launched) {
@@ -600,7 +616,8 @@ export default function PrinterSendPanel({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={busy || !selectedPrinterId}
+                  disabled={busy || !selectedPrinterId || !planBind.canSend}
+                  title={!planBind.canSend ? planBind.line : undefined}
                   onClick={() => ensureFileThen("send")}
                 >
                   {printerUploadJob.busy ? "Sending…" : "Send"}
@@ -610,15 +627,18 @@ export default function PrinterSendPanel({
                   disabled={
                     busy ||
                     !selectedPrinterId ||
+                    !planBind.canSend ||
                     selectedPrinterBusy ||
                     selectedPrinterUnavailable
                   }
                   title={
-                    selectedPrinterBusy
-                      ? "Printer is busy — Start print waits until Idle"
-                      : selectedPrinterUnavailable
-                        ? "Printer offline or error"
-                        : undefined
+                    !planBind.canSend
+                      ? planBind.line
+                      : selectedPrinterBusy
+                        ? "Printer is busy — Start print waits until Idle"
+                        : selectedPrinterUnavailable
+                          ? "Printer offline or error"
+                          : undefined
                   }
                   onClick={() => ensureFileThen("start")}
                 >
@@ -627,8 +647,13 @@ export default function PrinterSendPanel({
               </div>
 
               <p className="text-[11.5px] leading-relaxed text-muted-foreground">
-                Send from here to track these parts on Progress.
+                {planBind.line}
               </p>
+              {planBind.canSend ? (
+                <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  Send from here to track these parts on Progress.
+                </p>
+              ) : null}
               {selectedPrinterBusy ? (
                 <p className="text-[11.5px] leading-relaxed text-muted-foreground">
                   Printer is busy. Send still works. Or wait until Idle.
@@ -693,12 +718,19 @@ export default function PrinterSendPanel({
             <Button
               size="sm"
               variant="secondary"
-              disabled={busy || !selectedBambuPrinterId}
-              title="Stages the file and opens bambu-connect:// when possible"
+              disabled={busy || !selectedBambuPrinterId || !planBind.canSend}
+              title={
+                !planBind.canSend
+                  ? planBind.line
+                  : "Stages the file and opens bambu-connect:// when possible"
+              }
               onClick={() => bambuFileInputRef.current?.click()}
             >
               {bambuBusy ? "Handing off…" : "Open in Bambu Connect"}
             </Button>
+            <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+              {planBind.line}
+            </p>
             <p className="text-[11.5px] leading-relaxed text-muted-foreground">
               Opens Bambu Connect with the sliced file. Does not start a print from here.
             </p>
