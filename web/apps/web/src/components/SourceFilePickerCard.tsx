@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Maximize2 } from "lucide-react";
 import ImportRulesTree from "./ImportRulesTree";
-import Preview3D from "./Preview3D";
+const Preview3D = lazy(() => import("./Preview3D"));
 import PartPreviewDialog from "./parts/PartPreviewDialog";
 import SourceCardCover from "./SourceCardCover";
 import SourceDocsSheet from "./sources/SourceDocsSheet";
@@ -468,15 +468,17 @@ export default function SourceFilePickerCard({
                   </Button>
                 )}
               </div>
-              <Preview3D
-                partId={null}
-                sourceId={sourceId}
-                relativePath={selectedFilePath}
-                preferSource
-                filename={previewFilename}
-                meshColor={previewMeshColor}
-                className="min-h-[220px]"
-              />
+              <Suspense fallback={<div className="flex items-center justify-center min-h-[220px]">Loading 3D…</div>}>
+                <Preview3D
+                  partId={null}
+                  sourceId={sourceId}
+                  relativePath={selectedFilePath}
+                  preferSource
+                  filename={previewFilename}
+                  meshColor={previewMeshColor}
+                  className="min-h-[220px]"
+                />
+              </Suspense>
               <p className="mt-2 text-xs text-muted-foreground">
                 Click a file row to preview. Drag to rotate.
               </p>

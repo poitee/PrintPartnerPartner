@@ -1,4 +1,5 @@
-import Preview3D from "../Preview3D";
+import { lazy, Suspense } from "react";
+const Preview3D = lazy(() => import("../Preview3D"));
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { cn } from "../../lib/utils";
 
@@ -51,14 +52,16 @@ export default function PartPreviewDialog({ part, onClose, size = "default" }: P
             <p className="text-xs text-muted-foreground">
               Drag to rotate · scroll or pinch to zoom
             </p>
-            <Preview3D
-              partId={sourceMode ? null : (part.id ?? null)}
-              sourceId={sourceMode ? part.sourceId : null}
-              relativePath={sourceMode ? part.relativePath : null}
-              preferSource={sourceMode}
-              meshColor={part.filament_hex || undefined}
-              className={size === "large" ? "min-h-[420px]" : undefined}
-            />
+            <Suspense fallback={<div className="flex items-center justify-center" style={{minHeight: 160}}>Loading 3D…</div>}>
+              <Preview3D
+                partId={sourceMode ? null : (part.id ?? null)}
+                sourceId={sourceMode ? part.sourceId : null}
+                relativePath={sourceMode ? part.relativePath : null}
+                preferSource={sourceMode}
+                meshColor={part.filament_hex || undefined}
+                className={size === "large" ? "min-h-[420px]" : undefined}
+              />
+            </Suspense>
           </>
         )}
       </DialogContent>

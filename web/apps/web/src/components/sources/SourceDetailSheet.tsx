@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -18,7 +18,7 @@ import {
 } from "../../api/engine";
 import { StlNamingEditorEmbedded } from "../settings/StlNamingEditor";
 import ImportRulesTree from "../ImportRulesTree";
-import Preview3D from "../Preview3D";
+const Preview3D = lazy(() => import("../Preview3D"));
 import SourceCardCover from "../SourceCardCover";
 import { Button } from "../ui/button";
 import { Label } from "../ui/label";
@@ -478,14 +478,16 @@ export default function SourceDetailSheet({
           >
             {selectedFilePath && (
               <div className="h-40 shrink-0 overflow-hidden rounded-md border border-border">
-                <Preview3D
-                  partId={null}
-                  sourceId={source.id}
-                  relativePath={selectedFilePath}
-                  preferSource
-                  filename={selectedFilePath.split("/").pop() ?? selectedFilePath}
-                  className="h-full w-full"
-                />
+                <Suspense fallback={<div className="flex items-center justify-center h-40">Loading 3D…</div>}>
+                  <Preview3D
+                    partId={null}
+                    sourceId={source.id}
+                    relativePath={selectedFilePath}
+                    preferSource
+                    filename={selectedFilePath.split("/").pop() ?? selectedFilePath}
+                    className="h-full w-full"
+                  />
+                </Suspense>
               </div>
             )}
             <ScrollArea className="min-h-0 flex-1 rounded-md border border-border">
