@@ -67,6 +67,26 @@ export class SqliteDatabase {
     if (!profileCols.some((c) => c.name === "special_request")) {
       this.sqlite.exec("ALTER TABLE build_profiles ADD COLUMN special_request TEXT");
     }
+
+    // Performance indexes (idempotent — IF NOT EXISTS)
+    this.sqlite.exec(`
+      CREATE INDEX IF NOT EXISTS idx_profile_layers_tenant_profile
+        ON profile_layers(tenant_id, profile_id);
+      CREATE INDEX IF NOT EXISTS idx_parts_tenant_profile
+        ON parts(tenant_id, profile_id);
+      CREATE INDEX IF NOT EXISTS idx_parts_tenant_status
+        ON parts(tenant_id, status);
+      CREATE INDEX IF NOT EXISTS idx_print_progress_completed
+        ON print_progress(part_id, completed);
+      CREATE INDEX IF NOT EXISTS idx_sessions_expires_at
+        ON sessions(expires_at);
+      CREATE INDEX IF NOT EXISTS idx_sessions_user_id
+        ON sessions(user_id);
+      CREATE INDEX IF NOT EXISTS idx_projects_last_synced
+        ON projects(tenant_id, last_synced_at);
+      CREATE INDEX IF NOT EXISTS idx_buildprofiles_last_used
+        ON build_profiles(tenant_id, last_used_at);
+    `);
     const row = this.sqlite
       .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
       .get("default", schemaVersionKey) as { value?: string } | undefined;

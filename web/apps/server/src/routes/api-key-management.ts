@@ -33,6 +33,7 @@ export async function registerApiKeyManagementRoutes(app: FastifyInstance, deps:
    */
   app.post<{ Reply: ApiKeyInfo | { detail: string } }>(
     "/settings/api-keys",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
     async (_request, reply) => {
       try {
         const keyInfo = createApiKey(deps.repo);

@@ -22,7 +22,10 @@ export async function registerBackupRoutes(
    */
   app.post<{
     Reply: { path: string; name: string; size: number; metadata: object } | { detail: string };
-  }>("/backups", async (_request, reply) => {
+  }>(
+    "/backups",
+    { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+    async (_request, reply) => {
       try {
         const backupsDir = join(deps.dataDir, "backups");
         mkdirSync(backupsDir, { recursive: true });
@@ -210,9 +213,8 @@ export async function registerBackupRoutes(
   app.post<{ Reply: { success: boolean; message: string } | { detail: string } }>(
     "/backups/restore",
     {
-      schema: {
-        consumes: ["multipart/form-data"],
-      },
+      config: { rateLimit: { max: 3, timeWindow: "5 minutes" } },
+      schema: { consumes: ["multipart/form-data"] },
     },
     async (request, reply) => {
       try {
