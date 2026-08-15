@@ -198,7 +198,8 @@ export function StlAutoSyncProvider({ children }: { children: ReactNode }) {
     if (isLibraryPath(location.pathname) && profileId == null) {
       trigger = "library_no_plan";
     } else if (prevProfileRef.current !== profileId) {
-      // Plan select/switch — allowed on any page including Progress.
+      // Plan select/switch — re-allow auto-start when returning to a plan.
+      attemptedWorkKeyRef.current = null;
       trigger = "plan_select";
     } else if (onParts && !prevPartsPathRef.current) {
       trigger = "parts_open";
