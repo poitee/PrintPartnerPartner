@@ -133,7 +133,9 @@ describe("buildPlanReview", () => {
     const part = repo.listParts(plan.id).parts[0]!;
     repo.patchPart(part.id, { quantity_override: 2 });
 
-    const review = buildPlanReview(repo, plan.id);
+    const thumbsDir = join(dir, "thumbs");
+    mkdirSync(thumbsDir, { recursive: true });
+    const review = buildPlanReview(repo, plan.id, { thumbsDir });
     const reviewPart = review.part_groups.flatMap((g) => g.parts)[0]!;
     expect(reviewPart.print_units).toEqual([false, false]);
     expect(reviewPart.printed_count).toBe(0);
