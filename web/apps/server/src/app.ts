@@ -17,6 +17,7 @@ import {
 import { registerCoreRoutes } from "./routes/core-routes.js";
 import { registerBackupRoutes } from "./routes/backups.js";
 import { registerLoggingRoutes } from "./routes/logging.js";
+import { registerApiKeyManagementRoutes } from "./routes/api-key-management.js";
 import { registerApiV1Plugin, registerOpenApi, registerOpenApiJsonRoutes } from "./routes/api-v1.js";
 import { registerAuthRoutes, registerTenantMiddleware } from "./routes/auth.js";
 import { registerApiKeyAuth } from "./middleware/api-key.js";
@@ -147,6 +148,9 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     
     // Register logging routes
     await registerLoggingRoutes(app);
+    
+    // Register API key management routes
+    await registerApiKeyManagementRoutes(app, { repo: repository });
     
     await app.register(async (v1) => {
       await registerApiV1Plugin(v1, coreDeps);
