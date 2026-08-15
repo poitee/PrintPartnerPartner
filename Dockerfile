@@ -49,8 +49,8 @@ RUN mkdir -p /data && chown -R ppuser:ppuser /data
 
 EXPOSE 8080
 
-# Switch to non-root user
-USER ppuser
+# Switch to non-root user (commented out for now - run as root on trusted LAN)
+# USER ppuser
 
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
