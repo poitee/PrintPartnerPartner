@@ -4,6 +4,43 @@ import { repoNameFromSourceLayer } from "./parts-tree.js";
 import type { MergePartExport, PrinterMachine } from "./filament-assigner.js";
 import { loadStlMesh, placeMeshOnBed, type StlMesh } from "./stl-mesh.js";
 
+export type HeightBand = "flat" | "short" | "medium" | "tall" | "very-tall";
+
+/**
+ * Height band thresholds (mm), chosen to reflect common 3D-printing part
+ * height use cases:
+ *   flat:      < 10 mm   — baseplates, badges, thin panels
+ *   short:     10–50 mm  — brackets, small enclosures, spacers
+ *   medium:    50–150 mm — most functional parts, boxes, housings
+ *   tall:      150–300 mm — vases, tall enclosures, most single-plate maximum
+ *   very-tall: > 300 mm  — full-height prints near/above typical printer Z limits
+ * Upper bound of each band is exclusive; the next band's lower bound is inclusive,
+ * i.e. a part exactly at a threshold value falls into the taller band.
+ */
+export const HEIGHT_BAND_THRESHOLDS_MM = {
+  flat: 10,
+  short: 50,
+  medium: 150,
+  tall: 300,
+} as const;
+
+/**
+ * Classify a part height (mm) into one of five height bands.
+ * Pure function: given the same input it always returns the same output.
+ *
+ * Negative heights are invalid mesh data; they are classified as "flat" (the
+ * lowest band) rather than throwing, so callers can surface a separate
+ * validation warning without this classification itself failing. NaN is
+ * likewise treated as "flat" (safest default for unknown/bad data).
+ */
+export function classifyHeightBand(heightMm: number): HeightBand {
+  if (Number.isNaN(heightMm) || heightMm < HEIGHT_BAND_THRESHOLDS_MM.flat) return "flat";
+  if (heightMm < HEIGHT_BAND_THRESHOLDS_MM.short) return "short";
+  if (heightMm < HEIGHT_BAND_THRESHOLDS_MM.medium) return "medium";
+  if (heightMm < HEIGHT_BAND_THRESHOLDS_MM.tall) return "tall";
+  return "very-tall";
+}
+
 function partFilamentLabel(part: MergePartExport): string {
   const label = (part.filamentDisplay ?? part.filament_display ?? "").trim();
   if (label) return label;

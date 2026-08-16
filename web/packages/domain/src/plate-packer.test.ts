@@ -3,9 +3,10 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { PartCopy } from "./checkoff-missing.js";
-import { packCopiesOnPrinter } from "./plate-packer.js";
+import { classifyHeightBand, packCopiesOnPrinter } from "./plate-packer.js";
 import type { PrinterMachine } from "./filament-assigner.js";
 import type { MergePart } from "./merge.js";
+
 
 const MINI_STL = `solid t
   facet normal 0 0 1
@@ -54,5 +55,41 @@ describe("plate packer", () => {
     expect(plates.length).toBeGreaterThanOrEqual(1);
     expect(plates[0].items.length).toBe(1);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("classifyHeightBand", () => {
+  it("classifies typical part heights", () => {
+    expect(classifyHeightBand(5)).toBe("flat");
+    expect(classifyHeightBand(25)).toBe("short");
+    expect(classifyHeightBand(100)).toBe("medium");
+    expect(classifyHeightBand(200)).toBe("tall");
+    expect(classifyHeightBand(400)).toBe("very-tall");
+  });
+
+  it("treats each band's upper threshold as exclusive (boundary belongs to the taller band)", () => {
+    expect(classifyHeightBand(10)).toBe("short");
+    expect(classifyHeightBand(50)).toBe("medium");
+    expect(classifyHeightBand(150)).toBe("tall");
+    expect(classifyHeightBand(300)).toBe("very-tall");
+  });
+
+  it("classifies values just below each threshold into the shorter band", () => {
+    expect(classifyHeightBand(9.999)).toBe("flat");
+    expect(classifyHeightBand(49.999)).toBe("short");
+    expect(classifyHeightBand(149.999)).toBe("medium");
+    expect(classifyHeightBand(299.999)).toBe("tall");
+  });
+
+  it("handles zero and negative heights as flat", () => {
+    expect(classifyHeightBand(0)).toBe("flat");
+    expect(classifyHeightBand(-5)).toBe("flat");
+    expect(classifyHeightBand(-0.001)).toBe("flat");
+  });
+
+  it("handles non-finite input defensively", () => {
+    expect(classifyHeightBand(NaN)).toBe("flat");
+    expect(classifyHeightBand(Infinity)).toBe("very-tall");
+    expect(classifyHeightBand(-Infinity)).toBe("flat");
   });
 });
