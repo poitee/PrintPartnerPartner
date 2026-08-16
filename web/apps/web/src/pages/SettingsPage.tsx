@@ -575,7 +575,7 @@ export default function SettingsPage() {
           <CardHeader accent>
             <CardTitle className="text-base">Assembly tracking</CardTitle>
             <CardDescription>
-              Adds an Assembled toggle to each completed part — useful for multi-week builds where
+              Adds an Assembled toggle to each completed part - useful for multi-week builds where
               you want to track which printed parts have been physically installed. Tracks
               printed-but-not-yet-installed state for complex builds like Voron.
             </CardDescription>
