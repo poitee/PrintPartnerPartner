@@ -4,6 +4,7 @@ import {
   filterPartsByQuery,
   mergeAssembledIntoReview,
   mergePartIntoReview,
+  mergeProgressIntoReview,
   partitionIncludedParts,
   sourceLabelFromLayer,
 } from "./reviewParts";
@@ -148,5 +149,75 @@ describe("mergeAssembledIntoReview", () => {
     const next = mergeAssembledIntoReview(twoPartReview, 1, { assembled_units: [true] });
     const untouched = next.part_groups[0].parts.find((p) => p.id === 2);
     expect(untouched?.assembled_units).toBeUndefined();
+  });
+});
+
+describe("mergeProgressIntoReview + assembly tracking", () => {
+  /** A 2-unit part, both printed and both marked assembled. */
+  const builtReview = (): PlanReview =>
+    ({
+      profile_id: 1,
+      plan_name: "Voron 2.4",
+      layers: [],
+      totals: { included_parts: 1, total_print_units: 2, by_role: {}, by_filament: {} },
+      issues: [],
+      has_blockers: false,
+      part_groups: [
+        {
+          folder: "(root)",
+          source_layer: "base:main-kit",
+          parts: [
+            {
+              ...samplePart({ id: 1, quantity_effective: 2 }),
+              print_units: [true, true],
+              printed_count: 2,
+              missing: false,
+              assembled_units: [true, true],
+            },
+          ],
+        },
+      ],
+    }) as unknown as PlanReview;
+
+  it("clears assembled state for a unit that was just un-printed", () => {
+    // Regression: without this, un-printing unit #2 left assembled=true behind,
+    // so re-checking the print resurrected a phantom "Assembled" toggle.
+    const next = mergeProgressIntoReview(builtReview(), 1, {
+      printed_count: 1,
+      print_units: [true, false],
+      missing: true,
+    });
+    expect(next.part_groups[0].parts[0].assembled_units).toEqual([true, false]);
+  });
+
+  it("prefers the server's authoritative assembled_units when present", () => {
+    const next = mergeProgressIntoReview(builtReview(), 1, {
+      printed_count: 1,
+      print_units: [true, false],
+      missing: true,
+      assembled_units: [false, false],
+    });
+    expect(next.part_groups[0].parts[0].assembled_units).toEqual([false, false]);
+  });
+
+  it("keeps assembled state on units that are still printed", () => {
+    const next = mergeProgressIntoReview(builtReview(), 1, {
+      printed_count: 2,
+      print_units: [true, true],
+      missing: false,
+    });
+    expect(next.part_groups[0].parts[0].assembled_units).toEqual([true, true]);
+  });
+
+  it("is a no-op for parts that never had assembly tracking data", () => {
+    const review = builtReview();
+    delete (review.part_groups[0].parts[0] as { assembled_units?: boolean[] }).assembled_units;
+    const next = mergeProgressIntoReview(review, 1, {
+      printed_count: 1,
+      print_units: [true, false],
+      missing: true,
+    });
+    expect(next.part_groups[0].parts[0].assembled_units).toBeUndefined();
+    expect(next.part_groups[0].parts[0].printed_count).toBe(1);
   });
 });

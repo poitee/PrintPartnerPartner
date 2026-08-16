@@ -108,7 +108,10 @@ export type PrintJobPartRow = typeof defaultSchema.printJobParts.$inferSelect;
 export type SlicerProfileRow = {
   id: number;
   name: string;
-  slicerFormat: string;
+  /** Slicer dialect tag; null for filament rows, which carry no such column. */
+  slicerFormat: string | null;
+  /** Only set for filament rows (PLA/PETG/…); null elsewhere. */
+  materialType?: string | null;
   resolvedFlatConfig: string | null;
 };
 
@@ -312,15 +315,23 @@ export class AppRepository {
       .select({
         id: this.schema.filamentProfiles.id,
         name: this.schema.filamentProfiles.name,
-        // filament_profiles has no slicer_format column; report the material
-        // type instead so callers have a non-null discriminator to log.
-        slicerFormat: this.schema.filamentProfiles.materialType,
+        materialType: this.schema.filamentProfiles.materialType,
         resolvedFlatConfig: this.schema.filamentProfiles.resolvedFlatConfig,
       })
       .from(this.schema.filamentProfiles)
       .where(eq(this.schema.filamentProfiles.tenantId, this.tenantId))
       .orderBy(asc(this.schema.filamentProfiles.name))
-      .all();
+      .all()
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        // filament_profiles carries no slicer_format column — the rows are
+        // portable across slicers, so report no dialect rather than
+        // mislabelling the material type as one.
+        slicerFormat: null,
+        materialType: r.materialType,
+        resolvedFlatConfig: r.resolvedFlatConfig,
+      }));
   }
 
   /** Global slicer-printer-name -> PP fleet printer id map (all tenants). */
@@ -1526,13 +1537,19 @@ export class AppRepository {
     this.ensureProgressForPart(part);
     const rows = this.progressRowsForPart(partId);
     const updated = toggleCheckoffUnit(rows, partId, qty, unitIndex, completed);
-    this.saveProgressRows(partId, updated.filter((r) => r.partId === partId));
-    const units = getPrintUnits(updated.filter((r) => r.partId === partId), qty);
+    const partRowsOnly = updated.filter((r) => r.partId === partId);
+    this.saveProgressRows(partId, partRowsOnly);
+    const units = getPrintUnits(partRowsOnly, qty);
     const printedCount = units.filter(Boolean).length;
     return {
       part_id: partId,
       printed_count: printedCount,
       print_units: units,
+      // Un-printing a unit also clears its assembled flag (domain rule in
+      // setPrintedUnitCount). Return the post-toggle assembled state so the
+      // checkoff UI never keeps a stale "Assembled" pip on a unit the user
+      // just un-printed — otherwise re-checking the print resurrects it.
+      assembled_units: getAssembledUnits(partRowsOnly, qty),
       missing: !isFullyPrinted({ quantity_effective: qty, printed_count: printedCount }),
     };
   }

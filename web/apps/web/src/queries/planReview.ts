@@ -100,6 +100,9 @@ export function usePatchPartProgressMutation(profileId: number | null) {
           mergeProgressIntoReview(current, partId, {
             printed_count: progress.printed_count,
             print_units: progress.print_units,
+            // Server is authoritative about which units are still assembled
+            // after a print toggle (un-printing clears the flag).
+            assembled_units: progress.assembled_units,
             missing: progress.missing,
           }),
         );

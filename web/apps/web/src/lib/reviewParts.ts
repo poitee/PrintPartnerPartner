@@ -83,13 +83,28 @@ export function mergePartIntoReview(review: PlanReview, updated: ReviewPart | Pa
 export function mergeProgressIntoReview(
   review: PlanReview,
   partId: number,
-  progress: { printed_count: number; print_units: boolean[]; missing: boolean },
+  progress: {
+    printed_count: number;
+    print_units: boolean[];
+    missing: boolean;
+    assembled_units?: boolean[];
+  },
 ): PlanReview {
   const part_groups = review.part_groups.map((g) => ({
     ...g,
-    parts: g.parts.map((p) =>
-      p.id === partId ? mergeReviewPartPatch(p, progress) : p,
-    ),
+    parts: g.parts.map((p) => {
+      if (p.id !== partId) return p;
+      // A unit that is no longer printed cannot be assembled. The server
+      // enforces this in the domain layer, so mirror it in the cache: without
+      // this, un-printing a unit leaves a stale assembled=true that reappears
+      // as a checked "Assembled" toggle the moment the unit is re-checked.
+      const assembled_units =
+        progress.assembled_units ??
+        (p.assembled_units
+          ? p.assembled_units.map((a, i) => (progress.print_units[i] ? a : false))
+          : p.assembled_units);
+      return mergeReviewPartPatch(p, { ...progress, assembled_units });
+    }),
   }));
   return { ...review, part_groups };
 }

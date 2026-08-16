@@ -63,6 +63,7 @@ import { groupCheckoffParts } from "../lib/checkoffGroups";
 import {
   checkoffUnitTotals,
   formatPrintedUnitsLine,
+  isProgressRowBusy,
   lastCompletedUnit,
   nextUnitToComplete,
 } from "../lib/checkoffProgress";
@@ -959,7 +960,7 @@ export default function CheckoffPage() {
           {phaseProgress ? (
             <PhaseProgressView
               phases={phaseProgress}
-              busy={toggleBusy}
+              busyPartId={busyPartId}
               assemblyTrackingEnabled={assemblyTrackingEnabled}
               onIncrement={onIncrement}
               onDecrement={onDecrement}
@@ -1008,7 +1009,7 @@ export default function CheckoffPage() {
                         kind="part"
                         part={part}
                         mobile={isMobileLayout}
-                        busy={busyPartId === part.id || toggleBusy}
+                        busy={isProgressRowBusy(busyPartId, part.id)}
                         disabled={toggleBusy}
                         printingOn={printingPartIds.get(part.id)}
                         awaitingVerify={awaitingPartIds.get(part.id)}

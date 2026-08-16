@@ -23,6 +23,7 @@ import ProgressPartRow from "./ProgressPartRow";
 import type { ReviewPart } from "../../api/engine";
 import type { PhaseProgress } from "../../lib/phaseManifest";
 import { nextUnlockedPhase } from "../../lib/phaseManifest";
+import { isProgressRowBusy } from "../../lib/checkoffProgress";
 import { cn } from "../../lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -72,7 +73,8 @@ function PhaseBar({ percent, blocked }: { percent: number; blocked: boolean }) {
 
 type PhaseCardProps = {
   phaseProgress: PhaseProgress;
-  busy: boolean;
+  /** Part currently being saved, or null. Scoped per-row so one save doesn't lock the list. */
+  busyPartId: number | null;
   showBlockingOnly: boolean;
   assemblyTrackingEnabled?: boolean;
   onIncrement: (part: ReviewPart) => void;
@@ -85,7 +87,7 @@ type PhaseCardProps = {
 
 function PhaseCard({
   phaseProgress,
-  busy,
+  busyPartId,
   showBlockingOnly,
   assemblyTrackingEnabled,
   onIncrement,
@@ -188,7 +190,7 @@ function PhaseCard({
             <ProgressPartRow
               key={part.id}
               part={part}
-              busy={busy}
+              busy={isProgressRowBusy(busyPartId, part.id)}
               printingOn={printingPartIds.get(part.id)}
               awaitingVerify={awaitingPartIds.get(part.id)}
               assemblyTrackingEnabled={assemblyTrackingEnabled}
@@ -216,7 +218,8 @@ function PhaseCard({
 
 type PhaseProgressViewProps = {
   phases: PhaseProgress[];
-  busy: boolean;
+  /** Part currently being saved, or null. */
+  busyPartId: number | null;
   assemblyTrackingEnabled?: boolean;
   onIncrement: (part: ReviewPart) => void;
   onDecrement: (part: ReviewPart) => void;
@@ -228,7 +231,7 @@ type PhaseProgressViewProps = {
 
 export default function PhaseProgressView({
   phases,
-  busy,
+  busyPartId,
   assemblyTrackingEnabled,
   onIncrement,
   onDecrement,
@@ -276,7 +279,7 @@ export default function PhaseProgressView({
         <PhaseCard
           key={ph.phase.name}
           phaseProgress={ph}
-          busy={busy}
+          busyPartId={busyPartId}
           showBlockingOnly={showBlockingOnly}
           assemblyTrackingEnabled={assemblyTrackingEnabled}
           onIncrement={onIncrement}

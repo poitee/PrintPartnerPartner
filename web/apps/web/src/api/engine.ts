@@ -538,6 +538,10 @@ export type AutoSlicePlate = {
   thumbnail_path: string | null;
   error: string | null;
   error_code: string | null;
+  /** Slicer CLI stderr for a failed slice — the actual cause of the failure. */
+  stderr: string | null;
+  /** Slicer CLI exit code when the sidecar reported one. */
+  exit_code: number | null;
   settings_keys: string[];
   download_url: string | null;
   thumbnail_url: string | null;
@@ -2485,6 +2489,8 @@ export async function patchPartProgress(
 ): Promise<{
   printed_count: number;
   print_units: boolean[];
+  /** Post-toggle assembly state — un-printing a unit clears its assembled flag. */
+  assembled_units?: boolean[];
   missing: boolean;
 }> {
   return engineFetch(`/parts/${partId}/progress`, {

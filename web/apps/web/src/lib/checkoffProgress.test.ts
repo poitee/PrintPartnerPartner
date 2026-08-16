@@ -5,6 +5,7 @@ import {
   checkoffUnitTotals,
   formatCheckoffSummary,
   formatPrintedUnitsLine,
+  isProgressRowBusy,
   lastCompletedUnit,
   nextUnitToComplete,
   partProgressPercent,
@@ -111,5 +112,24 @@ describe("assembledEligibleUnitIndices", () => {
 
   it("returns all indices when fully printed", () => {
     expect(assembledEligibleUnitIndices([true, true])).toEqual([0, 1]);
+  });
+});
+
+describe("isProgressRowBusy", () => {
+  it("marks only the row actually being saved as busy", () => {
+    expect(isProgressRowBusy(7, 7)).toBe(true);
+    expect(isProgressRowBusy(7, 8)).toBe(false);
+  });
+
+  it("leaves every row interactive when nothing is in flight", () => {
+    expect(isProgressRowBusy(null, 7)).toBe(false);
+  });
+
+  it("does not lock the rest of a Voron-scale list while one part saves", () => {
+    // 150 completed-but-not-assembled parts; toggling Assembled on one of them
+    // must leave the other 149 rows clickable, not disable the whole list.
+    const partIds = Array.from({ length: 150 }, (_, i) => i + 1);
+    const busy = partIds.filter((id) => isProgressRowBusy(42, id));
+    expect(busy).toEqual([42]);
   });
 });

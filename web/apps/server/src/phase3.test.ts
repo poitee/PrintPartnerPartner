@@ -173,6 +173,25 @@ describe("Phase 3 APIs", () => {
     const afterReprint = await app.inject({ method: "GET", url: `/parts/${partId}/assembled` });
     expect(afterReprint.json()).toMatchObject({ assembled_count: 0, assembled_units: [false] });
 
+    // The progress PATCH response itself carries the post-toggle assembled
+    // state, so the checkoff UI can clear the Assembled toggle in the same
+    // round trip instead of showing a stale "installed" pip until a refetch.
+    await app.inject({
+      method: "PATCH",
+      url: `/parts/${partId}/assembled`,
+      payload: { unit_index: 0, assembled: true },
+    });
+    const unprintRes = await app.inject({
+      method: "PATCH",
+      url: `/parts/${partId}/progress`,
+      payload: { unit_index: 0, completed: false },
+    });
+    expect(unprintRes.statusCode).toBe(200);
+    expect(unprintRes.json()).toMatchObject({
+      printed_count: 0,
+      assembled_units: [false],
+    });
+
     // An unknown part is a 404 on the read path.
     const missingPart = await app.inject({ method: "GET", url: `/parts/99999/assembled` });
     expect(missingPart.statusCode).toBe(404);
