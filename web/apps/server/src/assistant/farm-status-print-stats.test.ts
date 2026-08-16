@@ -2,12 +2,40 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
 import { invokeAssistantTool } from "./tools.js";
 import { loadFleet, saveFleet } from "../services/printer-fleet.js";
-import type { IntegrationPort } from "../integrations/store.js";
+import { createIntegrationPort, type IntegrationPort } from "../integrations/store.js";
+import { spoolmanAdapter } from "../integrations/adapters/spoolman.js";
 import type { PrinterHostStatus } from "@print-partner/contracts";
+import type { PrinterMachine } from "@print-partner/domain";
+
+/** A fleet machine with one empty filament slot, bound to `integrationId`. */
+function machine(id: string, name: string, integrationId: string | null): PrinterMachine {
+  return {
+    id,
+    name,
+    bed_width_mm: 250,
+    bed_depth_mm: 250,
+    bed_height_mm: 250,
+    margin_mm: 4,
+    max_filament_slots: 1,
+    loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+    integration_id: integrationId,
+  };
+}
+
+/** IntegrationPort whose getStatus resolves from `statuses` and throws otherwise. */
+function integrationPort(statuses: Record<string, PrinterHostStatus>): IntegrationPort {
+  return {
+    getStatus: async (id: string) => {
+      const s = statuses[id];
+      if (!s) throw new Error("offline");
+      return s;
+    },
+  } as unknown as IntegrationPort;
+}
 
 /**
  * Schema-v9-era print_jobs audit: end-to-end validation that get_farm_status
@@ -210,6 +238,324 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
     const data = JSON.parse(result.content);
     expect(data.error).toBeUndefined();
     expect(data.window_hours).toBe(24);
+  });
+
+  it("get_print_stats reports a completion rate and a per-printer breakdown", async () => {
+    const plan = repo.createProfile("Rate Plan");
+    const now = Date.now();
+    const jobs = [
+      { status: "completed", printerId: "trident-r2", filamentConsumedG: 42, hoursAgo: 1 },
+      { status: "completed", printerId: "trident-r2", filamentConsumedG: 38, hoursAgo: 2 },
+      { status: "failed", printerId: "trident-r2", filamentConsumedG: 10, hoursAgo: 3 },
+      // Still in flight — counted as sent, excluded from the rate denominator.
+      { status: "sent", printerId: "trident-r2", filamentConsumedG: null, hoursAgo: 0.1 },
+      { status: "completed", printerId: "prusa-xl", filamentConsumedG: 55, hoursAgo: 4 },
+    ];
+    for (const j of jobs) {
+      const at = new Date(now - j.hoursAgo * 3600 * 1000).toISOString();
+      repo.insertPrintJob({
+        id: randomUUID(),
+        profileId: plan.id,
+        printerId: j.printerId,
+        material: "PLA",
+        status: j.status,
+        filamentConsumedG: j.filamentConsumedG ?? undefined,
+        at,
+        completedAt: j.status === "completed" ? at : undefined,
+      });
+    }
+
+    const data = JSON.parse((await invokeAssistantTool("get_print_stats", {}, { repo })).content);
+
+    // 3 completed / (3 completed + 1 failed) — the "sent" row is in flight.
+    expect(data.completion_rate).toBe(0.75);
+
+    const trident = data.by_printer.find((p: { printer_id: string }) => p.printer_id === "trident-r2");
+    expect(trident.plates_sent).toBe(4);
+    expect(trident.plates_completed).toBe(2);
+    expect(trident.plates_failed).toBe(1);
+    expect(trident.filament_consumed_g).toBe(90);
+    expect(trident.completion_rate).toBeCloseTo(2 / 3, 3);
+
+    const xl = data.by_printer.find((p: { printer_id: string }) => p.printer_id === "prusa-xl");
+    expect(xl.plates_completed).toBe(1);
+    expect(xl.completion_rate).toBe(1);
+  });
+
+  it("get_print_stats leaves completion_rate null when nothing has finished yet", async () => {
+    const plan = repo.createProfile("In Flight");
+    repo.insertPrintJob({
+      id: randomUUID(),
+      profileId: plan.id,
+      printerId: "trident-r2",
+      material: "PLA",
+      status: "sent",
+      at: new Date().toISOString(),
+    });
+
+    const data = JSON.parse((await invokeAssistantTool("get_print_stats", {}, { repo })).content);
+    expect(data.plates_sent).toBe(1);
+    expect(data.completion_rate).toBeNull();
+  });
+
+  it("get_farm_status reports idle_since from the printer's last finished job", async () => {
+    saveFleet(repo, [machine("prusa-xl", "Prusa XL", "moonraker-xl")]);
+    const plan = repo.createProfile("Overnight");
+
+    const finishedAt = new Date(Date.now() - 6 * 3600 * 1000).toISOString();
+    repo.insertPrintJob({
+      id: randomUUID(),
+      profileId: plan.id,
+      printerId: "prusa-xl",
+      material: "PLA",
+      status: "completed",
+      at: new Date(Date.now() - 9 * 3600 * 1000).toISOString(),
+      completedAt: finishedAt,
+    });
+
+    const integrations = integrationPort({ "moonraker-xl": { state: "idle" } });
+    const data = JSON.parse(
+      (await invokeAssistantTool("get_farm_status", {}, { repo, integrations })).content,
+    );
+
+    const xl = data.printers.find((p: { id: string }) => p.id === "prusa-xl");
+    expect(xl.state).toBe("idle");
+    expect(xl.idle_since).toBe(finishedAt);
+  });
+
+  it("get_farm_status reports no idle_since for a printer that is currently printing", async () => {
+    saveFleet(repo, [machine("trident-r2", "Trident R2 LDO", "moonraker-trident")]);
+    const plan = repo.createProfile("Running");
+    repo.insertPrintJob({
+      id: randomUUID(),
+      profileId: plan.id,
+      printerId: "trident-r2",
+      material: "PLA",
+      status: "completed",
+      at: new Date(Date.now() - 5 * 3600 * 1000).toISOString(),
+      completedAt: new Date(Date.now() - 4 * 3600 * 1000).toISOString(),
+    });
+
+    const integrations = integrationPort({
+      "moonraker-trident": { state: "printing", filename: "plate_ldo.gcode", progress: 42 },
+    });
+    const data = JSON.parse(
+      (await invokeAssistantTool("get_farm_status", {}, { repo, integrations })).content,
+    );
+
+    const trident = data.printers.find((p: { id: string }) => p.id === "trident-r2");
+    expect(trident.state).toBe("printing");
+    expect(trident.active_job).toBe("plate_ldo.gcode");
+    expect(trident.progress).toBe(42);
+    expect(trident.idle_since).toBeNull();
+  });
+
+  it("get_farm_status flags a printer whose host reports a filament runout", async () => {
+    saveFleet(repo, [machine("coreone1", "CoreOne1", "prusalink-coreone")]);
+
+    const integrations = integrationPort({
+      "prusalink-coreone": { state: "paused", message: "Filament runout detected" },
+    });
+    const data = JSON.parse(
+      (await invokeAssistantTool("get_farm_status", {}, { repo, integrations })).content,
+    );
+
+    const coreone = data.printers.find((p: { id: string }) => p.id === "coreone1");
+    expect(coreone.needs_filament_swap).toBe(true);
+    expect(coreone.filament_swap_reason).toMatch(/reports filament runout/);
+
+    // The farm-level roll-up names the machine so the digest can say
+    // "CoreOne1 needs filament swap" without re-deriving it.
+    expect(data.needs_filament_swap).toEqual([
+      { id: "coreone1", name: "CoreOne1", reason: coreone.filament_swap_reason },
+    ]);
+  });
+
+  it("get_farm_status flags an empty filament slot and leaves remaining unknown", async () => {
+    // Default fleet slots carry filament_color_id: null — nothing loaded.
+    saveFleet(repo, [machine("coreone1", "CoreOne1", null)]);
+
+    const data = JSON.parse((await invokeAssistantTool("get_farm_status", {}, { repo })).content);
+    const coreone = data.printers.find((p: { id: string }) => p.id === "coreone1");
+
+    expect(coreone.needs_filament_swap).toBe(true);
+    expect(coreone.filament_swap_reason).toMatch(/no filament loaded in slot 1/);
+    expect(coreone.filament_slots).toHaveLength(1);
+    expect(coreone.filament_slots[0].empty).toBe(true);
+    // Unknown, not 0 — nothing is loaded, so there is no inventory figure.
+    expect(coreone.filament_remaining_g).toBeNull();
+  });
+
+  it("get_farm_status does not flag a swap for a non-Spoolman (catalog) filament", async () => {
+    // A catalog colour id is a colour choice with no inventory behind it;
+    // treating it as 0 g would flag every such printer every morning.
+    const m = machine("trident-r2", "Trident R2 LDO", null);
+    m.loaded_filaments = [
+      { slot: 1, filament_color_id: "catalog:prusament-galaxy-black", label: "Galaxy Black" },
+    ];
+    saveFleet(repo, [m]);
+
+    const data = JSON.parse((await invokeAssistantTool("get_farm_status", {}, { repo })).content);
+    const trident = data.printers.find((p: { id: string }) => p.id === "trident-r2");
+
+    expect(trident.needs_filament_swap).toBe(false);
+    expect(trident.filament_remaining_g).toBeNull();
+    expect(data.needs_filament_swap).toEqual([]);
+  });
+
+  it("get_farm_status survives a printer host that throws, reporting it offline", async () => {
+    saveFleet(repo, [machine("prusa-xl", "Prusa XL", "moonraker-xl")]);
+    const integrations = integrationPort({}); // every getStatus throws
+
+    const data = JSON.parse(
+      (await invokeAssistantTool("get_farm_status", {}, { repo, integrations })).content,
+    );
+    const xl = data.printers.find((p: { id: string }) => p.id === "prusa-xl");
+    expect(xl.state).toBe("offline");
+    expect(data.offline).toBe(1);
+  });
+
+  describe("filament remaining per spool/printer (Spoolman-backed)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    /**
+     * Register a Spoolman integration and stub the HTTP layer so /spool returns
+     * `spools`. This is the real code path get_farm_status takes for filament
+     * inventory — buildSpoolLookup -> listSpoolmanSpools -> fetch.
+     */
+    function withSpoolman(spools: Array<Record<string, unknown>>): string {
+      const port = createIntegrationPort({
+        repo,
+        getAdapter: (type) => (type === "spoolman" ? spoolmanAdapter : undefined),
+      });
+      const created = port.create({
+        type: "spoolman",
+        name: "Workshop",
+        config: { base_url: "http://127.0.0.1:7912" },
+      });
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string | URL) => {
+          if (String(url).includes("/spool")) {
+            return new Response(JSON.stringify(spools), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return new Response("[]", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }),
+      );
+
+      return created.id;
+    }
+
+    it("reports grams remaining per slot, the spool ids behind it, and the printer total", async () => {
+      const integrationId = withSpoolman([
+        { id: 11, filament_id: 7, remaining_weight: 480 },
+        { id: 12, filament_id: 7, remaining_weight: 310 },
+        { id: 13, filament_id: 8, remaining_weight: 640 },
+      ]);
+
+      const m = machine("trident-r2", "Trident R2 LDO", null);
+      m.max_filament_slots = 2;
+      m.loaded_filaments = [
+        { slot: 1, filament_color_id: `spoolman:${integrationId}:filament:7`, label: "LDO Black" },
+        { slot: 2, filament_color_id: `spoolman:${integrationId}:filament:8`, label: "PETG" },
+      ];
+      saveFleet(repo, [m]);
+
+      const data = JSON.parse((await invokeAssistantTool("get_farm_status", {}, { repo })).content);
+      const trident = data.printers.find((p: { id: string }) => p.id === "trident-r2");
+
+      const slot1 = trident.filament_slots.find((s: { slot: number }) => s.slot === 1);
+      expect(slot1.remaining_g).toBe(790); // 480 + 310 across both spools
+      expect(slot1.spool_ids).toEqual([11, 12]);
+      expect(slot1.low).toBe(false);
+
+      const slot2 = trident.filament_slots.find((s: { slot: number }) => s.slot === 2);
+      expect(slot2.remaining_g).toBe(640);
+      expect(slot2.spool_ids).toEqual([13]);
+
+      expect(trident.filament_remaining_g).toBe(1430);
+      expect(trident.needs_filament_swap).toBe(false);
+    });
+
+    it("flags a printer whose spool is below the low-filament threshold", async () => {
+      const integrationId = withSpoolman([{ id: 21, filament_id: 7, remaining_weight: 45 }]);
+
+      const m = machine("coreone1", "CoreOne1", null);
+      m.loaded_filaments = [
+        { slot: 1, filament_color_id: `spoolman:${integrationId}:filament:7`, label: "LDO Black" },
+      ];
+      saveFleet(repo, [m]);
+
+      const data = JSON.parse((await invokeAssistantTool("get_farm_status", {}, { repo })).content);
+      const coreone = data.printers.find((p: { id: string }) => p.id === "coreone1");
+
+      expect(coreone.filament_remaining_g).toBe(45);
+      expect(coreone.needs_filament_swap).toBe(true);
+      expect(coreone.filament_swap_reason).toMatch(/slot 1 is low/);
+      expect(data.needs_filament_swap.map((p: { name: string }) => p.name)).toEqual(["CoreOne1"]);
+    });
+
+    it("flags a filament Spoolman knows about but has no spools left of as 0 g", async () => {
+      // Spoolman answered, and the answer is "no stock" — genuinely 0, unlike an
+      // unreachable Spoolman, which must stay unknown.
+      const integrationId = withSpoolman([{ id: 31, filament_id: 99, remaining_weight: 800 }]);
+
+      const m = machine("coreone1", "CoreOne1", null);
+      m.loaded_filaments = [
+        { slot: 1, filament_color_id: `spoolman:${integrationId}:filament:7`, label: "LDO Black" },
+      ];
+      saveFleet(repo, [m]);
+
+      const data = JSON.parse((await invokeAssistantTool("get_farm_status", {}, { repo })).content);
+      const coreone = data.printers.find((p: { id: string }) => p.id === "coreone1");
+
+      expect(coreone.filament_remaining_g).toBe(0);
+      expect(coreone.needs_filament_swap).toBe(true);
+      expect(coreone.filament_swap_reason).toMatch(/out of filament/);
+    });
+
+    it("reports remaining as unknown, and raises no false alarm, when Spoolman is unreachable", async () => {
+      const port = createIntegrationPort({
+        repo,
+        getAdapter: (type) => (type === "spoolman" ? spoolmanAdapter : undefined),
+      });
+      const created = port.create({
+        type: "spoolman",
+        name: "Workshop",
+        config: { base_url: "http://127.0.0.1:7912" },
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          throw new Error("ECONNREFUSED");
+        }),
+      );
+
+      const m = machine("trident-r2", "Trident R2 LDO", null);
+      m.loaded_filaments = [
+        { slot: 1, filament_color_id: `spoolman:${created.id}:filament:7`, label: "LDO Black" },
+      ];
+      saveFleet(repo, [m]);
+
+      const data = JSON.parse((await invokeAssistantTool("get_farm_status", {}, { repo })).content);
+      const trident = data.printers.find((p: { id: string }) => p.id === "trident-r2");
+
+      // Unknown, NOT 0 — a Spoolman outage must not page the operator about
+      // every printer in the farm every morning.
+      expect(trident.filament_remaining_g).toBeNull();
+      expect(trident.filament_slots[0].remaining_g).toBeNull();
+      expect(trident.needs_filament_swap).toBe(false);
+      expect(data.needs_filament_swap).toEqual([]);
+    });
   });
 });
 

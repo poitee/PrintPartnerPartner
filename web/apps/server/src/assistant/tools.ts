@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
-import type { AssistantActionType, AssistantProposedAction } from "@print-partner/contracts";
+import type { AssistantActionType, AssistantProposedAction, PrinterHostStatus } from "@print-partner/contracts";
 import { isAssistantUiAction } from "@print-partner/contracts";
 import { listStlRelativePaths, safeRepoPath } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
@@ -737,14 +737,14 @@ export const ASSISTANT_TOOL_SPECS: AssistantToolSpec[] = [
   {
     name: "get_farm_status",
     description:
-      "Current printer farm state: each printer's name, integration type, send-queue state (idle/sending/done/error/queued), and any active job filename. Useful for morning digest or routing decisions.",
+      "Current printer farm state: each printer's name, live host state (idle/printing/paused/offline/unknown), active job filename with progress and ETA, how long it has been idle, per-slot filament remaining in grams, and whether it needs a filament swap (runout reported by the host, an empty slot, or a spool at/below the low threshold). Also returns a needs_filament_swap list naming the printers that need attention. Useful for the morning digest or routing decisions.",
     input_schema: { type: "object", properties: {} },
     tier: "read",
   },
   {
     name: "get_print_stats",
     description:
-      "Recent print activity and plan completion rates. Returns plates sent to printers in the last N hours (default 8h / overnight), unattributed completed prints, and per-plan remaining unit counts. Pass hours to control the lookback window.",
+      "Recent print activity and plan completion rates. Returns plates sent to printers in the last N hours (default 8h / overnight), how many completed vs failed, the completion rate, filament consumed in grams, a per-printer breakdown of the same figures, and per-plan remaining unit counts. Pass hours to control the lookback window.",
     input_schema: {
       type: "object",
       properties: {
@@ -2477,28 +2477,63 @@ export async function invokeAssistantTool(
 
       case "get_farm_status": {
         const fleet = (await import("../services/printer-fleet.js")).loadFleet(ctx.repo);
+        const { buildSpoolLookup, printerFilamentStatus, idleSinceFor, lastActivityByPrinter } =
+          await import("../services/farm-filament.js");
+
+        // One Spoolman fetch per referenced integration for the whole fleet.
+        const lookupSpools = await buildSpoolLookup(
+          ctx.repo,
+          fleet.flatMap((m) => m.loaded_filaments.map((lf) => lf.filament_color_id)),
+        );
+
+        // Last activity per printer drives idle_since ("Prusa XL idle since 3am").
+        // 7 days back so a machine idle all weekend still reports a real timestamp.
+        let lastActivity = new Map<string, string>();
+        try {
+          const since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+          lastActivity = lastActivityByPrinter(ctx.repo.recentPrintJobs(since, 1000));
+        } catch {
+          // print_jobs unreadable — idle_since degrades to null, status still works.
+        }
+
         const printers = await Promise.all(
           fleet.map(async (m) => {
             let state: string = "unknown";
             let message: string | null = null;
             let activeJob: string | null = null;
+            let progress: number | null = null;
+            let etaSeconds: number | null = null;
+            let hostStatus: PrinterHostStatus | null = null;
             if (m.integration_id && ctx.integrations) {
               try {
                 const status = await ctx.integrations.getStatus(m.integration_id);
+                hostStatus = status;
                 state = status.state;
                 message = status.message ?? null;
                 activeJob = (status as Record<string, unknown>).filename as string | null ?? null;
+                progress = typeof status.progress === "number" ? status.progress : null;
+                etaSeconds = typeof status.eta_seconds === "number" ? status.eta_seconds : null;
               } catch {
                 state = "offline";
               }
             }
+
+            const filament = printerFilamentStatus(m, lookupSpools, hostStatus);
+
             return {
               id: m.id,
               name: m.name,
               state,
               active_job: activeJob,
+              progress,
+              eta_seconds: etaSeconds,
               message,
               integration_id: m.integration_id ?? null,
+              idle_since: idleSinceFor(state, m.id, lastActivity),
+              filament_slots: filament.slots,
+              filament_remaining_g: filament.filament_remaining_g,
+              needs_filament_swap: filament.needs_filament_swap,
+              filament_swap_reason: filament.filament_swap_reason,
             };
           }),
         );
@@ -2509,6 +2544,9 @@ export async function invokeAssistantTool(
             idle: printers.filter((p) => p.state === "idle" || p.state === "complete").length,
             printing: printers.filter((p) => p.state === "printing" || p.state === "paused").length,
             offline: printers.filter((p) => p.state === "offline" || p.state === "unknown").length,
+            needs_filament_swap: printers
+              .filter((p) => p.needs_filament_swap)
+              .map((p) => ({ id: p.id, name: p.name, reason: p.filament_swap_reason })),
           }),
         };
       }
@@ -2551,6 +2589,10 @@ export async function invokeAssistantTool(
         const failed = recentJobs.filter((j) => j.status === "failed").length;
         const filamentG = recentJobs.reduce((s, j) => s + (j.filamentConsumedG ?? 0), 0);
 
+        const { completionRate, printStatsByPrinter } = await import(
+          "../services/farm-filament.js"
+        );
+
         // per-plan remaining units
         const planSummaries = ctx.repo
           .listProfiles()
@@ -2569,7 +2611,12 @@ export async function invokeAssistantTool(
             plates_sent: sent,
             plates_completed: completed,
             plates_failed: failed,
+            // completed / (completed + failed). Jobs still in flight ("sent") are
+            // excluded from the denominator so an in-progress overnight run does
+            // not read as a failure.
+            completion_rate: completionRate(completed, failed),
             filament_consumed_g: filamentG,
+            by_printer: printStatsByPrinter(recentJobs),
             active_plans: planSummaries,
           }),
         };
