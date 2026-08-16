@@ -129,7 +129,8 @@ export type IntegrationType =
   | "bambu"
   | "spoolman"
   | "slicer_folder"
-  | "ai_assistant";
+  | "ai_assistant"
+  | "home_assistant";
 
 export type IntegrationConfig = Record<string, unknown>;
 
@@ -332,7 +333,16 @@ export type PrinterUploadResult = {
   checkoff_units?: number;
 };
 
-export type WebhookEvent = "job.done" | "job.error";
+export type WebhookEvent =
+  | "job.done"
+  | "job.error"
+  | "source.synced"
+  | "source.updated"
+  | "source.sync_failed"
+  | "source.update_available"
+  | "print.verified"
+  | "print.rejected"
+  | "plan.exported";
 
 export type WebhookRegistration = {
   id: string;
@@ -486,6 +496,7 @@ export type SearchProviderId =
   | "brave"
   | "exa"
   | "duckduckgo"
+  | "searxng"
   | "none";
 
 export type SearchSetupOption = {
@@ -726,4 +737,23 @@ export type AssistantHistoryMessage = AssistantChatMessage & {
 
 export type AssistantHistoryResponse = {
   messages: AssistantHistoryMessage[];
+};
+
+export type UnattributedPrintCandidate = {
+  stl_basename: string;
+  copy_count: number;
+  matching_filenames: string[];
+};
+
+export type UnattributedPrint = {
+  id: string;
+  integration_id: string;
+  printer_id: string;
+  host_name: string;
+  filename: string;
+  completed_at: string;
+  gcode_objects: string[];
+  candidates: UnattributedPrintCandidate[];
+  claimed_at?: string;
+  claimed_profile_id?: number;
 };

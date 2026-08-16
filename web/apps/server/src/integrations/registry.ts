@@ -5,6 +5,7 @@ import { bambuAdapter } from "./adapters/bambu.js";
 import { spoolmanAdapter } from "./adapters/spoolman.js";
 import { slicerFolderAdapter } from "./adapters/slicer-folder.js";
 import { aiAssistantAdapter } from "./adapters/ai-assistant.js";
+import { homeAssistantAdapter } from "./adapters/home-assistant.js";
 
 const adapters: IntegrationAdapter[] = [
   moonrakerAdapter,
@@ -13,6 +14,7 @@ const adapters: IntegrationAdapter[] = [
   spoolmanAdapter,
   slicerFolderAdapter,
   aiAssistantAdapter,
+  homeAssistantAdapter,
 ];
 
 export function getIntegrationAdapter(type: string): IntegrationAdapter | undefined {
