@@ -11,4 +11,5 @@ export const queryKeys = {
   roleFilaments: (profileId: number) => ["roleFilaments", profileId] as const,
   workflowGuide: ["workflowGuide"] as const,
   buildTrackingSettings: ["buildTrackingSettings"] as const,
+  plateWorkspace: (profileId: number) => ["plateWorkspace", profileId] as const,
 };
