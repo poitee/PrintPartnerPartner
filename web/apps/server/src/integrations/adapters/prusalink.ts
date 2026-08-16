@@ -155,9 +155,16 @@ type PrusaStatusBody = {
 };
 
 type PrusaJobBody = {
+  state?: string;
   file?: PrusaFileMeta;
   progress?: number;
   time_remaining?: number;
+  consumed_material?: number;
+  refs?: {
+    download?: string;
+    icon?: string;
+    thumbnail?: string;
+  };
 };
 
 function filenameFromFile(file: PrusaFileMeta | undefined): string | undefined {
@@ -322,6 +329,104 @@ export const prusalinkAdapter: IntegrationAdapter = {
         state: "offline",
         message: e instanceof Error ? e.message : String(e),
       };
+    }
+  },
+
+  async getObjectList(config: IntegrationConfig): Promise<string[]> {
+    try {
+      const baseUrl = normalizeBaseUrl(config.base_url ?? config.baseUrl);
+      if (!baseUrl) return [];
+
+      // Fetch current job to get state and download path
+      const jobRes = await prusalinkFetch(`${baseUrl}/api/v1/job`, config, {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!jobRes.ok) {
+        await drainResponseBody(jobRes);
+        return [];
+      }
+      const job = (await jobRes.json()) as PrusaJobBody;
+
+      // Only parse for active/finished jobs
+      const rawState = (job.state ?? "").toUpperCase();
+      if (rawState !== "PRINTING" && rawState !== "PAUSED" && rawState !== "FINISHED") {
+        return [];
+      }
+
+      const downloadPath = job.refs?.download;
+      if (!downloadPath) return [];
+
+      // Build full download URL
+      const downloadUrl = downloadPath.startsWith("http")
+        ? downloadPath
+        : `${baseUrl}${downloadPath.startsWith("/") ? "" : "/"}${downloadPath}`;
+
+      // Download only the first 65536 bytes (bgcode metadata block is not compressed)
+      const fileRes = await prusalinkFetch(downloadUrl, config, {
+        headers: { Range: "bytes=0-65535" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!fileRes.ok && fileRes.status !== 206) {
+        await drainResponseBody(fileRes);
+        return [];
+      }
+
+      const buf = await fileRes.arrayBuffer();
+      const text = new TextDecoder("latin1").decode(buf);
+
+      // Find objects_info={ and extract the JSON by counting braces
+      const MARKER = "objects_info=";
+      const markerIdx = text.indexOf(MARKER);
+      if (markerIdx === -1) return [];
+
+      const jsonStart = markerIdx + MARKER.length;
+      if (text[jsonStart] !== "{") return [];
+
+      let depth = 0;
+      let jsonEnd = -1;
+      for (let i = jsonStart; i < text.length; i++) {
+        if (text[i] === "{") depth++;
+        else if (text[i] === "}") {
+          depth--;
+          if (depth === 0) {
+            jsonEnd = i;
+            break;
+          }
+        }
+      }
+      if (jsonEnd === -1) return [];
+
+      const jsonStr = text.slice(jsonStart, jsonEnd + 1);
+      const parsed = JSON.parse(jsonStr) as { objects?: { name?: string }[] };
+      if (!Array.isArray(parsed.objects)) return [];
+
+      return parsed.objects
+        .map((o) => (typeof o.name === "string" ? o.name : ""))
+        .filter((n) => n.length > 0);
+    } catch {
+      return [];
+    }
+  },
+
+  async getFilamentUsed(config: IntegrationConfig): Promise<number | null> {
+    const baseUrl = normalizeBaseUrl(config.base_url ?? config.baseUrl);
+    if (!baseUrl || !credentials(config)) return null;
+    try {
+      const res = await prusalinkFetch(`${baseUrl}/api/v1/job`, config, {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) {
+        await drainResponseBody(res);
+        return null;
+      }
+      const body = (await res.json()) as PrusaJobBody;
+      const consumed = body.consumed_material;
+      if (typeof consumed === "number" && Number.isFinite(consumed) && consumed >= 0) {
+        return consumed;
+      }
+      return null;
+    } catch {
+      return null;
     }
   },
 

@@ -17,12 +17,18 @@ export type IntegrationAdapter = {
   testConnection(config: IntegrationConfig): Promise<IntegrationTestResult>;
   listDevices?(config: IntegrationConfig): Promise<DeviceSummary[]>;
   getStatus?(config: IntegrationConfig): Promise<PrinterHostStatus>;
+  getObjectList?(config: IntegrationConfig): Promise<string[]>;
   uploadFile?(
     config: IntegrationConfig,
     source: PrinterUploadSource,
     filename: string,
     options?: { start?: boolean },
   ): Promise<PrinterUploadResult>;
+  /**
+   * Return the amount of filament consumed by the last/current print job, in mm.
+   * Returns null when not supported or the value is unavailable.
+   */
+  getFilamentUsed?(config: IntegrationConfig): Promise<number | null>;
 };
 
 export interface IntegrationPort {

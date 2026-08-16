@@ -34,6 +34,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Switch } from "./ui/switch";
+import VariantDimensionDialog from "./VariantDimensionDialog";
 
 type Props = {
   disabled?: boolean;
@@ -78,6 +79,7 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
   const [duplicateName, setDuplicateName] = useState("");
   const [duplicateClearCheckoff, setDuplicateClearCheckoff] = useState(false);
   const [switchPrompt, setSwitchPrompt] = useState<SwitchPrompt | null>(null);
+  const [variantPlanId, setVariantPlanId] = useState<number | null>(null);
 
   const selected = profiles.find((p) => p.id === selectedProfileId);
   const selectedArchived = Boolean(selected?.archived_at);
@@ -172,10 +174,20 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
       const created = await createMutation.mutateAsync(name);
       setNewName("");
       setCreateOpen(false);
-      offerSwitchOrActivate(created.id, name);
+      // Show variant dimension picker if base source declares variant_dimensions
+      setVariantPlanId(created.id);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
+  };
+
+  const onVariantDone = () => {
+    if (variantPlanId == null) return;
+    const id = variantPlanId;
+    setVariantPlanId(null);
+    // find the name from profiles or fall back to empty string
+    const name = profiles.find((p) => p.id === id)?.name ?? "";
+    offerSwitchOrActivate(id, name);
   };
 
   const onRename = async () => {
@@ -515,6 +527,10 @@ export default function PlanPicker({ disabled, className, compact = false }: Pro
           </div>
         </DialogContent>
       </Dialog>
+
+      {variantPlanId != null && (
+        <VariantDimensionDialog profileId={variantPlanId} onDone={onVariantDone} />
+      )}
     </>
   );
 }

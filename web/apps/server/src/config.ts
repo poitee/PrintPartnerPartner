@@ -8,6 +8,7 @@ const SEARCH_PROVIDER_IDS: SearchProviderId[] = [
   "brave",
   "exa",
   "duckduckgo",
+  "searxng",
   "none",
 ];
 
@@ -111,6 +112,11 @@ export type ServerConfig = {
    * Env: `SEARCH_API_KEY`, with `BRAVE_API_KEY` / `EXA_API_KEY` as fallbacks.
    */
   searchApiKey: string | null;
+  /**
+   * Base URL for the self-hosted SearXNG instance.
+   * Env: `SEARXNG_URL`. Default: http://localhost:4040.
+   */
+  searxngUrl: string;
 };
 
 const DEFAULT_DATA_DIR = process.env.PRINT_PARTNER_DATA_DIR ?? "./data";
@@ -282,7 +288,7 @@ export function loadConfig(): ServerConfig {
     s3Bucket: process.env.S3_BUCKET ?? null,
     s3Region: process.env.S3_REGION ?? process.env.AWS_REGION ?? null,
     uploadMaxBytes: Number(process.env.UPLOAD_MAX_BYTES ?? 512 * 1024 * 1024),
-    integrationApiKey: process.env.PRINT_PARTNER_API_KEY?.trim() || null,
+    integrationApiKey: process.env.INTEGRATION_API_KEY?.trim() || process.env.PRINT_PARTNER_API_KEY?.trim() || null,
     updateCheckEnabled: process.env.PRINT_PARTNER_UPDATE_CHECK !== "0",
     githubRepo: process.env.GITHUB_REPO?.trim() || "poitee/PrintPartnerPartner",
     latestVersionOverride: process.env.PRINT_PARTNER_LATEST_VERSION?.trim() || null,
@@ -323,5 +329,6 @@ export function loadConfig(): ServerConfig {
     })(),
     searchProvider: parseSearchProvider(process.env.SEARCH_PROVIDER),
     searchApiKey: resolveSearchApiKey(),
+    searxngUrl: process.env.SEARXNG_URL?.trim() || "http://localhost:4040",
   };
 }

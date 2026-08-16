@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import * as schema from "./schema.js";
 import { currentSchemaVersion, schemaMigrations, schemaVersionKey } from "./schema.js";
+import { seedStarterProfiles } from "./seed-starter-profiles.js";
 
 export type DrizzleDb = BetterSQLite3Database<typeof schema>;
 
@@ -36,6 +37,7 @@ export class SqliteDatabase {
     this.sqlite.pragma("foreign_keys = ON");
     this.drizzle = drizzle(this.sqlite, { schema });
     this.runMigrations();
+    seedStarterProfiles(this.sqlite);
   }
 
   private runMigrations(): void {

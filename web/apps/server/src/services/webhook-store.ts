@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import type { WebhookRegistration } from "@print-partner/contracts";
+import type { WebhookRegistration, WebhookEvent } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import { assertSafeOutboundUrl, safeOutboundFetch, OutboundUrlError } from "../lib/outbound-url.js";
 import { getLogger } from "./logger.js";
@@ -86,7 +86,7 @@ function generateSignature(payload: string, secret: string): string {
  */
 export async function dispatchWebhooks(
   repo: AppRepository,
-  event: "job.done" | "job.error",
+  event: WebhookEvent,
   payload: Record<string, unknown>,
 ): Promise<void> {
   const logger = getLogger();

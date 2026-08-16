@@ -6,8 +6,11 @@ import type {
 } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 
+/**
+ * Legacy blob key. Still read during startup migration so existing events are
+ * not lost. Once migrated they live exclusively in print_job_parts.
+ */
 const SETTINGS_KEY = "printer.print_outcomes";
-const MAX_EVENTS = 2000;
 
 const REASONS = new Set<PrintRejectReason>([
   "bed_adhesion",
@@ -25,6 +28,8 @@ const REASONS = new Set<PrintRejectReason>([
 export function isPrintRejectReason(value: unknown): value is PrintRejectReason {
   return typeof value === "string" && REASONS.has(value as PrintRejectReason);
 }
+
+// ── Legacy blob parse (read-only, used only for blob→SQL migration) ──────────
 
 function parseEvent(raw: unknown): PrintOutcomeEvent | null {
   if (!raw || typeof raw !== "object") return null;
@@ -71,7 +76,7 @@ function parseEvent(raw: unknown): PrintOutcomeEvent | null {
   return event;
 }
 
-export function loadPrintOutcomes(repo: AppRepository): PrintOutcomeEvent[] {
+function loadBlobEvents(repo: AppRepository): PrintOutcomeEvent[] {
   const raw = repo.getSetting(SETTINGS_KEY);
   if (!raw?.trim()) return [];
   try {
@@ -83,8 +88,84 @@ export function loadPrintOutcomes(repo: AppRepository): PrintOutcomeEvent[] {
   }
 }
 
-function savePrintOutcomes(repo: AppRepository, events: PrintOutcomeEvent[]): void {
-  repo.setSetting(SETTINGS_KEY, JSON.stringify(events.slice(-MAX_EVENTS)));
+// ── Blob → SQL one-time migration ────────────────────────────────────────────
+
+const MIGRATED_KEY = "printer.print_outcomes_migrated_v1";
+
+/**
+ * Migrate any events still in the blob into print_job_parts rows.
+ * Safe to call on every startup — idempotent via MIGRATED_KEY flag.
+ */
+export function migratePrintOutcomesBlob(repo: AppRepository): void {
+  if (repo.getSetting(MIGRATED_KEY) === "1") return;
+  const events = loadBlobEvents(repo);
+  if (events.length > 0) {
+    repo.insertPrintJobParts(
+      events.map((e) => ({
+        id: e.id,
+        at: e.at,
+        profileId: e.profile_id,
+        partId: e.part_id,
+        unitIndex: e.unit_index,
+        result: e.result,
+        reason: e.reason,
+        note: e.note,
+        hostIntegrationId: e.host_integration_id,
+        filename: e.filename,
+        matchKey: e.match_key,
+        role: e.role,
+        filamentDisplay: e.filament_display,
+        linkId: e.link_id,
+      })),
+    );
+  }
+  repo.setSetting(MIGRATED_KEY, "1");
+}
+
+// ── SQL-backed public API ─────────────────────────────────────────────────────
+
+function rowToEvent(row: {
+  id: string;
+  at: string;
+  profileId: number;
+  partId: number;
+  unitIndex: number;
+  result: string;
+  reason: string | null;
+  note: string | null;
+  hostIntegrationId: string | null;
+  filename: string | null;
+  matchKey: string | null;
+  role: string | null;
+  filamentDisplay: string | null;
+  linkId: string | null;
+}): PrintOutcomeEvent {
+  const e: PrintOutcomeEvent = {
+    id: row.id,
+    at: row.at,
+    profile_id: row.profileId,
+    part_id: row.partId,
+    unit_index: row.unitIndex,
+    result: row.result as PrintOutcomeEvent["result"],
+  };
+  if (isPrintRejectReason(row.reason)) e.reason = row.reason;
+  if (row.note) e.note = row.note;
+  if (row.hostIntegrationId) e.host_integration_id = row.hostIntegrationId;
+  if (row.filename) e.filename = row.filename;
+  if (row.matchKey) e.match_key = row.matchKey;
+  if (row.role) e.role = row.role;
+  if (row.filamentDisplay) e.filament_display = row.filamentDisplay;
+  if (row.linkId) e.link_id = row.linkId;
+  return e;
+}
+
+export function loadPrintOutcomes(repo: AppRepository, profileId?: number): PrintOutcomeEvent[] {
+  if (profileId != null) {
+    return repo.listPrintJobParts(profileId).map(rowToEvent);
+  }
+  // Fallback: load all via profile 0 sentinel won't work; caller should pass profileId.
+  // This overload exists for legacy callers only.
+  return [];
 }
 
 export function appendPrintOutcomes(
@@ -92,22 +173,56 @@ export function appendPrintOutcomes(
   events: Omit<PrintOutcomeEvent, "id" | "at">[],
 ): PrintOutcomeEvent[] {
   if (!events.length) return [];
-  const all = loadPrintOutcomes(repo);
-  const created: PrintOutcomeEvent[] = events.map((e) => ({
-    ...e,
-    id: randomUUID(),
-    at: new Date().toISOString(),
-  }));
-  all.push(...created);
-  savePrintOutcomes(repo, all);
-  return created;
+  const now = new Date().toISOString();
+
+  // Group events by (profile_id, link_id) into jobs. One job per unique
+  // (profile_id × link_id) combo in this batch.
+  const jobKey = (e: Omit<PrintOutcomeEvent, "id" | "at">) =>
+    `${e.profile_id}:${e.link_id ?? ""}`;
+  const jobMap = new Map<string, string>(); // key → job id
+
+  const parts = events.map((e) => {
+    const key = jobKey(e);
+    if (!jobMap.has(key)) {
+      const jobId = randomUUID();
+      jobMap.set(key, jobId);
+      repo.insertPrintJob({
+        id: jobId,
+        profileId: e.profile_id,
+        hostIntegrationId: e.host_integration_id,
+        filename: e.filename,
+        at: now,
+        linkId: e.link_id,
+      });
+    }
+    return {
+      id: randomUUID(),
+      jobId: jobMap.get(key)!,
+      at: now,
+      profileId: e.profile_id,
+      partId: e.part_id,
+      unitIndex: e.unit_index,
+      result: e.result,
+      reason: e.reason,
+      note: e.note,
+      hostIntegrationId: e.host_integration_id,
+      filename: e.filename,
+      matchKey: e.match_key,
+      role: e.role,
+      filamentDisplay: e.filament_display,
+      linkId: e.link_id,
+    };
+  });
+
+  const inserted = repo.insertPrintJobParts(parts);
+  return inserted.map(rowToEvent);
 }
 
 export function summarizePrintOutcomes(
   repo: AppRepository,
   profileId: number,
 ): PrintOutcomesSummary {
-  const events = loadPrintOutcomes(repo).filter((e) => e.profile_id === profileId);
+  const events = repo.listPrintJobParts(profileId).map(rowToEvent);
   const by_reason: Partial<Record<PrintRejectReason, number>> = {};
   const by_role: Record<string, { confirmed: number; rejected: number }> = {};
   let total_confirmed = 0;

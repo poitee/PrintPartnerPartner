@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { useLocation } from "react-router-dom";
-import type { PlanReview, ReviewPart, RoleFilamentRow, SpoolmanSpoolRow } from "../../api/engine";
+import type { PlanReview, ReviewPart, RoleFilamentRow, SpoolmanSpoolRow, StlNamingFolderRule } from "../../api/engine";
 import { fetchRoleFilaments, fetchSpoolmanSpools } from "../../api/engine";
 import { useCopilotUiOptional } from "../../context/CopilotUiContext";
 import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
@@ -54,6 +54,7 @@ type Props = {
   review: PlanReview;
   planName: string;
   disabled?: boolean;
+  folderRules?: StlNamingFolderRule[];
 };
 
 export type ReviewPartsSheetHandle = {
@@ -299,7 +300,7 @@ function ReviewSheetRow({
 }
 
 const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function ReviewPartsSheet(
-  { review, planName, disabled },
+  { review, planName, disabled, folderRules },
   ref,
 ) {
   const { profiles } = useProfileSelection();
@@ -435,8 +436,8 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
   const facets = useMemo(() => collectReviewFacets(allParts), [allParts]);
 
   const filtered = useMemo(
-    () => filterReviewParts(allParts, review, ui),
-    [allParts, review, ui],
+    () => filterReviewParts(allParts, review, { ...ui, folderRules: folderRules ?? [] }),
+    [allParts, review, ui, folderRules],
   );
 
   const warningCount = useMemo(
@@ -782,6 +783,21 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
             ]}
             disabled={disabled}
           />
+          {folderRules && folderRules.length > 0 && (
+            <FilterSelect
+              aria-label="Functional class"
+              value={ui.functionalFilter}
+              onValueChange={(v) =>
+                patchUi({ functionalFilter: v as PersistedReviewPartsUi["functionalFilter"] })
+              }
+              options={[
+                { value: "all", label: "Show: all" },
+                { value: "functional", label: "Functional" },
+                { value: "cosmetic", label: "Cosmetic" },
+              ]}
+              disabled={disabled}
+            />
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-sm">

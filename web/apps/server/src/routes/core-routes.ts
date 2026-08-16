@@ -28,6 +28,7 @@ import { registerShareRoutes } from "./shares.js";
 import { registerAssistantRoutes } from "./assistant.js";
 import type { AuthStore } from "../services/auth-store.js";
 import { createIntegrationPort } from "../integrations/store.js";
+import { registerDiscordDigestRoute } from "./discord-digest.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
 
 export type CoreRouteDeps = {
@@ -59,6 +60,7 @@ export async function registerCoreRoutes(
     sourcesDir: deps.sourcesDir,
     thumbsDir: deps.thumbsDir,
     coversDir: deps.coversDir,
+    jobs: deps.jobs,
   };
 
   await registerSourceRoutes(app, routeDeps);
@@ -91,6 +93,7 @@ export async function registerCoreRoutes(
     getAdapter: getIntegrationAdapter,
   });
   await registerPrinterCheckoffRoutes(app, { integrations, repo: deps.repo });
+  await registerDiscordDigestRoute(app, { repo: deps.repo, integrations });
   await registerPrinterSendQueueRoutes(app, {
     integrations,
     repo: deps.repo,

@@ -20,9 +20,17 @@ type Props = {
   busy: boolean;
   /** Dense phone layout: larger steppers, no inline bar. */
   compact?: boolean;
+  /** Printer host name if this part is currently being printed. */
+  printingOn?: string;
+  /** Printer host name if this part's print has finished and awaits verify. */
+  awaitingVerify?: string;
+  /** Suggested printer from an unattributed print candidate. */
+  suggestedPrinter?: { hostName: string; printId: string; filename: string };
   onIncrement: (part: ReviewPart) => void;
   onDecrement: (part: ReviewPart) => void;
   onPreview: (part: ReviewPart) => void;
+  /** Called when user clicks Claim on a suggested printer. */
+  onClaim?: (printId: string) => void;
   /** When set, shows a grip handle for Progress list reorder. */
   dragHandle?: {
     attributes: DraggableAttributes;
@@ -50,6 +58,11 @@ const toneBarClass: Record<ReturnType<typeof partProgressTone>, string> = {
   done: "bg-success",
 };
 
+function truncateFilename(name: string, maxLen = 20): string {
+  if (name.length <= maxLen) return name;
+  return name.slice(0, maxLen - 1) + "…";
+}
+
 /**
  * Screen Progress row — thumb, path, filament swatch, bar, −/+ steppers
  * (matches Workflow mock Progress / phone checkoff density).
@@ -61,9 +74,13 @@ const ProgressPartRow = memo(function ProgressPartRow({
   part,
   busy,
   compact = false,
+  printingOn,
+  awaitingVerify,
+  suggestedPrinter,
   onIncrement,
   onDecrement,
   onPreview,
+  onClaim,
   dragHandle,
 }: Props) {
   const qty = part.quantity_effective;
@@ -83,12 +100,62 @@ const ProgressPartRow = memo(function ProgressPartRow({
     />
   ) : null;
 
+  /** Status badges rendered under the filename. At most one printing/awaiting badge shows. */
+  function StatusBadges({ inCompact }: { inCompact: boolean }) {
+    return (
+      <>
+        {/* Awaiting verify (green) — takes precedence over printing */}
+        {awaitingVerify && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+            <span aria-hidden>✓</span> Finished on {awaitingVerify} — verify
+          </span>
+        )}
+
+        {/* Actively printing (sky) — only when not already awaiting verify */}
+        {!awaitingVerify && printingOn && (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/40 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-300">
+            <span
+              className="inline-block h-2 w-2 rounded-full bg-sky-500 animate-pulse"
+              aria-hidden
+            />
+            Printing on {printingOn}
+          </span>
+        )}
+
+        {/* Suggested printer from unattributed print (amber) */}
+        {suggestedPrinter && !printingOn && !awaitingVerify && (
+          <span className="inline-flex flex-wrap items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+            <span aria-hidden>⚡</span>
+            <span>
+              Possibly on {suggestedPrinter.hostName} [{truncateFilename(suggestedPrinter.filename)}]
+            </span>
+            <button
+              type="button"
+              className={cn(
+                "rounded border border-amber-500/50 bg-amber-500/20 px-1.5 py-0 text-[10px] font-semibold text-amber-800 hover:bg-amber-500/30 dark:text-amber-200",
+                inCompact ? "h-5" : "h-4",
+              )}
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClaim?.(suggestedPrinter.printId);
+              }}
+            >
+              Claim
+            </button>
+          </span>
+        )}
+      </>
+    );
+  }
+
   if (compact) {
     return (
       <article
         className={cn(
           "flex items-center gap-3 rounded-[10px] border border-border bg-card p-3 shadow-sm",
           tone === "done" && "border-success/40 bg-success/5",
+          awaitingVerify && "border-emerald-500/30 bg-emerald-500/5",
         )}
       >
         {handle}
@@ -100,6 +167,7 @@ const ProgressPartRow = memo(function ProgressPartRow({
           >
             {part.filename}
           </span>
+          <StatusBadges inCompact />
           <div className="flex items-center gap-2">
             {part.filament_hex ? (
               <span
@@ -146,6 +214,7 @@ const ProgressPartRow = memo(function ProgressPartRow({
       className={cn(
         "flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 shadow-sm",
         tone === "done" && "border-success/40 bg-success/5",
+        awaitingVerify && "border-emerald-500/30 bg-emerald-500/5",
       )}
     >
       {handle}
@@ -158,6 +227,7 @@ const ProgressPartRow = memo(function ProgressPartRow({
           {part.filename}
         </span>
         <span className="truncate text-[11px] text-muted-foreground">{sourceLine(part)}</span>
+        <StatusBadges inCompact={false} />
       </div>
       {part.filament_hex ? (
         <span

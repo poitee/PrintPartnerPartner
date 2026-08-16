@@ -97,6 +97,8 @@ export const printProgress = sqliteTable(
       .references(() => parts.id, { onDelete: "cascade" }),
     unitIndex: integer("unit_index").notNull().default(0),
     completed: integer("completed", { mode: "boolean" }).notNull().default(false),
+    /** Assembly tracking: true when a completed printed part has been physically installed. */
+    assembled: integer("assembled", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
     uniqueIndex("uq_print_progress_part_unit").on(t.partId, t.unitIndex),
@@ -235,8 +237,158 @@ export const planSnapshots = sqliteTable("plan_snapshots", {
   payloadJson: text("payload_json").notNull().default("{}"),
 });
 
+/** Slicer printer profiles imported from Bambu / OrcaSlicer / PrusaSlicer. */
+export const printerProfiles = sqliteTable(
+  "printer_profiles",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    name: text("name").notNull(),
+    slicerFormat: text("slicer_format").notNull(),
+    slicerVersionAtImport: text("slicer_version_at_import"),
+    /** Polygon as JSON array of [x,y] pairs. */
+    printableArea: text("printable_area"),
+    printableHeightMm: text("printable_height_mm"),
+    /** JSON array of exclusion polygons. */
+    bedExcludeArea: text("bed_exclude_area"),
+    nozzleDiameterMm: text("nozzle_diameter_mm"),
+    extruderCount: integer("extruder_count").notNull().default(1),
+    /** Verbatim source JSON (Bambu/Orca). */
+    rawJson: text("raw_json"),
+    /** Verbatim source INI (Prusa). */
+    rawIni: text("raw_ini"),
+    /** Merged, inheritance-resolved flat config as JSON. */
+    resolvedFlatConfig: text("resolved_flat_config"),
+    importedAt: text("imported_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_printer_profiles_tenant_name").on(t.tenantId, t.name)],
+);
+
+/** Slicer process/print-settings profiles imported from slicers. */
+export const processProfiles = sqliteTable(
+  "process_profiles",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    name: text("name").notNull(),
+    slicerFormat: text("slicer_format").notNull(),
+    /** JSON array of printer profile names this process is compatible with. */
+    compatiblePrinters: text("compatible_printers"),
+    /** Merged, inheritance-resolved flat config as JSON. */
+    resolvedFlatConfig: text("resolved_flat_config"),
+    importedAt: text("imported_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_process_profiles_tenant_name").on(t.tenantId, t.name)],
+);
+
+/** Slicer filament profiles imported from slicers. */
+export const filamentProfiles = sqliteTable(
+  "filament_profiles",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    name: text("name").notNull(),
+    materialType: text("material_type").notNull(),
+    /** 1=generic 2=brand 3=certified 4=optimal — aligns with PP material_tier scale. */
+    materialTier: integer("material_tier").notNull().default(1),
+    nozzleTempC: integer("nozzle_temp_c"),
+    bedTempC: integer("bed_temp_c"),
+    fanPct: integer("fan_pct"),
+    extrusionMultiplier: text("extrusion_multiplier"),
+    pressureAdvance: text("pressure_advance"),
+    retraction: text("retraction"),
+    /** Verbatim source JSON. */
+    rawJson: text("raw_json"),
+    /** Verbatim source INI. */
+    rawIni: text("raw_ini"),
+    /** Merged, inheritance-resolved flat config as JSON. */
+    resolvedFlatConfig: text("resolved_flat_config"),
+    importedAt: text("imported_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_filament_profiles_tenant_name").on(t.tenantId, t.name)],
+);
+
+/** Global persistent mapping from slicer printer name to PP fleet printer id. */
+export const printerNameMap = sqliteTable(
+  "printer_name_map",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** Exact printer name string as it appears in the slicer profile. */
+    slicerName: text("slicer_name").notNull(),
+    /** PP fleet printer id. */
+    ppFleetId: text("pp_fleet_id").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_printer_name_map_slicer_name").on(t.slicerName)],
+);
+
+/** One print job container (keyed by checkoff link when available). */
+export const printJobs = sqliteTable("print_jobs", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  profileId: integer("profile_id")
+    .notNull()
+    .references(() => buildProfiles.id, { onDelete: "cascade" }),
+  hostIntegrationId: text("host_integration_id"),
+  /** PP fleet printer id (from checkoff link or send queue). */
+  printerId: text("printer_id").notNull().default(""),
+  /** Filament colour/material label (filament_color_id or filament_display). */
+  material: text("material").notNull().default(""),
+  filename: text("filename"),
+  /** sent | completed | failed */
+  status: text("status").notNull().default("sent"),
+  /** Estimated filament consumed in grams (from telemetry or slicer metadata). */
+  filamentConsumedG: integer("filament_consumed_g"),
+  at: text("at").notNull(),
+  completedAt: text("completed_at"),
+  linkId: text("link_id"),
+});
+
+/** One outcome row per part/unit within a print job (replaces printer.print_outcomes blob). */
+export const printJobParts = sqliteTable("print_job_parts", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  jobId: text("job_id").references(() => printJobs.id, { onDelete: "set null" }),
+  at: text("at").notNull(),
+  profileId: integer("profile_id").notNull(),
+  partId: integer("part_id").notNull(),
+  unitIndex: integer("unit_index").notNull().default(0),
+  result: text("result").notNull(),
+  reason: text("reason"),
+  note: text("note"),
+  hostIntegrationId: text("host_integration_id"),
+  filename: text("filename"),
+  matchKey: text("match_key"),
+  role: text("role"),
+  filamentDisplay: text("filament_display"),
+  linkId: text("link_id"),
+});
+
+/** Printer health / telemetry events (for Prometheus metrics and the stats page). */
+export const printerTelemetry = sqliteTable("printer_telemetry", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  at: text("at").notNull(),
+  printerId: text("printer_id"),
+  hostIntegrationId: text("host_integration_id"),
+  eventType: text("event_type").notNull(),
+  payloadJson: text("payload_json"),
+});
+
+/** General application event log (Discord daily digest, analytics). */
+export const appEvents = sqliteTable("app_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  at: text("at").notNull(),
+  kind: text("kind").notNull(),
+  actorType: text("actor_type"),
+  actorId: text("actor_id"),
+  payloadJson: text("payload_json"),
+});
+
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 8;
+export const currentSchemaVersion = 12;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -397,4 +549,118 @@ export const schemaMigrations: string[] = [
     payload_json TEXT NOT NULL DEFAULT '{}'
   )`,
   `CREATE INDEX IF NOT EXISTS idx_plan_snapshots_profile ON plan_snapshots (profile_id, created_at)`,
+  // v9 — slicer profile tables
+  `CREATE TABLE IF NOT EXISTS printer_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    name TEXT NOT NULL,
+    slicer_format TEXT NOT NULL,
+    slicer_version_at_import TEXT,
+    printable_area TEXT,
+    printable_height_mm TEXT,
+    bed_exclude_area TEXT,
+    nozzle_diameter_mm TEXT,
+    extruder_count INTEGER NOT NULL DEFAULT 1,
+    raw_json TEXT,
+    raw_ini TEXT,
+    resolved_flat_config TEXT,
+    imported_at TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_printer_profiles_tenant_name ON printer_profiles (tenant_id, name)`,
+  `CREATE TABLE IF NOT EXISTS process_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    name TEXT NOT NULL,
+    slicer_format TEXT NOT NULL,
+    compatible_printers TEXT,
+    resolved_flat_config TEXT,
+    imported_at TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_process_profiles_tenant_name ON process_profiles (tenant_id, name)`,
+  `CREATE TABLE IF NOT EXISTS filament_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    name TEXT NOT NULL,
+    material_type TEXT NOT NULL,
+    material_tier INTEGER NOT NULL DEFAULT 1,
+    nozzle_temp_c INTEGER,
+    bed_temp_c INTEGER,
+    fan_pct INTEGER,
+    extrusion_multiplier TEXT,
+    pressure_advance TEXT,
+    retraction TEXT,
+    raw_json TEXT,
+    raw_ini TEXT,
+    resolved_flat_config TEXT,
+    imported_at TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_filament_profiles_tenant_name ON filament_profiles (tenant_id, name)`,
+  `CREATE TABLE IF NOT EXISTS printer_name_map (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slicer_name TEXT NOT NULL,
+    pp_fleet_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_printer_name_map_slicer_name ON printer_name_map (slicer_name)`,
+  // v10 — assembly tracking column on print_progress
+  `ALTER TABLE print_progress ADD COLUMN assembled INTEGER NOT NULL DEFAULT 0`,
+  // v11 — print_jobs, print_job_parts, printer_telemetry, app_events
+  `CREATE TABLE IF NOT EXISTS print_jobs (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    host_integration_id TEXT,
+    filename TEXT,
+    at TEXT NOT NULL,
+    link_id TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_print_jobs_tenant_profile ON print_jobs (tenant_id, profile_id, at)`,
+  `CREATE TABLE IF NOT EXISTS print_job_parts (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    job_id TEXT REFERENCES print_jobs(id) ON DELETE SET NULL,
+    at TEXT NOT NULL,
+    profile_id INTEGER NOT NULL,
+    part_id INTEGER NOT NULL,
+    unit_index INTEGER NOT NULL DEFAULT 0,
+    result TEXT NOT NULL,
+    reason TEXT,
+    note TEXT,
+    host_integration_id TEXT,
+    filename TEXT,
+    match_key TEXT,
+    role TEXT,
+    filament_display TEXT,
+    link_id TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_print_job_parts_profile ON print_job_parts (profile_id, at)`,
+  `CREATE TABLE IF NOT EXISTS printer_telemetry (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    at TEXT NOT NULL,
+    printer_id TEXT,
+    host_integration_id TEXT,
+    event_type TEXT NOT NULL,
+    payload_json TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_printer_telemetry_at ON printer_telemetry (tenant_id, at)`,
+  `CREATE TABLE IF NOT EXISTS app_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    at TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    actor_type TEXT,
+    actor_id TEXT,
+    payload_json TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_app_events_kind_at ON app_events (tenant_id, kind, at)`,
+  // v12 — add printer_id / material / status / filament_consumed_g / completed_at to print_jobs
+  `ALTER TABLE print_jobs ADD COLUMN printer_id TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE print_jobs ADD COLUMN material TEXT NOT NULL DEFAULT ''`,
+  `ALTER TABLE print_jobs ADD COLUMN status TEXT NOT NULL DEFAULT 'sent'`,
+  `ALTER TABLE print_jobs ADD COLUMN filament_consumed_g INTEGER`,
+  `ALTER TABLE print_jobs ADD COLUMN completed_at TEXT`,
+  `CREATE INDEX IF NOT EXISTS idx_print_jobs_tenant_status ON print_jobs (tenant_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_print_jobs_printer ON print_jobs (tenant_id, printer_id)`,
 ];

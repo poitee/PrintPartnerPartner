@@ -1,0 +1,113 @@
+# pp-compose.yml — Slicer stack overlay for Print Partner
+#
+# Usage (with base compose):
+#   docker compose -f docker-compose.yml -f pp-compose.yml up -d
+#
+# Or standalone (self-contained; omit docker-compose.yml):
+#   docker compose -f pp-compose.yml up -d
+#
+# Local DNS: add to /etc/hosts (or your router/pihole):
+#   127.0.0.1  orca.home prusa.home bambu.home
+#
+# IMAGE TAG NOTES — verify these before deploying:
+#   OrcaSlicer:  lscr.io/linuxserver/orcaslicer uses "version-X.Y.Z" tags.
+#                Check: https://hub.docker.com/r/linuxserver/orcaslicer/tags
+#   PrusaSlicer: mikeah/prusaslicer-novnc uses PrusaSlicer release version tags.
+#                Check: https://hub.docker.com/r/mikeah/prusaslicer-novnc/tags
+#   BambuStudio: sodiumhydrogen/slicers-novnc uses flavor tags only (e.g. :bambu).
+#                No semantic version available; pin the image digest instead:
+#                sodiumhydrogen/slicers-novnc@sha256:<digest>
+#                Check: https://hub.docker.com/r/sodiumhydrogen/slicers-novnc/tags
+
+services:
+
+  # -----------------------------------------------------------------------
+  # OrcaSlicer — Selkies WebRTC remote desktop, port 3000
+  # -----------------------------------------------------------------------
+  orcaslicer:
+    image: lscr.io/linuxserver/orcaslicer:version-2.2.0  # VERIFY TAG
+    container_name: orcaslicer
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: America/Chicago          # adjust to your timezone
+      # Selkies options (override as needed):
+      # CUSTOM_PORT: "3000"
+      # CUSTOM_HTTPS_PORT: "3001"
+    ports:
+      - "3010:3000"                # host:container — avoids collision with other services
+    volumes:
+      - orca-config:/config        # slicer profiles, settings
+      - pp-exchange:/exchange      # drop 3MF here; pick up gcode
+    restart: unless-stopped
+
+  # -----------------------------------------------------------------------
+  # PrusaSlicer — noVNC remote desktop, port 8080
+  # -----------------------------------------------------------------------
+  prusaslicer:
+    image: mikeah/prusaslicer-novnc:2.8.1  # VERIFY TAG
+    container_name: prusaslicer
+    ports:
+      - "3011:8080"                # host:container
+    volumes:
+      - prusa-config:/configs      # slicer profiles, settings
+      - pp-exchange:/exchange      # drop 3MF here; pick up gcode
+    restart: unless-stopped
+
+  # -----------------------------------------------------------------------
+  # BambuStudio — sodiumhydrogen noVNC flavour, port 8080
+  # NOTE: :bambu is a flavor tag, not a version. Replace with a digest pin:
+  #   sodiumhydrogen/slicers-novnc@sha256:<digest>
+  # -----------------------------------------------------------------------
+  bambu:
+    image: sodiumhydrogen/slicers-novnc:bambu  # REPLACE with digest pin
+    container_name: bambu
+    ports:
+      - "3012:8080"                # host:container
+    volumes:
+      - bambu-config:/root/.config/BambuStudio   # slicer profiles, settings
+      - pp-exchange:/exchange      # drop 3MF here; pick up gcode
+    restart: unless-stopped
+
+  # -----------------------------------------------------------------------
+  # Caddy — reverse-proxy for *.home routes
+  # -----------------------------------------------------------------------
+  caddy:
+    image: caddy:2.9.1-alpine
+    container_name: caddy-slicers
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - orcaslicer
+      - prusaslicer
+      - bambu
+    restart: unless-stopped
+
+  # -----------------------------------------------------------------------
+  # Print Partner — extend with read-only profile volumes + exchange
+  # When used as an overlay (-f docker-compose.yml -f pp-compose.yml),
+  # Compose merges this definition with the base. Standalone: set the
+  # image or build key as well (see docker-compose.yml).
+  # -----------------------------------------------------------------------
+  print-partner:
+    volumes:
+      - orca-config:/slicer-profiles/orca:ro
+      - prusa-config:/slicer-profiles/prusa:ro
+      - bambu-config:/slicer-profiles/bambu:ro
+      - pp-exchange:/exchange      # read-write: PP writes 3MF, reads gcode
+
+# -----------------------------------------------------------------------
+# Named volumes
+# -----------------------------------------------------------------------
+volumes:
+  orca-config:
+  prusa-config:
+  bambu-config:
+  pp-exchange:
+  caddy-data:
+  caddy-config:

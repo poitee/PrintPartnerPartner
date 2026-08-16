@@ -149,6 +149,22 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     };
 
     await registerCoreRoutes(app, coreDeps);
+
+    // Start background source watcher
+    const { startSourceWatcher } = await import("./services/source-watcher.js");
+    const watcherHandle = startSourceWatcher(
+      repository,
+      coreDeps.reposDir,
+      jobs,
+      () => {
+        const webhookUrl = repository.getSetting("discord_notify_webhook_url") || null;
+        const notifyOnUpdate = repository.getSetting("discord_notify_on_update", "1") !== "0";
+        const notifyOnSync = repository.getSetting("discord_notify_on_sync", "0") !== "0";
+        const autoSyncUpdates = repository.getSetting("discord_auto_sync_updates", "1") !== "0";
+        return { discordWebhookUrl: webhookUrl, notifyOnUpdate, notifyOnSync, autoSyncUpdates };
+      },
+    );
+    app.addHook("onClose", async () => { watcherHandle.stop(); });
     
     // Register backup routes (available regardless of auth mode)
     await registerBackupRoutes(app, {
@@ -164,7 +180,7 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     await registerApiKeyManagementRoutes(app, { repo: repository });
     
     // Register metrics endpoint
-    await registerMetricsRoutes(app);
+    await registerMetricsRoutes(app, { repo: repository });
     
     await app.register(async (v1) => {
       await registerApiV1Plugin(v1, coreDeps);
@@ -234,6 +250,18 @@ export async function startServer(config: ServerConfig) {
   validateProductionConfig(config);
   const ports = createPorts(config);
   await ports.db.connect();
+
+  // One-time migration: move print_outcomes blob → print_job_parts SQL rows.
+  if (ports.repository) {
+    try {
+      const { migratePrintOutcomesBlob } = await import(
+        "./services/printer-outcomes-store.js"
+      );
+      migratePrintOutcomesBlob(ports.repository);
+    } catch (err) {
+      console.warn("[print-outcomes] blob migration skipped:", err);
+    }
+  }
 
   // Best-effort: upsert Advisor notes from shipped/imported domain pack onto matching sources.
   if (ports.repository) {

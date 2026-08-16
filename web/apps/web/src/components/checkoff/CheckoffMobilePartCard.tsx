@@ -9,8 +9,15 @@ import ProgressPartRow from "./ProgressPartRow";
 type Props = {
   part: ReviewPart;
   busy: boolean;
+  /** Printer host name if this part is currently being printed. */
+  printingOn?: string;
+  /** Printer host name if this part's print has finished and awaits verify. */
+  awaitingVerify?: string;
+  /** Suggested printer from an unattributed print candidate. */
+  suggestedPrinter?: { hostName: string; printId: string; filename: string };
   onToggleUnit: (part: ReviewPart, unitIndex: number) => void;
   onPreview: (part: ReviewPart) => void;
+  onClaim?: (printId: string) => void;
   dragHandle?: {
     attributes: DraggableAttributes;
     listeners: DraggableSyntheticListeners;
@@ -22,8 +29,12 @@ type Props = {
 export default function CheckoffMobilePartCard({
   part,
   busy,
+  printingOn,
+  awaitingVerify,
+  suggestedPrinter,
   onToggleUnit,
   onPreview,
+  onClaim,
   dragHandle,
 }: Props) {
   return (
@@ -31,6 +42,10 @@ export default function CheckoffMobilePartCard({
       part={part}
       busy={busy}
       compact
+      printingOn={printingOn}
+      awaitingVerify={awaitingVerify}
+      suggestedPrinter={suggestedPrinter}
+      onClaim={onClaim}
       dragHandle={dragHandle}
       onIncrement={(p) => {
         const idx = nextUnitToComplete(p.print_units);

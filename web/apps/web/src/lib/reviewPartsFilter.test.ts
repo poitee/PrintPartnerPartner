@@ -79,6 +79,7 @@ describe("filterReviewParts", () => {
       filament: null,
       issuesOnly: false,
       sort: "filename",
+      functionalFilter: "all",
     });
     expect(missing.map((p) => p.id)).toEqual([2]);
 
@@ -92,6 +93,7 @@ describe("filterReviewParts", () => {
       filament: null,
       issuesOnly: false,
       sort: "filename",
+      functionalFilter: "all",
     });
     expect(partial.map((p) => p.id)).toEqual([1]);
   });
@@ -107,6 +109,7 @@ describe("filterReviewParts", () => {
       filament: null,
       issuesOnly: false,
       sort: "filename",
+      functionalFilter: "all",
     });
     expect(out.map((p) => p.id)).toEqual([1, 3]);
   });
@@ -122,6 +125,7 @@ describe("filterReviewParts", () => {
       filament: null,
       issuesOnly: false,
       sort: "filename",
+      functionalFilter: "all",
     });
     expect(out.map((p) => p.id)).toEqual([1, 2, 3]);
   });

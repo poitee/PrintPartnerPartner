@@ -23,6 +23,17 @@ import {
   type DateFormatId,
   type GitHubPatSettings,
 } from "../api/engine";
+import {
+  fetchDiscordNotifySettings,
+  saveDiscordNotifySettings,
+  testDiscordNotify,
+  type DiscordNotifySettings,
+} from "../api/engine";
+import {
+  fetchBuildTrackingSettings,
+  saveBuildTrackingSettings,
+  type BuildTrackingSettings,
+} from "../api/engine";
 import { useDateFormat } from "../context/DateFormatContext";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -114,20 +125,31 @@ export default function SettingsPage() {
   const [updateIntervalSaving, setUpdateIntervalSaving] = useState(false);
   const [autoRecompute, setAutoRecompute] = useState(true);
   const [autoRecomputeSaving, setAutoRecomputeSaving] = useState(false);
+  const [discordSettings, setDiscordSettings] = useState<DiscordNotifySettings | null>(null);
+  const [discordWebhookInput, setDiscordWebhookInput] = useState("");
+  const [discordSaving, setDiscordSaving] = useState(false);
+  const [discordTestStatus, setDiscordTestStatus] = useState<string | null>(null);
+  const [buildTrackingSettings, setBuildTrackingSettings] = useState<BuildTrackingSettings | null>(null);
+  const [buildTrackingSaving, setBuildTrackingSaving] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!health) return;
     try {
-      const [filamentRows, patSettings, updateSettings, autoRecomputeSettings] = await Promise.all([
+      const [filamentRows, patSettings, updateSettings, autoRecomputeSettings, discordNotifySettings, buildTracking] = await Promise.all([
         fetchCustomFilaments(),
         fetchGitHubPatSettings(),
         fetchSourceUpdateCheckSettings(),
         fetchAutoRecomputeSettings(),
+        fetchDiscordNotifySettings(),
+        fetchBuildTrackingSettings(),
       ]);
       setFilaments(filamentRows);
       setGithubPat(patSettings);
       setUpdateIntervalHours(String(updateSettings.interval_hours));
       setAutoRecompute(autoRecomputeSettings.enabled);
+      setDiscordSettings(discordNotifySettings);
+      setDiscordWebhookInput(discordNotifySettings.webhook_url ?? "");
+      setBuildTrackingSettings(buildTracking);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
@@ -443,7 +465,141 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader accent>
+            <CardTitle className="text-base">Discord notifications</CardTitle>
+            <CardDescription>
+              Get notified in Discord when repos update — like Sonarr/Radarr.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">Webhook URL</span>
+              <input
+                type="text"
+                className={`${inputClass} w-full max-w-md`}
+                placeholder="https://discord.com/api/webhooks/..."
+                autoComplete="off"
+                value={discordWebhookInput}
+                onChange={(e) => setDiscordWebhookInput(e.target.value)}
+              />
+            </label>
+            <Button
+              disabled={!health || discordSaving}
+              onClick={async () => {
+                setDiscordSaving(true);
+                setDiscordTestStatus(null);
+                try {
+                  const saved = await saveDiscordNotifySettings({ webhook_url: discordWebhookInput || null });
+                  setDiscordSettings(saved);
+                } catch (e) {
+                  setLoadError(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setDiscordSaving(false);
+                }
+              }}
+            >
+              {discordSaving ? "Saving…" : "Save"}
+            </Button>
+            {discordSettings?.webhook_url && (
+              <div className="space-y-2 pt-1">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={discordSettings.notify_on_update}
+                    onChange={async (e) => {
+                      try {
+                        const saved = await saveDiscordNotifySettings({ notify_on_update: e.target.checked });
+                        setDiscordSettings(saved);
+                      } catch {}
+                    }}
+                  />
+                  Notify when a source is auto-synced (updates)
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={discordSettings.auto_sync_updates}
+                    onChange={async (e) => {
+                      try {
+                        const saved = await saveDiscordNotifySettings({ auto_sync_updates: e.target.checked });
+                        setDiscordSettings(saved);
+                      } catch {}
+                    }}
+                  />
+                  Auto-sync sources when updates are detected
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={discordSettings.notify_on_sync}
+                    onChange={async (e) => {
+                      try {
+                        const saved = await saveDiscordNotifySettings({ notify_on_sync: e.target.checked });
+                        setDiscordSettings(saved);
+                      } catch {}
+                    }}
+                  />
+                  Notify on manual syncs
+                </label>
+                <div className="flex items-center gap-3 pt-1">
+                  <Button
+                    variant="secondary"
+                    disabled={!health || discordSaving}
+                    onClick={async () => {
+                      setDiscordTestStatus(null);
+                      try {
+                        const result = await testDiscordNotify();
+                        setDiscordTestStatus(result.ok ? "✅ Test message sent!" : `❌ ${result.error ?? "Failed"}`);
+                      } catch (e) {
+                        setDiscordTestStatus(`❌ ${e instanceof Error ? e.message : String(e)}`);
+                      }
+                    }}
+                  >
+                    Send test message
+                  </Button>
+                  {discordTestStatus && (
+                    <span className="text-sm text-muted-foreground">{discordTestStatus}</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <IntegrationsSettingsCard engineReady={Boolean(health)} />
+      </SettingsSection>
+
+      <SettingsSection id="build-tracking" title="Build Tracking">
+        <Card>
+          <CardHeader accent>
+            <CardTitle className="text-base">Assembly tracking</CardTitle>
+            <CardDescription>
+              Adds an Assembled toggle to each completed part — useful for multi-week builds where
+              you want to track which printed parts have been physically installed. Tracks
+              printed-but-not-yet-installed state for complex builds like Voron.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <label className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
+              <span className="text-sm font-medium">Enable assembly tracking</span>
+              <Switch
+                checked={buildTrackingSettings?.assembly_tracking ?? false}
+                disabled={!health || buildTrackingSaving}
+                onCheckedChange={(checked) => {
+                  setBuildTrackingSaving(true);
+                  void saveBuildTrackingSettings({ assembly_tracking: checked })
+                    .then((s) => setBuildTrackingSettings(s))
+                    .catch((e) =>
+                      setLoadError(e instanceof Error ? e.message : String(e)),
+                    )
+                    .finally(() => setBuildTrackingSaving(false));
+                }}
+                aria-label="Enable assembly tracking"
+              />
+            </label>
+          </CardContent>
+        </Card>
       </SettingsSection>
 
       <SettingsSection title="Appearance">

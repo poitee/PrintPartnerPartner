@@ -481,7 +481,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
         kind: "applied_action",
         actionType: "restore_plan_snapshot",
         params: { snapshot_id: sid, name: snap.name },
-        label: `Restored snapshot “${snap.name}”`,
+        label: `Restored snapshot "${snap.name}"`,
         summary: `Restored configuration from snapshot #${sid}`,
         result: { needs_sync: restored.needs_sync },
       });
@@ -489,5 +489,39 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       /* best-effort */
     }
     return { ok: true, needs_sync: restored.needs_sync, layers: restored.layers, snapshot: snap };
+  });
+
+  /** GET /plans/:id/variant-dimensions — read variant_dimensions from the base source manifest. */
+  app.get("/plans/:id/variant-dimensions", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    const { getSourceVariantDimensions, getPlanVariantSelection } = await import(
+      "../services/variant-dimensions.js"
+    );
+    const layers = deps.repo.getProfileLayers(id);
+    const baseLayer = layers.find((l) => l.layer_type === "base");
+    const sourceId = baseLayer?.project_id ?? null;
+    const dimensions = sourceId != null ? getSourceVariantDimensions(deps.repo, sourceId) : {};
+    const selection = getPlanVariantSelection(deps.repo, id);
+    return { profile_id: id, source_id: sourceId, dimensions, selection };
+  });
+
+  /** POST /plans/:id/variant-selection — apply variant choice to base source import rules. */
+  app.post("/plans/:id/variant-selection", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    const body = (request.body ?? {}) as { selection?: Record<string, string>; source_id?: number };
+    const selection = body.selection ?? {};
+    const layers = deps.repo.getProfileLayers(id);
+    const baseLayer = layers.find((l) => l.layer_type === "base");
+    const sourceId = body.source_id ?? baseLayer?.project_id ?? null;
+    if (sourceId == null) return reply.status(400).send({ detail: "No base source on plan" });
+    try {
+      const { applyPlanVariantSelection } = await import("../services/variant-dimensions.js");
+      const result = applyPlanVariantSelection(deps.repo, id, selection, sourceId);
+      return { profile_id: id, source_id: sourceId, ...result };
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+    }
   });
 }

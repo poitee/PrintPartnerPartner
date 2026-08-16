@@ -99,6 +99,7 @@ export const printProgress = pgTable(
       .references(() => parts.id, { onDelete: "cascade" }),
     unitIndex: integer("unit_index").notNull().default(0),
     completed: boolean("completed").notNull().default(false),
+    assembled: boolean("assembled").notNull().default(false),
   },
   (t) => [uniqueIndex("uq_print_progress_part_unit").on(t.partId, t.unitIndex)],
 );
@@ -235,5 +236,155 @@ export const planSnapshots = pgTable("plan_snapshots", {
   payloadJson: text("payload_json").notNull().default("{}"),
 });
 
+/** Slicer printer profiles imported from Bambu / OrcaSlicer / PrusaSlicer. */
+export const printerProfiles = pgTable(
+  "printer_profiles",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    name: text("name").notNull(),
+    slicerFormat: text("slicer_format").notNull(),
+    slicerVersionAtImport: text("slicer_version_at_import"),
+    /** Polygon as JSON array of [x,y] pairs. */
+    printableArea: text("printable_area"),
+    printableHeightMm: text("printable_height_mm"),
+    /** JSON array of exclusion polygons. */
+    bedExcludeArea: text("bed_exclude_area"),
+    nozzleDiameterMm: text("nozzle_diameter_mm"),
+    extruderCount: integer("extruder_count").notNull().default(1),
+    /** Verbatim source JSON (Bambu/Orca). */
+    rawJson: text("raw_json"),
+    /** Verbatim source INI (Prusa). */
+    rawIni: text("raw_ini"),
+    /** Merged, inheritance-resolved flat config as JSON. */
+    resolvedFlatConfig: text("resolved_flat_config"),
+    importedAt: text("imported_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_printer_profiles_tenant_name").on(t.tenantId, t.name)],
+);
+
+/** Slicer process/print-settings profiles imported from slicers. */
+export const processProfiles = pgTable(
+  "process_profiles",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    name: text("name").notNull(),
+    slicerFormat: text("slicer_format").notNull(),
+    /** JSON array of printer profile names this process is compatible with. */
+    compatiblePrinters: text("compatible_printers"),
+    /** Merged, inheritance-resolved flat config as JSON. */
+    resolvedFlatConfig: text("resolved_flat_config"),
+    importedAt: text("imported_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_process_profiles_tenant_name").on(t.tenantId, t.name)],
+);
+
+/** Slicer filament profiles imported from slicers. */
+export const filamentProfiles = pgTable(
+  "filament_profiles",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    name: text("name").notNull(),
+    materialType: text("material_type").notNull(),
+    /** 1=generic 2=brand 3=certified 4=optimal — aligns with PP material_tier scale. */
+    materialTier: integer("material_tier").notNull().default(1),
+    nozzleTempC: integer("nozzle_temp_c"),
+    bedTempC: integer("bed_temp_c"),
+    fanPct: integer("fan_pct"),
+    extrusionMultiplier: text("extrusion_multiplier"),
+    pressureAdvance: text("pressure_advance"),
+    retraction: text("retraction"),
+    /** Verbatim source JSON. */
+    rawJson: text("raw_json"),
+    /** Verbatim source INI. */
+    rawIni: text("raw_ini"),
+    /** Merged, inheritance-resolved flat config as JSON. */
+    resolvedFlatConfig: text("resolved_flat_config"),
+    importedAt: text("imported_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_filament_profiles_tenant_name").on(t.tenantId, t.name)],
+);
+
+/** Global persistent mapping from slicer printer name to PP fleet printer id. */
+export const printerNameMap = pgTable(
+  "printer_name_map",
+  {
+    id: serial("id").primaryKey(),
+    /** Exact printer name string as it appears in the slicer profile. */
+    slicerName: text("slicer_name").notNull(),
+    /** PP fleet printer id. */
+    ppFleetId: text("pp_fleet_id").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_printer_name_map_slicer_name").on(t.slicerName)],
+);
+
+/** One print job container (keyed by checkoff link when available). */
+export const printJobs = pgTable("print_jobs", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  profileId: integer("profile_id")
+    .notNull()
+    .references(() => buildProfiles.id, { onDelete: "cascade" }),
+  hostIntegrationId: text("host_integration_id"),
+  /** PP fleet printer id (from checkoff link or send queue). */
+  printerId: text("printer_id").notNull().default(""),
+  /** Filament colour/material label (filament_color_id or filament_display). */
+  material: text("material").notNull().default(""),
+  filename: text("filename"),
+  /** sent | completed | failed */
+  status: text("status").notNull().default("sent"),
+  /** Estimated filament consumed in grams (from telemetry or slicer metadata). */
+  filamentConsumedG: integer("filament_consumed_g"),
+  at: text("at").notNull(),
+  completedAt: text("completed_at"),
+  linkId: text("link_id"),
+});
+
+/** One outcome row per part/unit within a print job (replaces printer.print_outcomes blob). */
+export const printJobParts = pgTable("print_job_parts", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  jobId: text("job_id").references(() => printJobs.id, { onDelete: "set null" }),
+  at: text("at").notNull(),
+  profileId: integer("profile_id").notNull(),
+  partId: integer("part_id").notNull(),
+  unitIndex: integer("unit_index").notNull().default(0),
+  result: text("result").notNull(),
+  reason: text("reason"),
+  note: text("note"),
+  hostIntegrationId: text("host_integration_id"),
+  filename: text("filename"),
+  matchKey: text("match_key"),
+  role: text("role"),
+  filamentDisplay: text("filament_display"),
+  linkId: text("link_id"),
+});
+
+/** Printer health / telemetry events (for Prometheus metrics and the stats page). */
+export const printerTelemetry = pgTable("printer_telemetry", {
+  id: serial("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  at: text("at").notNull(),
+  printerId: text("printer_id"),
+  hostIntegrationId: text("host_integration_id"),
+  eventType: text("event_type").notNull(),
+  payloadJson: text("payload_json"),
+});
+
+/** General application event log (Discord daily digest, analytics). */
+export const appEvents = pgTable("app_events", {
+  id: serial("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  at: text("at").notNull(),
+  kind: text("kind").notNull(),
+  actorType: text("actor_type"),
+  actorId: text("actor_id"),
+  payloadJson: text("payload_json"),
+});
+
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 8;
+export const currentSchemaVersion = 12;

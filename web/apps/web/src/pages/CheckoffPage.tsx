@@ -25,13 +25,18 @@ import EmptyState from "../components/layout/EmptyState";
 import PlanSpecialRequestLine from "../components/PlanSpecialRequestLine";
 // Lazy: PrinterLiveStrip starts polling on mount — defer until rendered
 const PrinterLiveStrip = lazy(() => import("../components/checkoff/PrinterLiveStrip"));
+const PrinterQueueSuggestionBanner = lazy(
+  () => import("../components/checkoff/PrinterQueueSuggestionBanner"),
+);
 import type { PrinterLiveStripState } from "../components/checkoff/PrinterLiveStrip";
 import PrintVerifyPanel, {
   type PrintVerifyQueueState,
 } from "../components/checkoff/PrintVerifyPanel";
+import UnattributedPrintCard from "../components/checkoff/UnattributedPrintCard";
 // Lazy: PrinterSendQueuePanel (heavy printer queue UI)
 const PrinterSendQueuePanel = lazy(() => import("../components/export/PrinterSendQueuePanel"));
 import SortableProgressPart from "../components/checkoff/SortableProgressPart";
+import PhaseProgressView from "../components/checkoff/PhaseProgressView";
 import PartPreviewDialog from "../components/parts/PartPreviewDialog";
 import PartThumbExpandButton from "../components/parts/PartThumbExpandButton";
 import SpoolRemainingBadge from "../components/SpoolRemainingBadge";
@@ -40,8 +45,17 @@ import { Card, CardContent } from "../components/ui/card";
 import { SegmentedControl } from "../components/ui/segmented-control";
 import { Spinner } from "../components/ui/spinner";
 import {
+  fetchUnattributedPrints,
+  fetchPrinterCheckoffLinks,
+  fetchPlanPhaseManifest,
+  claimUnattributedPrint,
   startRecompute,
+  fetchPrinterQueueSuggestions,
+  type PrinterCheckoffLink,
+  type PlanPhaseManifestResponse,
+  type PrinterQueueSuggestion,
   type ReviewPart,
+  type UnattributedPrint,
 } from "../api/engine";
 import { exportRoute, partsRoute, planRoute } from "../lib/routes";
 import { groupCheckoffParts } from "../lib/checkoffGroups";
@@ -51,6 +65,9 @@ import {
   lastCompletedUnit,
   nextUnitToComplete,
 } from "../lib/checkoffProgress";
+import {
+  computePhaseProgress,
+} from "../lib/phaseManifest";
 import { deskNextStepLine } from "../lib/deskNextStep";
 import {
   getProgressRowsForPlan,
@@ -78,6 +95,8 @@ import { useJobRunner } from "../hooks/useJobRunner";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { cn } from "../lib/utils";
 import { waitForSheetThumbnails } from "../lib/waitForSheetThumbnails";
+import PwaInstallBanner from "../components/pwa/PwaInstallBanner";
+import { useSyncComplete } from "../lib/useSyncComplete";
 
 function CheckoffSheetRow({
   part,
@@ -177,6 +196,12 @@ export default function CheckoffPage() {
   } = usePlanWorkspace();
   const recomputeJob = useJobRunner("recompute");
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
+
+  // Re-fetch when the service worker flushes its offline checkoff queue
+  useSyncComplete(useCallback(() => {
+    if (selectedProfileId != null) void reload(selectedProfileId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reload, selectedProfileId]));
   const persistedUi = useMemo(() => loadPersistedCheckoffUi(), []);
   const [filter, setFilter] = useState<CheckoffFilterMode>(persistedUi.filter);
   const [search, setSearch] = useState("");
@@ -208,6 +233,7 @@ export default function CheckoffPage() {
   const [liveStrip, setLiveStrip] = useState<PrinterLiveStripState>({
     anyPrinting: false,
     activeIntegrationIds: [],
+    idleIntegrationIds: [],
     hostCount: 0,
   });
   const [verifyQueue, setVerifyQueue] = useState<PrintVerifyQueueState>({
@@ -217,6 +243,11 @@ export default function CheckoffPage() {
   });
   /** Farm send-queue active count (panel still reports; idle banner removed). */
   const sheetRef = useRef<HTMLElement>(null);
+  const [unattributedPrints, setUnattributedPrints] = useState<UnattributedPrint[]>([]);
+  const [watchingLinks, setWatchingLinks] = useState<PrinterCheckoffLink[]>([]);
+  const [awaitingLinks, setAwaitingLinks] = useState<PrinterCheckoffLink[]>([]);
+  const [phaseManifest, setPhaseManifest] = useState<PlanPhaseManifestResponse | null>(null);
+  const [queueSuggestions, setQueueSuggestions] = useState<PrinterQueueSuggestion[]>([]);
   const location = useLocation();
   const copilot = useCopilotUiOptional();
   const [pendingPreviewId, setPendingPreviewId] = useState<number | null>(null);
@@ -226,6 +257,18 @@ export default function CheckoffPage() {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+
+  // Fetch queue suggestions whenever idle printer set changes.
+  useEffect(() => {
+    const ids = liveStrip.idleIntegrationIds;
+    if (!ids.length) {
+      setQueueSuggestions([]);
+      return;
+    }
+    void fetchPrinterQueueSuggestions({ idle_integration_ids: ids })
+      .then(({ suggestions }) => setQueueSuggestions(suggestions))
+      .catch(() => setQueueSuggestions([]));
+  }, [liveStrip.idleIntegrationIds]);
 
   useEffect(() => {
     const state = location.state as { previewPartId?: number } | null;
@@ -295,6 +338,44 @@ export default function CheckoffPage() {
   }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
 
   useEffect(() => {
+    if (!health?.ok) return;
+    void fetchUnattributedPrints()
+      .then(setUnattributedPrints)
+      .catch(() => {/* ignore */});
+  }, [health?.ok]);
+
+  // Load phase manifest whenever the selected plan changes
+  useEffect(() => {
+    if (!health?.ok || selectedProfileId == null) {
+      setPhaseManifest(null);
+      return;
+    }
+    void fetchPlanPhaseManifest(selectedProfileId)
+      .then((manifest) => setPhaseManifest(manifest))
+      .catch(() => setPhaseManifest(null));
+  }, [health?.ok, selectedProfileId]);
+
+  const refreshWatchingLinks = useCallback(() => {
+    if (!health?.ok) return;
+    void fetchPrinterCheckoffLinks({
+      state: "watching",
+      profile_id: selectedProfileId ?? undefined,
+    })
+      .then((res) => setWatchingLinks(res.links ?? []))
+      .catch(() => {/* ignore */});
+    void fetchPrinterCheckoffLinks({
+      state: "awaiting_verify",
+      profile_id: selectedProfileId ?? undefined,
+    })
+      .then((res) => setAwaitingLinks(res.links ?? []))
+      .catch(() => {/* ignore */});
+  }, [health?.ok, selectedProfileId]);
+
+  useEffect(() => {
+    refreshWatchingLinks();
+  }, [refreshWatchingLinks]);
+
+  useEffect(() => {
     setVerifyQueue({ awaitingCount: 0, watchingCount: 0, primaryHostName: null });
   }, [selectedProfileId]);
 
@@ -341,6 +422,55 @@ export default function CheckoffPage() {
     if (!review) return [];
     return flattenReviewParts(review.part_groups).filter((p) => p.included);
   }, [review]);
+
+  const printingPartIds = useMemo(() => {
+    const map = new Map<number, string>(); // part_id → host_name
+    for (const link of watchingLinks) {
+      if (link.state === "watching") {
+        for (const unit of link.units ?? []) {
+          if (!map.has(unit.part_id)) {
+            map.set(unit.part_id, link.host_name);
+          }
+        }
+      }
+    }
+    return map;
+  }, [watchingLinks]);
+
+  const awaitingPartIds = useMemo(() => {
+    const map = new Map<number, string>(); // part_id → host_name
+    for (const link of awaitingLinks) {
+      if (link.state === "awaiting_verify") {
+        for (const unit of link.units ?? []) {
+          if (!map.has(unit.part_id)) {
+            map.set(unit.part_id, link.host_name);
+          }
+        }
+      }
+    }
+    return map;
+  }, [awaitingLinks]);
+
+  /** Map part_id → suggested printer info from unattributed print candidates. */
+  const suggestedPartIds = useMemo(() => {
+    const map = new Map<number, { hostName: string; printId: string; filename: string }>();
+    for (const print of unattributedPrints) {
+      for (const candidate of print.candidates ?? []) {
+        for (const matchingFilename of candidate.matching_filenames ?? []) {
+          for (const part of includedParts) {
+            if (part.filename === matchingFilename && !map.has(part.id)) {
+              map.set(part.id, {
+                hostName: print.host_name,
+                printId: print.id,
+                filename: print.filename,
+              });
+            }
+          }
+        }
+      }
+    }
+    return map;
+  }, [unattributedPrints, includedParts]);
 
   const partsById = useMemo(() => {
     const map = new Map<number, ReviewPart>();
@@ -465,6 +595,17 @@ export default function CheckoffPage() {
   );
 
   const grouped = useMemo(() => groupCheckoffParts(filtered), [filtered]);
+  const phaseProgress = useMemo(() => {
+    if (!phaseManifest?.has_phases || phaseManifest.phases.length === 0) return null;
+    return computePhaseProgress(
+      {
+        profile_id: phaseManifest.profile_id,
+        has_phases: phaseManifest.has_phases,
+        phases: phaseManifest.phases,
+      },
+      includedParts,
+    );
+  }, [phaseManifest, includedParts]);
   const totals = useMemo(() => checkoffUnitTotals(includedParts), [includedParts]);
   const printedLine = useMemo(() => formatPrintedUnitsLine(includedParts), [includedParts]);
   const loadError = workspaceError;
@@ -607,6 +748,8 @@ export default function CheckoffPage() {
 
         <DeskNextStep className="no-print">{progressNextStep}</DeskNextStep>
 
+        <PwaInstallBanner />
+
         <PlanSpecialRequestLine note={specialRequest} />
 
         <StaleBuildBanner
@@ -652,9 +795,45 @@ export default function CheckoffPage() {
                 if (selectedProfileId != null && profileId === selectedProfileId) {
                   setVerifyRefreshKey((k) => k + 1);
                 }
+                refreshWatchingLinks();
+              }}
+              onUnattributedUpdate={() => {
+                void fetchUnattributedPrints()
+                  .then(setUnattributedPrints)
+                  .catch(() => {/* ignore */});
               }}
             />
           </Suspense>
+          {unattributedPrints.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {unattributedPrints.map((print) => (
+                <UnattributedPrintCard
+                  key={print.id}
+                  print={print}
+                  onClaimed={() => {
+                    void fetchUnattributedPrints()
+                      .then(setUnattributedPrints)
+                      .catch(() => {/* ignore */});
+                    setVerifyRefreshKey((k) => k + 1);
+                  }}
+                  onDismissed={() => {
+                    void fetchUnattributedPrints()
+                      .then(setUnattributedPrints)
+                      .catch(() => {/* ignore */});
+                  }}
+                />
+              ))}
+            </div>
+          )}
+          {queueSuggestions.length > 0 && (
+            <Suspense fallback={null}>
+              <PrinterQueueSuggestionBanner
+                suggestions={queueSuggestions}
+                onDrained={() => setQueueSuggestions([])}
+                onDismiss={() => setQueueSuggestions([])}
+              />
+            </Suspense>
+          )}
           <PrintVerifyPanel
             engineReady={Boolean(health?.ok)}
             profileId={selectedProfileId}
@@ -765,7 +944,17 @@ export default function CheckoffPage() {
             </Card>
           ) : (
             <>
-          {filteredRows.length === 0 ? (
+          {phaseProgress ? (
+            <PhaseProgressView
+              phases={phaseProgress}
+              busy={toggleBusy}
+              onIncrement={onIncrement}
+              onDecrement={onDecrement}
+              onPreview={setPreviewPart}
+              printingPartIds={printingPartIds}
+              awaitingPartIds={awaitingPartIds}
+            />
+          ) : filteredRows.length === 0 ? (
             <div className="no-print">{renderEmpty()}</div>
           ) : (
             <DndContext
@@ -807,10 +996,24 @@ export default function CheckoffPage() {
                         mobile={isMobileLayout}
                         busy={busyPartId === part.id || toggleBusy}
                         disabled={toggleBusy}
+                        printingOn={printingPartIds.get(part.id)}
+                        awaitingVerify={awaitingPartIds.get(part.id)}
+                        suggestedPrinter={suggestedPartIds.get(part.id)}
                         onToggleUnit={onToggleUnit}
                         onIncrement={onIncrement}
                         onDecrement={onDecrement}
                         onPreview={setPreviewPart}
+                        onClaim={(printId) => {
+                          if (selectedProfileId == null) return;
+                          void claimUnattributedPrint(printId, selectedProfileId)
+                            .then(() => {
+                              void fetchUnattributedPrints()
+                                .then(setUnattributedPrints)
+                                .catch(() => {});
+                              refreshWatchingLinks();
+                            })
+                            .catch(() => {});
+                        }}
                       />
                     );
                   })}

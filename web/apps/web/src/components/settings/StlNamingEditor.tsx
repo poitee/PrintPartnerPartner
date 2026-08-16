@@ -297,6 +297,24 @@ function StlNamingEditorBody({
                         </option>
                       ))}
                     </select>
+                    <select
+                      className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                      value={rule.functional_class ?? ""}
+                      disabled={disabled}
+                      onChange={(e) =>
+                        updateFolderRule(index, {
+                          functional_class: (e.target.value || undefined) as
+                            | "functional"
+                            | "cosmetic"
+                            | undefined,
+                        })
+                      }
+                      aria-label="Functional class"
+                    >
+                      <option value="">Class: none</option>
+                      <option value="functional">Functional</option>
+                      <option value="cosmetic">Cosmetic</option>
+                    </select>
                     <Button
                       type="button"
                       variant="ghost"

@@ -17,6 +17,7 @@ import {
   dispatchPrinterSendQueueItem,
   drainPrinterSendQueue,
 } from "../services/printer-send-queue.js";
+import { computePrinterQueueSuggestions } from "../services/printer-queue-suggestions.js";
 import { parsePrinterUploadMultipart } from "../services/printer-upload-multipart.js";
 import type { InProcessJobRunner } from "./jobs.js";
 
@@ -57,6 +58,40 @@ export async function registerPrinterSendQueueRoutes(
     }
     return { items: loadPrinterSendQueue(deps.repo) };
   });
+
+  /**
+   * Smart queue routing suggestions.
+   * Caller passes idle integration ids (from their live status poll) and
+   * receives a suggestion per idle printer that has matching queued items.
+   *
+   * Query params:
+   *   idle_integration_ids  comma-separated integration ids currently idle/complete
+   */
+  app.get(
+    "/printer-send-queue/suggestions",
+    { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
+    async (request) => {
+      const query = request.query as { idle_integration_ids?: string };
+      const rawIds = (query.idle_integration_ids ?? "").trim();
+      const idleIds = new Set(
+        rawIds
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      );
+      const fleet = loadFleet(deps.repo);
+      const queued = listActivePrinterSendQueue(deps.repo).filter(
+        (i) => i.state === "queued",
+      );
+      const suggestions = computePrinterQueueSuggestions(
+        deps.repo,
+        fleet,
+        idleIds,
+        queued,
+      );
+      return { suggestions };
+    },
+  );
 
   app.post(
     "/printer-send-queue",

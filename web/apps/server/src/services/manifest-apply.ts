@@ -55,6 +55,7 @@ export type ManifestDoc = {
   addons?: Array<{ parts?: ManifestPartRule[]; project?: string; source_id?: string }>;
   option_groups?: Record<string, ManifestOptionGroup>;
   selections?: Record<string, string>;
+  variant_dimensions?: Record<string, Array<string | number>>;
 };
 
 export type ManifestApplyResult = {
@@ -122,9 +123,21 @@ function parsePartRules(raw: unknown): ManifestPartRule[] {
   return rules;
 }
 
+function parseVariantDimensions(raw: unknown): Record<string, Array<string | number>> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, Array<string | number>> = {};
+  for (const [dim, values] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(values)) continue;
+    out[dim] = values.filter(
+      (v): v is string | number => typeof v === "string" || typeof v === "number",
+    );
+  }
+  return out;
+}
+
 export function loadManifestYaml(manifestYaml: string): ManifestDoc {
   if (!manifestYaml.trim()) {
-    return { parts: [], addons: [], option_groups: {}, selections: {} };
+    return { parts: [], addons: [], option_groups: {}, selections: {}, variant_dimensions: {} };
   }
   const data = yaml.load(manifestYaml) as Record<string, unknown>;
   return {
@@ -145,6 +158,7 @@ export function loadManifestYaml(manifestYaml: string): ManifestDoc {
       data.selections && typeof data.selections === "object"
         ? (data.selections as Record<string, string>)
         : {},
+    variant_dimensions: parseVariantDimensions(data.variant_dimensions),
   };
 }
 

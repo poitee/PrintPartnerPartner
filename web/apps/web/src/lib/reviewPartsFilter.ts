@@ -1,4 +1,5 @@
 import type { PlanReview, ReviewPart } from "../api/engine";
+import type { StlNamingFolderRule } from "../api/engine";
 import { folderKeyFromRelativePath } from "./checkoffGroups";
 import { isPartFullyPrinted } from "./checkoffProgress";
 import { hasPartWarning } from "./partWarnings";
@@ -7,6 +8,7 @@ import type {
   ReviewPrintFilter,
   ReviewSortKey,
 } from "./persistedReviewPartsUi";
+import type { ReviewFunctionalFilter } from "./persistedReviewPartsUi";
 import { sourceLabelFromLayer } from "./reviewParts";
 
 export type ReviewPartsFilterState = {
@@ -19,7 +21,25 @@ export type ReviewPartsFilterState = {
   filament: string | null;
   issuesOnly: boolean;
   sort: ReviewSortKey;
+  functionalFilter: ReviewFunctionalFilter;
+  folderRules?: StlNamingFolderRule[];
 };
+
+function classifyPartFunctional(
+  relativePath: string,
+  filename: string,
+  folderRules: StlNamingFolderRule[],
+): "functional" | "cosmetic" | "unclassified" {
+  if (filename.toLowerCase().includes("_optional_")) return "cosmetic";
+  const normalizedPath = (relativePath || filename).replace(/\\/g, "/").toLowerCase();
+  for (const rule of folderRules) {
+    if (!rule.functional_class) continue;
+    if (normalizedPath.includes(rule.path_contains.toLowerCase())) {
+      return rule.functional_class;
+    }
+  }
+  return "unclassified";
+}
 
 function partPrintStatus(part: ReviewPart): ReviewPrintFilter {
   const qty = Math.max(1, part.quantity_effective);
@@ -65,6 +85,14 @@ export function filterReviewParts(
 
   if (state.issuesOnly) {
     rows = rows.filter((p) => hasPartWarning(p, review));
+  }
+
+  if (state.functionalFilter !== "all" && state.folderRules && state.folderRules.length > 0) {
+    rows = rows.filter(
+      (p) =>
+        classifyPartFunctional(p.relative_path || p.filename, p.filename, state.folderRules!) ===
+        state.functionalFilter,
+    );
   }
 
   const q = state.search.trim().toLowerCase();

@@ -6,15 +6,20 @@ import {
   deletePrinter,
   fetchIntegrationStatus,
   fetchIntegrations,
+  fetchPrinterPlanBindings,
   fetchPrinterPresets,
   fetchPrinters,
+  fetchProfiles,
   savePrinterFleet,
+  savePrinterPlanBinding,
   testIntegration,
   updateIntegration,
   type IntegrationSummary,
   type PrinterHostStatus,
   type PrinterMachine,
+  type PrinterPlanBinding,
   type PrinterPreset,
+  type ProfileSummary,
 } from "../../api/engine";
 import { Button } from "../ui/button";
 import {
@@ -144,6 +149,8 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [planBindings, setPlanBindings] = useState<PrinterPlanBinding[]>([]);
+  const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
 
   const [hostType, setHostType] = useState<HostType>("moonraker");
   const [newName, setNewName] = useState("");
@@ -205,15 +212,19 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
     if (!engineReady) return;
     setLoadError(null);
     try {
-      const [fleet, presetRows, integrations] = await Promise.all([
+      const [fleet, presetRows, integrations, bindings, profileList] = await Promise.all([
         fetchPrinters(),
         fetchPrinterPresets(),
         fetchIntegrations(),
+        fetchPrinterPlanBindings(),
+        fetchProfiles(),
       ]);
       setPrinters(fleet);
       setPresets(presetRows);
       setHosts(integrations.filter((i) => HOST_TYPES.has(i.type)));
       setPresetId((prev) => prev || pickDefaultPresetId(presetRows, "moonraker"));
+      setPlanBindings(bindings);
+      setProfiles(profileList);
       void refreshStatuses(fleet);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -808,6 +819,30 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
                         />
                       </label>
                     ))}
+                  </div>
+                )}
+
+                {(host?.type === "moonraker" || host?.type === "prusalink") && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-xs text-muted-foreground min-w-fit">Default plan:</span>
+                    <Select
+                      value={planBindings.find(b => b.integration_id === printer.integration_id)?.profile_id?.toString() ?? "none"}
+                      onValueChange={(val) => {
+                        const profileId = val === "none" ? null : Number(val);
+                        void savePrinterPlanBinding(printer.integration_id!, profileId)
+                          .then(setPlanBindings);
+                      }}
+                    >
+                      <SelectTrigger className="h-7 text-xs">
+                        <SelectValue placeholder="No default plan" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No default plan</SelectItem>
+                        {profiles.map(p => (
+                          <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 )}
               </li>

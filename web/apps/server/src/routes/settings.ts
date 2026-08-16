@@ -29,6 +29,7 @@ import {
   spoolmanFilamentToCatalogColor,
 } from "../integrations/spoolman-client.js";
 import { WORKFLOW_GUIDE } from "./workflow-guide.js";
+import { sendDiscordNotification } from "../services/discord-notify.js";
 
 type RouteDeps = { repo: AppRepository; dataDir: string; config?: ServerConfig };
 
@@ -137,6 +138,109 @@ export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDe
     const body = request.body as { enabled?: boolean };
     deps.repo.setSetting("auto_recompute", body.enabled === false ? "0" : "1");
     return { enabled: body.enabled !== false };
+  });
+
+  app.get("/settings/build-tracking", async () => ({
+    assembly_tracking: deps.repo.getSetting("build_tracking_assembly", "0") !== "0",
+  }));
+
+  app.put("/settings/build-tracking", async (request) => {
+    const body = request.body as { assembly_tracking?: boolean };
+    deps.repo.setSetting("build_tracking_assembly", body.assembly_tracking ? "1" : "0");
+    return { assembly_tracking: body.assembly_tracking === true };
+  });
+
+
+  app.get("/settings/discord-notify", async () => ({
+    webhook_url: deps.repo.getSetting("discord_notify_webhook_url") || null,
+    notify_on_update: deps.repo.getSetting("discord_notify_on_update", "1") !== "0",
+    notify_on_sync: deps.repo.getSetting("discord_notify_on_sync", "0") !== "0",
+    auto_sync_updates: deps.repo.getSetting("discord_auto_sync_updates", "1") !== "0",
+  }));
+
+  app.put("/settings/discord-notify", async (request) => {
+    const body = request.body as {
+      webhook_url?: string | null;
+      notify_on_update?: boolean;
+      notify_on_sync?: boolean;
+      auto_sync_updates?: boolean;
+    };
+    if (body.webhook_url !== undefined) {
+      deps.repo.setSetting("discord_notify_webhook_url", body.webhook_url ?? "");
+    }
+    if (body.notify_on_update !== undefined) {
+      deps.repo.setSetting("discord_notify_on_update", body.notify_on_update ? "1" : "0");
+    }
+    if (body.notify_on_sync !== undefined) {
+      deps.repo.setSetting("discord_notify_on_sync", body.notify_on_sync ? "1" : "0");
+    }
+    if (body.auto_sync_updates !== undefined) {
+      deps.repo.setSetting("discord_auto_sync_updates", body.auto_sync_updates ? "1" : "0");
+    }
+    return {
+      webhook_url: deps.repo.getSetting("discord_notify_webhook_url") || null,
+      notify_on_update: deps.repo.getSetting("discord_notify_on_update", "1") !== "0",
+      notify_on_sync: deps.repo.getSetting("discord_notify_on_sync", "0") !== "0",
+      auto_sync_updates: deps.repo.getSetting("discord_auto_sync_updates", "1") !== "0",
+    };
+  });
+
+  app.post("/settings/discord-notify/test", async (_, reply) => {
+    const webhookUrl = deps.repo.getSetting("discord_notify_webhook_url") || null;
+    if (!webhookUrl) {
+      return reply.status(400).send({ ok: false, error: "No Discord webhook URL configured" });
+    }
+    try {
+      await sendDiscordNotification(webhookUrl, "source.synced", {
+        sourceName: "Test Source",
+        sourceUrl: "https://github.com/example/test-repo",
+        branch: "main",
+        commitSha: "abc1234",
+        stlCount: 42,
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  app.put("/settings/source-update-check", async (request) => {
+    const body = request.body as { interval_hours?: number };
+    const hours = Number(body.interval_hours ?? 24);
+    deps.repo.setSetting("source_update_check_hours", String(hours));
+    return { interval_hours: hours };
+  });
+
+  // --- Printer → Plan default bindings ---
+
+  type PlanBinding = { integration_id: string; profile_id: number | null; updated_at: string };
+
+  function loadPlanBindings(): PlanBinding[] {
+    const raw = deps.repo.getSetting("printer.plan_bindings");
+    return raw ? (JSON.parse(raw) as PlanBinding[]) : [];
+  }
+
+  app.get("/settings/printer-plan-bindings", async () => {
+    return { bindings: loadPlanBindings() };
+  });
+
+  app.put("/settings/printer-plan-bindings", async (request) => {
+    const body = request.body as { integration_id?: string; profile_id?: number | null };
+    const integrationId = String(body.integration_id ?? "").trim();
+    const profileId = body.profile_id == null ? null : Number(body.profile_id);
+    const bindings = loadPlanBindings();
+    const idx = bindings.findIndex((b) => b.integration_id === integrationId);
+    const entry: PlanBinding = { integration_id: integrationId, profile_id: profileId, updated_at: new Date().toISOString() };
+    if (idx >= 0) bindings[idx] = entry; else bindings.push(entry);
+    deps.repo.setSetting("printer.plan_bindings", JSON.stringify(bindings));
+    return { bindings };
+  });
+
+  app.delete("/settings/printer-plan-bindings/:integration_id", async (request) => {
+    const { integration_id } = request.params as { integration_id: string };
+    const bindings = loadPlanBindings().filter((b) => b.integration_id !== integration_id);
+    deps.repo.setSetting("printer.plan_bindings", JSON.stringify(bindings));
+    return { ok: true };
   });
 }
 

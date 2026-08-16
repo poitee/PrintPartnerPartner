@@ -4,6 +4,7 @@ import type { AssistantActionType, AssistantProposedAction } from "@print-partne
 import { isAssistantUiAction } from "@print-partner/contracts";
 import { listStlRelativePaths, safeRepoPath } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
+import type { IntegrationPort } from "../integrations/store.js";
 import { loadKitCatalog } from "../services/kit-catalog.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
 import { buildPlanReview } from "../services/plan-review.js";
@@ -733,6 +734,28 @@ export const ASSISTANT_TOOL_SPECS: AssistantToolSpec[] = [
     },
     tier: "mutate",
   },
+  {
+    name: "get_farm_status",
+    description:
+      "Current printer farm state: each printer's name, integration type, send-queue state (idle/sending/done/error/queued), and any active job filename. Useful for morning digest or routing decisions.",
+    input_schema: { type: "object", properties: {} },
+    tier: "read",
+  },
+  {
+    name: "get_print_stats",
+    description:
+      "Recent print activity and plan completion rates. Returns plates sent to printers in the last N hours (default 8h / overnight), unattributed completed prints, and per-plan remaining unit counts. Pass hours to control the lookback window.",
+    input_schema: {
+      type: "object",
+      properties: {
+        hours: {
+          type: "number",
+          description: "Lookback window in hours for 'overnight' activity. Default 8.",
+        },
+      },
+    },
+    tier: "read",
+  },
 ];
 
 export type ToolContext = {
@@ -747,6 +770,8 @@ export type ToolContext = {
    * When omitted, tools fall back to `loadConfig()` env defaults.
    */
   runtime?: AssistantRuntimeConfig | null;
+  /** Optional integration port for farm status queries. */
+  integrations?: IntegrationPort | null;
 };
 
 function asInt(raw: unknown): number | null {
@@ -2448,6 +2473,103 @@ export async function invokeAssistantTool(
             `Archive plan ${planId} as a reusable template (remaining = 0).`,
           {},
         );
+      }
+
+      case "get_farm_status": {
+        const fleet = (await import("../services/printer-fleet.js")).loadFleet(ctx.repo);
+        const printers = await Promise.all(
+          fleet.map(async (m) => {
+            let state: string = "unknown";
+            let message: string | null = null;
+            let activeJob: string | null = null;
+            if (m.integration_id && ctx.integrations) {
+              try {
+                const status = await ctx.integrations.getStatus(m.integration_id);
+                state = status.state;
+                message = status.message ?? null;
+                activeJob = (status as Record<string, unknown>).filename as string | null ?? null;
+              } catch {
+                state = "offline";
+              }
+            }
+            return {
+              id: m.id,
+              name: m.name,
+              state,
+              active_job: activeJob,
+              message,
+              integration_id: m.integration_id ?? null,
+            };
+          }),
+        );
+        return {
+          content: JSON.stringify({
+            printer_count: fleet.length,
+            printers,
+            idle: printers.filter((p) => p.state === "idle" || p.state === "complete").length,
+            printing: printers.filter((p) => p.state === "printing" || p.state === "paused").length,
+            offline: printers.filter((p) => p.state === "offline" || p.state === "unknown").length,
+          }),
+        };
+      }
+
+      case "get_print_stats": {
+        const hours = typeof input.hours === "number" && input.hours > 0 ? input.hours : 8;
+        const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+        type JobRow = {
+          id: string;
+          printer_id: string;
+          material: string;
+          status: string;
+          filament_consumed_g: number | null;
+          at: string;
+          completed_at: string | null;
+        };
+        let recentJobs: JobRow[] = [];
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const raw = (ctx.repo as any).db;
+          if (raw && typeof raw.all === "function") {
+            recentJobs = raw
+              .prepare(
+                `SELECT id, printer_id, material, status, filament_consumed_g, at, completed_at
+                 FROM print_jobs
+                 WHERE tenant_id = ? AND at >= ?
+                 ORDER BY at DESC
+                 LIMIT 100`,
+              )
+              .all("default", since) as JobRow[];
+          }
+        } catch {
+          // table may not exist yet
+        }
+        const sent = recentJobs.length;
+        const completed = recentJobs.filter((j) => j.status === "completed").length;
+        const failed = recentJobs.filter((j) => j.status === "failed").length;
+        const filamentG = recentJobs.reduce((s, j) => s + (j.filament_consumed_g ?? 0), 0);
+
+        // per-plan remaining units
+        const planSummaries = ctx.repo
+          .listProfiles()
+          .filter((p) => !p.archived_at)
+          .map((p) => ({
+            plan_id: p.id,
+            plan_name: p.name,
+            remaining_units: p.remaining_units,
+            part_count: p.part_count,
+          }));
+
+        return {
+          content: JSON.stringify({
+            window_hours: hours,
+            since,
+            plates_sent: sent,
+            plates_completed: completed,
+            plates_failed: failed,
+            filament_consumed_g: filamentG,
+            active_plans: planSummaries,
+          }),
+        };
       }
 
       default:

@@ -4,6 +4,7 @@ export type ReviewPrintFilter = "all" | "missing" | "partial" | "complete";
 export type ReviewIncludedFilter = "included" | "excluded" | "all";
 export type ReviewSortKey = "folder" | "filename" | "qty";
 export type ReviewViewMode = "edit" | "print";
+export type ReviewFunctionalFilter = "all" | "functional" | "cosmetic";
 /** Parts stage: group sections by filament role or by source/folder. */
 export type PartsGroupMode = "role" | "source";
 /** Parts stage: card grid vs sheet table (edit/print still apply inside table). */
@@ -23,6 +24,7 @@ export type PersistedReviewPartsUi = {
   compactMode: boolean;
   groupMode: PartsGroupMode;
   layoutMode: PartsLayoutMode;
+  functionalFilter: ReviewFunctionalFilter;
 };
 
 const DEFAULT: PersistedReviewPartsUi = {
@@ -39,6 +41,7 @@ const DEFAULT: PersistedReviewPartsUi = {
   compactMode: false,
   groupMode: "role",
   layoutMode: "grid",
+  functionalFilter: "all",
 };
 
 function isPrintFilter(v: unknown): v is ReviewPrintFilter {
@@ -63,6 +66,10 @@ function isGroupMode(v: unknown): v is PartsGroupMode {
 
 function isLayoutMode(v: unknown): v is PartsLayoutMode {
   return v === "grid" || v === "table";
+}
+
+function isFunctionalFilter(v: unknown): v is ReviewFunctionalFilter {
+  return v === "all" || v === "functional" || v === "cosmetic";
 }
 
 export function parsePersistedReviewPartsUi(raw: string | null): PersistedReviewPartsUi {
@@ -99,6 +106,9 @@ export function parsePersistedReviewPartsUi(raw: string | null): PersistedReview
         typeof parsed.compactMode === "boolean" ? parsed.compactMode : DEFAULT.compactMode,
       groupMode: isGroupMode(parsed.groupMode) ? parsed.groupMode : DEFAULT.groupMode,
       layoutMode: isLayoutMode(parsed.layoutMode) ? parsed.layoutMode : DEFAULT.layoutMode,
+      functionalFilter: isFunctionalFilter(parsed.functionalFilter)
+        ? parsed.functionalFilter
+        : DEFAULT.functionalFilter,
     };
   } catch {
     return { ...DEFAULT };

@@ -1,0 +1,22 @@
+# Caddyfile — slicer reverse-proxy routes
+#
+# Local .home domains — add to /etc/hosts or resolver:
+#   127.0.0.1  orca.home prusa.home bambu.home
+#
+# Caddy on a LAN with no public ACME: uncomment the tls line per block
+# to use Caddy's internal (self-signed) CA, or add your own cert paths.
+
+orca.home {
+    # tls internal
+    reverse_proxy orcaslicer:3000
+}
+
+prusa.home {
+    # tls internal
+    reverse_proxy prusaslicer:8080
+}
+
+bambu.home {
+    # tls internal
+    reverse_proxy bambu:8080
+}

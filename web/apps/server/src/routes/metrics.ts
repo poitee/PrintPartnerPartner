@@ -1,119 +1,241 @@
 import type { FastifyInstance } from "fastify";
+import type { AppRepository } from "../db/repository.js";
+import { loadFleet } from "../services/printer-fleet.js";
+import type { IntegrationPort } from "../integrations/store.js";
+
+type MetricsDeps = {
+  repo: AppRepository;
+  integrations?: IntegrationPort;
+};
 
 /**
- * Prometheus metrics in OpenMetrics format
- * Exposes key performance indicators for monitoring
+ * Prometheus metrics in Prometheus text format (exposition format v0.0.4).
+ *
+ * Counters (labeled by printer_id and material):
+ *   plates_sent_total
+ *   plates_completed_total
+ *   plates_failed_total
+ *
+ * Gauges:
+ *   parts_remaining{plan_id, plan_name}
+ *   printers_idle
+ *   printers_printing
+ *   filament_consumed_g
+ *
+ * Plus existing HTTP-level counters.
  */
-export async function registerMetricsRoutes(app: FastifyInstance): Promise<void> {
-  // In-memory metrics store
-  const metrics = {
+export async function registerMetricsRoutes(
+  app: FastifyInstance,
+  deps?: MetricsDeps,
+): Promise<void> {
+  // In-memory HTTP metrics store
+  const httpMetrics = {
     httpRequestsTotal: 0,
     httpRequestDurationMs: [] as number[],
     httpErrorsTotal: 0,
     httpSuccessTotal: 0,
-    apiKeysActive: 0,
-    backupsTotal: 0,
-    databaseConnectionTime: 0,
   };
 
   // Hook to collect metrics
   app.addHook("onResponse", async (request, reply) => {
-    // Skip metrics endpoint itself
     if (request.url === "/metrics") return;
 
-    metrics.httpRequestsTotal++;
-
-    // Record by status
+    httpMetrics.httpRequestsTotal++;
     if (reply.statusCode >= 400) {
-      metrics.httpErrorsTotal++;
+      httpMetrics.httpErrorsTotal++;
     } else {
-      metrics.httpSuccessTotal++;
+      httpMetrics.httpSuccessTotal++;
     }
-
-    // Record duration
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const duration = Date.now() - ((request as any).startTime || Date.now());
-    metrics.httpRequestDurationMs.push(duration);
-
-    // Keep only last 1000 samples
-    if (metrics.httpRequestDurationMs.length > 1000) {
-      metrics.httpRequestDurationMs.shift();
+    httpMetrics.httpRequestDurationMs.push(duration);
+    if (httpMetrics.httpRequestDurationMs.length > 1000) {
+      httpMetrics.httpRequestDurationMs.shift();
     }
   });
 
   /**
    * GET /metrics
    * Return Prometheus-compatible metrics.
-   * In multi-user mode, requires a valid session or API key
-   * (same guard as /api/v1 endpoints).
+   * In multi-user mode, requires a valid session or API key.
    */
   app.get("/metrics", async (request, reply) => {
-    // Optional auth: if config has API key enforcement, check it.
-    // In single-user / trusted-LAN mode this is a no-op.
     const authHeader = request.headers["authorization"];
     const apiKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sessionUser = (request as any).sessionUser;
-    // If neither a session nor an API key is present and we're in multi-user
-    // mode, return 401 — otherwise allow (self-hosted default = open).
     if (!sessionUser && !apiKey) {
-      // Only block when the app is explicitly in multi-user / auth-required mode.
-      // Single-host self-hosted installs remain open by default.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { config } = app as any;
       if (config?.authRequired) {
         return reply.status(401).send({ detail: "Authentication required" });
       }
     }
-    const p50 =
-      metrics.httpRequestDurationMs.length > 0
-        ? metrics.httpRequestDurationMs.sort((a, b) => a - b)[
-            Math.floor(metrics.httpRequestDurationMs.length * 0.5)
-          ]
-        : 0;
 
-    const p95 =
-      metrics.httpRequestDurationMs.length > 0
-        ? metrics.httpRequestDurationMs.sort((a, b) => a - b)[
-            Math.floor(metrics.httpRequestDurationMs.length * 0.95)
-          ]
-        : 0;
+    reply.header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
 
-    const p99 =
-      metrics.httpRequestDurationMs.length > 0
-        ? metrics.httpRequestDurationMs.sort((a, b) => a - b)[
-            Math.floor(metrics.httpRequestDurationMs.length * 0.99)
-          ]
-        : 0;
+    const lines: string[] = [];
 
-    // Build OpenMetrics format response
-    const metricsText = `# HELP http_requests_total Total HTTP requests
-# TYPE http_requests_total counter
-http_requests_total ${metrics.httpRequestsTotal}
+    // ─── HTTP counters ────────────────────────────────────────────────────────
+    const sorted = [...httpMetrics.httpRequestDurationMs].sort((a, b) => a - b);
+    const p50 = sorted.length > 0 ? (sorted[Math.floor(sorted.length * 0.5)] ?? 0) : 0;
+    const p95 = sorted.length > 0 ? (sorted[Math.floor(sorted.length * 0.95)] ?? 0) : 0;
+    const p99 = sorted.length > 0 ? (sorted[Math.floor(sorted.length * 0.99)] ?? 0) : 0;
 
-# HELP http_request_duration_ms HTTP request duration in milliseconds
-# TYPE http_request_duration_ms summary
-http_request_duration_ms_sum ${metrics.httpRequestDurationMs.reduce((a, b) => a + b, 0)}
-http_request_duration_ms_count ${metrics.httpRequestDurationMs.length}
-http_request_duration_ms{quantile="0.5"} ${p50}
-http_request_duration_ms{quantile="0.95"} ${p95}
-http_request_duration_ms{quantile="0.99"} ${p99}
+    lines.push(
+      "# HELP http_requests_total Total HTTP requests",
+      "# TYPE http_requests_total counter",
+      `http_requests_total ${httpMetrics.httpRequestsTotal}`,
+      "",
+      "# HELP http_request_duration_ms HTTP request duration in milliseconds",
+      "# TYPE http_request_duration_ms summary",
+      `http_request_duration_ms_sum ${httpMetrics.httpRequestDurationMs.reduce((a, b) => a + b, 0)}`,
+      `http_request_duration_ms_count ${httpMetrics.httpRequestDurationMs.length}`,
+      `http_request_duration_ms{quantile="0.5"} ${p50}`,
+      `http_request_duration_ms{quantile="0.95"} ${p95}`,
+      `http_request_duration_ms{quantile="0.99"} ${p99}`,
+      "",
+      "# HELP http_errors_total Total HTTP errors (4xx, 5xx)",
+      "# TYPE http_errors_total counter",
+      `http_errors_total ${httpMetrics.httpErrorsTotal}`,
+      "",
+      "# HELP http_success_total Total successful HTTP requests (2xx, 3xx)",
+      "# TYPE http_success_total counter",
+      `http_success_total ${httpMetrics.httpSuccessTotal}`,
+      "",
+      "# HELP http_error_rate Error rate (errors / total)",
+      "# TYPE http_error_rate gauge",
+      `http_error_rate ${httpMetrics.httpRequestsTotal > 0 ? (httpMetrics.httpErrorsTotal / httpMetrics.httpRequestsTotal).toFixed(4) : 0}`,
+      "",
+      "# HELP app_info Application version and build info",
+      "# TYPE app_info gauge",
+      `app_info{version="3.0.0",node="${process.version}"} 1`,
+      "",
+    );
 
-# HELP http_errors_total Total HTTP errors (4xx, 5xx)
-# TYPE http_errors_total counter
-http_errors_total ${metrics.httpErrorsTotal}
+    // ─── Print-job counters and gauges ────────────────────────────────────────
+    if (deps?.repo) {
+      const repo = deps.repo;
 
-# HELP http_success_total Total successful HTTP requests (2xx, 3xx)
-# TYPE http_success_total counter
-http_success_total ${metrics.httpSuccessTotal}
+      // Query print_jobs table for counter metrics (grouped by printer_id, material, status)
+      type JobRow = { printer_id: string; material: string; status: string; cnt: number; filament_sum: number | null };
+      let jobRows: JobRow[] = [];
+      try {
+        jobRows = repo.printJobMetrics();
+      } catch {
+        // Table may not exist yet on old DBs; skip silently
+      }
 
-# HELP http_error_rate Error rate (errors / total)
-# TYPE http_error_rate gauge
-http_error_rate ${metrics.httpRequestsTotal > 0 ? (metrics.httpErrorsTotal / metrics.httpRequestsTotal).toFixed(4) : 0}
+      // Aggregate by (printer_id, material) across statuses
+      type LabelKey = string;
+      const sentMap = new Map<LabelKey, number>();
+      const completedMap = new Map<LabelKey, number>();
+      const failedMap = new Map<LabelKey, number>();
+      let filamentConsumedTotal = 0;
 
-# HELP app_info Application version and build info
-# TYPE app_info gauge
-app_info{version="3.0.0",node="${process.version}"} 1
-`;
+      for (const row of jobRows) {
+        const key = `printer_id="${escape(row.printer_id)}",material="${escape(row.material)}"`;
+        if (row.status === "sent") sentMap.set(key, (sentMap.get(key) ?? 0) + row.cnt);
+        if (row.status === "completed") completedMap.set(key, (completedMap.get(key) ?? 0) + row.cnt);
+        if (row.status === "failed") failedMap.set(key, (failedMap.get(key) ?? 0) + row.cnt);
+        filamentConsumedTotal += row.filament_sum ?? 0;
+      }
 
-    return metricsText;
+      lines.push("# HELP plates_sent_total Total print plates sent to printers");
+      lines.push("# TYPE plates_sent_total counter");
+      if (sentMap.size === 0) {
+        lines.push("plates_sent_total 0");
+      } else {
+        for (const [labels, val] of sentMap) {
+          lines.push(`plates_sent_total{${labels}} ${val}`);
+        }
+      }
+      lines.push("");
+
+      lines.push("# HELP plates_completed_total Total print plates completed successfully");
+      lines.push("# TYPE plates_completed_total counter");
+      if (completedMap.size === 0) {
+        lines.push("plates_completed_total 0");
+      } else {
+        for (const [labels, val] of completedMap) {
+          lines.push(`plates_completed_total{${labels}} ${val}`);
+        }
+      }
+      lines.push("");
+
+      lines.push("# HELP plates_failed_total Total print plates that failed");
+      lines.push("# TYPE plates_failed_total counter");
+      if (failedMap.size === 0) {
+        lines.push("plates_failed_total 0");
+      } else {
+        for (const [labels, val] of failedMap) {
+          lines.push(`plates_failed_total{${labels}} ${val}`);
+        }
+      }
+      lines.push("");
+
+      lines.push("# HELP filament_consumed_g Total filament consumed in grams (from recorded print jobs)");
+      lines.push("# TYPE filament_consumed_g gauge");
+      lines.push(`filament_consumed_g ${filamentConsumedTotal}`);
+      lines.push("");
+
+      // parts_remaining per active plan
+      try {
+        const profiles = repo.listProfiles().filter((p) => !p.archived_at);
+        lines.push("# HELP parts_remaining Remaining print units per active plan");
+        lines.push("# TYPE parts_remaining gauge");
+        for (const p of profiles) {
+          const planLabel = `plan_id="${p.id}",plan_name="${escapeLabel(p.name)}"`;
+          lines.push(`parts_remaining{${planLabel}} ${p.remaining_units}`);
+        }
+        lines.push("");
+      } catch {
+        // skip
+      }
+
+      // printers_idle / printers_printing from fleet + live integration status
+      try {
+        const fleet = loadFleet(repo);
+        let idleCount = 0;
+        let printingCount = 0;
+
+        if (deps.integrations) {
+          await Promise.allSettled(
+            fleet.map(async (m) => {
+              if (!m.integration_id) return;
+              try {
+                const status = await deps.integrations!.getStatus(m.integration_id);
+                if (status.state === "idle" || status.state === "complete") idleCount++;
+                else if (status.state === "printing" || status.state === "paused") printingCount++;
+              } catch {
+                // unreachable printer — skip
+              }
+            }),
+          );
+        }
+
+        lines.push("# HELP printers_idle Number of printers currently idle");
+        lines.push("# TYPE printers_idle gauge");
+        lines.push(`printers_idle ${idleCount}`);
+        lines.push("");
+
+        lines.push("# HELP printers_printing Number of printers currently printing or paused");
+        lines.push("# TYPE printers_printing gauge");
+        lines.push(`printers_printing ${printingCount}`);
+        lines.push("");
+      } catch {
+        // skip
+      }
+    }
+
+    return reply.send(lines.join("\n") + "\n");
   });
+}
+
+function escape(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
+}
+
+function escapeLabel(s: string): string {
+  return escape(s);
 }

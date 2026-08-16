@@ -14,6 +14,7 @@ import {
   toggleCheckoffUnit,
   ensureProgressRows,
   getPrintUnits,
+  getAssembledUnits,
   type MergePart,
   type ProgressRow,
   type StlNamingProfileDict,
@@ -81,6 +82,10 @@ export type SchemaTables = Pick<
   | "sourceNotes"
   | "planDecisions"
   | "planSnapshots"
+  | "printJobs"
+  | "printJobParts"
+  | "printerTelemetry"
+  | "appEvents"
 >;
 
 export type ProjectRow = typeof defaultSchema.projects.$inferSelect;
@@ -91,6 +96,8 @@ export type SourceDocRow = typeof defaultSchema.sourceDocs.$inferSelect;
 export type SourceNoteRow = typeof defaultSchema.sourceNotes.$inferSelect;
 export type PlanDecisionRow = typeof defaultSchema.planDecisions.$inferSelect;
 export type PlanSnapshotRow = typeof defaultSchema.planSnapshots.$inferSelect;
+export type PrintJobRow = typeof defaultSchema.printJobs.$inferSelect;
+export type PrintJobPartRow = typeof defaultSchema.printJobParts.$inferSelect;
 
 export type SourceDocSummary = {
   id: number;
@@ -1259,20 +1266,25 @@ export class AppRepository {
         partId: r.partId,
         unitIndex: r.unitIndex,
         completed: r.completed,
+        assembled: (r as Record<string, unknown>).assembled ? true : false,
       }));
   }
 
   private saveProgressRows(partId: number, rows: ProgressRow[]): void {
     this.db.delete(this.schema.printProgress).where(eq(this.schema.printProgress.partId, partId)).run();
     for (const row of rows) {
+      const vals: Record<string, unknown> = {
+        tenantId: this.tenantId,
+        partId,
+        unitIndex: row.unitIndex,
+        completed: row.completed,
+      };
+      const rowAny = row as Record<string, unknown>;
+      if (rowAny.assembled !== undefined) vals.assembled = Boolean(rowAny.assembled);
       this.db
         .insert(this.schema.printProgress)
-        .values({
-          tenantId: this.tenantId,
-          partId,
-          unitIndex: row.unitIndex,
-          completed: row.completed,
-        })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .values(vals as any)
         .run();
     }
   }
@@ -1303,6 +1315,7 @@ export class AppRepository {
         partId: r.partId,
         unitIndex: r.unitIndex,
         completed: r.completed,
+        assembled: (r as Record<string, unknown>).assembled ? true : false,
       });
       byPart.set(r.partId, list);
     }
@@ -1313,6 +1326,33 @@ export class AppRepository {
       out.set(part.id, getPrintUnits(byPart.get(part.id) ?? [], qty));
     }
     return out;
+  }
+
+  /** Like printUnitsByPartId but returns raw ProgressRow arrays for access to assembled field. */
+  private progressRowsByPartId(profileId: number): Map<number, ProgressRow[]> {
+    const partRows = this.listPartRows(profileId);
+    const partIds = partRows.map((p) => p.id);
+    if (!partIds.length) return new Map();
+
+    const allProgress = this.db
+      .select()
+      .from(this.schema.printProgress)
+      .where(inArray(this.schema.printProgress.partId, partIds))
+      .all();
+
+    const byPart = new Map<number, ProgressRow[]>();
+    for (const r of allProgress) {
+      const list = byPart.get(r.partId) ?? [];
+      list.push({
+        id: r.id,
+        partId: r.partId,
+        unitIndex: r.unitIndex,
+        completed: r.completed,
+        assembled: (r as Record<string, unknown>).assembled ? true : false,
+      });
+      byPart.set(r.partId, list);
+    }
+    return byPart;
   }
 
   /** Parts with print progress for the unified Review API (optional excluded rows). */
@@ -1326,6 +1366,7 @@ export class AppRepository {
       this.ensureProgressForPart(part);
     }
     const unitsById = this.printUnitsByPartId(profileId);
+    const progressRowsById = this.progressRowsByPartId(profileId);
     const rows = partRows.filter((p) => includeExcluded || p.included);
     return rows.map((p) => {
       const units = unitsById.get(p.id) ?? [];
@@ -1337,10 +1378,13 @@ export class AppRepository {
       const base = partRow(p);
       const spoolSummary =
         ctx?.spoolSummariesForPart(p.filamentColorId ?? null, p.spoolmanSpoolId ?? null) ?? [];
+      const pRows = progressRowsById.get(p.id) ?? [];
+      const assembledUnits = getAssembledUnits(pRows, qty);
       return {
         ...base,
         printed_count: printedCount,
         print_units: units,
+        assembled_units: assembledUnits,
         missing: printedCount < qty,
         filament_display:
           resolved?.combo_label ?? catalogColor?.combo_label ?? base.filament_display ?? "",
@@ -1415,6 +1459,26 @@ export class AppRepository {
       printed_count: printedCount,
       print_units: units,
       missing: !isFullyPrinted({ quantity_effective: qty, printed_count: printedCount }),
+    };
+  }
+
+  patchPartAssembled(partId: number, unitIndex: number, assembled: boolean) {
+    const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
+    if (!part) throw new Error("Part not found");
+    const qty = Math.max(1, part.quantityEffective);
+    if (unitIndex >= qty) throw new Error("unit_index out of range");
+    this.ensureProgressForPart(part);
+    const rows = this.progressRowsForPart(partId);
+    const updated = rows.map((r) =>
+      r.unitIndex === unitIndex ? { ...r, assembled } : r,
+    );
+    this.saveProgressRows(partId, updated);
+    const assembledUnits = getAssembledUnits(updated, qty);
+    const assembledCount = assembledUnits.filter(Boolean).length;
+    return {
+      part_id: partId,
+      assembled_count: assembledCount,
+      assembled_units: assembledUnits,
     };
   }
 
@@ -2337,5 +2401,135 @@ export class AppRepository {
       )
       .run();
     return true;
+  }
+
+  // ── Print jobs (SQL history, replaces blob store) ──────────────────────────
+
+  insertPrintJob(job: {
+    id: string;
+    profileId: number;
+    hostIntegrationId?: string;
+    printerId?: string;
+    material?: string;
+    filename?: string;
+    status?: string;
+    filamentConsumedG?: number;
+    at: string;
+    completedAt?: string;
+    linkId?: string;
+  }): PrintJobRow {
+    const inserted = this.db
+      .insert(this.schema.printJobs)
+      .values({
+        id: job.id,
+        tenantId: this.tenantId,
+        profileId: job.profileId,
+        hostIntegrationId: job.hostIntegrationId ?? null,
+        printerId: job.printerId ?? "",
+        material: job.material ?? "",
+        filename: job.filename ?? null,
+        status: job.status ?? "sent",
+        filamentConsumedG: job.filamentConsumedG ?? null,
+        at: job.at,
+        completedAt: job.completedAt ?? null,
+        linkId: job.linkId ?? null,
+      })
+      .returning()
+      .get();
+    if (!inserted) throw new Error("Failed to insert print job");
+    return inserted;
+  }
+
+  insertPrintJobParts(parts: Array<{
+    id: string;
+    jobId?: string;
+    at: string;
+    profileId: number;
+    partId: number;
+    unitIndex: number;
+    result: string;
+    reason?: string;
+    note?: string;
+    hostIntegrationId?: string;
+    filename?: string;
+    matchKey?: string;
+    role?: string;
+    filamentDisplay?: string;
+    linkId?: string;
+  }>): PrintJobPartRow[] {
+    if (!parts.length) return [];
+    const inserted = this.db
+      .insert(this.schema.printJobParts)
+      .values(parts.map((p) => ({
+        id: p.id,
+        tenantId: this.tenantId,
+        jobId: p.jobId ?? null,
+        at: p.at,
+        profileId: p.profileId,
+        partId: p.partId,
+        unitIndex: p.unitIndex,
+        result: p.result,
+        reason: p.reason ?? null,
+        note: p.note ?? null,
+        hostIntegrationId: p.hostIntegrationId ?? null,
+        filename: p.filename ?? null,
+        matchKey: p.matchKey ?? null,
+        role: p.role ?? null,
+        filamentDisplay: p.filamentDisplay ?? null,
+        linkId: p.linkId ?? null,
+      })))
+      .returning()
+      .all();
+    return inserted;
+  }
+
+  /**
+   * Returns aggregate print-job counters grouped by (printer_id, material, status)
+   * for the current tenant. Used by the Prometheus /metrics endpoint.
+   */
+  printJobMetrics(): Array<{
+    printer_id: string;
+    material: string;
+    status: string;
+    cnt: number;
+    filament_sum: number | null;
+  }> {
+    const tenantId = this.tenantId;
+    return this.db
+      .select({
+        printer_id: this.schema.printJobs.printerId,
+        material: this.schema.printJobs.material,
+        status: this.schema.printJobs.status,
+        cnt: sql<number>`COUNT(*)`,
+        filament_sum: sql<number | null>`SUM(${this.schema.printJobs.filamentConsumedG})`,
+      })
+      .from(this.schema.printJobs)
+      .where(eq(this.schema.printJobs.tenantId, tenantId))
+      .groupBy(
+        this.schema.printJobs.printerId,
+        this.schema.printJobs.material,
+        this.schema.printJobs.status,
+      )
+      .all() as Array<{
+        printer_id: string;
+        material: string;
+        status: string;
+        cnt: number;
+        filament_sum: number | null;
+      }>;
+  }
+
+  listPrintJobParts(profileId: number): PrintJobPartRow[] {
+    return this.db
+      .select()
+      .from(this.schema.printJobParts)
+      .where(
+        and(
+          eq(this.schema.printJobParts.tenantId, this.tenantId),
+          eq(this.schema.printJobParts.profileId, profileId),
+        ),
+      )
+      .orderBy(asc(this.schema.printJobParts.at))
+      .all();
   }
 }

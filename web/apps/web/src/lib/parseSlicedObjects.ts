@@ -23,6 +23,12 @@ export type ParseSlicedObjectsResult = {
   names: string[];
   format: "gcode" | "bgcode" | "3mf" | "unknown";
   unlabeled: boolean;
+  /** Plate preview thumbnail as a data URL (PNG), if found in .gcode.3mf. */
+  thumbnailUrl?: string;
+  /** Estimated print time string extracted from gcode header comments. */
+  printTime?: string;
+  /** Total filament weight in grams from gcode header comments. */
+  filamentWeightG?: number;
 };
 
 const EXCLUDE_NAME_EQ = /EXCLUDE_OBJECT_DEFINE\b[^\n]*?\bNAME\s*=\s*"?([^"\s,]+)"?/gi;
@@ -82,6 +88,61 @@ export function parseGcodeObjectText(text: string): ParsedSlicedObject[] {
   return out;
 }
 
+/** Extract estimated print time and filament weight from gcode header comments. */
+export function parseGcodeStats(
+  text: string,
+): { printTime?: string; filamentWeightG?: number } {
+  // Estimated print time — OrcaSlicer / PrusaSlicer / BambuStudio emit variants:
+  //   ; estimated printing time (normal mode) = 1h 23m 45s
+  //   ; estimated printing time = 1h 23m 45s
+  //   ; print_time = 4950
+  const timeMatch =
+    /^;\s*estimated printing time(?:\s*\([^)]*\))?\s*=\s*(.+)$/im.exec(text) ??
+    /^;\s*print_time\s*=\s*(\d+)\s*$/im.exec(text);
+
+  let printTime: string | undefined;
+  if (timeMatch) {
+    const raw = timeMatch[1]!.trim();
+    // If it's raw seconds (from print_time = N), convert to h/m/s
+    if (/^\d+$/.test(raw)) {
+      const secs = parseInt(raw, 10);
+      const h = Math.floor(secs / 3600);
+      const m = Math.floor((secs % 3600) / 60);
+      const s = secs % 60;
+      printTime = h > 0 ? `${h}h ${m}m ${s}s` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+    } else {
+      printTime = raw;
+    }
+  }
+
+  // Filament weight:
+  //   ; total filament used [g] = 12.34
+  //   ; filament used [g] = 12.34
+  //   ; total weight = 12.34 [g]   (some slicers)
+  const weightMatch =
+    /^;\s*(?:total\s+)?filament\s+(?:used\s+)?\[g\]\s*=\s*([\d.]+)/im.exec(text) ??
+    /^;\s*total\s+weight\s*=\s*([\d.]+)\s*\[g\]/im.exec(text);
+
+  const filamentWeightG = weightMatch ? parseFloat(weightMatch[1]!) : undefined;
+
+  return {
+    printTime,
+    filamentWeightG: filamentWeightG != null && !isNaN(filamentWeightG)
+      ? filamentWeightG
+      : undefined,
+  };
+}
+
+/** Convert a Uint8Array of PNG bytes to a base64 data URL. */
+function pngToDataUrl(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return `data:image/png;base64,${btoa(binary)}`;
+}
+
+
 /** Pull object@name from 3MF model XML. */
 export function parse3mfObjectNamesFromXml(xml: string): ParsedSlicedObject[] {
   const out: ParsedSlicedObject[] = [];
@@ -125,14 +186,46 @@ export function extractAsciiChunks(bytes: Uint8Array, minRun = 12): string {
   return parts.join("\n");
 }
 
-async function parse3mfArchive(bytes: ArrayBuffer): Promise<ParsedSlicedObject[]> {
+async function parse3mfArchive(
+  bytes: ArrayBuffer,
+): Promise<{ objects: ParsedSlicedObject[]; thumbnailUrl?: string; printTime?: string; filamentWeightG?: number }> {
   const zip = await JSZip.loadAsync(bytes);
   const out: ParsedSlicedObject[] = [];
   const seen = new Set<string>();
+  let thumbnailUrl: string | undefined;
+  let printTime: string | undefined;
+  let filamentWeightG: number | undefined;
 
   const merge = (rows: ParsedSlicedObject[]) => {
     for (const row of rows) pushUnique(out, seen, row.name, row.source);
   };
+
+  // Collect thumbnail paths in priority order: plate_1.png first, then others.
+  const thumbnailPaths: string[] = [];
+
+  for (const [path] of Object.entries(zip.files)) {
+    const lower = path.toLowerCase();
+    // OrcaSlicer stores plate thumbnails as Metadata/plate_1.png, plate_2.png, etc.
+    if (/^metadata\/plate_\d+\.png$/i.test(lower)) {
+      thumbnailPaths.push(path);
+    }
+  }
+
+  // Sort so plate_1.png comes first.
+  thumbnailPaths.sort((a, b) => {
+    const numA = parseInt(/plate_(\d+)/i.exec(a)?.[1] ?? "99", 10);
+    const numB = parseInt(/plate_(\d+)/i.exec(b)?.[1] ?? "99", 10);
+    return numA - numB;
+  });
+
+  if (thumbnailPaths.length > 0) {
+    try {
+      const pngBytes = await zip.files[thumbnailPaths[0]!]!.async("uint8array");
+      thumbnailUrl = pngToDataUrl(pngBytes);
+    } catch {
+      /* skip if unreadable */
+    }
+  }
 
   for (const [path, entry] of Object.entries(zip.files)) {
     if (entry.dir) continue;
@@ -155,17 +248,24 @@ async function parse3mfArchive(bytes: ArrayBuffer): Promise<ParsedSlicedObject[]
             ? extractAsciiChunks(await entry.async("uint8array"))
             : await entry.async("string");
         merge(parseGcodeObjectText(text));
+        // Parse stats from the first gcode entry that has them.
+        if (printTime == null && filamentWeightG == null) {
+          const stats = parseGcodeStats(text);
+          printTime = stats.printTime;
+          filamentWeightG = stats.filamentWeightG;
+        }
       } catch {
         /* skip */
       }
     }
   }
-  return out;
+  return { objects: out, thumbnailUrl, printTime, filamentWeightG };
 }
 
 function finish(
   objects: ParsedSlicedObject[],
   format: ParseSlicedObjectsResult["format"],
+  extras?: Pick<ParseSlicedObjectsResult, "thumbnailUrl" | "printTime" | "filamentWeightG">,
 ): ParseSlicedObjectsResult {
   const names = objects.map((o) => o.name);
   return {
@@ -173,6 +273,7 @@ function finish(
     names,
     format,
     unlabeled: names.length === 0,
+    ...extras,
   };
 }
 
@@ -185,15 +286,18 @@ export async function parseSlicedObjectsFile(file: File): Promise<ParseSlicedObj
   const buffer = await file.arrayBuffer();
 
   if (format === "3mf") {
-    return finish(await parse3mfArchive(buffer), "3mf");
+    const { objects, thumbnailUrl, printTime, filamentWeightG } = await parse3mfArchive(buffer);
+    return finish(objects, "3mf", { thumbnailUrl, printTime, filamentWeightG });
   }
 
   if (format === "bgcode") {
     const ascii = extractAsciiChunks(new Uint8Array(buffer));
-    return finish(parseGcodeObjectText(ascii), "bgcode");
+    const stats = parseGcodeStats(ascii);
+    return finish(parseGcodeObjectText(ascii), "bgcode", stats);
   }
 
   // .gcode / .gco / unknown — decode as text
   const text = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
-  return finish(parseGcodeObjectText(text), format === "unknown" ? "gcode" : format);
+  const stats = parseGcodeStats(text);
+  return finish(parseGcodeObjectText(text), format === "unknown" ? "gcode" : format, stats);
 }

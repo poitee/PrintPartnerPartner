@@ -129,7 +129,7 @@ See [API.md](../API.md) for auth and OpenAPI.
 
 ## Limitations (v1)
 
-- **No automatic consumption** — marking units printed in Checkoff does not call Spoolman “Use Spool Filament” or deduct weight. A future optional “Suggest spool usage in Checkoff” toggle may be added; it will stay off by default.
+- **Automatic consumption** — when you confirm units in Checkoff and the confirmed parts have Spoolman spool assignments, Print Partner reads filament consumed (mm) from the printer API (Moonraker: `print_stats.filament_used`; PrusaLink: `consumed_material`) and calls Spoolman `PUT /spool/:id/use` to deduct weight. This is best—effort: if the printer API is unreachable or the parts have no spool assignment, no deduction occurs and checkoff still succeeds.
 - **No live sync** — no WebSocket or Moonraker push from Spoolman; weights refresh when Review/Checkoff reloads.
 - Integrations API is `/api/v1` only; core workflow does not require Spoolman.
 

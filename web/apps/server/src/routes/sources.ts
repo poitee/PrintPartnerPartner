@@ -38,6 +38,7 @@ type RouteDeps = {
   sourcesDir: string;
   thumbsDir: string;
   coversDir: string;
+  jobs?: import("./jobs.js").InProcessJobRunner;
 };
 
 function toCoverProject(row: NonNullable<ReturnType<AppRepository["getProjectRow"]>>): SourceCoverProject {
@@ -110,7 +111,7 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
           });
         }
       }
-      return deps.repo.createSource({
+      const newSource = deps.repo.createSource({
         name: String(body.name ?? ""),
         url: body.url != null ? String(body.url) : undefined,
         branch: body.branch != null ? String(body.branch) : undefined,
@@ -123,6 +124,16 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
             ? (body.metadata as Record<string, unknown>)
             : undefined,
       });
+      // Kick off auto-sync for new GitHub/git source (best-effort, non-blocking)
+      const kind = (body.source_kind ?? "github").toString().toLowerCase();
+      if (kind === "github" || kind === "git") {
+        try {
+          if (deps.jobs) {
+            void deps.jobs.start("sync", { project_ids: [newSource.id] }, "default");
+          }
+        } catch { /* best effort */ }
+      }
+      return newSource;
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }

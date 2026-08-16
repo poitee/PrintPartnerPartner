@@ -17,6 +17,7 @@ import {
   type PartRow,
   type ProfileSummary,
   type SourceSummary,
+  type UnattributedPrint,
 } from "@print-partner/contracts";
 import {
   pickKitBundleFileWeb,
@@ -26,7 +27,7 @@ import {
   saveTextFileWeb,
 } from "@/lib/webFilePickers";
 
-export type { AppUpdateCheckResponse, HealthResponse, JobEvent, JobSnapshot, PartRow, ProfileSummary, SourceSummary };
+export type { AppUpdateCheckResponse, HealthResponse, JobEvent, JobSnapshot, PartRow, ProfileSummary, SourceSummary, UnattributedPrint };
 export { DATE_FORMAT_DEFAULT, DATE_FORMAT_PRESETS, formatTimestamp, type DateFormatId };
 
 export function formatSyncTime(iso: string): string {
@@ -1394,6 +1395,31 @@ export async function cancelPrinterSendQueueItem(id: string): Promise<{ item: Pr
   return engineFetch(`/printer-send-queue/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+export type PrinterQueueSuggestionItem = {
+  item_id: string;
+  filename: string;
+  filament_color_ids: string[];
+  overlap: number;
+};
+
+export type PrinterQueueSuggestion = {
+  printer_id: string;
+  printer_name: string;
+  integration_id: string;
+  items: PrinterQueueSuggestionItem[];
+  item_count: number;
+};
+
+export async function fetchPrinterQueueSuggestions(options: {
+  idle_integration_ids: string[];
+}): Promise<{ suggestions: PrinterQueueSuggestion[] }> {
+  const ids = options.idle_integration_ids.join(",");
+  if (!ids) return { suggestions: [] };
+  return engineFetch(
+    `/printer-send-queue/suggestions?idle_integration_ids=${encodeURIComponent(ids)}`,
+  );
+}
+
 export type BambuConnectHandoffResult = {
   handoff_id: string;
   filename: string;
@@ -1509,6 +1535,34 @@ export async function saveSpoolmanDefaultIntegration(
   return engineFetch<SpoolmanDefaultSettings>("/settings/spoolman-default", {
     method: "PUT",
     body: JSON.stringify({ integration_id: integrationId }),
+  });
+}
+
+export type PrinterPlanBinding = {
+  integration_id: string;
+  profile_id: number | null;
+  updated_at: string;
+};
+
+export async function fetchPrinterPlanBindings(): Promise<PrinterPlanBinding[]> {
+  const body = await engineFetch<{ bindings: PrinterPlanBinding[] }>("/settings/printer-plan-bindings");
+  return body.bindings;
+}
+
+export async function savePrinterPlanBinding(
+  integration_id: string,
+  profile_id: number | null,
+): Promise<PrinterPlanBinding[]> {
+  const body = await engineFetch<{ bindings: PrinterPlanBinding[] }>("/settings/printer-plan-bindings", {
+    method: "PUT",
+    body: JSON.stringify({ integration_id, profile_id }),
+  });
+  return body.bindings;
+}
+
+export async function deletePrinterPlanBinding(integration_id: string): Promise<void> {
+  await engineFetch<{ ok: boolean }>(`/settings/printer-plan-bindings/${encodeURIComponent(integration_id)}`, {
+    method: "DELETE",
   });
 }
 
@@ -1757,6 +1811,33 @@ export async function saveGitHubPat(token: string): Promise<GitHubPatSettings> {
   });
 }
 
+export type DiscordNotifySettings = {
+  webhook_url: string | null;
+  notify_on_update: boolean;
+  notify_on_sync: boolean;
+  auto_sync_updates: boolean;
+};
+
+export async function fetchDiscordNotifySettings(): Promise<DiscordNotifySettings> {
+  return engineFetch<DiscordNotifySettings>("/settings/discord-notify");
+}
+
+export async function saveDiscordNotifySettings(
+  settings: Partial<DiscordNotifySettings>,
+): Promise<DiscordNotifySettings> {
+  return engineFetch<DiscordNotifySettings>("/settings/discord-notify", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+export async function testDiscordNotify(): Promise<{ ok: boolean; error?: string }> {
+  return engineFetch<{ ok: boolean; error?: string }>("/settings/discord-notify/test", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export type StlNamingRoleId = "primary" | "accent" | "clear" | "opaque";
 
 export type StlNamingRole = {
@@ -1768,6 +1849,7 @@ export type StlNamingRole = {
 export type StlNamingFolderRule = {
   path_contains: string;
   role_id: StlNamingRoleId;
+  functional_class?: "functional" | "cosmetic";
 };
 
 export type StlNamingProfile = {
@@ -2086,6 +2168,8 @@ export type PlanReviewTotals = {
 export type ReviewPart = PartRow & {
   printed_count: number;
   print_units: boolean[];
+  /** Assembly tracking: which completed units have been physically installed. */
+  assembled_units?: boolean[];
   /** Checkoff: not fully printed yet (printed_count < qty). */
   missing: boolean;
   /** On-disk STL absent for an included part (GRE-235). */
@@ -2345,6 +2429,37 @@ export async function patchPartProgress(
   return engineFetch(`/parts/${partId}/progress`, {
     method: "PATCH",
     body: JSON.stringify({ unit_index: unitIndex, completed }),
+  });
+}
+
+export async function patchPartAssembled(
+  partId: number,
+  unitIndex: number,
+  assembled: boolean,
+): Promise<{
+  assembled_count: number;
+  assembled_units: boolean[];
+}> {
+  return engineFetch(`/parts/${partId}/assembled`, {
+    method: "PATCH",
+    body: JSON.stringify({ unit_index: unitIndex, assembled }),
+  });
+}
+
+export type BuildTrackingSettings = {
+  assembly_tracking: boolean;
+};
+
+export async function fetchBuildTrackingSettings(): Promise<BuildTrackingSettings> {
+  return engineFetch<BuildTrackingSettings>("/settings/build-tracking");
+}
+
+export async function saveBuildTrackingSettings(
+  settings: Partial<BuildTrackingSettings>,
+): Promise<BuildTrackingSettings> {
+  return engineFetch<BuildTrackingSettings>("/settings/build-tracking", {
+    method: "PUT",
+    body: JSON.stringify(settings),
   });
 }
 
@@ -2850,4 +2965,92 @@ export async function pickZipArchive(): Promise<File | null> {
 export function shortSha(sha: string | null): string {
   if (!sha) return "—";
   return sha.slice(0, 7);
+}
+
+export async function fetchUnattributedPrints(): Promise<UnattributedPrint[]> {
+  const res = await engineFetch<{ prints: UnattributedPrint[] }>(
+    "/printer-checkoff/unattributed",
+  );
+  return res.prints;
+}
+
+export async function claimUnattributedPrint(
+  id: string,
+  profile_id: number,
+): Promise<{ ok: boolean }> {
+  return engineFetch(`/printer-checkoff/unattributed/${encodeURIComponent(id)}/claim`, {
+    method: "POST",
+    body: JSON.stringify({ profile_id }),
+  });
+}
+
+export async function dismissUnattributedPrint(id: string): Promise<void> {
+  await engineFetch(
+    `/printer-checkoff/unattributed/${encodeURIComponent(id)}/dismiss`,
+    { method: "POST", body: "{}" },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Phase manifest
+// ---------------------------------------------------------------------------
+
+export type PlanPhaseDefinition = {
+  name: string;
+  order: number;
+  description?: string;
+  /** Repo-relative folder paths whose STL/3MF files belong to this phase. */
+  folders: string[];
+  /** Names of phases that must be fully printed before this phase can start. */
+  depends_on: string[];
+  /** Optional hex color for the phase badge, e.g. '#4A90D9'. */
+  color?: string;
+};
+
+export type PlanPhaseManifestResponse = {
+  profile_id: number;
+  /** True when at least one source in the plan has a pp-phases.json. */
+  has_phases: boolean;
+  phases: PlanPhaseDefinition[];
+};
+
+/**
+ * Fetch the phase manifest for a plan.
+ * Returns has_phases=false with an empty phases array when no source has a
+ * pp-phases.json; the UI should fall back to the flat parts list in that case.
+ */
+export async function fetchPlanPhaseManifest(
+  profileId: number,
+): Promise<PlanPhaseManifestResponse> {
+  return engineFetch<PlanPhaseManifestResponse>(
+    `/plans/${profileId}/phase-manifest`,
+  );
+}
+
+export type PlanVariantDimensionsResponse = {
+  profile_id: number;
+  source_id: number | null;
+  dimensions: Record<string, Array<string | number>>;
+  selection: Record<string, string>;
+};
+
+/** Fetch variant_dimensions declared in the base source manifest, plus the current selection. */
+export async function fetchPlanVariantDimensions(
+  profileId: number,
+): Promise<PlanVariantDimensionsResponse> {
+  return engineFetch<PlanVariantDimensionsResponse>(
+    `/plans/${profileId}/variant-dimensions`,
+  );
+}
+
+/** Apply a variant selection to the plan (updates import rules on base source). */
+export async function applyPlanVariantSelection(
+  profileId: number,
+  selection: Record<string, string>,
+  sourceId?: number,
+): Promise<{ profile_id: number; source_id: number; rules: string[]; selection: Record<string, string> }> {
+  return engineFetch(`/plans/${profileId}/variant-selection`, {
+    method: "POST",
+    body: JSON.stringify({ selection, ...(sourceId != null ? { source_id: sourceId } : {}) }),
+  });
 }

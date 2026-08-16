@@ -5,6 +5,8 @@ export type ProgressRow = {
   partId: number;
   unitIndex: number;
   completed: boolean;
+  /** Assembly tracking: true when this printed unit has been physically installed. */
+  assembled?: boolean;
 };
 
 export function dedupeProgressRows(rows: ProgressRow[]): ProgressRow[] {
@@ -31,6 +33,16 @@ export function getPrintUnits(rows: ProgressRow[], qty: number): boolean[] {
   const flags: Record<number, boolean> = {};
   for (const r of rows) {
     flags[r.unitIndex] = flags[r.unitIndex] || r.completed;
+  }
+  const n = Math.max(1, qty);
+  return Array.from({ length: n }, (_, i) => flags[i] ?? false);
+}
+
+/** Returns an array of length qty where each entry is true if that unit is both completed AND assembled. */
+export function getAssembledUnits(rows: ProgressRow[], qty: number): boolean[] {
+  const flags: Record<number, boolean> = {};
+  for (const r of rows) {
+    if (r.completed && r.assembled) flags[r.unitIndex] = true;
   }
   const n = Math.max(1, qty);
   return Array.from({ length: n }, (_, i) => flags[i] ?? false);

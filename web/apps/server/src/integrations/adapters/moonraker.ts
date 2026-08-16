@@ -138,6 +138,35 @@ async function queryStatus(config: IntegrationConfig): Promise<PrinterHostStatus
   };
 }
 
+async function fetchObjectList(config: IntegrationConfig): Promise<string[]> {
+  const baseUrl = normalizeBaseUrl(config.base_url ?? config.baseUrl);
+  if (!baseUrl) return [];
+  try {
+    const res = await moonrakerFetch(
+      `${baseUrl}/printer/objects/query?exclude_object`,
+      config,
+      { signal: AbortSignal.timeout(8_000) },
+    );
+    if (!res.ok) return [];
+    const body = (await res.json()) as {
+      result?: {
+        status?: {
+          exclude_object?: {
+            objects?: Array<{ name?: string }>;
+          };
+        };
+      };
+    };
+    const objects = body.result?.status?.exclude_object?.objects;
+    if (!Array.isArray(objects)) return [];
+    return objects
+      .map((o) => (typeof o.name === "string" ? o.name.trim() : ""))
+      .filter((n) => n.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 export const moonrakerAdapter: IntegrationAdapter = {
   type: "moonraker",
 
@@ -190,6 +219,33 @@ export const moonrakerAdapter: IntegrationAdapter = {
         state: "offline",
         message: e instanceof Error ? e.message : String(e),
       };
+    }
+  },
+
+  async getObjectList(config: IntegrationConfig): Promise<string[]> {
+    return fetchObjectList(config);
+  },
+
+  async getFilamentUsed(config: IntegrationConfig): Promise<number | null> {
+    const baseUrl = normalizeBaseUrl(config.base_url ?? config.baseUrl);
+    if (!baseUrl) return null;
+    try {
+      const res = await moonrakerFetch(
+        `${baseUrl}/printer/objects/query?print_stats`,
+        config,
+        { signal: AbortSignal.timeout(8_000) },
+      );
+      if (!res.ok) return null;
+      const body = (await res.json()) as {
+        result?: { status?: { print_stats?: { filament_used?: number } } };
+      };
+      const used = body.result?.status?.print_stats?.filament_used;
+      if (typeof used === "number" && Number.isFinite(used) && used >= 0) {
+        return used;
+      }
+      return null;
+    } catch {
+      return null;
     }
   },
 

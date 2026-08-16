@@ -96,6 +96,7 @@ export const JOB_KINDS = [
   "export-3mf",
   "pack-preview",
   "printer-upload",
+  "auto-slice",
 ] as const;
 
 export type JobKind = (typeof JOB_KINDS)[number];
@@ -129,6 +130,7 @@ export type IntegrationType =
   | "bambu"
   | "spoolman"
   | "slicer_folder"
+  | "slicer_sidecar"
   | "ai_assistant"
   | "home_assistant";
 

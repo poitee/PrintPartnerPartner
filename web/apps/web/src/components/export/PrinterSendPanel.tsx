@@ -36,6 +36,7 @@ import {
   CardTitle,
 } from "../ui/card";
 import ObjectProposalRows from "./ObjectProposalRows";
+import PlateApprovalCard from "./PlateApprovalCard";
 import {
   sendPlanBindCopy,
 } from "../../lib/printerPlanBind";
@@ -396,6 +397,12 @@ export default function PrinterSendPanel({
     );
   };
 
+  const rejectFile = () => {
+    setChosenFile(null);
+    setObjectParse(null);
+    setObjectPropose(null);
+  };
+
   const ensureFileThen = (action: "send" | "start") => {
     if (chosenFile) {
       runUpload(chosenFile, action === "start");
@@ -584,6 +591,32 @@ export default function PrinterSendPanel({
                 </Badge>
               </div>
 
+              {/* ── Approval gate: shown when a file is chosen and parsed ── */}
+              {chosenFile && objectParse ? (
+                <PlateApprovalCard
+                  thumbnailUrl={objectParse.thumbnailUrl}
+                  printerName={
+                    linkedPrinters.find((p) => p.id === selectedPrinterId)?.name ?? "Printer"
+                  }
+                  plateIndex={1}
+                  plateTotal={1}
+                  printTime={objectParse.printTime}
+                  filamentWeightG={objectParse.filamentWeightG}
+                  unmatchedNames={objectPropose?.unmatchedNames ?? []}
+                  busy={printerUploadJob.busy}
+                  onApprove={() => {
+                    if (chosenFile) runUpload(chosenFile, false);
+                  }}
+                  onReject={rejectFile}
+                />
+              ) : null}
+
+              {/* Proposal rows shown below the approval card when there are named objects */}
+              {chosenFile && objectParse && hasNamedObjects && !objectParse.thumbnailUrl ? (
+                <ObjectProposalRows rows={previewRows} />
+              ) : null}
+
+              {/* File picker row — always shown so user can change the file */}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
                   {chosenFile ? chosenFile.name : "No file chosen"}
@@ -602,49 +635,42 @@ export default function PrinterSendPanel({
                 </Button>
               </div>
 
-              {objectParse ? (
-                hasNamedObjects ? (
-                  <ObjectProposalRows rows={previewRows} />
-                ) : (
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    No named objects in this file — map on Progress after Send.
-                  </p>
-                )
+              {/* Send / Start buttons — only shown when no file is chosen (before approval gate) */}
+              {!chosenFile ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || !selectedPrinterId || !planBind.canSend}
+                    title={!planBind.canSend ? planBind.line : undefined}
+                    onClick={() => ensureFileThen("send")}
+                  >
+                    Send
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={
+                      busy ||
+                      !selectedPrinterId ||
+                      !planBind.canSend ||
+                      selectedPrinterBusy ||
+                      selectedPrinterUnavailable
+                    }
+                    title={
+                      !planBind.canSend
+                        ? planBind.line
+                        : selectedPrinterBusy
+                          ? "Printer is busy — Start print waits until Idle"
+                          : selectedPrinterUnavailable
+                            ? "Printer offline or error"
+                            : undefined
+                    }
+                    onClick={() => ensureFileThen("start")}
+                  >
+                    Start print
+                  </Button>
+                </div>
               ) : null}
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy || !selectedPrinterId || !planBind.canSend}
-                  title={!planBind.canSend ? planBind.line : undefined}
-                  onClick={() => ensureFileThen("send")}
-                >
-                  {printerUploadJob.busy ? "Sending…" : "Send"}
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={
-                    busy ||
-                    !selectedPrinterId ||
-                    !planBind.canSend ||
-                    selectedPrinterBusy ||
-                    selectedPrinterUnavailable
-                  }
-                  title={
-                    !planBind.canSend
-                      ? planBind.line
-                      : selectedPrinterBusy
-                        ? "Printer is busy — Start print waits until Idle"
-                        : selectedPrinterUnavailable
-                          ? "Printer offline or error"
-                          : undefined
-                  }
-                  onClick={() => ensureFileThen("start")}
-                >
-                  Start print
-                </Button>
-              </div>
 
               <p className="text-[11.5px] leading-relaxed text-muted-foreground">
                 {planBind.line}

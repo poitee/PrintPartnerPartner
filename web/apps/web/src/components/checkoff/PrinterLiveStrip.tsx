@@ -39,6 +39,8 @@ export type PrinterLiveStripState = {
   anyPrinting: boolean;
   /** Integration ids currently printing or paused (for per-link verify suppress). */
   activeIntegrationIds: string[];
+  /** Integration ids currently idle or complete (for queue suggestion matching). */
+  idleIntegrationIds: string[];
   hostCount: number;
 };
 
@@ -48,6 +50,8 @@ type Props = {
   onCheckoffUpdate?: (profileId: number) => void;
   /** Reports whether any linked host is actively printing/paused. */
   onLiveStateChange?: (state: PrinterLiveStripState) => void;
+  /** Called when unattributed print count changes. */
+  onUnattributedUpdate?: (count: number) => void;
   className?: string;
 };
 
@@ -97,6 +101,7 @@ export default function PrinterLiveStrip({
   engineReady,
   onCheckoffUpdate,
   onLiveStateChange,
+  onUnattributedUpdate,
   className,
 }: Props) {
   const [hosts, setHosts] = useState<LinkedHost[]>([]);
@@ -110,6 +115,8 @@ export default function PrinterLiveStrip({
   onCheckoffUpdateRef.current = onCheckoffUpdate;
   const onLiveStateChangeRef = useRef(onLiveStateChange);
   onLiveStateChangeRef.current = onLiveStateChange;
+  const onUnattributedUpdateRef = useRef(onUnattributedUpdate);
+  onUnattributedUpdateRef.current = onUnattributedUpdate;
   const pollMs = usePrinterStatusPollMs();
 
   const refreshRoster = useCallback(async () => {
@@ -156,46 +163,66 @@ export default function PrinterLiveStrip({
       if (id === requestId.current) setStatusById({});
       return;
     }
-    const entries = await Promise.all(
+    // Prune status map to only currently linked printers, keeping existing values so
+    // nothing flashes offline while we wait for slow reconcile responses.
+    // Do NOT clear to {} first — that's what causes the offline flash.
+    if (id === requestId.current) {
+      const linkedIds = new Set(linked.map((h) => h.integrationId));
+      setStatusById((prev) => {
+        const next: Record<string, PrinterHostStatus> = {};
+        for (const [k, v] of Object.entries(prev)) {
+          if (linkedIds.has(k)) next[k] = v;
+        }
+        return next;
+      });
+    }
+    await Promise.allSettled(
       linked.map(async (h) => {
         try {
+          let status: PrinterHostStatus;
           if (!h.reconcileCheckoff) {
-            const status = await fetchIntegrationStatus(h.integrationId);
-            return [h.integrationId, status] as const;
-          }
-          const { updates, status } = await reconcilePrinterCheckoff({
-            integration_id: h.integrationId,
-          });
-          for (const row of updates ?? []) {
-            if (toastedLinks.current.has(row.link_id)) continue;
-            toastedLinks.current.add(row.link_id);
-            if (row.event === "awaiting_verify") {
-              const n = row.units_pending;
-              toast.message(
-                `${row.host_name} finished ${row.filename} — verify ${n} part${n === 1 ? "" : "s"}`,
-              );
-            } else {
-              toast.error(
-                `${row.host_name} ${row.host_outcome === "cancelled" ? "cancelled" : "failed"} ${row.filename} — review send`,
-              );
+            status = await fetchIntegrationStatus(h.integrationId);
+          } else {
+            const reconcileResult = await reconcilePrinterCheckoff({
+              integration_id: h.integrationId,
+            });
+            const { updates, status: s } = reconcileResult;
+            status = s;
+            for (const row of updates ?? []) {
+              if (toastedLinks.current.has(row.link_id)) continue;
+              toastedLinks.current.add(row.link_id);
+              if (row.event === "awaiting_verify") {
+                toast.success("Print finished — see highlighted parts");
+              } else {
+                toast.error(
+                  `${row.host_name} ${row.host_outcome === "cancelled" ? "cancelled" : "failed"} ${row.filename} — review send`,
+                );
+              }
+              onCheckoffUpdateRef.current?.(row.profile_id);
             }
-            onCheckoffUpdateRef.current?.(row.profile_id);
+            // Report unattributed print count
+            const unattributed = (reconcileResult as Record<string, unknown>).unattributed;
+            if (Array.isArray(unattributed)) {
+              onUnattributedUpdateRef.current?.(unattributed.length);
+            }
           }
-          return [h.integrationId, status] as const;
+          if (id === requestId.current) {
+            setStatusById((prev) => ({ ...prev, [h.integrationId]: status }));
+          }
         } catch (e) {
           const raw = e instanceof Error ? e.message : String(e);
-          return [
-            h.integrationId,
-            {
-              state: "offline" as const,
-              message: quietPrinterStatusMessage(raw) ?? "Printers unavailable",
-            },
-          ] as const;
+          if (id === requestId.current) {
+            setStatusById((prev) => ({
+              ...prev,
+              [h.integrationId]: {
+                state: "offline" as const,
+                message: quietPrinterStatusMessage(raw) ?? "Unavailable",
+              },
+            }));
+          }
         }
       }),
     );
-    if (id !== requestId.current) return;
-    setStatusById(Object.fromEntries(entries));
   }, []);
 
   useEffect(() => {
@@ -233,9 +260,16 @@ export default function PrinterLiveStrip({
         return state === "printing" || state === "paused";
       })
       .map((h) => h.integrationId);
+    const idleIntegrationIds = hosts
+      .filter((h) => {
+        const state = statusById[h.integrationId]?.state;
+        return state === "idle" || state === "complete";
+      })
+      .map((h) => h.integrationId);
     onLiveStateChangeRef.current?.({
       anyPrinting: activeIntegrationIds.length > 0,
       activeIntegrationIds,
+      idleIntegrationIds,
       hostCount: hosts.length,
     });
   }, [statusById, hosts]);
@@ -245,6 +279,7 @@ export default function PrinterLiveStrip({
     onLiveStateChangeRef.current?.({
       anyPrinting: false,
       activeIntegrationIds: [],
+      idleIntegrationIds: [],
       hostCount: 0,
     });
   }, [engineReady]);

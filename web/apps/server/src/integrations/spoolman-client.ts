@@ -323,3 +323,31 @@ export async function listSpoolmanSpools(config: IntegrationConfig): Promise<Spo
   const body = await res.json();
   return parseSpoolmanSpoolList(body);
 }
+
+/**
+ * Record filament consumption on a spool.
+ * @param spoolId  Numeric Spoolman spool id
+ * @param useLengthMm  Filament consumed in millimetres
+ */
+export async function useSpoolFilament(
+  config: IntegrationConfig,
+  spoolId: number,
+  useLengthMm: number,
+): Promise<void> {
+  const baseUrl = normalizeSpoolmanBaseUrl(config.base_url ?? config.baseUrl);
+  if (!baseUrl) throw new Error("Spoolman base_url is required");
+  await assertSafeOutboundUrl(`${apiRoot(baseUrl)}/spool/${spoolId}/use`, { allowPrivate: true });
+  const res = await fetch(`${apiRoot(baseUrl)}/spool/${spoolId}/use`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(config),
+    },
+    body: JSON.stringify({ use_length: useLengthMm }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Spoolman use spool failed: HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ""}`);
+  }
+}

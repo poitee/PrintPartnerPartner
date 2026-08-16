@@ -19,7 +19,7 @@ flowchart LR
 
 - **Live send-to-printer ships for Moonraker and PrusaLink** (Export upload / start, Progress verify-first). Bambu is status-only over LAN MQTT.
 - **No G-code generation.** Exports are slicer inputs (STL packs, packed 3MF). Materials in 3MF are display colors, not AMS/MMU maps ([3MF_EXPORT_VALIDATION.md](../3MF_EXPORT_VALIDATION.md)).
-- **Spoolman is inventory**, not consumption: no weight deduction on Progress checkoff.
+- **Spoolman** deducts filament consumption automatically on Checkoff confirm when spool assignments are set on parts. The deduction uses the printer API's consumed-material field and distributes proportionally across assigned spools. This is best-effort and never blocks checkoff.
 - **Self-host** can reach LAN printers (`allowPrivate: true` for Spoolman/Moonraker). **SaaS** generally cannot reach customer LANs without an on-prem agent/tunnel.
 - **Moonraker auth:** untrusted clients must send credentials on HTTP (`Authorization: Bearer <JWT>` or `X-Api-Key: <key>`); WebSocket clients authenticate at connection setup / `server.connection.identify`, not via per-message headers. “Trusted clients” is a separate IP/domain allowlist mode in Moonraker config — not “open LAN by default.” Prefer HTTPS/WSS when credentials leave a trusted LAN; desk-v1 HTTP on a private LAN is still the common Moonraker setup. Store keys via integrations secret redaction; never log JWT/API-key material in errors or diagnostics.
 

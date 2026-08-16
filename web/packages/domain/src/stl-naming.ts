@@ -15,6 +15,7 @@ export type StlNamingRole = {
 export type StlNamingFolderRule = {
   path_contains: string;
   role_id: StlNamingRoleId;
+  functional_class?: "functional" | "cosmetic";
 };
 
 export type StlNamingProfileDict = {
@@ -43,6 +44,8 @@ export const DEFAULT_NAMING_PROFILE: StlNamingProfileDict = {
   folder_rules: [],
   export_role_order: ["primary", "accent", "clear", "opaque"],
 };
+
+export type PartFunctionalClass = "functional" | "cosmetic" | "unclassified";
 
 export type NamingProfile = {
   roles: readonly StlNamingRole[];
@@ -232,4 +235,27 @@ export function resolveNamingProfile(
     return namingProfileFromDict(mergeNamingProfiles(globalDict, override));
   }
   return namingProfileFromDict(globalDict);
+}
+
+/**
+ * Classify a part as functional, cosmetic, or unclassified using folder rules
+ * with functional_class set, and the _optional_ filename convention.
+ */
+export function classifyPartFunctional(
+  relativePath: string,
+  filename: string,
+  folderRules: readonly StlNamingFolderRule[],
+): PartFunctionalClass {
+  // _optional_ in filename -> cosmetic (Voron convention)
+  if (filename.toLowerCase().includes("_optional_")) return "cosmetic";
+
+  const normalizedPath = relativePath.replace(/\\/g, "/").toLowerCase();
+  for (const rule of folderRules) {
+    if (!rule.functional_class) continue;
+    if (normalizedPath.includes(rule.path_contains.toLowerCase())) {
+      return rule.functional_class;
+    }
+  }
+
+  return "unclassified";
 }

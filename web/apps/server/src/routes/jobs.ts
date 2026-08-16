@@ -27,6 +27,7 @@ import { loadFleet } from "../services/printer-fleet.js";
 import { parsePrinterUploadMultipart } from "../services/printer-upload-multipart.js";
 import { runPrinterUploadJob } from "../services/printer-upload-job.js";
 import { reconcileSendQueueJobResult } from "../services/printer-send-queue.js";
+import { runAutoSliceJob } from "../services/auto-slice-job.js";
 
 export type JobHandler = (
   jobId: string,
@@ -105,6 +106,22 @@ export class InProcessJobRunner {
         result: event.result,
         error: event.error,
       });
+      // Fire plan.exported for any export job that completes successfully.
+      const EXPORT_KINDS = new Set([
+        "export-stl-pack",
+        "export-checklist-html",
+        "export-kit-bundle",
+        "export-3mf",
+      ]);
+      if (event.status === "done" && EXPORT_KINDS.has(event.kind)) {
+        const meta = this.jobMeta.get(jobId);
+        void dispatchWebhooks(this.repo, "plan.exported", {
+          job_id: event.job_id,
+          kind: event.kind,
+          profile_id: meta?.payload.profile_id ?? null,
+          download_url: (event.result as Record<string, unknown> | null)?.download_url ?? null,
+        });
+      }
     }
   }
 
@@ -216,6 +233,8 @@ export class InProcessJobRunner {
           result = await this.runPackPreview(payload);
         } else if (kind === "printer-upload") {
           result = await this.runPrinterUpload(jobId, payload);
+        } else if (kind === "auto-slice") {
+          result = await this.runAutoSlice(jobId, payload);
         } else {
           result = { stub: true, kind, payload };
         }
@@ -522,6 +541,45 @@ export class InProcessJobRunner {
         resolve(existing);
       }
     });
+  }
+
+  private async runAutoSlice(
+    jobId: string,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const profileId = Number(payload.profile_id);
+    const result = await runAutoSliceJob(
+      this.repo,
+      this.deps.exportsDir,
+      {
+        profile_id: profileId,
+        layout_mode: typeof payload.layout_mode === "string" ? payload.layout_mode : "per_plate",
+        spacing_mm: payload.spacing_mm != null ? Number(payload.spacing_mm) : undefined,
+        missing_only: Boolean(payload.missing_only),
+        enabled_printer_ids: Array.isArray(payload.enabled_printer_ids)
+          ? (payload.enabled_printer_ids as string[])
+          : undefined,
+      },
+      (patch) => this.emit(jobId, patch),
+    );
+    return {
+      profile_id: profileId,
+      plate_count: result.plate_count,
+      gcode_paths: result.gcode_paths.map((p) => ({
+        path: p,
+        download_url: this.downloadUrlForPath(p),
+      })),
+      plates: result.plates.map((pl) => ({
+        printer_id: pl.printer_id,
+        printer_name: pl.printer_name,
+        plate_index: pl.plate_index,
+        slicer: pl.slicer,
+        gcode_path: pl.gcode_path,
+        thumbnail_path: pl.thumbnail_path,
+        download_url: this.downloadUrlForPath(pl.gcode_path),
+      })),
+      warnings: result.warnings,
+    };
   }
 
   async cancel(jobId: string): Promise<boolean> {

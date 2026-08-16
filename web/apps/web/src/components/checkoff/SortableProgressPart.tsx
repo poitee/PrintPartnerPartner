@@ -14,10 +14,17 @@ type PartProps = {
   busy: boolean;
   mobile: boolean;
   disabled?: boolean;
+  /** Printer host name if this part is currently being printed. */
+  printingOn?: string;
+  /** Printer host name if this part's print has finished and awaits verify. */
+  awaitingVerify?: string;
+  /** Suggested printer from an unattributed print candidate. */
+  suggestedPrinter?: { hostName: string; printId: string; filename: string };
   onToggleUnit: (part: ReviewPart, unitIndex: number) => void;
   onIncrement: (part: ReviewPart) => void;
   onDecrement: (part: ReviewPart) => void;
   onPreview: (part: ReviewPart) => void;
+  onClaim?: (printId: string) => void;
 };
 
 type BagProps = {
@@ -70,6 +77,10 @@ export default memo(function SortableProgressPart(props: Props) {
             busy={props.busy}
             onToggleUnit={props.onToggleUnit}
             onPreview={props.onPreview}
+            printingOn={props.printingOn}
+            awaitingVerify={props.awaitingVerify}
+            suggestedPrinter={props.suggestedPrinter}
+            onClaim={props.onClaim}
             dragHandle={dragHandle}
           />
         ) : (
@@ -79,6 +90,10 @@ export default memo(function SortableProgressPart(props: Props) {
             onIncrement={props.onIncrement}
             onDecrement={props.onDecrement}
             onPreview={props.onPreview}
+            printingOn={props.printingOn}
+            awaitingVerify={props.awaitingVerify}
+            suggestedPrinter={props.suggestedPrinter}
+            onClaim={props.onClaim}
             dragHandle={dragHandle}
           />
         )}

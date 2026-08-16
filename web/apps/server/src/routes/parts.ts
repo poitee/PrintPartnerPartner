@@ -84,6 +84,21 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
     }
   });
 
+  app.patch("/parts/:id/assembled", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    const body = request.body as { unit_index?: number; assembled?: boolean };
+    if (body.unit_index == null || body.assembled == null) {
+      return reply.status(400).send({ detail: "unit_index and assembled required" });
+    }
+    try {
+      return deps.repo.patchPartAssembled(id, body.unit_index, body.assembled);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const code = msg.includes("out of range") ? 400 : msg.includes("not found") ? 404 : 400;
+      return reply.status(code).send({ detail: msg });
+    }
+  });
+
   app.get("/parts/:id/mesh", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const part = deps.repo.getPartRow(id);

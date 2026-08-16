@@ -179,8 +179,13 @@ function BuildPageContent() {
   );
 
   const onRoleFilamentsUpdated = useCallback(async () => {
+    // Only bump plan revision (re-fetches part colour assignments).
+    // Do NOT bump filamentRefreshKey here — the picker already has fresh data
+    // from saveRoleFilament's response (setRows), so a full re-fetch just
+    // causes the picker to flash/reset while the user is still assigning colours.
+    // The refreshKey is bumped explicitly in the recompute job onDone callbacks
+    // (lines below) where the catalogue may have genuinely changed.
     await bumpPlanRevision();
-    setFilamentRefreshKey((k) => k + 1);
   }, [bumpPlanRevision]);
 
   useEffect(() => {

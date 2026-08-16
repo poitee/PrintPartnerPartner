@@ -21,6 +21,8 @@ services:
       SESSION_SECRET: "${SESSION_SECRET:-}"
       # Optional: require API key for /api/v1 automation (slicers, scripts)
       # PRINT_PARTNER_API_KEY: "change-me-to-a-long-random-secret"
+      # Optional: expose Swagger UI at /api/v1/docs in production (useful for integrations and MCP tool testing)
+      # OPENAPI_UI: "1"
       # When Ollama runs on the host (not in Compose), set in Settings or here:
       # AI_PROVIDER: ollama
       # OLLAMA_URL: http://host.docker.internal:11434

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -23,7 +23,8 @@ import ReviewPartsSheet, {
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
-import { startRecompute, startSync } from "../api/engine";
+import { fetchStlNaming, startRecompute, startSync } from "../api/engine";
+import type { StlNamingFolderRule } from "../api/engine";
 import {
   exportRoute,
   planRoute,
@@ -71,8 +72,17 @@ export default function PartsPage() {
   const recomputeJob = useJobRunner("recompute");
   const syncJob = useJobRunner("sync");
   const sheetRef = useRef<ReviewPartsSheetHandle>(null);
+  const [folderRules, setFolderRules] = useState<StlNamingFolderRule[]>([]);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
+
+  useEffect(() => {
+    void fetchStlNaming().then((profile) => {
+      setFolderRules(
+        (profile.folder_rules ?? []).filter((r) => r.functional_class != null),
+      );
+    }).catch(() => {/* silently ignore – filter just won't work */});
+  }, []);
   const buildStale = selectedProfile?.build_stale ?? false;
 
   const onUpdateBuild = () => {
@@ -380,6 +390,7 @@ export default function PartsPage() {
             review={review}
             planName={planName}
             disabled={!health || loading}
+            folderRules={folderRules}
           />
 
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
