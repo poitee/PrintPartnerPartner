@@ -58,6 +58,12 @@ export class PostgresDatabase {
     await this.pool.query(
       "ALTER TABLE build_profiles ADD COLUMN IF NOT EXISTS special_request TEXT",
     );
+    // Assembly tracking: printed-but-not-yet-installed state per print_progress unit.
+    // Mirrors the guarded ADD COLUMN in client.ts (SQLite) — defaults every existing
+    // and new row to false/not-assembled.
+    await this.pool.query(
+      "ALTER TABLE print_progress ADD COLUMN IF NOT EXISTS assembled BOOLEAN NOT NULL DEFAULT FALSE",
+    );
     await this.pool.query(
       `INSERT INTO app_settings (tenant_id, key, value) VALUES ($1, $2, $3)
        ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value`,

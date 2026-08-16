@@ -87,6 +87,77 @@ describe("Phase 3 APIs", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("assembled field: defaults false, round-trips via repo and HTTP API", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-asm-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
+    const source = repo.createSource({ name: "Repo", url: "https://github.com/a/b", source_kind: "github" });
+    const repoPath = join(dir, "repos", String(source.id));
+    mkdirSync(join(repoPath, "x"), { recursive: true });
+    writeFileSync(join(repoPath, "x", "part.stl"), "x");
+    repo.updateSource(source.id, { local_path: repoPath });
+    repo.updateImportRules(source.id, ["x/"]);
+
+    const plan = repo.createProfile("Plan", source.id);
+    await repo.recomputeProfile(plan.id);
+
+    const checkoff = repo.getCheckoff(plan.id);
+    const partId = checkoff.parts[0].id;
+
+    // New print_progress rows default to assembled=false, and it's only
+    // reachable once a unit is completed (mirrors the checkoff UI's own gating).
+    const enriched = repo.getEnrichedPartsForReview(plan.id, false);
+    expect(enriched[0].assembled_units).toEqual([false]);
+
+    repo.patchPartProgress(partId, 0, true);
+    const patched = repo.patchPartAssembled(partId, 0, true);
+    expect(patched.assembled_count).toBe(1);
+    expect(patched.assembled_units).toEqual([true]);
+
+    const afterAssembled = repo.getEnrichedPartsForReview(plan.id, false);
+    expect(afterAssembled[0].assembled_units).toEqual([true]);
+
+    // Toggling back off works too — the column is read/write, not append-only.
+    const unset = repo.patchPartAssembled(partId, 0, false);
+    expect(unset.assembled_units).toEqual([false]);
+
+    // Same round trip through the actual HTTP endpoint used by the frontend,
+    // to prove the route is wired end-to-end and doesn't break the existing
+    // /parts/:id/progress contract alongside it.
+    const config = loadConfig();
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const app = await buildApp(config, ports);
+
+    const progressRes = await app.inject({
+      method: "PATCH",
+      url: `/parts/${partId}/progress`,
+      payload: { unit_index: 0, completed: true },
+    });
+    expect(progressRes.statusCode).toBe(200);
+    expect(progressRes.json()).toMatchObject({ printed_count: 1, missing: false });
+
+    const patchRes = await app.inject({
+      method: "PATCH",
+      url: `/parts/${partId}/assembled`,
+      payload: { unit_index: 0, assembled: true },
+    });
+    expect(patchRes.statusCode).toBe(200);
+    expect(patchRes.json()).toMatchObject({ part_id: partId, assembled_count: 1, assembled_units: [true] });
+
+    const missingFieldRes = await app.inject({
+      method: "PATCH",
+      url: `/parts/${partId}/assembled`,
+      payload: { unit_index: 0 },
+    });
+    expect(missingFieldRes.statusCode).toBe(400);
+
+    await app.close();
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("export STL pack job via HTTP", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-exp-"));
     process.env.PRINT_PARTNER_DATA_DIR = dir;
