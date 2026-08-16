@@ -405,6 +405,8 @@ export type PlateFootprint = {
   depth_mm: number;
   height_mm: number;
   group_key?: string;
+  /** Height band classification ("flat" | "short" | "medium" | "tall" | "very-tall") attached by the packer core; absent for parts whose STL failed to load. */
+  height_band?: string;
 };
 
 export type PlatePreview = {
@@ -463,9 +465,13 @@ export type SpoolmanSpoolRow = {
   location?: string | null;
 };
 
+/** Active strategy for grouping parts into plates. "location" (default) buckets by filament + source repo/folder; "height_band" buckets by classifyHeightBand(part height). */
+export type GroupingStrategy = "location" | "height_band";
+
 export type PrintPlan = {
   enabled_printer_ids: string[];
   group_assignments?: Record<string, string>;
+  grouping_strategy?: GroupingStrategy;
   plate_layout?: {
     spacing_mm: number;
     pool: Array<{ match_key: string; unit: number }>;
@@ -2361,6 +2367,7 @@ export type PackPreviewOptions = {
   assignments?: Record<string, string>;
   auto_assign?: boolean;
   spacing_mm?: number;
+  grouping_strategy?: GroupingStrategy;
 };
 
 export async function startPackPreview(options: PackPreviewOptions): Promise<string> {
@@ -2528,6 +2535,15 @@ export async function saveBuildTrackingSettings(
 
 export async function startExport3mf(options: Export3mfOptions): Promise<string> {
   const body = await engineFetch<{ job_id: string }>("/jobs/export-3mf", {
+    method: "POST",
+    body: JSON.stringify(options),
+  });
+  return body.job_id;
+}
+
+/** Export plates and slice each one on the sidecar matching its printer's slicer. */
+export async function startAutoSlice(options: AutoSliceOptions): Promise<string> {
+  const body = await engineFetch<{ job_id: string }>("/jobs/auto-slice", {
     method: "POST",
     body: JSON.stringify(options),
   });

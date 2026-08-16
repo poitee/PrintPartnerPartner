@@ -2533,16 +2533,22 @@ export class AppRepository {
 
   /**
    * Print jobs at/after `sinceIso`, most recent first, capped at `limit`.
-   * Used by get_print_stats (MCP tool) and the Discord morning digest route.
-   * Built on Drizzle's query builder (not a raw `.prepare()` call) so it works
-   * against both the sync better-sqlite3 driver and the async-wrapped Postgres
-   * driver behind `this.db`.
+   * Used by get_print_stats (assistant MCP tool) and the Discord morning
+   * digest. Goes through Drizzle's query builder (works on both the
+   * better-sqlite3 sync driver and the Postgres async-wrapped driver) —
+   * do NOT reach for `(repo as any).db.prepare(...)`, since `this.db` is a
+   * Drizzle instance, not a raw better-sqlite3 handle, and has no `.prepare`.
    */
   recentPrintJobs(sinceIso: string, limit = 100): PrintJobRow[] {
     return this.db
       .select()
       .from(this.schema.printJobs)
-      .where(and(eq(this.schema.printJobs.tenantId, this.tenantId), gte(this.schema.printJobs.at, sinceIso)))
+      .where(
+        and(
+          eq(this.schema.printJobs.tenantId, this.tenantId),
+          gte(this.schema.printJobs.at, sinceIso),
+        ),
+      )
       .orderBy(desc(this.schema.printJobs.at))
       .limit(limit)
       .all();
