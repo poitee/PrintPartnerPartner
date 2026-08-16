@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { getTableConfig as getPgTableConfig, PgTable } from "drizzle-orm/pg-core";
-import { SqliteDatabase } from "./client.js";
+import { getDb, SqliteDatabase } from "./client.js";
 import { postgresPostInitMigrations } from "./client-postgres.js";
+import { AppRepository } from "./repository.js";
 import * as pgSchema from "./schema-pg.js";
+import * as sqliteSchema from "./schema.js";
 import { currentSchemaVersion, schemaMigrations } from "./schema.js";
 
 /**
@@ -106,13 +109,92 @@ describe("schema v9-v12 (SQLite)", () => {
     withSqlite((sqlite) => {
       const indexes = (
         rawSqlite(sqlite)
-          .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'print_jobs'")
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'print_jobs'",
+          )
           .all() as { name: string }[]
       ).map((r) => r.name);
       expect(indexes).toContain("idx_print_jobs_tenant_status");
       expect(indexes).toContain("idx_print_jobs_printer");
       expect(indexes).toContain("idx_print_jobs_tenant_profile");
     });
+  });
+
+  it("round-trips real print_jobs rows through every v9-v12 field", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-schema-v9-data-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    try {
+      const repo = new AppRepository(
+        getDb(sqlite),
+        "default",
+        sqlite.reposDir,
+        sqliteSchema as unknown as ConstructorParameters<typeof AppRepository>[3],
+      );
+      const profile = repo.createProfile("Trident R2 LDO");
+
+      // A completed overnight plate, an in-flight job, and a failure — the
+      // three shapes get_farm_status / get_print_stats have to distinguish.
+      repo.insertPrintJob({
+        id: "job-done",
+        profileId: profile.id,
+        printerId: "prusa-xl",
+        material: "PLA Galaxy Black",
+        status: "completed",
+        filamentConsumedG: 214,
+        filename: "plate-01.gcode",
+        at: "2026-08-16T03:10:00.000Z",
+        completedAt: "2026-08-16T05:42:00.000Z",
+      });
+      repo.insertPrintJob({
+        id: "job-running",
+        profileId: profile.id,
+        printerId: "coreone-1",
+        material: "PETG Grey",
+        status: "sent",
+        at: "2026-08-16T06:00:00.000Z",
+      });
+      repo.insertPrintJob({
+        id: "job-failed",
+        profileId: profile.id,
+        printerId: "coreone-1",
+        material: "PETG Grey",
+        status: "failed",
+        filamentConsumedG: 12,
+        at: "2026-08-16T02:00:00.000Z",
+        completedAt: "2026-08-16T02:20:00.000Z",
+      });
+
+      const rows = repo.recentPrintJobs("2026-08-16T00:00:00.000Z", 100);
+      expect(rows).toHaveLength(3);
+      // Most recent first.
+      expect(rows.map((r) => r.id)).toEqual(["job-running", "job-done", "job-failed"]);
+
+      const done = rows.find((r) => r.id === "job-done")!;
+      expect(done.printerId).toBe("prusa-xl");
+      expect(done.material).toBe("PLA Galaxy Black");
+      expect(done.status).toBe("completed");
+      expect(done.filamentConsumedG).toBe(214);
+      expect(done.completedAt).toBe("2026-08-16T05:42:00.000Z");
+
+      // Completion rate + filament totals, the two aggregates get_print_stats reports.
+      const completed = rows.filter((r) => r.status === "completed").length;
+      const failed = rows.filter((r) => r.status === "failed").length;
+      expect(completed).toBe(1);
+      expect(failed).toBe(1);
+      expect(rows.reduce((sum, r) => sum + (r.filamentConsumedG ?? 0), 0)).toBe(226);
+
+      // Per-printer grouping, what get_farm_status keys off.
+      expect(new Set(rows.map((r) => r.printerId))).toEqual(new Set(["prusa-xl", "coreone-1"]));
+
+      // The time window must actually filter.
+      expect(repo.recentPrintJobs("2026-08-16T04:00:00.000Z", 100).map((r) => r.id)).toEqual([
+        "job-running",
+      ]);
+    } finally {
+      sqlite.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("records schema_version and re-migrates idempotently", () => {
@@ -144,20 +226,21 @@ describe("schema v9-v12 (SQLite)", () => {
   it("upgrades a pre-v12 print_jobs table in place (legacy database)", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-schema-v9-legacy-"));
     try {
-      // Simulate a v11-era database: print_jobs exists without the v12 columns.
-      // Only run the migrations up to (but excluding) the v12 ALTER block.
-      const v12Start = schemaMigrations.findIndex((s) =>
-        /ALTER TABLE print_jobs ADD COLUMN printer_id/.test(s),
+      // The v11 CREATE TABLE print_jobs statement, i.e. the shape a database
+      // created before v12 has on disk.
+      const v11CreatePrintJobs = schemaMigrations.find((s) =>
+        /CREATE TABLE IF NOT EXISTS print_jobs/.test(s),
       );
-      expect(v12Start).toBeGreaterThan(0);
+      expect(v11CreatePrintJobs).toBeDefined();
+      expect(v11CreatePrintJobs).not.toMatch(/printer_id/);
 
+      // Connect once so every ancillary table exists, then rebuild print_jobs
+      // in its v11 shape to simulate a legacy database.
       const legacy = new SqliteDatabase(dir);
-      // Connect normally first so all the ancillary tables exist, then drop the
-      // v12 columns by rebuilding print_jobs in its v11 shape.
       legacy.connect();
       const raw = rawSqlite(legacy);
       raw.exec("DROP TABLE print_jobs");
-      raw.exec(schemaMigrations[v12Start - 3]!); // v11 CREATE TABLE print_jobs
+      raw.exec(v11CreatePrintJobs!);
       expect(sqliteColumnNames(legacy, "print_jobs")).not.toContain("printer_id");
       legacy.close();
 
@@ -175,45 +258,63 @@ describe("schema v9-v12 (SQLite)", () => {
 });
 
 /**
- * Static parity check for the Postgres side. We cannot spin up a Postgres
- * server in unit tests, so instead assert that the DDL the migration runner
+ * Static parity check for the Postgres side. A Postgres server cannot be spun
+ * up in unit tests, so instead assert that the DDL the migration runner
  * executes covers every table and column the Drizzle schema declares. This is
  * exactly the check that would have caught print_jobs never being created on
  * saas installs.
  */
+const POSTGRES_DDL = (() => {
+  const initPath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "../../drizzle/postgres/0000_init.sql",
+  );
+  return [readFileSync(initPath, "utf8"), ...postgresPostInitMigrations].join("\n");
+})();
+
+function pgTables(): { name: string; columns: string[] }[] {
+  // schema-pg.ts also exports plain constants (DEFAULT_TENANT_ID, schemaVersionKey,
+  // currentSchemaVersion) alongside the tables, hence the unknown[] widening.
+  return (Object.values(pgSchema) as unknown[])
+    .filter((v): v is PgTable => v instanceof PgTable)
+    .map((t) => {
+      const cfg = getPgTableConfig(t);
+      return { name: cfg.name, columns: cfg.columns.map((c) => c.name) };
+    });
+}
+
+/** Column names inside the CREATE TABLE body for `table`, if it is created at all. */
+function pgCreatedColumns(table: string): string[] {
+  const body = new RegExp(
+    `CREATE TABLE(?:\\s+IF NOT EXISTS)?\\s+"?${table}"?\\s*\\(([\\s\\S]*?)\\n\\s*\\)`,
+    "i",
+  ).exec(POSTGRES_DDL)?.[1];
+  if (!body) return [];
+  return body
+    .split("\n")
+    .map((line) => /^\s*"?([a-z_]+)"?\s+[A-Za-z]/.exec(line)?.[1]?.toLowerCase())
+    .filter((c): c is string => Boolean(c));
+}
+
+/** Column names added to `table` via ALTER TABLE ... ADD COLUMN. */
+function pgAddedColumns(table: string): string[] {
+  return [
+    ...POSTGRES_DDL.matchAll(
+      new RegExp(
+        `ALTER TABLE\\s+"?${table}"?\\s+ADD COLUMN(?:\\s+IF NOT EXISTS)?\\s+"?([a-z_]+)"?`,
+        "gi",
+      ),
+    ),
+  ].map((m) => m[1]!.toLowerCase());
+}
+
 describe("schema v9-v12 (Postgres DDL parity)", () => {
-  const initSql = (() => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return "";
-  })();
-  void initSql;
-
-  /** All identifiers created by 0000_init.sql plus the post-init migration list. */
-  function ddlText(): string {
-    const initPath = join(
-      dirname(new URL(import.meta.url).pathname),
-      "../../drizzle/postgres/0000_init.sql",
-    );
-    // eslint-disable-next-line no-restricted-syntax
-    const init = readFileSyncSafe(initPath);
-    return [init, ...postgresPostInitMigrations].join("\n");
-  }
-
-  function readFileSyncSafe(path: string): string {
-    // Imported lazily to keep the top-level import list dialect-focused.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    return readFileSyncImpl(path);
-  }
-
   it("creates every table declared in schema-pg.ts", () => {
-    const sql = ddlText();
-    const declared = Object.values(pgSchema)
-      .filter((v): v is PgTable => v instanceof PgTable)
-      .map((t) => getPgTableConfig(t).name);
+    const declared = pgTables().map((t) => t.name);
     expect(declared.length).toBeGreaterThan(0);
 
     const created = new Set(
-      [...sql.matchAll(/CREATE TABLE(?:\s+IF NOT EXISTS)?\s+"?([a-z_]+)"?/gi)].map((m) =>
+      [...POSTGRES_DDL.matchAll(/CREATE TABLE(?:\s+IF NOT EXISTS)?\s+"?([a-z_]+)"?/gi)].map((m) =>
         m[1]!.toLowerCase(),
       ),
     );
@@ -222,63 +323,33 @@ describe("schema v9-v12 (Postgres DDL parity)", () => {
   });
 
   it("creates every column declared for the v9-v12 tables", () => {
-    const sql = ddlText();
+    const byName = new Map(pgTables().map((t) => [t.name, t.columns]));
     for (const table of V9_TO_V12_TABLES) {
-      const drizzleTable = Object.values(pgSchema)
-        .filter((v): v is PgTable => v instanceof PgTable)
-        .find((t) => getPgTableConfig(t).name === table);
-      expect(drizzleTable, `schema-pg.ts declares no ${table}`).toBeDefined();
+      const declaredCols = byName.get(table);
+      expect(declaredCols, `schema-pg.ts declares no ${table}`).toBeDefined();
 
-      const declaredCols = getPgTableConfig(drizzleTable!).columns.map((c) => c.name);
-      // Statement-level scan: the CREATE TABLE body plus any ADD COLUMN for it.
-      const createBody =
-        new RegExp(`CREATE TABLE(?:\\s+IF NOT EXISTS)?\\s+"?${table}"?\\s*\\(([\\s\\S]*?)\\n\\s*\\)`, "i").exec(
-          sql,
-        )?.[1] ?? "";
-      const added = [
-        ...sql.matchAll(
-          new RegExp(`ALTER TABLE\\s+"?${table}"?\\s+ADD COLUMN(?:\\s+IF NOT EXISTS)?\\s+"?([a-z_]+)"?`, "gi"),
-        ),
-      ].map((m) => m[1]!.toLowerCase());
-      const bodyCols = createBody
-        .split("\n")
-        .map((line) => /^\s*"?([a-z_]+)"?\s+[A-Z]/.exec(line)?.[1]?.toLowerCase())
-        .filter((c): c is string => Boolean(c));
-      const present = new Set([...bodyCols, ...added]);
-
-      const missing = declaredCols.filter((c) => !present.has(c.toLowerCase()));
+      const present = new Set([...pgCreatedColumns(table), ...pgAddedColumns(table)]);
+      const missing = declaredCols!.filter((c) => !present.has(c.toLowerCase()));
       expect(missing, `Postgres DDL for ${table} is missing: ${missing.join(", ")}`).toEqual([]);
     }
   });
 
   it("gives print_jobs the columns the farm-status/print-stats tools read", () => {
-    const sql = ddlText();
+    const present = new Set([...pgCreatedColumns("print_jobs"), ...pgAddedColumns("print_jobs")]);
     for (const col of PRINT_JOBS_REQUIRED_COLUMNS) {
-      const created = new RegExp(`^\\s*"?${col}"?\\s+[A-Z]`, "im").test(
-        new RegExp(`CREATE TABLE(?:\\s+IF NOT EXISTS)?\\s+"?print_jobs"?\\s*\\(([\\s\\S]*?)\\n\\s*\\)`, "i").exec(
-          sql,
-        )?.[1] ?? "",
-      );
-      const altered = new RegExp(
-        `ALTER TABLE\\s+"?print_jobs"?\\s+ADD COLUMN(?:\\s+IF NOT EXISTS)?\\s+"?${col}"?`,
-        "i",
-      ).test(sql);
-      expect(created || altered, `Postgres print_jobs never gets column ${col}`).toBe(true);
+      expect(present.has(col), `Postgres print_jobs never gets column ${col}`).toBe(true);
     }
   });
 
   it("keeps every post-init statement idempotent (safe to re-run on boot)", () => {
     for (const stmt of postgresPostInitMigrations) {
-      const isCreate = /^\s*CREATE\s+(TABLE|(UNIQUE\s+)?INDEX)/i.test(stmt);
-      const isAlter = /^\s*ALTER TABLE/i.test(stmt);
-      if (isCreate) {
-        expect(stmt, `not idempotent: ${stmt.slice(0, 60)}`).toMatch(/IF NOT EXISTS/i);
-      } else if (isAlter) {
-        expect(stmt, `not idempotent: ${stmt.slice(0, 60)}`).toMatch(
-          /ADD COLUMN IF NOT EXISTS/i,
-        );
+      const head = stmt.trim().slice(0, 60);
+      if (/^\s*CREATE\s+(TABLE|(UNIQUE\s+)?INDEX)/i.test(stmt)) {
+        expect(stmt, `not idempotent: ${head}`).toMatch(/IF NOT EXISTS/i);
+      } else if (/^\s*ALTER TABLE/i.test(stmt)) {
+        expect(stmt, `not idempotent: ${head}`).toMatch(/ADD COLUMN IF NOT EXISTS/i);
       } else {
-        throw new Error(`unexpected non-DDL post-init statement: ${stmt.slice(0, 60)}`);
+        throw new Error(`unexpected non-DDL post-init statement: ${head}`);
       }
     }
   });

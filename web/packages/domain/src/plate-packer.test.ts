@@ -3,7 +3,12 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { PartCopy } from "./checkoff-missing.js";
-import { classifyHeightBand, packCopiesOnPrinter } from "./plate-packer.js";
+import {
+  classifyHeightBand,
+  packCopiesGrouped,
+  packCopiesGroupedByHeightBand,
+  packCopiesOnPrinter,
+} from "./plate-packer.js";
 import type { PrinterMachine } from "./filament-assigner.js";
 import type { MergePart } from "./merge.js";
 
@@ -167,5 +172,213 @@ describe("classifyHeightBand", () => {
     expect(classifyHeightBand(NaN)).toBe("flat");
     expect(classifyHeightBand(Infinity)).toBe("very-tall");
     expect(classifyHeightBand(-Infinity)).toBe("flat");
+  });
+});
+
+function makePrinter(overrides: Partial<PrinterMachine> = {}): PrinterMachine {
+  return {
+    id: "p1",
+    name: "Test",
+    bed_width_mm: 200,
+    bed_depth_mm: 200,
+    bed_height_mm: 500,
+    margin_mm: 4,
+    max_filament_slots: 1,
+    loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+    ...overrides,
+  };
+}
+
+function makePartCopyAtHeight(
+  dir: string,
+  name: string,
+  heightMm: number,
+): PartCopy {
+  const stl = join(dir, name);
+  writeFileSync(stl, stlWithHeight(heightMm));
+  const part: MergePart = {
+    matchKey: name,
+    relativePath: name,
+    filename: name,
+    sourceLayer: "base:repo",
+    status: "included",
+    role: "primary",
+    quantityAuto: 1,
+    partSlug: name.replace(/\.stl$/, ""),
+    included: true,
+    quantityOverride: null,
+    notes: "",
+    geometrySame: null,
+    absolutePath: stl,
+  };
+  return { part, unit: 1 };
+}
+
+describe("packCopiesGroupedByHeightBand", () => {
+  it("groups parts into separate plates per height band, ordered flat to very-tall", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-band-group-"));
+    try {
+      const printer = makePrinter();
+      const copies: PartCopy[] = [
+        makePartCopyAtHeight(dir, "tall.stl", 200),
+        makePartCopyAtHeight(dir, "flat.stl", 5),
+        makePartCopyAtHeight(dir, "medium.stl", 100),
+      ];
+      const [plates, warnings] = packCopiesGroupedByHeightBand(printer, copies);
+      expect(warnings).toEqual([]);
+      // Each band gets its own plate since each band has exactly one part here.
+      expect(plates.length).toBe(3);
+      expect(plates.map((p) => p.group_label)).toEqual([
+        "Flat (<10mm)",
+        "Medium (50–150mm)",
+        "Tall (150–300mm)",
+      ]);
+      expect(plates[0].items[0].heightBand).toBe("flat");
+      expect(plates[1].items[0].heightBand).toBe("medium");
+      expect(plates[2].items[0].heightBand).toBe("tall");
+      // Plate indices renumbered sequentially across bands.
+      expect(plates.map((p) => p.index)).toEqual([1, 2, 3]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("packs multiple parts of the same band onto shared plate(s)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-band-samegroup-"));
+    try {
+      const printer = makePrinter();
+      const copies: PartCopy[] = [
+        makePartCopyAtHeight(dir, "a.stl", 20),
+        makePartCopyAtHeight(dir, "b.stl", 30),
+      ];
+      const [plates] = packCopiesGroupedByHeightBand(printer, copies);
+      expect(plates.length).toBe(1);
+      expect(plates[0].group_label).toBe("Short (10–50mm)");
+      expect(plates[0].items.length).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces STL load errors as warnings without dropping other bands", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-band-err-"));
+    try {
+      const printer = makePrinter();
+      const goodCopy = makePartCopyAtHeight(dir, "good.stl", 20);
+      const badPart: MergePart = {
+        matchKey: "missing.stl",
+        relativePath: "missing.stl",
+        filename: "missing.stl",
+        sourceLayer: "base:repo",
+        status: "included",
+        role: "primary",
+        quantityAuto: 1,
+        partSlug: "missing",
+        included: true,
+        quantityOverride: null,
+        notes: "",
+        geometrySame: null,
+        absolutePath: null,
+      };
+      const [plates, warnings] = packCopiesGroupedByHeightBand(printer, [
+        goodCopy,
+        { part: badPart, unit: 1 },
+      ]);
+      expect(warnings.some((w) => w.includes("Missing STL"))).toBe(true);
+      expect(plates.length).toBe(1);
+      expect(plates[0].items.length).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("packCopiesGrouped dispatch", () => {
+  it("dispatches to height-band grouping when strategy is height_band", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-dispatch-"));
+    try {
+      const printer = makePrinter();
+      const copies: PartCopy[] = [makePartCopyAtHeight(dir, "part.stl", 5)];
+      const [plates] = packCopiesGrouped("height_band", printer, copies);
+      expect(plates[0].group_label).toBe("Flat (<10mm)");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("dispatches to location grouping by default", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-dispatch-loc-"));
+    try {
+      const printer = makePrinter();
+      const copies: PartCopy[] = [makePartCopyAtHeight(dir, "part.stl", 5)];
+      const [plates] = packCopiesGrouped("location", printer, copies);
+      // Location grouping labels by filament/repo/folder, not by height band.
+      expect(plates[0].group_label).not.toBe("Flat (<10mm)");
+      expect(plates[0].group_label).toContain("repo");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("plate height variance warning", () => {
+  it("warns when a plate's height variance exceeds 2x the shortest part", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-variance-"));
+    try {
+      const printer = makePrinter();
+      // shortest = 10mm, tallest = 100mm -> variance 90mm > 2*10=20mm -> should warn.
+      const copies: PartCopy[] = [
+        makePartCopyAtHeight(dir, "short.stl", 10),
+        makePartCopyAtHeight(dir, "tall.stl", 100),
+      ];
+      const [, warnings] = packCopiesOnPrinter(printer, copies);
+      expect(warnings.some((w) => w.includes("height variance"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not warn when height variance is within 2x the shortest part", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-novariance-"));
+    try {
+      const printer = makePrinter();
+      // shortest = 20mm, tallest = 30mm -> variance 10mm <= 2*20=40mm -> no warning.
+      const copies: PartCopy[] = [
+        makePartCopyAtHeight(dir, "a.stl", 20),
+        makePartCopyAtHeight(dir, "b.stl", 30),
+      ];
+      const [, warnings] = packCopiesOnPrinter(printer, copies);
+      expect(warnings.some((w) => w.includes("height variance"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not warn for a single-part plate (no variance possible)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-singlevariance-"));
+    try {
+      const printer = makePrinter();
+      const copies: PartCopy[] = [makePartCopyAtHeight(dir, "solo.stl", 200)];
+      const [, warnings] = packCopiesOnPrinter(printer, copies);
+      expect(warnings.some((w) => w.includes("height variance"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("warns per-plate for every active grouping strategy, including height_band", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-variance-strategy-"));
+    try {
+      const printer = makePrinter();
+      // Both fall in the "short" band (10-50mm) but still vary > 2x within that plate.
+      const copies: PartCopy[] = [
+        makePartCopyAtHeight(dir, "a.stl", 10),
+        makePartCopyAtHeight(dir, "b.stl", 45),
+      ];
+      const [, warnings] = packCopiesGroupedByHeightBand(printer, copies);
+      expect(warnings.some((w) => w.includes("height variance"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
