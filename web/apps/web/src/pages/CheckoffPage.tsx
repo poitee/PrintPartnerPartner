@@ -57,6 +57,7 @@ import {
   type ReviewPart,
   type UnattributedPrint,
 } from "../api/engine";
+import { useBuildTrackingSettingsQuery } from "../queries/buildTracking";
 import { exportRoute, partsRoute, planRoute } from "../lib/routes";
 import { groupCheckoffParts } from "../lib/checkoffGroups";
 import {
@@ -192,10 +193,13 @@ export default function CheckoffPage() {
     revision,
     loadedRevision,
     toggleUnit,
+    toggleAssembled,
     busyPartId,
   } = usePlanWorkspace();
   const recomputeJob = useJobRunner("recompute");
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
+  const { data: buildTrackingSettings } = useBuildTrackingSettingsQuery(Boolean(health?.ok));
+  const assemblyTrackingEnabled = buildTrackingSettings?.assembly_tracking ?? false;
 
   // Re-fetch when the service worker flushes its offline checkoff queue
   useSyncComplete(useCallback(() => {
@@ -653,6 +657,14 @@ export default function CheckoffPage() {
     [toggleUnit],
   );
 
+  const onToggleAssembled = useCallback(
+    (part: ReviewPart, unitIndex: number) => {
+      const next = !(part.assembled_units?.[unitIndex] ?? false);
+      void toggleAssembled(part.id, unitIndex, next);
+    },
+    [toggleAssembled],
+  );
+
   const onIncrement = useCallback(
     (part: ReviewPart) => {
       const idx = nextUnitToComplete(part.print_units);
@@ -948,9 +960,11 @@ export default function CheckoffPage() {
             <PhaseProgressView
               phases={phaseProgress}
               busy={toggleBusy}
+              assemblyTrackingEnabled={assemblyTrackingEnabled}
               onIncrement={onIncrement}
               onDecrement={onDecrement}
               onPreview={setPreviewPart}
+              onToggleAssembled={onToggleAssembled}
               printingPartIds={printingPartIds}
               awaitingPartIds={awaitingPartIds}
             />
@@ -999,10 +1013,12 @@ export default function CheckoffPage() {
                         printingOn={printingPartIds.get(part.id)}
                         awaitingVerify={awaitingPartIds.get(part.id)}
                         suggestedPrinter={suggestedPartIds.get(part.id)}
+                        assemblyTrackingEnabled={assemblyTrackingEnabled}
                         onToggleUnit={onToggleUnit}
                         onIncrement={onIncrement}
                         onDecrement={onDecrement}
                         onPreview={setPreviewPart}
+                        onToggleAssembled={onToggleAssembled}
                         onClaim={(printId) => {
                           if (selectedProfileId == null) return;
                           void claimUnattributedPrint(printId, selectedProfileId)

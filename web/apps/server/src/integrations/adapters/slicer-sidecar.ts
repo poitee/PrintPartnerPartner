@@ -6,9 +6,22 @@
  * plus resolved profile JSON, the sidecar invokes the CLI, and returns the
  * gcode + thumbnail.
  *
+ * Two wire protocols are supported:
+ *
+ *  - v1 (preferred, slicer_sidecar service): POST <url>/v1/slice with fields
+ *    file / slicer / resolved_flat_configs / timeout_s, answering with
+ *    {ok, meta, gcode_filename, gcode_base64, thumbnail_filename, thumbnail_base64}
+ *    or an {ok:false, error:{code,message,details}} envelope. This is the one
+ *    the per-printer routing flow uses because it carries the slicer selector
+ *    and PP's resolved_flat_configs verbatim.
+ *  - legacy (slicer-sidecar/sidecar.py): POST <url>/slice with
+ *    model / machine_config / process_config / filament_configs, answering with
+ *    {gcode, thumbnail, filename} base64 JSON.
+ *
  * Config fields:
  *   url      - Base URL of the sidecar HTTP service, e.g. http://localhost:2814
  *   slicer   - Which CLI the sidecar wraps: "orca" | "prusa" | "bambu"
+ *   api      - Optional protocol pin: "v1" | "legacy" (default: try v1, fall back)
  */
 
 import type { IntegrationConfig, IntegrationTestResult } from "@print-partner/contracts";
@@ -17,14 +30,31 @@ import { assertSafeOutboundUrl } from "../../lib/outbound-url.js";
 
 export type SlicerKind = "orca" | "prusa" | "bambu";
 
+export const SLICER_KINDS: readonly SlicerKind[] = ["orca", "prusa", "bambu"] as const;
+
+export function isSlicerKind(value: unknown): value is SlicerKind {
+  return typeof value === "string" && (SLICER_KINDS as readonly string[]).includes(value);
+}
+
 export type SliceRequest = {
   /** Raw bytes of the plate 3MF file. */
   model: Uint8Array;
-  /** OrcaSlicer: machine.json content */
+  /** Filename to advertise for the uploaded plate (defaults to plate.3mf). */
+  filename?: string;
+  /** Which slicer the sidecar should run (v1 protocol). */
+  slicer?: SlicerKind;
+  /**
+   * PP's inheritance-resolved flat config docs keyed by role, e.g.
+   * {machine: {...}, process: {...}, filament: {...}} (v1 protocol).
+   */
+  resolved_flat_configs?: Record<string, Record<string, unknown>>;
+  /** Slice timeout in seconds (v1 protocol). Defaults to 300. */
+  timeout_s?: number;
+  /** Legacy protocol: machine.json content */
   machine_config?: Record<string, unknown>;
-  /** OrcaSlicer: process.json content */
+  /** Legacy protocol: process.json content */
   process_config?: Record<string, unknown>;
-  /** OrcaSlicer: array of filament config objects */
+  /** Legacy protocol: array of filament config objects */
   filament_configs?: Array<Record<string, unknown>>;
 };
 
@@ -35,68 +65,39 @@ export type SliceResult = {
   thumbnail: Uint8Array;
   /** Filename suggested by the sidecar (optional). */
   filename?: string;
+  /** Thumbnail filename suggested by the sidecar, e.g. plate_1.png (optional). */
+  thumbnail_filename?: string;
+  /** Which protocol answered — useful in job metadata. */
+  protocol?: "v1" | "legacy";
+  /** Non-fatal notes reported by the sidecar. */
+  warnings?: string[];
 };
+
+/** Structured sidecar failure so callers can surface code + message in the UI. */
+export class SlicerSidecarError extends Error {
+  readonly code: string;
+  readonly status: number | null;
+  readonly details: Record<string, unknown>;
+
+  constructor(
+    message: string,
+    options: { code?: string; status?: number | null; details?: Record<string, unknown> } = {},
+  ) {
+    super(message);
+    this.name = "SlicerSidecarError";
+    this.code = options.code ?? "sidecar_error";
+    this.status = options.status ?? null;
+    this.details = options.details ?? {};
+  }
+}
 
 function normUrl(raw: unknown): string | null {
   if (typeof raw !== "string" || !raw.trim()) return null;
   return raw.trim().replace(/\/+$/, "");
 }
 
-export async function slicerSidecarSlice(
-  config: IntegrationConfig,
-  req: SliceRequest,
-): Promise<SliceResult> {
-  const base = normUrl(config.url);
-  if (!base) throw new Error("Slicer sidecar URL not configured");
-  const endpoint = `${base}/slice`;
-  await assertSafeOutboundUrl(endpoint, { allowPrivate: true });
-
-  // Build multipart form data
-  const form = new FormData();
-  form.append("model", new Blob([req.model as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" }), "plate.3mf");
-  if (req.machine_config) {
-    form.append("machine_config", JSON.stringify(req.machine_config));
-  }
-  if (req.process_config) {
-    form.append("process_config", JSON.stringify(req.process_config));
-  }
-  if (req.filament_configs) {
-    form.append("filament_configs", JSON.stringify(req.filament_configs));
-  }
-
-  const res = await fetch(endpoint, {
-    method: "POST",
-    body: form,
-    signal: AbortSignal.timeout(300_000), // 5 min timeout for slicing
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Slicer sidecar returned HTTP ${res.status}: ${text.slice(0, 200)}`);
-  }
-
-  const contentType = res.headers.get("content-type") ?? "";
-
-  // Sidecar may return a ZIP with gcode + thumbnail, or JSON with base64 fields.
-  if (contentType.includes("application/zip") || contentType.includes("application/octet-stream")) {
-    const buf = new Uint8Array(await res.arrayBuffer());
-    return extractSliceZip(buf);
-  }
-
-  if (contentType.includes("application/json")) {
-    const json = (await res.json()) as {
-      gcode?: string;
-      thumbnail?: string;
-      filename?: string;
-    };
-    const gcode = json.gcode ? base64ToBytes(json.gcode) : new Uint8Array(0);
-    const thumbnail = json.thumbnail ? base64ToBytes(json.thumbnail) : new Uint8Array(0);
-    return { gcode, thumbnail, filename: json.filename };
-  }
-
-  // Fall back: treat entire body as raw gcode
-  const gcode = new Uint8Array(await res.arrayBuffer());
-  return { gcode, thumbnail: new Uint8Array(0) };
+function toBlob(bytes: Uint8Array): Blob {
+  return new Blob([bytes as Uint8Array<ArrayBuffer>], { type: "application/octet-stream" });
 }
 
 function base64ToBytes(b64: string): Uint8Array {
@@ -104,6 +105,165 @@ function base64ToBytes(b64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+/** Read an {ok:false, error:{...}} envelope, tolerating non-JSON bodies. */
+async function sidecarErrorFromResponse(res: Response): Promise<SlicerSidecarError> {
+  const text = await res.text().catch(() => "");
+  try {
+    const body = JSON.parse(text) as {
+      error?: { code?: string; message?: string; details?: Record<string, unknown> };
+    };
+    if (body?.error?.message) {
+      return new SlicerSidecarError(body.error.message, {
+        code: body.error.code ?? "sidecar_error",
+        status: res.status,
+        details: body.error.details ?? {},
+      });
+    }
+  } catch {
+    /* not a JSON envelope — fall through to the raw-text form */
+  }
+  return new SlicerSidecarError(
+    `Slicer sidecar returned HTTP ${res.status}: ${text.slice(0, 200)}`,
+    { code: "http_error", status: res.status },
+  );
+}
+
+/** POST the v1 multipart contract (`/v1/slice`). */
+async function sliceV1(base: string, req: SliceRequest): Promise<SliceResult> {
+  const endpoint = `${base}/v1/slice`;
+  await assertSafeOutboundUrl(endpoint, { allowPrivate: true });
+
+  const timeoutS = req.timeout_s ?? 300;
+  const form = new FormData();
+  form.append("file", toBlob(req.model), req.filename ?? "plate.3mf");
+  form.append("slicer", req.slicer ?? "orca");
+  form.append("resolved_flat_configs", JSON.stringify(req.resolved_flat_configs ?? {}));
+  form.append("timeout_s", String(timeoutS));
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    body: form,
+    // Give the HTTP call slack over the slicer's own budget so a slicer
+    // timeout comes back as a structured 504 rather than an aborted socket.
+    signal: AbortSignal.timeout(Math.round((timeoutS + 30) * 1000)),
+  });
+
+  if (!res.ok) throw await sidecarErrorFromResponse(res);
+
+  const json = (await res.json()) as {
+    ok?: boolean;
+    meta?: { warnings?: string[] };
+    gcode_base64?: string;
+    gcode_filename?: string;
+    thumbnail_base64?: string;
+    thumbnail_filename?: string;
+  };
+  if (json.ok === false) {
+    throw new SlicerSidecarError("Slicer sidecar reported failure", {
+      code: "sidecar_error",
+      status: res.status,
+    });
+  }
+  const gcode = json.gcode_base64 ? base64ToBytes(json.gcode_base64) : new Uint8Array(0);
+  if (!gcode.length) {
+    throw new SlicerSidecarError("Slicer sidecar returned no gcode", {
+      code: "empty_gcode",
+      status: res.status,
+    });
+  }
+  return {
+    gcode,
+    thumbnail: json.thumbnail_base64 ? base64ToBytes(json.thumbnail_base64) : new Uint8Array(0),
+    ...(json.gcode_filename ? { filename: json.gcode_filename } : {}),
+    ...(json.thumbnail_filename ? { thumbnail_filename: json.thumbnail_filename } : {}),
+    protocol: "v1",
+    warnings: json.meta?.warnings ?? [],
+  };
+}
+
+/** POST the legacy multipart contract (`/slice`). */
+async function sliceLegacy(base: string, req: SliceRequest): Promise<SliceResult> {
+  const endpoint = `${base}/slice`;
+  await assertSafeOutboundUrl(endpoint, { allowPrivate: true });
+
+  // Map the v1-shaped settings onto the legacy machine/process/filament split
+  // so a caller only has to build resolved_flat_configs once.
+  const resolved = req.resolved_flat_configs ?? {};
+  const machine = req.machine_config ?? resolved.machine;
+  const process = req.process_config ?? resolved.process;
+  const filaments =
+    req.filament_configs ??
+    Object.entries(resolved)
+      .filter(([key]) => key.toLowerCase().includes("filament"))
+      .map(([, value]) => value);
+
+  const form = new FormData();
+  form.append("model", toBlob(req.model), req.filename ?? "plate.3mf");
+  if (machine) form.append("machine_config", JSON.stringify(machine));
+  if (process) form.append("process_config", JSON.stringify(process));
+  if (filaments?.length) form.append("filament_configs", JSON.stringify(filaments));
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    body: form,
+    signal: AbortSignal.timeout(Math.round(((req.timeout_s ?? 300) + 30) * 1000)),
+  });
+
+  if (!res.ok) throw await sidecarErrorFromResponse(res);
+
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("application/zip") || contentType.includes("application/octet-stream")) {
+    return { ...extractSliceZip(new Uint8Array(await res.arrayBuffer())), protocol: "legacy" };
+  }
+  if (contentType.includes("application/json")) {
+    const json = (await res.json()) as {
+      gcode?: string;
+      thumbnail?: string;
+      filename?: string;
+    };
+    return {
+      gcode: json.gcode ? base64ToBytes(json.gcode) : new Uint8Array(0),
+      thumbnail: json.thumbnail ? base64ToBytes(json.thumbnail) : new Uint8Array(0),
+      ...(json.filename ? { filename: json.filename } : {}),
+      protocol: "legacy",
+    };
+  }
+  // Fall back: treat entire body as raw gcode
+  return {
+    gcode: new Uint8Array(await res.arrayBuffer()),
+    thumbnail: new Uint8Array(0),
+    protocol: "legacy",
+  };
+}
+
+/**
+ * Slice a plate through the sidecar.
+ *
+ * Protocol selection: `config.api` pins it explicitly, otherwise v1 is tried
+ * first and a 404/405 (endpoint absent) transparently retries the legacy
+ * `/slice` route so existing sidecar deployments keep working.
+ */
+export async function slicerSidecarSlice(
+  config: IntegrationConfig,
+  req: SliceRequest,
+): Promise<SliceResult> {
+  const base = normUrl(config.url);
+  if (!base) throw new SlicerSidecarError("Slicer sidecar URL not configured", { code: "no_url" });
+
+  const pinned = typeof config.api === "string" ? config.api.toLowerCase() : null;
+  if (pinned === "legacy") return sliceLegacy(base, req);
+  if (pinned === "v1") return sliceV1(base, req);
+
+  try {
+    return await sliceV1(base, req);
+  } catch (e) {
+    const endpointMissing =
+      e instanceof SlicerSidecarError && (e.status === 404 || e.status === 405);
+    if (!endpointMissing) throw e;
+    return sliceLegacy(base, req);
+  }
 }
 
 /**
@@ -123,15 +283,17 @@ function extractSliceZip(buf: Uint8Array): SliceResult {
     const files = unzipSync(buf);
     let gcode = new Uint8Array(0);
     let thumbnail = new Uint8Array(0);
+    let thumbnailName: string | undefined;
     for (const [name, data] of Object.entries(files)) {
       if (name.endsWith(".gcode") || name.endsWith(".bgcode")) {
         if (!gcode.length || data.length > gcode.length) gcode = data as Uint8Array<ArrayBuffer>;
       }
       if (/plate_\d+\.png$/i.test(name)) {
         thumbnail = data as Uint8Array<ArrayBuffer>;
+        thumbnailName = name.split("/").pop();
       }
     }
-    return { gcode, thumbnail };
+    return { gcode, thumbnail, ...(thumbnailName ? { thumbnail_filename: thumbnailName } : {}) };
   } catch {
     // Couldn't unzip — return the whole buffer as gcode (best effort).
     return { gcode: buf, thumbnail: new Uint8Array(0) };
@@ -144,23 +306,28 @@ export const slicerSidecarAdapter: IntegrationAdapter = {
   async testConnection(config: IntegrationConfig): Promise<IntegrationTestResult> {
     const base = normUrl(config.url);
     if (!base) return { ok: false, message: "url is required (e.g. http://localhost:2814)" };
-    const healthUrl = `${base}/health`;
-    try {
-      await assertSafeOutboundUrl(healthUrl, { allowPrivate: true });
-      const res = await fetch(healthUrl, {
-        method: "GET",
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) {
-        return { ok: false, message: `Sidecar returned HTTP ${res.status}` };
+    const slicer = typeof config.slicer === "string" ? config.slicer : "orca";
+
+    // v1 exposes /healthz, the legacy sidecar exposes /health. Probe both so a
+    // correctly configured service of either generation tests green.
+    const attempts: Array<{ path: string; protocol: string }> = [
+      { path: "/healthz", protocol: "v1" },
+      { path: "/health", protocol: "legacy" },
+    ];
+    let lastMessage = "Sidecar unreachable";
+    for (const attempt of attempts) {
+      const healthUrl = `${base}${attempt.path}`;
+      try {
+        await assertSafeOutboundUrl(healthUrl, { allowPrivate: true });
+        const res = await fetch(healthUrl, { method: "GET", signal: AbortSignal.timeout(10_000) });
+        if (res.ok) {
+          return { ok: true, message: `Slicer sidecar reachable (${slicer}, ${attempt.protocol})` };
+        }
+        lastMessage = `Sidecar returned HTTP ${res.status}`;
+      } catch (e) {
+        lastMessage = e instanceof Error ? e.message : String(e);
       }
-      const slicer = typeof config.slicer === "string" ? config.slicer : "orca";
-      return { ok: true, message: `Slicer sidecar reachable (${slicer})` };
-    } catch (e) {
-      return {
-        ok: false,
-        message: e instanceof Error ? e.message : String(e),
-      };
     }
+    return { ok: false, message: lastMessage };
   },
 };

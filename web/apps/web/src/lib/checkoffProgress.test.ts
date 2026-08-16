@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyStackToggle,
+  assembledEligibleUnitIndices,
   checkoffUnitTotals,
   formatCheckoffSummary,
   formatPrintedUnitsLine,
@@ -96,5 +97,19 @@ describe("unit steppers", () => {
     expect(nextUnitToComplete([true, true])).toBe(-1);
     expect(lastCompletedUnit([true, true, false])).toBe(1);
     expect(lastCompletedUnit([false, false])).toBe(-1);
+  });
+});
+
+describe("assembledEligibleUnitIndices", () => {
+  it("returns only completed unit indices", () => {
+    expect(assembledEligibleUnitIndices([true, false, true])).toEqual([0, 2]);
+  });
+
+  it("returns empty array when nothing is printed yet", () => {
+    expect(assembledEligibleUnitIndices([false, false])).toEqual([]);
+  });
+
+  it("returns all indices when fully printed", () => {
+    expect(assembledEligibleUnitIndices([true, true])).toEqual([0, 1]);
   });
 });

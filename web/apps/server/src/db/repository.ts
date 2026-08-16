@@ -15,6 +15,7 @@ import {
   ensureProgressRows,
   getPrintUnits,
   getAssembledUnits,
+  setAssembledUnit,
   type MergePart,
   type ProgressRow,
   type StlNamingProfileDict,
@@ -51,7 +52,7 @@ import type { FilamentResolveContext } from "../services/filament-resolve.js";
 import { formatSpoolSummaryBadge } from "../integrations/spoolman-client.js";
 import { REMOTE_CHECKED_AT_KEY, REMOTE_UPDATE_STATUS_KEY } from "../services/source-update-check.js";
 import type { PartRow, ProfileSummary, SourceSummary, PlanDecision, PlanSnapshot, PlanSnapshotSummary, PlanSnapshotSource, PlanDecisionActor, PlanDecisionKind } from "@print-partner/contracts";
-import { and, asc, count, eq, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ne, sql } from "drizzle-orm";
 import { join, resolve, sep, basename } from "node:path";
 import type { DrizzleDb } from "./client.js";
 import {
@@ -86,6 +87,10 @@ export type SchemaTables = Pick<
   | "printJobParts"
   | "printerTelemetry"
   | "appEvents"
+  | "printerProfiles"
+  | "processProfiles"
+  | "filamentProfiles"
+  | "printerNameMap"
 >;
 
 export type ProjectRow = typeof defaultSchema.projects.$inferSelect;
@@ -98,6 +103,14 @@ export type PlanDecisionRow = typeof defaultSchema.planDecisions.$inferSelect;
 export type PlanSnapshotRow = typeof defaultSchema.planSnapshots.$inferSelect;
 export type PrintJobRow = typeof defaultSchema.printJobs.$inferSelect;
 export type PrintJobPartRow = typeof defaultSchema.printJobParts.$inferSelect;
+
+/** Slim slicer-profile projection used by the auto-slice routing layer. */
+export type SlicerProfileRow = {
+  id: number;
+  name: string;
+  slicerFormat: string;
+  resolvedFlatConfig: string | null;
+};
 
 export type SourceDocSummary = {
   id: number;
@@ -258,6 +271,67 @@ export class AppRepository {
       return this.db.transaction(fn);
     }
     return runSerializedSettingsMutation(fn);
+  }
+
+  // -------------------------------------------------------------------------
+  // Slicer profiles (printer / process / filament) — imported slicer configs.
+  // The `resolved_flat_config` column carries the inheritance-resolved flat
+  // key/value document the slicer sidecar needs as its settings file.
+  // -------------------------------------------------------------------------
+
+  listSlicerPrinterProfiles(): SlicerProfileRow[] {
+    return this.db
+      .select({
+        id: this.schema.printerProfiles.id,
+        name: this.schema.printerProfiles.name,
+        slicerFormat: this.schema.printerProfiles.slicerFormat,
+        resolvedFlatConfig: this.schema.printerProfiles.resolvedFlatConfig,
+      })
+      .from(this.schema.printerProfiles)
+      .where(eq(this.schema.printerProfiles.tenantId, this.tenantId))
+      .orderBy(asc(this.schema.printerProfiles.name))
+      .all();
+  }
+
+  listSlicerProcessProfiles(): SlicerProfileRow[] {
+    return this.db
+      .select({
+        id: this.schema.processProfiles.id,
+        name: this.schema.processProfiles.name,
+        slicerFormat: this.schema.processProfiles.slicerFormat,
+        resolvedFlatConfig: this.schema.processProfiles.resolvedFlatConfig,
+      })
+      .from(this.schema.processProfiles)
+      .where(eq(this.schema.processProfiles.tenantId, this.tenantId))
+      .orderBy(asc(this.schema.processProfiles.name))
+      .all();
+  }
+
+  listSlicerFilamentProfiles(): SlicerProfileRow[] {
+    return this.db
+      .select({
+        id: this.schema.filamentProfiles.id,
+        name: this.schema.filamentProfiles.name,
+        // filament_profiles has no slicer_format column; report the material
+        // type instead so callers have a non-null discriminator to log.
+        slicerFormat: this.schema.filamentProfiles.materialType,
+        resolvedFlatConfig: this.schema.filamentProfiles.resolvedFlatConfig,
+      })
+      .from(this.schema.filamentProfiles)
+      .where(eq(this.schema.filamentProfiles.tenantId, this.tenantId))
+      .orderBy(asc(this.schema.filamentProfiles.name))
+      .all();
+  }
+
+  /** Global slicer-printer-name -> PP fleet printer id map (all tenants). */
+  listPrinterNameMap(): Array<{ slicerName: string; ppFleetId: string }> {
+    return this.db
+      .select({
+        slicerName: this.schema.printerNameMap.slicerName,
+        ppFleetId: this.schema.printerNameMap.ppFleetId,
+      })
+      .from(this.schema.printerNameMap)
+      .all();
   }
 
   getGlobalNaming(): StlNamingProfileDict {
@@ -1278,9 +1352,10 @@ export class AppRepository {
         partId,
         unitIndex: row.unitIndex,
         completed: row.completed,
+        // Always persist explicitly so a row that was toggled back to
+        // not-assembled actually clears the column instead of keeping the old value.
+        assembled: (row as Record<string, unknown>).assembled === true,
       };
-      const rowAny = row as Record<string, unknown>;
-      if (rowAny.assembled !== undefined) vals.assembled = Boolean(rowAny.assembled);
       this.db
         .insert(this.schema.printProgress)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1466,11 +1541,12 @@ export class AppRepository {
     const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
     if (!part) throw new Error("Part not found");
     const qty = Math.max(1, part.quantityEffective);
-    if (unitIndex >= qty) throw new Error("unit_index out of range");
+    if (unitIndex < 0 || unitIndex >= qty) throw new Error("unit_index out of range");
     this.ensureProgressForPart(part);
     const rows = this.progressRowsForPart(partId);
-    const updated = rows.map((r) =>
-      r.unitIndex === unitIndex ? { ...r, assembled } : r,
+    // Domain owns the rule that an unprinted unit can't be assembled.
+    const updated = setAssembledUnit(rows, partId, qty, unitIndex, assembled).filter(
+      (r) => r.partId === partId,
     );
     this.saveProgressRows(partId, updated);
     const assembledUnits = getAssembledUnits(updated, qty);
@@ -1478,6 +1554,21 @@ export class AppRepository {
     return {
       part_id: partId,
       assembled_count: assembledCount,
+      assembled_units: assembledUnits,
+    };
+  }
+
+  /** Read accessor: the assembled state of every unit of a single part. */
+  getPartAssembled(partId: number) {
+    const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
+    if (!part) throw new Error("Part not found");
+    const qty = Math.max(1, part.quantityEffective);
+    this.ensureProgressForPart(part);
+    const rows = this.progressRowsForPart(partId);
+    const assembledUnits = getAssembledUnits(rows, qty);
+    return {
+      part_id: partId,
+      assembled_count: assembledUnits.filter(Boolean).length,
       assembled_units: assembledUnits,
     };
   }
@@ -2438,6 +2529,23 @@ export class AppRepository {
       .get();
     if (!inserted) throw new Error("Failed to insert print job");
     return inserted;
+  }
+
+  /**
+   * Print jobs at/after `sinceIso`, most recent first, capped at `limit`.
+   * Used by get_print_stats (MCP tool) and the Discord morning digest route.
+   * Built on Drizzle's query builder (not a raw `.prepare()` call) so it works
+   * against both the sync better-sqlite3 driver and the async-wrapped Postgres
+   * driver behind `this.db`.
+   */
+  recentPrintJobs(sinceIso: string, limit = 100): PrintJobRow[] {
+    return this.db
+      .select()
+      .from(this.schema.printJobs)
+      .where(and(eq(this.schema.printJobs.tenantId, this.tenantId), gte(this.schema.printJobs.at, sinceIso)))
+      .orderBy(desc(this.schema.printJobs.at))
+      .limit(limit)
+      .all();
   }
 
   insertPrintJobParts(parts: Array<{

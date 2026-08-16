@@ -15,9 +15,13 @@ type Props = {
   awaitingVerify?: string;
   /** Suggested printer from an unattributed print candidate. */
   suggestedPrinter?: { hostName: string; printId: string; filename: string };
+  /** Global "Enable assembly tracking" setting (Settings > Build Tracking). */
+  assemblyTrackingEnabled?: boolean;
   onToggleUnit: (part: ReviewPart, unitIndex: number) => void;
   onPreview: (part: ReviewPart) => void;
   onClaim?: (printId: string) => void;
+  /** Called when the user toggles the Assembled switch for a completed unit. */
+  onToggleAssembled?: (part: ReviewPart, unitIndex: number) => void;
   dragHandle?: {
     attributes: DraggableAttributes;
     listeners: DraggableSyntheticListeners;
@@ -32,9 +36,11 @@ export default function CheckoffMobilePartCard({
   printingOn,
   awaitingVerify,
   suggestedPrinter,
+  assemblyTrackingEnabled,
   onToggleUnit,
   onPreview,
   onClaim,
+  onToggleAssembled,
   dragHandle,
 }: Props) {
   return (
@@ -45,7 +51,9 @@ export default function CheckoffMobilePartCard({
       printingOn={printingOn}
       awaitingVerify={awaitingVerify}
       suggestedPrinter={suggestedPrinter}
+      assemblyTrackingEnabled={assemblyTrackingEnabled}
       onClaim={onClaim}
+      onToggleAssembled={onToggleAssembled}
       dragHandle={dragHandle}
       onIncrement={(p) => {
         const idx = nextUnitToComplete(p.print_units);

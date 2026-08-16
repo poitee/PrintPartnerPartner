@@ -12,12 +12,22 @@ function planKey(profileId: number): string {
 export function loadKitPrintPlan(repo: AppRepository, profileId: number): KitPrintPlan {
   const raw = repo.getSetting(planKey(profileId));
   if (!raw) {
-    return { enabled_printer_ids: [], plate_layout: null, group_assignments: {} };
+    return {
+      enabled_printer_ids: [],
+      plate_layout: null,
+      group_assignments: {},
+      grouping_strategy: "location",
+    };
   }
   try {
     return kitPrintPlanFromDict(JSON.parse(raw) as Record<string, unknown>);
   } catch {
-    return { enabled_printer_ids: [], plate_layout: null, group_assignments: {} };
+    return {
+      enabled_printer_ids: [],
+      plate_layout: null,
+      group_assignments: {},
+      grouping_strategy: "location",
+    };
   }
 }
 

@@ -23,8 +23,11 @@ export function dedupeProgressRows(rows: ProgressRow[]): ProgressRow[] {
       continue;
     }
     const completed = group.some((r) => r.completed);
+    // Assembly tracking: like `completed`, assembled is OR-merged across duplicate
+    // rows for the same unit so a dedupe pass never silently drops the flag.
+    const assembled = group.some((r) => r.assembled === true);
     const keep = group.reduce((a, b) => ((a.id ?? 0) > (b.id ?? 0) ? a : b));
-    out.push({ ...keep, completed });
+    out.push({ ...keep, completed, assembled });
   }
   return out;
 }
@@ -56,10 +59,37 @@ export function ensureProgressRows(rows: ProgressRow[], partId: number, qty: num
   for (let unitIndex = 0; unitIndex < n; unitIndex++) {
     const existing = byIndex.get(unitIndex);
     out.push(
-      existing ?? { partId, unitIndex, completed: false },
+      // New units are explicitly not-assembled rather than leaving the field
+      // undefined, so a freshly materialised row round-trips as assembled=false.
+      existing ?? { partId, unitIndex, completed: false, assembled: false },
     );
   }
   return out;
+}
+
+/**
+ * Set the assembled flag on a single unit of a part.
+ *
+ * A unit that is not printed cannot be installed into the build, so setting
+ * assembled=true on an incomplete unit is a no-op. Returns a new row array.
+ */
+export function setAssembledUnit(
+  rows: ProgressRow[],
+  partId: number,
+  qty: number,
+  unitIndex: number,
+  assembled: boolean,
+): ProgressRow[] {
+  const n = Math.max(1, qty);
+  if (unitIndex >= n || unitIndex < 0) return rows;
+  const others = rows.filter((r) => r.partId !== partId);
+  const ensured = ensureProgressRows(rows, partId, n);
+  const updated = ensured.map((r) => {
+    if (r.unitIndex !== unitIndex) return r;
+    if (assembled && !r.completed) return { ...r, assembled: false };
+    return { ...r, assembled };
+  });
+  return [...others, ...updated];
 }
 
 export function setPrintedUnitCount(rows: ProgressRow[], partId: number, qty: number, completedCount: number): ProgressRow[] {
@@ -67,10 +97,13 @@ export function setPrintedUnitCount(rows: ProgressRow[], partId: number, qty: nu
   const count = Math.max(0, Math.min(completedCount, n));
   const ensured = ensureProgressRows(rows, partId, n);
   const others = rows.filter((r) => r.partId !== partId);
-  const updated = ensured.map((r) => ({
-    ...r,
-    completed: r.unitIndex < count,
-  }));
+  const updated = ensured.map((r) => {
+    const completed = r.unitIndex < count;
+    // Un-printing a unit also un-assembles it: a part that is no longer printed
+    // cannot be installed in the build. Without this the stale flag would
+    // resurrect the moment the unit is re-checked.
+    return { ...r, completed, assembled: completed ? r.assembled === true : false };
+  });
   return [...others, ...updated];
 }
 

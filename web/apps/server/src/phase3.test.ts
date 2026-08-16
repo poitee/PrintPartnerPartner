@@ -153,6 +153,30 @@ describe("Phase 3 APIs", () => {
     });
     expect(missingFieldRes.statusCode).toBe(400);
 
+    // Read accessor mirrors the write.
+    const getRes = await app.inject({ method: "GET", url: `/parts/${partId}/assembled` });
+    expect(getRes.statusCode).toBe(200);
+    expect(getRes.json()).toMatchObject({ part_id: partId, assembled_count: 1, assembled_units: [true] });
+
+    // Un-printing a unit clears its assembled flag, so re-checking the print
+    // does not silently resurrect a stale "installed" state.
+    await app.inject({
+      method: "PATCH",
+      url: `/parts/${partId}/progress`,
+      payload: { unit_index: 0, completed: false },
+    });
+    await app.inject({
+      method: "PATCH",
+      url: `/parts/${partId}/progress`,
+      payload: { unit_index: 0, completed: true },
+    });
+    const afterReprint = await app.inject({ method: "GET", url: `/parts/${partId}/assembled` });
+    expect(afterReprint.json()).toMatchObject({ assembled_count: 0, assembled_units: [false] });
+
+    // An unknown part is a 404 on the read path.
+    const missingPart = await app.inject({ method: "GET", url: `/parts/99999/assembled` });
+    expect(missingPart.statusCode).toBe(404);
+
     await app.close();
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });

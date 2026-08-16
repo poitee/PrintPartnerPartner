@@ -1,8 +1,10 @@
 import type { PartCopy } from "./checkoff-missing.js";
 import { assignPartsToPrinters, type PrinterMachine } from "./filament-assigner.js";
 import {
+  packCopiesGrouped,
   packCopiesGroupedByLocation,
   packCopiesOnPrinter,
+  type GroupingStrategy,
   type PlateLayout,
 } from "./plate-packer.js";
 
@@ -103,6 +105,7 @@ export function autoPlateLayout(
   printers: PrinterMachine[],
   copies: PartCopy[],
   spacingMm = 4,
+  groupingStrategy: GroupingStrategy = "location",
 ): [KitPlateLayout, string[]] {
   const warnings: string[] = [];
   const [byPrinter, assignWarnings] = assignPartsToPrinters(copies, printers);
@@ -112,7 +115,7 @@ export function autoPlateLayout(
   for (const printer of printers) {
     const pcopies = byPrinter[printer.id] ?? [];
     if (!pcopies.length) continue;
-    const [plates, packWarnings] = packCopiesGroupedByLocation(printer, pcopies, {
+    const [plates, packWarnings] = packCopiesGrouped(groupingStrategy, printer, pcopies, {
       spacing_mm: spacingMm,
     });
     warnings.push(...packWarnings);

@@ -41,6 +41,25 @@ export function classifyHeightBand(heightMm: number): HeightBand {
   return "very-tall";
 }
 
+/** Human-readable labels for each height band, used as plate `group_label` when packing by Height Band. */
+export const HEIGHT_BAND_LABELS: Record<HeightBand, string> = {
+  flat: "Flat (<10mm)",
+  short: "Short (10–50mm)",
+  medium: "Medium (50–150mm)",
+  tall: "Tall (150–300mm)",
+  "very-tall": "Very Tall (>300mm)",
+};
+
+/** Iteration order from shortest to tallest band, used when grouping/sorting by Height Band. */
+export const HEIGHT_BAND_ORDER: HeightBand[] = ["flat", "short", "medium", "tall", "very-tall"];
+
+/**
+ * Strategy used to group parts into plates.
+ *   location:    group by filament + source repo/folder (existing default behavior)
+ *   height_band: group by classifyHeightBand(bounds.heightMm) — see packCopiesGroupedByHeightBand
+ */
+export type GroupingStrategy = "location" | "height_band";
+
 function partFilamentLabel(part: MergePartExport): string {
   const label = (part.filamentDisplay ?? part.filament_display ?? "").trim();
   if (label) return label;
@@ -58,6 +77,7 @@ export type PlacedItem = {
   width_mm: number;
   depth_mm: number;
   height_mm: number;
+  heightBand: HeightBand;
 };
 
 export type PlateLayout = {
@@ -78,6 +98,36 @@ function loadMeshForCopy(copy: PartCopy): [StlMesh | null, string | null] {
   } catch (e) {
     return [null, `Could not load ${part.relativePath}: ${e instanceof Error ? e.message : String(e)}`];
   }
+}
+
+/**
+ * Check a completed plate's height variance and warn when the spread between
+ * the tallest and shortest part exceeds 2x the shortest part's height. Applies
+ * uniformly to every plate produced by packCopiesOnPrinter, regardless of which
+ * grouping strategy (location, height band, or none) selected the parts on it —
+ * mixed-height plates cause uneven cooling / support needs during printing.
+ *
+ * Logged to console for diagnostics; also returned so callers can surface it
+ * to the user (e.g. as a toast) alongside other pack warnings — see
+ * export3mfJobResult.ts / exportStlJobResult.ts for the existing
+ * warnings-array-to-toast pattern this plugs into.
+ */
+function checkPlateHeightVariance(
+  printer: PrinterMachine,
+  plateIndex: number,
+  items: PlacedItem[],
+): string | null {
+  const heights = items.map((i) => i.height_mm).filter((h) => Number.isFinite(h) && h > 0);
+  if (heights.length < 2) return null;
+  const minH = Math.min(...heights);
+  const maxH = Math.max(...heights);
+  const variance = maxH - minH;
+  if (minH <= 0 || variance <= 2 * minH) return null;
+  const warning =
+    `Plate ${plateIndex} on ${printer.name}: height variance ${variance.toFixed(1)} mm exceeds ` +
+    `2× the shortest part (${minH.toFixed(1)} mm) — consider grouping by Height Band.`;
+  console.warn(`[plate-packer] ${warning}`);
+  return warning;
 }
 
 export function packCopiesOnPrinter(
@@ -142,6 +192,8 @@ export function packCopiesOnPrinter(
 
   const flushPlate = () => {
     if (currentItems.length) {
+      const varianceWarning = checkPlateHeightVariance(printer, plateIndex, currentItems);
+      if (varianceWarning) warnings.push(varianceWarning);
       plates.push({
         printer_id: printer.id,
         index: plateIndex,
@@ -173,6 +225,7 @@ export function packCopiesOnPrinter(
       width_mm: width,
       depth_mm: depth,
       height_mm: height,
+      heightBand: classifyHeightBand(height),
     });
     layoutX += width + spacing;
     rowHeight = Math.max(rowHeight, depth);
@@ -216,4 +269,77 @@ export function packCopiesGroupedByLocation(
     allWarnings.push(...warnings);
   }
   return [allPlates, allWarnings];
+}
+
+/**
+ * Group parts into their height bands (flat/short/medium/tall/very-tall) and
+ * pack each band onto its own plate(s), ordered shortest band to tallest.
+ * Used when the active grouping strategy is "Height Band" — see GroupingStrategy.
+ *
+ * Height is classified from the same mesh bounds.heightMm used by
+ * packCopiesOnPrinter, via classifyHeightBand. A part whose STL fails to load
+ * is skipped here (as in packCopiesOnPrinter) and its load error is still
+ * surfaced through the returned warnings.
+ */
+export function packCopiesGroupedByHeightBand(
+  printer: PrinterMachine,
+  copies: PartCopy[],
+  options?: { spacing_mm?: number | null },
+): [PlateLayout[], string[]] {
+  if (!copies.length) return [[], []];
+
+  const bandGroups: Record<HeightBand, PartCopy[]> = {
+    flat: [],
+    short: [],
+    medium: [],
+    tall: [],
+    "very-tall": [],
+  };
+  const allWarnings: string[] = [];
+
+  for (const copy of copies) {
+    const [mesh, err] = loadMeshForCopy(copy);
+    if (err) {
+      allWarnings.push(err);
+      continue;
+    }
+    if (!mesh) continue;
+    const band = classifyHeightBand(mesh.bounds.heightMm);
+    bandGroups[band].push(copy);
+  }
+
+  const allPlates: PlateLayout[] = [];
+  let plateIndex = 1;
+  for (const band of HEIGHT_BAND_ORDER) {
+    const bandCopies = bandGroups[band];
+    if (!bandCopies.length) continue;
+    // Sort tallest-first within the band so the shelf packer places the largest
+    // footprints first (matches the sort packCopiesOnPrinter would otherwise do).
+    const [plates, warnings] = packCopiesOnPrinter(printer, bandCopies, options);
+    for (const plate of plates) {
+      plate.index = plateIndex;
+      plate.group_label = HEIGHT_BAND_LABELS[band];
+      plateIndex += 1;
+      allPlates.push(plate);
+    }
+    allWarnings.push(...warnings);
+  }
+  return [allPlates, allWarnings];
+}
+
+/**
+ * Dispatch to the packer for the given grouping strategy. Height Band grouping
+ * sorts/groups parts into their bands (flat → very-tall) before shelf-packing;
+ * Location grouping (default) buckets by filament + source repo/folder.
+ */
+export function packCopiesGrouped(
+  strategy: GroupingStrategy,
+  printer: PrinterMachine,
+  copies: PartCopy[],
+  options?: { spacing_mm?: number | null },
+): [PlateLayout[], string[]] {
+  if (strategy === "height_band") {
+    return packCopiesGroupedByHeightBand(printer, copies, options);
+  }
+  return packCopiesGroupedByLocation(printer, copies, options);
 }

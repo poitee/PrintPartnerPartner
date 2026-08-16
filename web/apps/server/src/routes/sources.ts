@@ -169,6 +169,49 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
     return reply.status(204).send();
   });
 
+  // Bulk category assignment — apply one category (or Uncategorised) to many
+  // sources in a single request. Used by the Library multi-select bulk bar so
+  // 25+ repos don't need one PATCH round-trip each.
+  app.post("/sources/bulk-category", async (request, reply) => {
+    const body = request.body as { source_ids?: unknown; category?: unknown };
+    const rawIds = Array.isArray(body.source_ids) ? body.source_ids : [];
+    const ids = Array.from(
+      new Set(
+        rawIds
+          .map((v) => Number(v))
+          .filter((n) => Number.isFinite(n)),
+      ),
+    );
+    if (ids.length === 0) {
+      return reply.status(400).send({ detail: "source_ids must be a non-empty array" });
+    }
+    const category =
+      typeof body.category === "string" ? body.category.trim() : body.category === null ? null : "";
+    const results: Array<{ source_id: number; ok: boolean; detail?: string }> = [];
+    const updated: Array<ReturnType<typeof deps.repo.getSource>> = [];
+    for (const id of ids) {
+      try {
+        const source = deps.repo.updateSource(id, {
+          metadata: { category: category == null || category === "" ? "" : category },
+        });
+        results.push({ source_id: id, ok: true });
+        updated.push(source);
+      } catch (e) {
+        results.push({
+          source_id: id,
+          ok: false,
+          detail: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    return {
+      updated: updated.filter((s): s is NonNullable<typeof s> => s != null),
+      results,
+      succeeded: results.filter((r) => r.ok).length,
+      failed: results.filter((r) => !r.ok).length,
+    };
+  });
+
   app.get("/sources/:id/import-rules", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const row = deps.repo.getProjectRow(id);

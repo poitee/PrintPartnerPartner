@@ -10,4 +10,5 @@ export const queryKeys = {
   checkoff: (profileId: number) => ["checkoff", profileId] as const,
   roleFilaments: (profileId: number) => ["roleFilaments", profileId] as const,
   workflowGuide: ["workflowGuide"] as const,
+  buildTrackingSettings: ["buildTrackingSettings"] as const,
 };

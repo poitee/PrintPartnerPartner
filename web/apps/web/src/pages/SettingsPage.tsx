@@ -30,10 +30,9 @@ import {
   type DiscordNotifySettings,
 } from "../api/engine";
 import {
-  fetchBuildTrackingSettings,
-  saveBuildTrackingSettings,
-  type BuildTrackingSettings,
-} from "../api/engine";
+  useBuildTrackingSettingsQuery,
+  useSaveBuildTrackingSettingsMutation,
+} from "../queries/buildTracking";
 import { useDateFormat } from "../context/DateFormatContext";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
@@ -129,19 +128,19 @@ export default function SettingsPage() {
   const [discordWebhookInput, setDiscordWebhookInput] = useState("");
   const [discordSaving, setDiscordSaving] = useState(false);
   const [discordTestStatus, setDiscordTestStatus] = useState<string | null>(null);
-  const [buildTrackingSettings, setBuildTrackingSettings] = useState<BuildTrackingSettings | null>(null);
-  const [buildTrackingSaving, setBuildTrackingSaving] = useState(false);
+  const { data: buildTrackingSettings } = useBuildTrackingSettingsQuery(Boolean(health));
+  const saveBuildTrackingMutation = useSaveBuildTrackingSettingsMutation();
+  const buildTrackingSaving = saveBuildTrackingMutation.isPending;
 
   const refresh = useCallback(async () => {
     if (!health) return;
     try {
-      const [filamentRows, patSettings, updateSettings, autoRecomputeSettings, discordNotifySettings, buildTracking] = await Promise.all([
+      const [filamentRows, patSettings, updateSettings, autoRecomputeSettings, discordNotifySettings] = await Promise.all([
         fetchCustomFilaments(),
         fetchGitHubPatSettings(),
         fetchSourceUpdateCheckSettings(),
         fetchAutoRecomputeSettings(),
         fetchDiscordNotifySettings(),
-        fetchBuildTrackingSettings(),
       ]);
       setFilaments(filamentRows);
       setGithubPat(patSettings);
@@ -149,7 +148,6 @@ export default function SettingsPage() {
       setAutoRecompute(autoRecomputeSettings.enabled);
       setDiscordSettings(discordNotifySettings);
       setDiscordWebhookInput(discordNotifySettings.webhook_url ?? "");
-      setBuildTrackingSettings(buildTracking);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
@@ -587,13 +585,13 @@ export default function SettingsPage() {
                 checked={buildTrackingSettings?.assembly_tracking ?? false}
                 disabled={!health || buildTrackingSaving}
                 onCheckedChange={(checked) => {
-                  setBuildTrackingSaving(true);
-                  void saveBuildTrackingSettings({ assembly_tracking: checked })
-                    .then((s) => setBuildTrackingSettings(s))
-                    .catch((e) =>
-                      setLoadError(e instanceof Error ? e.message : String(e)),
-                    )
-                    .finally(() => setBuildTrackingSaving(false));
+                  saveBuildTrackingMutation.mutate(
+                    { assembly_tracking: checked },
+                    {
+                      onError: (e) =>
+                        setLoadError(e instanceof Error ? e.message : String(e)),
+                    },
+                  );
                 }}
                 aria-label="Enable assembly tracking"
               />

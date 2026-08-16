@@ -74,9 +74,11 @@ type PhaseCardProps = {
   phaseProgress: PhaseProgress;
   busy: boolean;
   showBlockingOnly: boolean;
+  assemblyTrackingEnabled?: boolean;
   onIncrement: (part: ReviewPart) => void;
   onDecrement: (part: ReviewPart) => void;
   onPreview: (part: ReviewPart) => void;
+  onToggleAssembled?: (part: ReviewPart, unitIndex: number) => void;
   printingPartIds: Map<number, string>;
   awaitingPartIds: Map<number, string>;
 };
@@ -85,9 +87,11 @@ function PhaseCard({
   phaseProgress,
   busy,
   showBlockingOnly,
+  assemblyTrackingEnabled,
   onIncrement,
   onDecrement,
   onPreview,
+  onToggleAssembled,
   printingPartIds,
   awaitingPartIds,
 }: PhaseCardProps) {
@@ -187,9 +191,11 @@ function PhaseCard({
               busy={busy}
               printingOn={printingPartIds.get(part.id)}
               awaitingVerify={awaitingPartIds.get(part.id)}
+              assemblyTrackingEnabled={assemblyTrackingEnabled}
               onIncrement={onIncrement}
               onDecrement={onDecrement}
               onPreview={onPreview}
+              onToggleAssembled={onToggleAssembled}
             />
           ))}
         </div>
@@ -211,9 +217,11 @@ function PhaseCard({
 type PhaseProgressViewProps = {
   phases: PhaseProgress[];
   busy: boolean;
+  assemblyTrackingEnabled?: boolean;
   onIncrement: (part: ReviewPart) => void;
   onDecrement: (part: ReviewPart) => void;
   onPreview: (part: ReviewPart) => void;
+  onToggleAssembled?: (part: ReviewPart, unitIndex: number) => void;
   printingPartIds: Map<number, string>;
   awaitingPartIds: Map<number, string>;
 };
@@ -221,9 +229,11 @@ type PhaseProgressViewProps = {
 export default function PhaseProgressView({
   phases,
   busy,
+  assemblyTrackingEnabled,
   onIncrement,
   onDecrement,
   onPreview,
+  onToggleAssembled,
   printingPartIds,
   awaitingPartIds,
 }: PhaseProgressViewProps) {
@@ -268,9 +278,11 @@ export default function PhaseProgressView({
           phaseProgress={ph}
           busy={busy}
           showBlockingOnly={showBlockingOnly}
+          assemblyTrackingEnabled={assemblyTrackingEnabled}
           onIncrement={onIncrement}
           onDecrement={onDecrement}
           onPreview={onPreview}
+          onToggleAssembled={onToggleAssembled}
           printingPartIds={printingPartIds}
           awaitingPartIds={awaitingPartIds}
         />

@@ -3,11 +3,12 @@ import {
   buildPrintGroupRows,
   makeGroupKey,
   mergePartsToCopies,
-  packCopiesGroupedByLocation,
+  packCopiesGrouped,
   partFilamentKey,
   assignPartsToPrinters,
   repoNameFromSourceLayer,
   folderKeyFromRelativePath,
+  type GroupingStrategy,
   type MergePartExport,
   type PrinterMachine,
 } from "@print-partner/domain";
@@ -60,6 +61,7 @@ function placedItemDict(
     width_mm: number;
     depth_mm: number;
     height_mm: number;
+    heightBand?: string;
   },
   groupKey?: string,
 ) {
@@ -75,6 +77,7 @@ function placedItemDict(
     height_mm: Math.round(item.height_mm * 100) / 100,
   };
   if (groupKey) out.group_key = groupKey;
+  if (item.heightBand) out.height_band = item.heightBand;
   return out;
 }
 
@@ -88,6 +91,7 @@ function plateLayoutDict(plate: {
     width_mm: number;
     depth_mm: number;
     height_mm: number;
+    heightBand?: string;
   }>;
 }) {
   return {
@@ -102,6 +106,7 @@ export function packPreviewForPrinters(
   copies: ReturnType<typeof mergePartsToCopies>,
   assignments: Record<string, string>,
   spacingMm = 4,
+  groupingStrategy: GroupingStrategy = "location",
 ): { preview: unknown[]; plate_count: number; warnings: string[] } {
   const byPrinter = copiesForAssignments(copies, assignments, enabled);
   const previews: unknown[] = [];
@@ -111,7 +116,7 @@ export function packPreviewForPrinters(
   for (const printer of enabled) {
     const pcopies = byPrinter[printer.id] ?? [];
     if (!pcopies.length) continue;
-    const [plates, packWarnings] = packCopiesGroupedByLocation(printer, pcopies, {
+    const [plates, packWarnings] = packCopiesGrouped(groupingStrategy, printer, pcopies, {
       spacing_mm: spacingMm,
     });
     warnings.push(...packWarnings);
@@ -155,12 +160,14 @@ export function buildPlateWorkspace(repo: AppRepository, profileId: number) {
     copies,
     assignments,
     spacing,
+    plan.grouping_strategy,
   );
   return {
     profile_id: profileId,
     plan: {
       enabled_printer_ids: plan.enabled_printer_ids,
       group_assignments: plan.group_assignments,
+      grouping_strategy: plan.grouping_strategy,
       plate_layout: plan.plate_layout
         ? {
             spacing_mm: plan.plate_layout.spacing_mm,
@@ -198,6 +205,7 @@ export function runPackPreview(
     assignments?: Record<string, string>;
     auto_assign?: boolean;
     spacing_mm?: number;
+    grouping_strategy?: GroupingStrategy;
   },
 ) {
   const fleet = loadFleet(repo);
@@ -209,6 +217,7 @@ export function runPackPreview(
   const enabled = fleet.filter((m) => (ids ?? []).includes(m.id));
   const { parts } = repo.buildMergePartsForProfile(profileId);
   const copies = mergePartsToCopies(parts as MergePartExport[]);
+  const groupingStrategy = options.grouping_strategy ?? plan.grouping_strategy;
 
   let assignMap = {
     ...(options.assignments ?? plan.group_assignments),
@@ -224,13 +233,14 @@ export function runPackPreview(
     copies,
     assignMap,
     spacing,
+    groupingStrategy,
   );
   const unassigned = countUnassignedGroups(groups, assignMap);
 
   let plateLayout: Record<string, unknown> | null = null;
   let allWarnings = [...warnings];
   if (options.auto_assign && enabled.length && copies.length) {
-    const [layout, layoutWarnings] = autoPlateLayout(enabled, copies, spacing);
+    const [layout, layoutWarnings] = autoPlateLayout(enabled, copies, spacing, groupingStrategy);
     allWarnings = allWarnings.concat(layoutWarnings);
     plateLayout = {
       spacing_mm: layout.spacing_mm,
@@ -264,6 +274,7 @@ export function runPackPreviewJob(
     assignments?: Record<string, string>;
     auto_assign?: boolean;
     spacing_mm?: number;
+    grouping_strategy?: GroupingStrategy;
   },
 ) {
   return runPackPreview(repo, profileId, options);

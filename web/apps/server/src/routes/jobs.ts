@@ -27,7 +27,7 @@ import { loadFleet } from "../services/printer-fleet.js";
 import { parsePrinterUploadMultipart } from "../services/printer-upload-multipart.js";
 import { runPrinterUploadJob } from "../services/printer-upload-job.js";
 import { reconcileSendQueueJobResult } from "../services/printer-send-queue.js";
-import { runAutoSliceJob } from "../services/auto-slice-job.js";
+import { runAutoSliceJob, autoSliceJobMessage } from "../services/auto-slice-job.js";
 
 export type JobHandler = (
   jobId: string,
@@ -243,7 +243,9 @@ export class InProcessJobRunner {
             ? exportStlPackJobMessage(result)
             : kind === "printer-upload" && typeof result.message === "string"
               ? result.message
-              : kind === "sync" && Number(result.failed ?? 0) > 0
+              : kind === "auto-slice"
+                ? autoSliceJobMessage(result)
+                : kind === "sync" && Number(result.failed ?? 0) > 0
               ? `Synced ${result.synced ?? 0}, ${result.failed} failed — check Settings → GitHub PAT if rate-limited`
               : "Complete";
         this.emit(jobId, {
@@ -470,6 +472,7 @@ export class InProcessJobRunner {
       assignments: payload.assignments as Record<string, string> | undefined,
       auto_assign: Boolean(payload.auto_assign),
       spacing_mm: payload.spacing_mm != null ? Number(payload.spacing_mm) : undefined,
+      grouping_strategy: payload.grouping_strategy === "height_band" ? "height_band" : undefined,
     });
   }
 
@@ -559,12 +562,16 @@ export class InProcessJobRunner {
         enabled_printer_ids: Array.isArray(payload.enabled_printer_ids)
           ? (payload.enabled_printer_ids as string[])
           : undefined,
+        timeout_s: payload.timeout_s != null ? Number(payload.timeout_s) : undefined,
       },
       (patch) => this.emit(jobId, patch),
     );
     return {
       profile_id: profileId,
+      ok: result.ok,
       plate_count: result.plate_count,
+      attempted_count: result.attempted_count,
+      failed_count: result.failed_count,
       gcode_paths: result.gcode_paths.map((p) => ({
         path: p,
         download_url: this.downloadUrlForPath(p),
@@ -574,9 +581,14 @@ export class InProcessJobRunner {
         printer_name: pl.printer_name,
         plate_index: pl.plate_index,
         slicer: pl.slicer,
+        status: pl.status,
         gcode_path: pl.gcode_path,
         thumbnail_path: pl.thumbnail_path,
-        download_url: this.downloadUrlForPath(pl.gcode_path),
+        error: pl.error,
+        error_code: pl.error_code,
+        settings_keys: pl.settings_keys,
+        download_url: pl.gcode_path ? this.downloadUrlForPath(pl.gcode_path) : null,
+        thumbnail_url: pl.thumbnail_path ? this.downloadUrlForPath(pl.thumbnail_path) : null,
       })),
       warnings: result.warnings,
     };
@@ -705,6 +717,31 @@ export async function registerJobRoutes(
     return { job_id };
   });
 
+  app.post("/jobs/auto-slice", limited, async (request) => {
+    const body = request.body as {
+      profile_id?: number;
+      spacing_mm?: number;
+      missing_only?: boolean;
+      enabled_printer_ids?: string[];
+      timeout_s?: number;
+    };
+    const job_id = await jobs.start(
+      "auto-slice",
+      {
+        profile_id: body.profile_id,
+        // Auto-slice always exports one 3MF per plate; a zip would be
+        // unsliceable by the sidecar.
+        layout_mode: "per_plate",
+        spacing_mm: body.spacing_mm ?? 4,
+        missing_only: body.missing_only ?? false,
+        enabled_printer_ids: body.enabled_printer_ids,
+        timeout_s: body.timeout_s,
+      },
+      request.tenantId,
+    );
+    return { job_id };
+  });
+
   app.post("/jobs/pack-preview", async (request) => {
     const body = request.body as {
       profile_id?: number;
@@ -712,6 +749,7 @@ export async function registerJobRoutes(
       assignments?: Record<string, string>;
       auto_assign?: boolean;
       spacing_mm?: number;
+      grouping_strategy?: string;
     };
     const job_id = await jobs.start(
       "pack-preview",
@@ -721,6 +759,7 @@ export async function registerJobRoutes(
         assignments: body.assignments,
         auto_assign: body.auto_assign ?? false,
         spacing_mm: body.spacing_mm,
+        grouping_strategy: body.grouping_strategy,
       },
       request.tenantId,
     );

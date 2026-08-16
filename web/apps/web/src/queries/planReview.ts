@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchPlanReview,
   patchPart,
+  patchPartAssembled,
   patchPartProgress,
   type PlanReview,
 } from "../api/engine";
-import { mergeProgressIntoReview } from "../lib/reviewParts";
+import { mergeAssembledIntoReview, mergeProgressIntoReview } from "../lib/reviewParts";
 import { queryKeys } from "./keys";
 import { invalidateProfiles } from "./profiles";
 
@@ -100,6 +101,59 @@ export function usePatchPartProgressMutation(profileId: number | null) {
             printed_count: progress.printed_count,
             print_units: progress.print_units,
             missing: progress.missing,
+          }),
+        );
+      }
+    },
+  });
+}
+
+export function usePatchPartAssembledMutation(profileId: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      partId,
+      unitIndex,
+      assembled,
+    }: {
+      partId: number;
+      unitIndex: number;
+      assembled: boolean;
+      optimisticReview?: PlanReview;
+    }) => patchPartAssembled(partId, unitIndex, assembled),
+    onMutate: async ({ partId, unitIndex, assembled, optimisticReview }) => {
+      if (profileId == null || !optimisticReview) return undefined;
+      const key = queryKeys.planReview(profileId, false);
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<PlanReview>(key);
+      const part = optimisticReview.part_groups
+        .flatMap((g) => g.parts)
+        .find((p) => p.id === partId);
+      if (part) {
+        const qty = Math.max(1, part.quantity_effective);
+        const optimisticUnits = [...(part.assembled_units ?? [])];
+        while (optimisticUnits.length < qty) optimisticUnits.push(false);
+        if (unitIndex < optimisticUnits.length) optimisticUnits[unitIndex] = assembled;
+        qc.setQueryData(
+          key,
+          mergeAssembledIntoReview(optimisticReview, partId, {
+            assembled_units: optimisticUnits,
+          }),
+        );
+      }
+      return { previous, key };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous && ctx.key) qc.setQueryData(ctx.key, ctx.previous);
+    },
+    onSuccess: (progress, { partId }, ctx) => {
+      if (profileId == null || !ctx?.key) return;
+      const current = qc.getQueryData<PlanReview>(ctx.key);
+      if (current) {
+        qc.setQueryData(
+          ctx.key,
+          mergeAssembledIntoReview(current, partId, {
+            assembled_units: progress.assembled_units,
           }),
         );
       }

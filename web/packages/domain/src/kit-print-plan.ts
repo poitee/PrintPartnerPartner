@@ -1,10 +1,17 @@
 import { kitPlateLayoutFromDict, kitPlateLayoutToDict, type KitPlateLayout } from "./plate-plan.js";
+import type { GroupingStrategy } from "./plate-packer.js";
 
 export type KitPrintPlan = {
   enabled_printer_ids: string[];
   plate_layout: KitPlateLayout | null;
   group_assignments: Record<string, string>;
+  /** Active grouping strategy for packing new plates. Defaults to "location". */
+  grouping_strategy: GroupingStrategy;
 };
+
+function isGroupingStrategy(v: unknown): v is GroupingStrategy {
+  return v === "location" || v === "height_band";
+}
 
 export function kitPrintPlanFromDict(data: Record<string, unknown>): KitPrintPlan {
   const layoutRaw = data.plate_layout;
@@ -26,6 +33,9 @@ export function kitPrintPlanFromDict(data: Record<string, unknown>): KitPrintPla
             ]),
           )
         : {},
+    grouping_strategy: isGroupingStrategy(data.grouping_strategy)
+      ? data.grouping_strategy
+      : "location",
   };
 }
 
@@ -33,6 +43,7 @@ export function kitPrintPlanToDict(plan: KitPrintPlan): Record<string, unknown> 
   const out: Record<string, unknown> = {
     enabled_printer_ids: [...plan.enabled_printer_ids],
     group_assignments: { ...plan.group_assignments },
+    grouping_strategy: plan.grouping_strategy,
   };
   if (plan.plate_layout) {
     out.plate_layout = kitPlateLayoutToDict(plan.plate_layout);

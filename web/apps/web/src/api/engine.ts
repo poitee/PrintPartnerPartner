@@ -512,6 +512,41 @@ export type Export3mfOptions = {
   enabled_printer_ids?: string[];
 };
 
+export type AutoSliceOptions = {
+  profile_id: number;
+  spacing_mm?: number;
+  missing_only?: boolean;
+  enabled_printer_ids?: string[];
+  /** Per-plate slice timeout handed to the sidecar (seconds). */
+  timeout_s?: number;
+};
+
+/** One plate's outcome in an auto-slice job result. */
+export type AutoSlicePlate = {
+  printer_id: string;
+  printer_name: string;
+  plate_index: number;
+  slicer: "orca" | "prusa" | "bambu";
+  status: "ok" | "error";
+  gcode_path: string | null;
+  thumbnail_path: string | null;
+  error: string | null;
+  error_code: string | null;
+  settings_keys: string[];
+  download_url: string | null;
+  thumbnail_url: string | null;
+};
+
+export type AutoSliceJobResultBody = {
+  profile_id: number;
+  ok: boolean;
+  plate_count: number;
+  attempted_count: number;
+  failed_count: number;
+  plates: AutoSlicePlate[];
+  warnings: string[];
+};
+
 /**
  * STL pack folder grouping:
  * - `color_dir` (default): `role/<directory>/file.stl` — keep source directories.
@@ -937,6 +972,25 @@ export async function updateSource(
     body: JSON.stringify(payload),
   });
 }
+
+export type BulkCategoryAssignResult = {
+  updated: SourceSummary[];
+  results: Array<{ source_id: number; ok: boolean; detail?: string }>;
+  succeeded: number;
+  failed: number;
+};
+
+/** Assign one category (or null for Uncategorised) to many sources at once. */
+export async function bulkAssignSourceCategory(
+  sourceIds: number[],
+  category: string | null,
+): Promise<BulkCategoryAssignResult> {
+  return engineFetch<BulkCategoryAssignResult>("/sources/bulk-category", {
+    method: "POST",
+    body: JSON.stringify({ source_ids: sourceIds, category }),
+  });
+}
+
 
 export async function deleteSource(sourceId: number): Promise<void> {
   await engineFetch(`/sources/${sourceId}`, { method: "DELETE" });
@@ -2444,6 +2498,15 @@ export async function patchPartAssembled(
     method: "PATCH",
     body: JSON.stringify({ unit_index: unitIndex, assembled }),
   });
+}
+
+/** Read the per-unit assembled state of a single part. */
+export async function fetchPartAssembled(partId: number): Promise<{
+  part_id: number;
+  assembled_count: number;
+  assembled_units: boolean[];
+}> {
+  return engineFetch(`/parts/${partId}/assembled`);
 }
 
 export type BuildTrackingSettings = {

@@ -191,16 +191,32 @@ export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDe
       return reply.status(400).send({ ok: false, error: "No Discord webhook URL configured" });
     }
     try {
-      await sendDiscordNotification(webhookUrl, "source.synced", {
+      // Report the ACTUAL delivery outcome. This endpoint previously returned
+      // {ok:true} as long as no exception escaped, so a webhook that Discord
+      // rejected (401/404/429) still looked healthy from the UI — which is how
+      // the broken #print-partner webhook went unnoticed.
+      const result = await sendDiscordNotification(webhookUrl, "source.synced", {
         sourceName: "Test Source",
         sourceUrl: "https://github.com/example/test-repo",
         branch: "main",
         commitSha: "abc1234",
         stlCount: 42,
       });
-      return { ok: true };
+      if (!result.ok) {
+        // 502: we reached Discord but it refused to deliver.
+        return reply.status(502).send({
+          ok: false,
+          error: result.error ?? "Discord webhook delivery failed",
+          status: result.status,
+          permanent: result.permanent ?? false,
+          attempts: result.attempts,
+        });
+      }
+      return { ok: true, status: result.status, attempts: result.attempts };
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return reply
+        .status(502)
+        .send({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   });
 

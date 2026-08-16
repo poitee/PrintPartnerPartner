@@ -11,6 +11,7 @@ import type { PlanReview } from "../api/engine";
 import { formatCheckoffSummary } from "../lib/checkoffProgress";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import {
+  usePatchPartAssembledMutation,
   usePatchPartMutation,
   usePatchPartProgressMutation,
   usePlanReviewQuery,
@@ -31,6 +32,7 @@ type PlanWorkspaceValue = {
   setIncluded: (partId: number, included: boolean) => Promise<void>;
   setSpoolmanSpool: (partId: number, spoolman_spool_id: string | null) => Promise<void>;
   toggleUnit: (partId: number, unitIndex: number, completed: boolean) => Promise<void>;
+  toggleAssembled: (partId: number, unitIndex: number, assembled: boolean) => Promise<void>;
   busyPartId: number | null;
 };
 
@@ -68,6 +70,7 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
 
   const patchPartMutation = usePatchPartMutation(selectedProfileId);
   const patchProgressMutation = usePatchPartProgressMutation(selectedProfileId);
+  const patchAssembledMutation = usePatchPartAssembledMutation(selectedProfileId);
 
   const invalidate = useCallback(async () => {
     setRevision((r) => r + 1);
@@ -151,6 +154,24 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
     [review, patchProgressMutation],
   );
 
+  const toggleAssembled = useCallback(
+    async (partId: number, unitIndex: number, assembled: boolean) => {
+      if (!review) return;
+      setBusyPartId(partId);
+      try {
+        await patchAssembledMutation.mutateAsync({
+          partId,
+          unitIndex,
+          assembled,
+          optimisticReview: review,
+        });
+      } finally {
+        setBusyPartId(null);
+      }
+    },
+    [review, patchAssembledMutation],
+  );
+
   const loadedRevision = revision;
 
   const value = useMemo(
@@ -173,6 +194,7 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
       setIncluded,
       setSpoolmanSpool,
       toggleUnit,
+      toggleAssembled,
       busyPartId,
     }),
     [
@@ -188,6 +210,7 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
       setIncluded,
       setSpoolmanSpool,
       toggleUnit,
+      toggleAssembled,
       busyPartId,
     ],
   );

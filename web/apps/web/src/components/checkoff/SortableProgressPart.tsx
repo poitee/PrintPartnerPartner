@@ -20,11 +20,15 @@ type PartProps = {
   awaitingVerify?: string;
   /** Suggested printer from an unattributed print candidate. */
   suggestedPrinter?: { hostName: string; printId: string; filename: string };
+  /** Global "Enable assembly tracking" setting (Settings > Build Tracking). */
+  assemblyTrackingEnabled?: boolean;
   onToggleUnit: (part: ReviewPart, unitIndex: number) => void;
   onIncrement: (part: ReviewPart) => void;
   onDecrement: (part: ReviewPart) => void;
   onPreview: (part: ReviewPart) => void;
   onClaim?: (printId: string) => void;
+  /** Called when the user toggles the Assembled switch for a completed unit. */
+  onToggleAssembled?: (part: ReviewPart, unitIndex: number) => void;
 };
 
 type BagProps = {
@@ -80,7 +84,9 @@ export default memo(function SortableProgressPart(props: Props) {
             printingOn={props.printingOn}
             awaitingVerify={props.awaitingVerify}
             suggestedPrinter={props.suggestedPrinter}
+            assemblyTrackingEnabled={props.assemblyTrackingEnabled}
             onClaim={props.onClaim}
+            onToggleAssembled={props.onToggleAssembled}
             dragHandle={dragHandle}
           />
         ) : (
@@ -93,7 +99,9 @@ export default memo(function SortableProgressPart(props: Props) {
             printingOn={props.printingOn}
             awaitingVerify={props.awaitingVerify}
             suggestedPrinter={props.suggestedPrinter}
+            assemblyTrackingEnabled={props.assemblyTrackingEnabled}
             onClaim={props.onClaim}
+            onToggleAssembled={props.onToggleAssembled}
             dragHandle={dragHandle}
           />
         )}

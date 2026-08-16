@@ -3,6 +3,7 @@ import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/
 import { Minus, Plus } from "lucide-react";
 import type { ReviewPart } from "../../api/engine";
 import {
+  assembledEligibleUnitIndices,
   lastCompletedUnit,
   nextUnitToComplete,
   partProgressPercent,
@@ -14,6 +15,7 @@ import { cn } from "../../lib/utils";
 import { SortableDragHandle } from "../dnd/SortableDragHandle";
 import PartThumbExpandButton from "../parts/PartThumbExpandButton";
 import { Button } from "../ui/button";
+import { Switch } from "../ui/switch";
 
 type Props = {
   part: ReviewPart;
@@ -26,11 +28,15 @@ type Props = {
   awaitingVerify?: string;
   /** Suggested printer from an unattributed print candidate. */
   suggestedPrinter?: { hostName: string; printId: string; filename: string };
+  /** Global "Enable assembly tracking" setting (Settings > Build Tracking). */
+  assemblyTrackingEnabled?: boolean;
   onIncrement: (part: ReviewPart) => void;
   onDecrement: (part: ReviewPart) => void;
   onPreview: (part: ReviewPart) => void;
   /** Called when user clicks Claim on a suggested printer. */
   onClaim?: (printId: string) => void;
+  /** Called when the user toggles the Assembled switch for a completed unit. */
+  onToggleAssembled?: (part: ReviewPart, unitIndex: number) => void;
   /** When set, shows a grip handle for Progress list reorder. */
   dragHandle?: {
     attributes: DraggableAttributes;
@@ -64,6 +70,52 @@ function truncateFilename(name: string, maxLen = 20): string {
 }
 
 /**
+ * Assembled toggles — one per completed unit, only rendered when the global
+ * Assembled Tracking setting is on. Hidden entirely when there is nothing
+ * completed yet, since "assembled" tracks installed-but-already-printed state.
+ */
+function AssembledToggles({
+  part,
+  busy,
+  onToggleAssembled,
+}: {
+  part: ReviewPart;
+  busy: boolean;
+  onToggleAssembled: (part: ReviewPart, unitIndex: number) => void;
+}) {
+  const assembledUnits = part.assembled_units ?? [];
+  const completedIndices = assembledEligibleUnitIndices(part.print_units);
+  if (completedIndices.length === 0) return null;
+  const showUnitNumber = part.print_units.length > 1;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" data-testid="assembled-toggles">
+      {completedIndices.map((idx) => {
+        const isAssembled = assembledUnits[idx] ?? false;
+        const label = showUnitNumber ? `Assembled #${idx + 1}` : "Assembled";
+        return (
+          <label
+            key={idx}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[11px] font-medium text-muted-foreground",
+              isAssembled && "border-success/40 bg-success/10 text-success",
+            )}
+          >
+            <Switch
+              checked={isAssembled}
+              disabled={busy}
+              onCheckedChange={() => onToggleAssembled(part, idx)}
+              aria-label={`${label} for ${part.filename}`}
+              className="h-4 w-7 [&>span]:size-3 [&>span]:data-[state=checked]:translate-x-3"
+            />
+            <span>{label}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * Screen Progress row — thumb, path, filament swatch, bar, −/+ steppers
  * (matches Workflow mock Progress / phone checkoff density).
  *
@@ -77,10 +129,12 @@ const ProgressPartRow = memo(function ProgressPartRow({
   printingOn,
   awaitingVerify,
   suggestedPrinter,
+  assemblyTrackingEnabled,
   onIncrement,
   onDecrement,
   onPreview,
   onClaim,
+  onToggleAssembled,
   dragHandle,
 }: Props) {
   const qty = part.quantity_effective;
@@ -180,6 +234,9 @@ const ProgressPartRow = memo(function ProgressPartRow({
               {countLabel}
             </span>
           </div>
+          {assemblyTrackingEnabled && onToggleAssembled && (
+            <AssembledToggles part={part} busy={busy} onToggleAssembled={onToggleAssembled} />
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -228,6 +285,9 @@ const ProgressPartRow = memo(function ProgressPartRow({
         </span>
         <span className="truncate text-[11px] text-muted-foreground">{sourceLine(part)}</span>
         <StatusBadges inCompact={false} />
+        {assemblyTrackingEnabled && onToggleAssembled && (
+          <AssembledToggles part={part} busy={busy} onToggleAssembled={onToggleAssembled} />
+        )}
       </div>
       {part.filament_hex ? (
         <span

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PartRow, PlanReview } from "../api/engine";
 import {
   filterPartsByQuery,
+  mergeAssembledIntoReview,
   mergePartIntoReview,
   partitionIncludedParts,
   sourceLabelFromLayer,
@@ -90,5 +91,62 @@ describe("mergePartIntoReview", () => {
     );
     expect(next.totals.included_parts).toBe(0);
     expect(next.totals.total_print_units).toBe(0);
+  });
+});
+
+describe("mergeAssembledIntoReview", () => {
+  const review: PlanReview = {
+    profile_id: 1,
+    plan_name: "Test",
+    layers: [],
+    totals: {
+      included_parts: 1,
+      total_print_units: 1,
+      by_role: { primary: 1 },
+      by_filament: {},
+    },
+    issues: [],
+    has_blockers: false,
+    part_groups: [
+      {
+        folder: "(root)",
+        source_layer: "base:main-kit",
+        parts: [
+          {
+            ...samplePart({ id: 1 }),
+            print_units: [true],
+            printed_count: 1,
+            missing: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  it("sets assembled_units on the matching part without touching other fields", () => {
+    const next = mergeAssembledIntoReview(review, 1, { assembled_units: [true] });
+    const part = next.part_groups[0].parts[0];
+    expect(part.assembled_units).toEqual([true]);
+    // Unrelated print progress fields are untouched.
+    expect(part.printed_count).toBe(1);
+    expect(part.print_units).toEqual([true]);
+  });
+
+  it("leaves other parts unchanged", () => {
+    const twoPartReview: PlanReview = {
+      ...review,
+      part_groups: [
+        {
+          ...review.part_groups[0],
+          parts: [
+            ...review.part_groups[0].parts,
+            { ...samplePart({ id: 2 }), print_units: [true], printed_count: 1, missing: false },
+          ],
+        },
+      ],
+    };
+    const next = mergeAssembledIntoReview(twoPartReview, 1, { assembled_units: [true] });
+    const untouched = next.part_groups[0].parts.find((p) => p.id === 2);
+    expect(untouched?.assembled_units).toBeUndefined();
   });
 });

@@ -2514,39 +2514,42 @@ export async function invokeAssistantTool(
       }
 
       case "get_print_stats": {
-        const hours = typeof input.hours === "number" && input.hours > 0 ? input.hours : 8;
-        const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
-        type JobRow = {
-          id: string;
-          printer_id: string;
-          material: string;
-          status: string;
-          filament_consumed_g: number | null;
-          at: string;
-          completed_at: string | null;
-        };
-        let recentJobs: JobRow[] = [];
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const raw = (ctx.repo as any).db;
-          if (raw && typeof raw.all === "function") {
-            recentJobs = raw
-              .prepare(
-                `SELECT id, printer_id, material, status, filament_consumed_g, at, completed_at
-                 FROM print_jobs
-                 WHERE tenant_id = ? AND at >= ?
-                 ORDER BY at DESC
-                 LIMIT 100`,
-              )
-              .all("default", since) as JobRow[];
+        // `hours` is optional (default 8h / overnight); when present it must be a
+        // finite, positive number within a sane window. Reject bad input instead of
+        // silently falling back to the default, so callers can tell "no window given"
+        // apart from "the model passed nonsense".
+        const MAX_LOOKBACK_HOURS = 24 * 90; // 90 days
+        let hours = 8;
+        if (input.hours !== undefined && input.hours !== null) {
+          const raw = input.hours;
+          const parsed =
+            typeof raw === "number"
+              ? raw
+              : typeof raw === "string" && raw.trim() !== ""
+                ? Number(raw)
+                : NaN;
+          if (!Number.isFinite(parsed) || parsed <= 0) {
+            return {
+              content: JSON.stringify({
+                error: "hours must be a positive number",
+              }),
+            };
           }
-        } catch {
-          // table may not exist yet
+          if (parsed > MAX_LOOKBACK_HOURS) {
+            return {
+              content: JSON.stringify({
+                error: `hours must be ${MAX_LOOKBACK_HOURS} or less (90 days)`,
+              }),
+            };
+          }
+          hours = parsed;
         }
+        const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+        const recentJobs = ctx.repo.recentPrintJobs(since, 100);
         const sent = recentJobs.length;
         const completed = recentJobs.filter((j) => j.status === "completed").length;
         const failed = recentJobs.filter((j) => j.status === "failed").length;
-        const filamentG = recentJobs.reduce((s, j) => s + (j.filament_consumed_g ?? 0), 0);
+        const filamentG = recentJobs.reduce((s, j) => s + (j.filamentConsumedG ?? 0), 0);
 
         // per-plan remaining units
         const planSummaries = ctx.repo

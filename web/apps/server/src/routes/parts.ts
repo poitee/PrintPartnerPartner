@@ -84,11 +84,24 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
     }
   });
 
+  app.get("/parts/:id/assembled", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    try {
+      return deps.repo.getPartAssembled(id);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.status(msg.includes("not found") ? 404 : 400).send({ detail: msg });
+    }
+  });
+
   app.patch("/parts/:id/assembled", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const body = request.body as { unit_index?: number; assembled?: boolean };
     if (body.unit_index == null || body.assembled == null) {
       return reply.status(400).send({ detail: "unit_index and assembled required" });
+    }
+    if (typeof body.assembled !== "boolean" || !Number.isInteger(body.unit_index)) {
+      return reply.status(400).send({ detail: "unit_index must be an integer and assembled a boolean" });
     }
     try {
       return deps.repo.patchPartAssembled(id, body.unit_index, body.assembled);

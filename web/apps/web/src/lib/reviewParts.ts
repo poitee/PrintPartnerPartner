@@ -93,3 +93,18 @@ export function mergeProgressIntoReview(
   }));
   return { ...review, part_groups };
 }
+
+/** Apply an assembled-units PATCH response into review payload (assembly tracking). */
+export function mergeAssembledIntoReview(
+  review: PlanReview,
+  partId: number,
+  progress: { assembled_units: boolean[] },
+): PlanReview {
+  const part_groups = review.part_groups.map((g) => ({
+    ...g,
+    parts: g.parts.map((p) =>
+      p.id === partId ? mergeReviewPartPatch(p, progress) : p,
+    ),
+  }));
+  return { ...review, part_groups };
+}

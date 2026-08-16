@@ -8,6 +8,7 @@ import {
   fetchSourceCategories,
   fetchSources,
   saveSourceCategories,
+  bulkAssignSourceCategory,
   importReposTxt,
   importSourceArchive,
   importSourceFiles,
@@ -40,6 +41,7 @@ import LibraryCategoryRail, {
   type LibraryAddKind,
 } from "../components/sources/LibraryCategoryRail";
 import LibrarySourceCard from "../components/sources/LibrarySourceCard";
+import BulkCategoryBar from "../components/sources/BulkCategoryBar";
 import LibraryStaleBanner from "../components/sources/LibraryStaleBanner";
 import SourceDetailSheet from "../components/sources/SourceDetailSheet";
 import SourceCategoryAssignSubmenu from "../components/sources/SourceCategoryAssignSubmenu";
@@ -97,6 +99,13 @@ import {
   sourceCategoryLabel,
 } from "../lib/sourceCategoryAssignment";
 import { librarySourceDragId } from "../lib/sourceCategoryDnD";
+import {
+  applySelectionClick,
+  isAllVisibleSelected,
+  pruneSelectionToKnownIds,
+  selectAllVisible,
+  type SelectionModifiers,
+} from "../lib/sourceSelection";
 import {
   loadPersistedSourcesUi,
   savePersistedSourcesUi,
@@ -198,6 +207,9 @@ export default function SourcesPage() {
   const [stlSearchExpanded, setStlSearchExpanded] = useState(false);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
   const [syncingSourceIds, setSyncingSourceIds] = useState<number[] | "all" | null>(null);
+  const [selectedSourceIds, setSelectedSourceIds] = useState<Set<number>>(new Set());
+  const selectionAnchorRef = useRef<number | null>(null);
+  const [bulkAssigning, setBulkAssigning] = useState(false);
   const importSharedBuild = useImportSharedBuild();
   const pendingOpenRef = useRef<PendingOpenSource | null>(null);
   const appliedIntentSeqRef = useRef(0);
@@ -380,6 +392,67 @@ export default function SourcesPage() {
       ),
     [sources, search, categoryFilter, syncFilter, platformFilter],
   );
+
+  const visibleIds = useMemo(() => filtered.map((s) => s.id), [filtered]);
+
+  // Drop selected ids that fall out of view (filtered away, deleted, etc.)
+  // so the bulk bar never quietly acts on hidden sources.
+  useEffect(() => {
+    setSelectedSourceIds((prev) => {
+      const pruned = pruneSelectionToKnownIds(prev, visibleIds);
+      return pruned.size === prev.size ? prev : pruned;
+    });
+  }, [visibleIds]);
+
+  const onSourceSelectClick = useCallback(
+    (sourceId: number, modifiers: SelectionModifiers) => {
+      setSelectedSourceIds((prev) => {
+        const { selection, anchorId } = applySelectionClick({
+          selected: prev,
+          anchorId: selectionAnchorRef.current,
+          clickedId: sourceId,
+          visibleIds,
+          modifiers,
+        });
+        selectionAnchorRef.current = anchorId;
+        return selection;
+      });
+    },
+    [visibleIds],
+  );
+
+  const clearSelection = useCallback(() => {
+    setSelectedSourceIds(new Set());
+    selectionAnchorRef.current = null;
+  }, []);
+
+  const selectAllFiltered = useCallback(() => {
+    setSelectedSourceIds(selectAllVisible(visibleIds));
+  }, [visibleIds]);
+
+  const bulkAssignCategory = async (category: string | null) => {
+    const ids = Array.from(selectedSourceIds);
+    if (ids.length === 0) return;
+    setBulkAssigning(true);
+    try {
+      const result = await bulkAssignSourceCategory(ids, category);
+      const updatedById = new Map(result.updated.map((s) => [s.id, s]));
+      setSources((prev) => prev.map((s) => updatedById.get(s.id) ?? s));
+      const label = category?.trim() ? category.trim() : "Uncategorised";
+      if (result.failed > 0) {
+        toast.error(
+          `Moved ${result.succeeded}/${ids.length} source(s) to ${label}; ${result.failed} failed`,
+        );
+      } else {
+        toast.success(`Moved ${result.succeeded} source(s) to ${label}`);
+      }
+      clearSelection();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBulkAssigning(false);
+    }
+  };
 
   const hasSyncedSources = sources.some((s) => Boolean(s.local_path));
 
@@ -766,12 +839,15 @@ export default function SourcesPage() {
         onUpload={canUpload(s) ? () => runUpload(s) : undefined}
         onDelete={() => setDeleteTarget(s)}
         onAssignCategory={(category) => void assignSourceCategory(s, category)}
+        selected={selectedSourceIds.has(s.id)}
+        onSelectClick={(mods) => onSourceSelectClick(s.id, mods)}
       />
     );
   };
 
   const renderSourceRow = (s: SourceSummary) => {
     const syncing = isSourceSyncing(s.id);
+    const isSelected = selectedSourceIds.has(s.id);
     const meta = buildLibraryCardMeta({
       source: s,
       attached: attachedIds.has(s.id),
@@ -792,14 +868,40 @@ export default function SourcesPage() {
           "flex flex-col gap-2 rounded-lg border bg-card px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center",
           meta.borderTone === "update" && "border-amber-500/50",
           meta.borderTone === "syncing" && "border-sky-400/70",
+          isSelected && "ring-2 ring-primary border-primary/60",
           !busy && "cursor-grab active:cursor-grabbing",
         )}
         title="Drag onto a category"
       >
+        <input
+          type="checkbox"
+          className="h-4 w-4 shrink-0 accent-primary"
+          checked={isSelected}
+          aria-label={`Select ${s.name}`}
+          onChange={() => {}}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSourceSelectClick(s.id, {
+              shiftKey: e.shiftKey,
+              metaKey: e.metaKey,
+              ctrlKey: e.ctrlKey,
+            });
+          }}
+        />
         <button
           type="button"
           className="min-w-0 flex-1 text-left"
-          onClick={() => openDetail(s, "docs")}
+          onClick={(e) => {
+            if (e.shiftKey || e.metaKey || e.ctrlKey) {
+              onSourceSelectClick(s.id, {
+                shiftKey: e.shiftKey,
+                metaKey: e.metaKey,
+                ctrlKey: e.ctrlKey,
+              });
+              return;
+            }
+            openDetail(s, "docs");
+          }}
         >
           <p className="font-medium">{s.name}</p>
           <p className="truncate font-mono text-xs text-muted-foreground">{meta.slug}</p>
@@ -1014,6 +1116,16 @@ export default function SourcesPage() {
               staleCount={staleSources.length}
               attachedStaleCount={attachedStaleCount}
               onSeeChanges={onSeeStaleChanges}
+            />
+
+            <BulkCategoryBar
+              count={selectedSourceIds.size}
+              categories={categories}
+              busy={bulkAssigning}
+              onAssign={(category) => void bulkAssignCategory(category)}
+              onSelectAll={selectAllFiltered}
+              allSelected={isAllVisibleSelected(selectedSourceIds, visibleIds)}
+              onClear={clearSelection}
             />
 
             <SourcesToolbar

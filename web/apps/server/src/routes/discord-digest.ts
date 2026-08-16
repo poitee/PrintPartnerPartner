@@ -50,16 +50,7 @@ export async function registerDiscordDigestRoute(
     const since = new Date(Date.now() - windowHours * 3600 * 1000).toISOString();
     let platesOvernight = 0;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const raw = (deps.repo as any).db;
-      if (raw && typeof raw.all === "function") {
-        const rows = raw
-          .prepare(
-            `SELECT COUNT(*) as cnt FROM print_jobs WHERE tenant_id = ? AND at >= ?`,
-          )
-          .all("default", since) as Array<{ cnt: number }>;
-        platesOvernight = rows[0]?.cnt ?? 0;
-      }
+      platesOvernight = deps.repo.recentPrintJobs(since, 1000).length;
     } catch {
       // table may not exist yet — proceed with 0
     }

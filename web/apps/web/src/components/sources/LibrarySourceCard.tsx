@@ -28,6 +28,8 @@ type Props = {
   onUpload?: () => void;
   onDelete: () => void;
   onAssignCategory: (category: string | null) => void;
+  selected?: boolean;
+  onSelectClick?: (e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => void;
 };
 
 function barClass(tone: LibraryCardMeta["barTone"]): string {
@@ -81,6 +83,8 @@ export default function LibrarySourceCard({
   onUpload,
   onDelete,
   onAssignCategory,
+  selected = false,
+  onSelectClick,
 }: Props) {
   return (
     <article
@@ -92,24 +96,55 @@ export default function LibrarySourceCard({
       className={cn(
         "overflow-hidden rounded-lg border bg-card shadow-[0_1px_2px_rgba(89,115,166,0.06)] transition-colors",
         borderClass(meta.borderTone),
+        selected && "ring-2 ring-primary border-primary/60",
         !busy && "cursor-grab active:cursor-grabbing",
       )}
       title="Drag onto a category"
     >
-      <button
-        type="button"
-        className="block w-full text-left"
-        onClick={onOpen}
-        aria-label={`Open ${source.name}`}
-      >
-        <SourceCardCover
-          sourceId={source.id}
-          name={source.name}
-          sourceKind={source.source_kind}
-          compact
-          hideKindBadge
-        />
-      </button>
+      <div className="relative">
+        {onSelectClick && (
+          <label
+            className="absolute left-1.5 top-1.5 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-background/85 shadow-sm backdrop-blur-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-primary"
+              checked={selected}
+              aria-label={`Select ${source.name}`}
+              onChange={() => {}}
+              onClick={(e) =>
+                onSelectClick({
+                  shiftKey: e.shiftKey,
+                  metaKey: e.metaKey,
+                  ctrlKey: e.ctrlKey,
+                })
+              }
+            />
+          </label>
+        )}
+        <button
+          type="button"
+          className="block w-full text-left"
+          onClick={(e) => {
+            if (onSelectClick && (e.shiftKey || e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              onSelectClick({ shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey });
+              return;
+            }
+            onOpen();
+          }}
+          aria-label={`Open ${source.name}`}
+        >
+          <SourceCardCover
+            sourceId={source.id}
+            name={source.name}
+            sourceKind={source.source_kind}
+            compact
+            hideKindBadge
+          />
+        </button>
+      </div>
       <div className="flex flex-col gap-2 px-2.5 py-2.5">
         <div className="flex items-start gap-1.5">
           <button

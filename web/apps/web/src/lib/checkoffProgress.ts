@@ -94,3 +94,14 @@ export function lastCompletedUnit(units: boolean[]): number {
   }
   return -1;
 }
+
+/**
+ * Unit indices eligible for an Assembled toggle: only completed (printed) units.
+ * Used by the checkoff UI to gate the per-unit Assembled switch — assembly
+ * tracking only makes sense once a unit has actually been printed.
+ */
+export function assembledEligibleUnitIndices(printUnits: boolean[]): number[] {
+  return printUnits
+    .map((done, idx) => (done ? idx : -1))
+    .filter((idx) => idx >= 0);
+}
