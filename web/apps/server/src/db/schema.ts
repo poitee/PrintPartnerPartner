@@ -603,8 +603,11 @@ export const schemaMigrations: string[] = [
     updated_at TEXT NOT NULL
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS uq_printer_name_map_slicer_name ON printer_name_map (slicer_name)`,
-  // v10 — assembly tracking column on print_progress
-  `ALTER TABLE print_progress ADD COLUMN assembled INTEGER NOT NULL DEFAULT 0`,
+  // v10 — assembly tracking column on print_progress.
+  // NOTE: intentionally NOT an unconditional ALTER TABLE here (that fails with
+  // "duplicate column name" on every restart once applied once). The guarded
+  // add-if-missing logic for this column lives in db/client.ts runMigrations(),
+  // alongside the other conditional column migrations.
   // v11 — print_jobs, print_job_parts, printer_telemetry, app_events
   `CREATE TABLE IF NOT EXISTS print_jobs (
     id TEXT PRIMARY KEY,

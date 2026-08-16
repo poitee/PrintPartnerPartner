@@ -43,7 +43,17 @@ export class SqliteDatabase {
   private runMigrations(): void {
     if (!this.sqlite) throw new Error("Database not connected");
     for (const stmt of schemaMigrations) {
-      this.sqlite.exec(stmt);
+      try {
+        this.sqlite.exec(stmt);
+      } catch (e) {
+        // Several migrations are unconditional "ALTER TABLE ... ADD COLUMN"
+        // statements (unlike the CREATE TABLE/INDEX IF NOT EXISTS ones) and
+        // are not safe to re-run once already applied. SQLite has no
+        // "ADD COLUMN IF NOT EXISTS", so tolerate re-application here rather
+        // than crash the whole server on every restart after the first.
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/duplicate column name/i.test(msg)) throw e;
+      }
     }
     const partCols = this.sqlite.pragma("table_info(parts)") as { name: string }[];
     if (!partCols.some((c) => c.name === "spoolman_spool_id")) {
@@ -68,6 +78,10 @@ export class SqliteDatabase {
     }
     if (!profileCols.some((c) => c.name === "special_request")) {
       this.sqlite.exec("ALTER TABLE build_profiles ADD COLUMN special_request TEXT");
+    }
+    const printProgressCols = this.sqlite.pragma("table_info(print_progress)") as { name: string }[];
+    if (!printProgressCols.some((c) => c.name === "assembled")) {
+      this.sqlite.exec("ALTER TABLE print_progress ADD COLUMN assembled INTEGER NOT NULL DEFAULT 0");
     }
 
     // Performance indexes (idempotent — IF NOT EXISTS)
