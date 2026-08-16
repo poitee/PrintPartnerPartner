@@ -125,6 +125,22 @@ const scenarios: Scenario[] = [
     plan: { name: "Trident R2 LDO", units: 7 },
   },
   {
+    // The worst case for the digest: every overnight plate was attempted and
+    // every one of them failed. plates_completed is 0, so a digest that only
+    // reads plates_completed says "No plates printed overnight" — indistinguishable
+    // from a farm that simply sat idle. See kanban t_9e139737.
+    name: "all-failed",
+    note: "every overnight plate failed — the digest must not read as a quiet night",
+    fleet: [machine("t", "Trident", "int-t")],
+    statuses: { "int-t": { state: "idle" } },
+    jobs: [
+      { printerId: "t", status: "failed", hoursAgo: 7, doneHoursAgo: 6 },
+      { printerId: "t", status: "failed", hoursAgo: 6, doneHoursAgo: 5 },
+      { printerId: "t", status: "failed", hoursAgo: 5, doneHoursAgo: 4 },
+    ],
+    plan: { name: "Trident R2 LDO", units: 12 },
+  },
+  {
     name: "offline-printer",
     note: "an unreachable host must read as offline, not as idle-since-never",
     fleet: [machine("x", "Redoubt", "int-missing")],
