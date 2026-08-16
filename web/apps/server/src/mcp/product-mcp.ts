@@ -24,6 +24,8 @@ import {
 } from "../assistant/tools.js";
 import type { InProcessJobRunner } from "../routes/jobs.js";
 import type { AppRepository } from "../db/repository.js";
+import { createIntegrationPort, type IntegrationPort } from "../integrations/store.js";
+import { getIntegrationAdapter } from "../integrations/registry.js";
 
 export const META_TOOLS = [
   {
@@ -97,12 +99,33 @@ export type ProductMcpDeps = {
   pending: Map<string, AssistantProposedAction>;
   /** Optional tenant for jobs started via confirm_apply. */
   tenantId?: string;
+  /**
+   * Live printer-host access for farm tools (get_farm_status). Optional so
+   * tests can inject a stub; when omitted a real port is built from the repo,
+   * because without one get_farm_status reports every printer as "unknown".
+   */
+  integrations?: IntegrationPort;
 };
 
 export function createProductMcpServer(deps: ProductMcpDeps): Server {
   const { getRepo, jobs, config, pending } = deps;
   const defaultPlanId = deps.defaultPlanId ?? null;
   const tenantId = deps.tenantId;
+
+  // get_farm_status needs an IntegrationPort to read live printer state. It is
+  // built lazily and cached: constructing it per tool call would re-resolve
+  // adapters on every request, and building it eagerly would run before the
+  // repo is necessarily connected.
+  let integrationsPort: IntegrationPort | undefined = deps.integrations;
+  function getIntegrations(): IntegrationPort {
+    if (!integrationsPort) {
+      integrationsPort = createIntegrationPort({
+        repo: getRepo(),
+        getAdapter: getIntegrationAdapter,
+      });
+    }
+    return integrationsPort;
+  }
 
   function toolCtx(): ToolContext {
     const repo = getRepo();
@@ -114,6 +137,7 @@ export function createProductMcpServer(deps: ProductMcpDeps): Server {
       dataDir: config.dataDir,
       assistant: createAssistantPort(runtime),
       runtime,
+      integrations: getIntegrations(),
     };
   }
 
