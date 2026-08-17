@@ -154,7 +154,7 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
         <CardTitle className="text-base">Slicers</CardTitle>
         <CardDescription>
           Register slicer GUIs and profile watch paths. Profile sync and Export links use enabled
-          instances. Restart the server after changing watch paths so sync picks them up.
+          instances. Changing watch paths or enablement reloads sync watchers automatically.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

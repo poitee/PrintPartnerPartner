@@ -6,11 +6,15 @@ import { buildApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
 
-let cleanup: Array<() => void> = [];
+let cleanup: Array<() => Promise<void> | void> = [];
+const previousDataDir = process.env.PRINT_PARTNER_DATA_DIR;
 
-afterEach(() => {
-  for (const fn of cleanup) fn();
-  cleanup = [];
+afterEach(async () => {
+  for (const fn of cleanup.splice(0).reverse()) {
+    await fn();
+  }
+  if (previousDataDir === undefined) delete process.env.PRINT_PARTNER_DATA_DIR;
+  else process.env.PRINT_PARTNER_DATA_DIR = previousDataDir;
 });
 
 async function makeApp() {
@@ -21,9 +25,9 @@ async function makeApp() {
   const ports = createSelfHostPorts(dir);
   await ports.db.connect();
   const app = await buildApp(config, ports);
-  cleanup.push(() => {
-    void app.close();
-    void ports.db.close();
+  cleanup.push(async () => {
+    await app.close();
+    await ports.db.close();
     rmSync(dir, { recursive: true, force: true });
   });
   return { app, repo: ports.repository! };
@@ -63,6 +67,20 @@ describe("slicer instance routes", () => {
     });
     expect(updated.statusCode).toBe(200);
     expect(updated.json()).toMatchObject({ name: "Orca Off", enabled: false });
+  });
+
+  it("rejects non-boolean enabled", async () => {
+    const { app } = await makeApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/slicer-instances",
+      payload: {
+        name: "Bad",
+        kind: "orca",
+        enabled: "yes",
+      },
+    });
+    expect(res.statusCode).toBe(400);
   });
 
   it("rejects enabled custom without watch_path", async () => {

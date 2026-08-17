@@ -4,6 +4,7 @@ import type {
   SlicerDialect,
   SlicerInstanceKind,
 } from "../services/slicer-instances.js";
+import { reloadManagedProfileSync } from "../services/profile-sync-manager.js";
 
 type RouteDeps = { repo: AppRepository };
 
@@ -41,6 +42,14 @@ function parseDialect(value: unknown): SlicerDialect | null {
   return value as SlicerDialect;
 }
 
+function parseOptionalBoolean(
+  value: unknown,
+): { ok: true; value: boolean | undefined } | { ok: false } {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (typeof value === "boolean") return { ok: true, value };
+  return { ok: false };
+}
+
 function validateWritable(input: {
   kind: SlicerInstanceKind;
   dialect: SlicerDialect;
@@ -62,6 +71,10 @@ function defaultDialectForKind(kind: SlicerInstanceKind): SlicerDialect {
   return "orca_json";
 }
 
+function afterWatcherAffectingChange(): void {
+  reloadManagedProfileSync();
+}
+
 export async function registerSlicerInstanceRoutes(
   app: FastifyInstance,
   deps: RouteDeps,
@@ -72,6 +85,7 @@ export async function registerSlicerInstanceRoutes(
 
   app.post("/slicer-instances/seed-defaults", async () => {
     const inserted = deps.repo.seedStockSlicerInstancesIfEmpty();
+    if (inserted > 0) afterWatcherAffectingChange();
     return {
       inserted,
       instances: deps.repo.listSlicerInstances().map(asInstanceJson),
@@ -91,7 +105,11 @@ export async function registerSlicerInstanceRoutes(
 
     const guiUrl = typeof body.gui_url === "string" ? body.gui_url.trim() : "";
     const watchPath = typeof body.watch_path === "string" ? body.watch_path.trim() : "";
-    const enabled = body.enabled === undefined ? true : Boolean(body.enabled);
+    const enabledParsed = parseOptionalBoolean(body.enabled);
+    if (!enabledParsed.ok) {
+      return reply.status(400).send({ detail: "enabled must be a boolean" });
+    }
+    const enabled = enabledParsed.value ?? true;
 
     const err = validateWritable({ kind, dialect, watchPath, enabled });
     if (err) return reply.status(400).send({ detail: err });
@@ -104,6 +122,7 @@ export async function registerSlicerInstanceRoutes(
       watchPath,
       enabled,
     });
+    afterWatcherAffectingChange();
     return reply.status(201).send(asInstanceJson(row));
   });
 
@@ -130,8 +149,11 @@ export async function registerSlicerInstanceRoutes(
       typeof body.gui_url === "string" ? body.gui_url.trim() : existing.guiUrl;
     const watchPath =
       typeof body.watch_path === "string" ? body.watch_path.trim() : existing.watchPath;
-    const enabled =
-      body.enabled === undefined ? existing.enabled : Boolean(body.enabled);
+    const enabledParsed = parseOptionalBoolean(body.enabled);
+    if (!enabledParsed.ok) {
+      return reply.status(400).send({ detail: "enabled must be a boolean" });
+    }
+    const enabled = enabledParsed.value ?? existing.enabled;
 
     const err = validateWritable({ kind, dialect, watchPath, enabled });
     if (err) return reply.status(400).send({ detail: err });
@@ -145,6 +167,7 @@ export async function registerSlicerInstanceRoutes(
       watchPath,
       enabled,
     });
+    afterWatcherAffectingChange();
     return asInstanceJson(row);
   });
 
@@ -153,6 +176,7 @@ export async function registerSlicerInstanceRoutes(
     if (!deps.repo.deleteSlicerInstance(id)) {
       return reply.status(404).send({ detail: "Slicer instance not found" });
     }
+    afterWatcherAffectingChange();
     return reply.status(204).send();
   });
 }

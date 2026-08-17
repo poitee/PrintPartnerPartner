@@ -37,10 +37,9 @@ export default function SlicerLinksPanel() {
     void (async () => {
       try {
         const instances = await fetchSlicerInstances();
-        const fromHub = linksFromInstances(instances);
         if (cancelled) return;
-        if (fromHub.length > 0) {
-          setLinks(fromHub);
+        if (instances.length > 0) {
+          setLinks(linksFromInstances(instances));
         }
       } catch {
         // Keep hardcoded fallback when the API is unavailable.

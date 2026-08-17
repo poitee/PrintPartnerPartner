@@ -826,20 +826,22 @@ export class AppRepository {
    * Returns the number of rows inserted (0 if already seeded).
    */
   seedStockSlicerInstancesIfEmpty(env: NodeJS.ProcessEnv = process.env): number {
-    if (this.listSlicerInstances().length > 0) return 0;
-    let inserted = 0;
-    for (const preset of stockPresets(env)) {
-      this.upsertSlicerInstance({
-        name: preset.name,
-        kind: preset.kind,
-        dialect: preset.dialect,
-        guiUrl: preset.gui_url,
-        watchPath: preset.watch_path,
-        enabled: true,
-      });
-      inserted += 1;
-    }
-    return inserted;
+    return this.transaction(() => {
+      if (this.listSlicerInstances().length > 0) return 0;
+      let inserted = 0;
+      for (const preset of stockPresets(env)) {
+        this.upsertSlicerInstance({
+          name: preset.name,
+          kind: preset.kind,
+          dialect: preset.dialect,
+          guiUrl: preset.gui_url,
+          watchPath: preset.watch_path,
+          enabled: true,
+        });
+        inserted += 1;
+      }
+      return inserted;
+    });
   }
 
   private mapSlicerInstance(row: typeof defaultSchema.slicerInstances.$inferSelect): SlicerInstanceRow {
