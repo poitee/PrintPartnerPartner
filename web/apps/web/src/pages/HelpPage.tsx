@@ -230,7 +230,7 @@ export default function HelpPage() {
             <div>
               <CardTitle className="text-base">Kit variants</CardTitle>
               <CardDescription>
-                Optional per-repo manifests that let you pick one variant per group on Build.
+                Optional per-repo manifests that let you pick one variant per group on Plan.
               </CardDescription>
             </div>
           </div>
@@ -238,7 +238,7 @@ export default function HelpPage() {
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <ol className="list-decimal space-y-2 pl-5">
             <li>
-              Sync the source, then on <strong className="font-medium text-foreground">Build</strong>{" "}
+              Sync the source, then on <strong className="font-medium text-foreground">Plan</strong>{" "}
               apply a stack preset (if available) or attach the base repo.
             </li>
             <li>
@@ -246,8 +246,8 @@ export default function HelpPage() {
               and pick one option per group (selections save automatically).
             </li>
             <li>
-              Run <strong className="font-medium text-foreground">Update build</strong> so variant
-              parts appear on Review.
+              Run <strong className="font-medium text-foreground">Update plan</strong> so variant
+              parts appear on Parts.
             </li>
           </ol>
           <ul className="list-disc space-y-2 pl-5">
