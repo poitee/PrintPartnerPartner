@@ -28,9 +28,8 @@ services:
       # OLLAMA_URL: http://host.docker.internal:11434
     volumes:
       - print-partner-data:/data
-    # Use user namespace to map container ppuser (1000) to host user
-    # This allows non-root execution with proper file permissions
-    user: "1000:1000"
+    # Entrypoint starts as root, chowns /data for named volumes, then drops to ppuser.
+    # Do not set user: here — that would skip the chown and break fresh volumes.
     healthcheck:
       # node:22-bookworm-slim has no curl/wget; use node's built-in fetch.
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]

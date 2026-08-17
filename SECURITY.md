@@ -20,24 +20,24 @@ If exposing to the internet:
 
 ### Container Execution
 
-The Docker image enforces:
+The Docker image starts as root only long enough for the entrypoint to prepare `/data`, then drops to:
 
-```dockerfile
-USER ppuser  # Non-root, uid 1000
+```text
+ppuser  # Non-root, uid 1000 (via gosu after chown)
 ```
 
 Benefits:
-- Escape from container cannot gain root on host
+- Escape from container cannot gain root on host (runtime process is non-root)
 - Process cannot write to system directories
 - Standard Linux security model applies
 
 ### Data Directory Permissions
 
-On first run, the container creates `/data` with:
+On start, the entrypoint ensures `/data` is owned by:
 - Owner: ppuser:ppuser (uid 1000:1000)
-- Permissions: drwxr-xr-x (755)
+- Permissions: typically drwxr-xr-x (755) after chown
 
-Default Compose uses a **named volume** (`print-partner-data`). Docker manages ownership for that volume; you do not set a host bind `device:` path.
+Default Compose uses a **named volume** (`print-partner-data`). Named volumes are **not** automatically owned by ppuser — especially on Docker Desktop, a fresh volume is often root-owned. The entrypoint `chown`s `/data` before dropping privileges. Do not set `user: "1000:1000"` in Compose for this path.
 
 If you switch to a **host bind mount** instead (see `NON_ROOT_SETUP.md` Option 2), prepare the host directory for uid 1000:
 

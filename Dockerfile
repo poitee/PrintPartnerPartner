@@ -18,8 +18,8 @@ FROM node:22-bookworm-slim AS runtime
 # Baked in by the release workflow (vX.Y.Z tag -> X.Y.Z-web); reported by GET /health.
 ARG PP_VERSION=3.0.0-web
 
-# Install dumb-init for proper signal handling (PID 1 zombie process issue)
-RUN apt-get update && apt-get install -y --no-install-recommends dumb-init && \
+# dumb-init: proper PID 1 signal handling. gosu: drop root after entrypoint chown.
+RUN apt-get update && apt-get install -y --no-install-recommends dumb-init gosu && \
     rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for application (uid 1000, gid 1000)
@@ -44,14 +44,15 @@ COPY --from=build --chown=ppuser:ppuser /app/web ./
 
 WORKDIR /app/web/apps/server
 
-# Create data directory with correct permissions
+# Image-layer /data ownership (named volume mounts hide this; entrypoint fixes at runtime)
 RUN mkdir -p /data && chown -R ppuser:ppuser /data
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8080
 
-# Switch to non-root user (disabled for compatibility with existing volumes)
-# USER ppuser
-
-# Use dumb-init to handle signals properly
-ENTRYPOINT ["dumb-init", "--"]
+# Starts as root so entrypoint can chown named-volume /data, then drops to ppuser.
+# Do not set USER here — compose must not force user: "1000:1000" either.
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "dist/index.js"]
