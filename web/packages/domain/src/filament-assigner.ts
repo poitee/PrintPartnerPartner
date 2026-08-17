@@ -20,6 +20,12 @@ export type PrinterMachine = {
   integration_id?: string | null;
   /** Optional device id within the host (Moonraker uses "default"). */
   device_id?: string | null;
+  /**
+   * Explicit per-printer slicer override. When set, this wins over the
+   * integration/name-based routing in `selectSlicerForPrinter()`. Null/absent
+   * means "Auto" — fall back to the existing routing rules.
+   */
+  preferred_slicer?: "orca" | "prusa" | "bambu" | null;
 };
 
 export type MergePartExport = MergePart & {

@@ -56,5 +56,35 @@ export async function registerPrinterRoutes(app: FastifyInstance, deps: RouteDep
     return reply.status(204).send();
   });
 
+  const VALID_SLICER_OVERRIDES = new Set(["orca", "prusa", "bambu"]);
+
+  app.put("/printers/:id", async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const body = request.body as { preferred_slicer?: string | null };
+    const fleet = loadFleet(deps.repo);
+    const idx = fleet.findIndex((m) => m.id === id);
+    if (idx === -1) {
+      return reply.status(404).send({ detail: "Printer not found" });
+    }
+    if (
+      body.preferred_slicer !== undefined &&
+      body.preferred_slicer !== null &&
+      !VALID_SLICER_OVERRIDES.has(body.preferred_slicer)
+    ) {
+      return reply.status(400).send({
+        detail: `preferred_slicer must be one of orca, prusa, bambu, or null (got ${body.preferred_slicer})`,
+      });
+    }
+    if (body.preferred_slicer !== undefined) {
+      const value =
+        body.preferred_slicer === null
+          ? null
+          : (body.preferred_slicer as "orca" | "prusa" | "bambu");
+      fleet[idx] = { ...fleet[idx], preferred_slicer: value };
+    }
+    saveFleet(deps.repo, fleet);
+    return loadFleet(deps.repo)[idx];
+  });
+
   app.get("/printer-presets", async () => ({ presets: loadPrinterPresets() }));
 }
