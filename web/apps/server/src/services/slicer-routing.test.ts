@@ -347,4 +347,61 @@ describe("resolveFlatConfigsForPrinter", () => {
       expect(resolved.configs.filament).toBeDefined();
     });
   });
+
+  it("assigned mode uses machine profile id, not name match", () => {
+    withRepo((repo, sqlite) => {
+      seedProfiles(sqlite);
+      const bambuMachine = repo.listSlicerPrinterProfiles().find((p) => p.name === "Bambu X1C 0.4")!;
+      const petg = repo.listSlicerFilamentProfiles().find((p) => p.name === "Imported PETG")!;
+      repo.upsertPrinterProfileAssignment({
+        printerId: "p1",
+        machineProfileId: bambuMachine.id,
+        profileSource: "assigned",
+        filamentSlots: [{ slotIndex: 1, filamentProfileId: petg.id }],
+      });
+      const resolved = resolveFlatConfigsForPrinter(
+        repo,
+        printer({ id: "p1", name: "Voron 350" }),
+        "orca",
+      );
+      expect(resolved.sources.machine?.id).toBe(bambuMachine.id);
+      expect(resolved.configs.filament).toMatchObject({ filament_type: "PETG" });
+      expect(resolved.errors).toEqual([]);
+    });
+  });
+
+  it("assigned mode without machine_profile_id yields errors and no machine config", () => {
+    withRepo((repo) => {
+      repo.upsertPrinterProfileAssignment({
+        printerId: "p1",
+        machineProfileId: null,
+        profileSource: "assigned",
+        filamentSlots: [{ slotIndex: 1, filamentProfileId: null }],
+      });
+      const resolved = resolveFlatConfigsForPrinter(repo, printer({ id: "p1", name: "Voron 350" }), "orca");
+      expect(resolved.errors.length).toBeGreaterThan(0);
+      expect(resolved.configs.machine).toBeUndefined();
+    });
+  });
+
+  it("auto_match mode ignores assignment machine id and keeps name match", () => {
+    withRepo((repo, sqlite) => {
+      seedProfiles(sqlite);
+      const bambuMachine = repo.listSlicerPrinterProfiles().find((p) => p.name === "Bambu X1C 0.4")!;
+      const voronMachine = repo.listSlicerPrinterProfiles().find((p) => p.name === "Voron 350 0.4")!;
+      repo.upsertPrinterProfileAssignment({
+        printerId: "p1",
+        machineProfileId: bambuMachine.id,
+        profileSource: "auto_match",
+        filamentSlots: [{ slotIndex: 1, filamentProfileId: null }],
+      });
+      const resolved = resolveFlatConfigsForPrinter(
+        repo,
+        printer({ id: "p1", name: "Voron 350" }),
+        "orca",
+      );
+      expect(resolved.sources.machine?.id).toBe(voronMachine.id);
+      expect(resolved.errors).toEqual([]);
+    });
+  });
 });

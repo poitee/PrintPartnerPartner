@@ -21,6 +21,7 @@ import type { PrinterMachine } from "@print-partner/domain";
 import type { AppRepository, SlicerProfileRow } from "../db/repository.js";
 import { getIntegrationConfig } from "../integrations/store.js";
 import type { SlicerKind } from "../integrations/adapters/slicer-sidecar.js";
+import { processCompatibleWithMachine } from "./printer-profile-assignments.js";
 
 /** Flat, already inheritance-resolved config document. */
 export type FlatConfig = Record<string, unknown>;
@@ -186,6 +187,8 @@ export function pickProfileForPrinterDetailed(
 export type ResolveSettingsResult = {
   configs: ResolvedFlatConfigs;
   warnings: string[];
+  /** Blocking issues when profile_source=assigned and required rows are missing. */
+  errors: string[];
   /** Which profile row supplied each entry, for job metadata/logging. */
   sources: Record<string, { id: number; name: string }>;
 };
@@ -198,6 +201,98 @@ export type ResolveSettingsResult = {
  * goes to --load-filaments (see slicer_sidecar/settings_writer.py).
  */
 export function resolveFlatConfigsForPrinter(
+  repo: AppRepository,
+  printer: PrinterMachine | null | undefined,
+  slicer: SlicerKind,
+): ResolveSettingsResult {
+  const assignment = printer?.id ? repo.getPrinterProfileAssignment(printer.id) : null;
+  if (assignment?.profileSource === "assigned") {
+    return resolveAssignedFlatConfigsForPrinter(repo, printer, slicer, assignment);
+  }
+  return resolveAutoMatchFlatConfigsForPrinter(repo, printer, slicer);
+}
+
+function resolveAssignedFlatConfigsForPrinter(
+  repo: AppRepository,
+  printer: PrinterMachine | null | undefined,
+  slicer: SlicerKind,
+  assignment: { machineProfileId: number | null },
+): ResolveSettingsResult {
+  const configs: ResolvedFlatConfigs = {};
+  const sources: Record<string, { id: number; name: string }> = {};
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  if (assignment.machineProfileId == null) {
+    errors.push(
+      "Use assigned profiles is enabled but no machine profile is assigned. Assign one on Settings → Printers.",
+    );
+    return { configs, warnings, errors, sources };
+  }
+
+  const machineRow = repo.getSlicerPrinterProfileById(assignment.machineProfileId);
+  if (!machineRow || !profileMatchesSlicer(machineRow, slicer)) {
+    errors.push(
+      `Assigned machine profile is missing or incompatible with ${slicer}. Update the assignment on Settings → Printers.`,
+    );
+    return { configs, warnings, errors, sources };
+  }
+
+  const machineCfg = parseFlatConfig(machineRow.resolvedFlatConfig);
+  if (!machineCfg) {
+    errors.push(`Assigned machine profile "${machineRow.name}" has an unreadable resolved config.`);
+    return { configs, warnings, errors, sources };
+  }
+  configs.machine = machineCfg;
+  sources.machine = { id: machineRow.id, name: machineRow.name };
+
+  const compatibleProcesses = repo
+    .listSlicerProcessProfilesDetailed()
+    .filter(
+      (row) =>
+        profileMatchesSlicer(row, slicer) &&
+        row.resolvedFlatConfig &&
+        processCompatibleWithMachine(row.compatiblePrinters, machineRow.name),
+    );
+  const processRow = pickProfileForPrinter(compatibleProcesses, slicer, printer?.name ?? null);
+  if (processRow) {
+    const cfg = parseFlatConfig(processRow.resolvedFlatConfig);
+    if (cfg) {
+      configs.process = cfg;
+      sources.process = { id: processRow.id, name: processRow.name };
+    } else {
+      warnings.push(`Process profile "${processRow.name}" has an unreadable resolved config.`);
+    }
+  } else {
+    warnings.push(`No ${slicer}-compatible process profile found for the assigned machine; using slicer defaults.`);
+  }
+
+  const slotAssignments = new Map(
+    repo.listFilamentSlotAssignments(printer!.id).map((s) => [s.slotIndex, s.filamentProfileId]),
+  );
+  let filamentIndex = 0;
+  for (const slot of printer?.loaded_filaments ?? []) {
+    const filamentProfileId = slotAssignments.get(slot.slot) ?? null;
+    if (filamentProfileId == null) continue;
+    const row = repo.getSlicerFilamentProfileById(filamentProfileId);
+    if (!row || !profileMatchesSlicer(row, slicer)) continue;
+    const cfg = parseFlatConfig(row.resolvedFlatConfig);
+    if (!cfg) continue;
+    const key = filamentIndex === 0 ? "filament" : `filament_${filamentIndex + 1}`;
+    configs[key] = withMaterialType(cfg, row);
+    sources[key] = { id: row.id, name: row.name };
+    filamentIndex += 1;
+  }
+  if (filamentIndex === 0) {
+    errors.push(
+      "Use assigned profiles is enabled but no filament profiles are assigned to loaded slots. Assign filaments on Settings → Printers.",
+    );
+  }
+
+  return { configs, warnings, errors, sources };
+}
+
+function resolveAutoMatchFlatConfigsForPrinter(
   repo: AppRepository,
   printer: PrinterMachine | null | undefined,
   slicer: SlicerKind,
@@ -275,7 +370,7 @@ export function resolveFlatConfigsForPrinter(
     }
   }
 
-  return { configs, warnings, sources };
+  return { configs, warnings, errors: [], sources };
 }
 
 /**
