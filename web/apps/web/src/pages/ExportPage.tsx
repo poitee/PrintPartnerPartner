@@ -10,6 +10,7 @@ import PartsManifestTransfer from "../components/export/PartsManifestTransfer";
 import ManualAssignmentPanel from "../components/export/ManualAssignmentPanel";
 import PlatePreviewPanel from "../components/export/PlatePreviewPanel";
 import SlicerLinksPanel from "../components/export/SlicerLinksPanel";
+import ProfileLibraryPanel from "../components/export/ProfileLibraryPanel";
 // Lazy: PrinterSendPanel pulls in heavy printer integration + dnd-kit
 const PrinterSendPanel = lazy(() => import("../components/export/PrinterSendPanel"));
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
@@ -134,6 +135,8 @@ export default function ExportPage() {
             </p>
 
             <SlicerLinksPanel />
+
+            <ProfileLibraryPanel />
 
             <ManualAssignmentPanel
               profileId={selectedProfileId}

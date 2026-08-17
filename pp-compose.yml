@@ -128,6 +128,7 @@ services:
     volumes:
       - orca-config:/slicer-profiles/orca:ro
       - prusa-config:/slicer-profiles/prusa:ro
+      - bambu-config:/slicer-profiles/bambu:ro
       - pp-exchange:/exchange      # read-write: PP writes 3MF, reads gcode
 
 # -----------------------------------------------------------------------
@@ -136,6 +137,7 @@ services:
 volumes:
   orca-config:
   prusa-config:
+  bambu-config:
   pp-exchange:
   caddy-data:
   caddy-config:

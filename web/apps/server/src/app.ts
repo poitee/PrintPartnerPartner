@@ -165,6 +165,23 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
       },
     );
     app.addHook("onClose", async () => { watcherHandle.stop(); });
+
+    // Start background slicer profile-sync watcher (chokidar over shared config volumes)
+    const { startProfileSyncWatcher, buildProfileSyncSettings } = await import(
+      "./services/profile-sync.js"
+    );
+    const { broadcastProfileSync, registerProfileSyncWebSocket } = await import(
+      "./services/profile-sync-broadcast.js"
+    );
+    registerProfileSyncWebSocket(app);
+    const profileSyncSettings = buildProfileSyncSettings(process.env);
+    const profileSyncHandle = startProfileSyncWatcher(
+      repository,
+      profileSyncSettings,
+      (event) => broadcastProfileSync(event),
+    );
+    void profileSyncHandle.syncAll();
+    app.addHook("onClose", async () => { profileSyncHandle.stop(); });
     
     // Register backup routes (available regardless of auth mode)
     await registerBackupRoutes(app, {

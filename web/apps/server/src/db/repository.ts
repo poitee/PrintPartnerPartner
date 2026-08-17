@@ -115,6 +115,60 @@ export type SlicerProfileRow = {
   resolvedFlatConfig: string | null;
 };
 
+/** Full row for the read-only profile library UI (all three kinds merged). */
+export type ProfileLibraryRow = {
+  id: number;
+  kind: "printer" | "process" | "filament";
+  name: string;
+  slicerFormat: string | null;
+  materialType: string | null;
+  resolvedFlatConfig: string | null;
+  sourcePath: string | null;
+  syncedFromSlicerVersion: string | null;
+  lastSyncedAt: string | null;
+  importedAt: string;
+};
+
+/** Input for a printer/machine profile upserted by the profile-sync watcher. */
+export type SyncedPrinterProfileInput = {
+  name: string;
+  slicerFormat: string;
+  slicerVersion?: string | null;
+  nozzleDiameterMm?: string | null;
+  extruderCount?: number | null;
+  rawJson?: string | null;
+  resolvedFlatConfig: string;
+  sourcePath: string;
+};
+
+/** Input for a process profile upserted by the profile-sync watcher. */
+export type SyncedProcessProfileInput = {
+  name: string;
+  slicerFormat: string;
+  slicerVersion?: string | null;
+  compatiblePrinters?: string | null;
+  resolvedFlatConfig: string;
+  sourcePath: string;
+};
+
+/** Input for a filament profile upserted by the profile-sync watcher. */
+export type SyncedFilamentProfileInput = {
+  name: string;
+  materialType: string;
+  slicerVersion?: string | null;
+  materialTier?: number | null;
+  nozzleTempC?: number | null;
+  bedTempC?: number | null;
+  fanPct?: number | null;
+  extrusionMultiplier?: string | null;
+  pressureAdvance?: string | null;
+  retraction?: string | null;
+  rawJson?: string | null;
+  rawIni?: string | null;
+  resolvedFlatConfig: string;
+  sourcePath: string;
+};
+
 export type SourceDocSummary = {
   id: number;
   path: string;
@@ -332,6 +386,175 @@ export class AppRepository {
         materialType: r.materialType,
         resolvedFlatConfig: r.resolvedFlatConfig,
       }));
+  }
+
+  // -------------------------------------------------------------------------
+  // Profile library (read-only UI) + profile-sync watcher upserts.
+  // -------------------------------------------------------------------------
+
+  /** Full profile library for the read-only UI — all three kinds, with sync provenance. */
+  listProfileLibrary(): ProfileLibraryRow[] {
+    const printers = this.db
+      .select({
+        id: this.schema.printerProfiles.id,
+        name: this.schema.printerProfiles.name,
+        slicerFormat: this.schema.printerProfiles.slicerFormat,
+        resolvedFlatConfig: this.schema.printerProfiles.resolvedFlatConfig,
+        sourcePath: this.schema.printerProfiles.sourcePath,
+        syncedFromSlicerVersion: this.schema.printerProfiles.syncedFromSlicerVersion,
+        lastSyncedAt: this.schema.printerProfiles.lastSyncedAt,
+        importedAt: this.schema.printerProfiles.importedAt,
+      })
+      .from(this.schema.printerProfiles)
+      .where(eq(this.schema.printerProfiles.tenantId, this.tenantId))
+      .all()
+      .map((r) => ({ ...r, kind: "printer" as const, materialType: null }));
+
+    const processes = this.db
+      .select({
+        id: this.schema.processProfiles.id,
+        name: this.schema.processProfiles.name,
+        slicerFormat: this.schema.processProfiles.slicerFormat,
+        resolvedFlatConfig: this.schema.processProfiles.resolvedFlatConfig,
+        sourcePath: this.schema.processProfiles.sourcePath,
+        syncedFromSlicerVersion: this.schema.processProfiles.syncedFromSlicerVersion,
+        lastSyncedAt: this.schema.processProfiles.lastSyncedAt,
+        importedAt: this.schema.processProfiles.importedAt,
+      })
+      .from(this.schema.processProfiles)
+      .where(eq(this.schema.processProfiles.tenantId, this.tenantId))
+      .all()
+      .map((r) => ({ ...r, kind: "process" as const, materialType: null }));
+
+    const filaments = this.db
+      .select({
+        id: this.schema.filamentProfiles.id,
+        name: this.schema.filamentProfiles.name,
+        materialType: this.schema.filamentProfiles.materialType,
+        resolvedFlatConfig: this.schema.filamentProfiles.resolvedFlatConfig,
+        sourcePath: this.schema.filamentProfiles.sourcePath,
+        syncedFromSlicerVersion: this.schema.filamentProfiles.syncedFromSlicerVersion,
+        lastSyncedAt: this.schema.filamentProfiles.lastSyncedAt,
+        importedAt: this.schema.filamentProfiles.importedAt,
+      })
+      .from(this.schema.filamentProfiles)
+      .where(eq(this.schema.filamentProfiles.tenantId, this.tenantId))
+      .all()
+      .map((r) => ({ ...r, kind: "filament" as const, slicerFormat: null }));
+
+    return [...printers, ...processes, ...filaments].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Upsert a printer/machine profile synced from a slicer config volume (identity: tenant + name). */
+  upsertSyncedPrinterProfile(input: SyncedPrinterProfileInput): void {
+    const now = new Date().toISOString();
+    this.db
+      .insert(this.schema.printerProfiles)
+      .values({
+        tenantId: this.tenantId,
+        name: input.name,
+        slicerFormat: input.slicerFormat,
+        slicerVersionAtImport: input.slicerVersion ?? null,
+        nozzleDiameterMm: input.nozzleDiameterMm ?? null,
+        extruderCount: input.extruderCount ?? 1,
+        rawJson: input.rawJson ?? null,
+        resolvedFlatConfig: input.resolvedFlatConfig,
+        importedAt: now,
+        sourcePath: input.sourcePath,
+        syncedFromSlicerVersion: input.slicerVersion ?? null,
+        lastSyncedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [this.schema.printerProfiles.tenantId, this.schema.printerProfiles.name],
+        set: {
+          slicerFormat: input.slicerFormat,
+          slicerVersionAtImport: input.slicerVersion ?? null,
+          nozzleDiameterMm: input.nozzleDiameterMm ?? null,
+          extruderCount: input.extruderCount ?? 1,
+          rawJson: input.rawJson ?? null,
+          resolvedFlatConfig: input.resolvedFlatConfig,
+          sourcePath: input.sourcePath,
+          syncedFromSlicerVersion: input.slicerVersion ?? null,
+          lastSyncedAt: now,
+        },
+      })
+      .run();
+  }
+
+  /** Upsert a process (print settings) profile synced from a slicer config volume. */
+  upsertSyncedProcessProfile(input: SyncedProcessProfileInput): void {
+    const now = new Date().toISOString();
+    this.db
+      .insert(this.schema.processProfiles)
+      .values({
+        tenantId: this.tenantId,
+        name: input.name,
+        slicerFormat: input.slicerFormat,
+        compatiblePrinters: input.compatiblePrinters ?? null,
+        resolvedFlatConfig: input.resolvedFlatConfig,
+        importedAt: now,
+        sourcePath: input.sourcePath,
+        syncedFromSlicerVersion: input.slicerVersion ?? null,
+        lastSyncedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [this.schema.processProfiles.tenantId, this.schema.processProfiles.name],
+        set: {
+          slicerFormat: input.slicerFormat,
+          compatiblePrinters: input.compatiblePrinters ?? null,
+          resolvedFlatConfig: input.resolvedFlatConfig,
+          sourcePath: input.sourcePath,
+          syncedFromSlicerVersion: input.slicerVersion ?? null,
+          lastSyncedAt: now,
+        },
+      })
+      .run();
+  }
+
+  /** Upsert a filament profile synced from a slicer config volume. */
+  upsertSyncedFilamentProfile(input: SyncedFilamentProfileInput): void {
+    const now = new Date().toISOString();
+    this.db
+      .insert(this.schema.filamentProfiles)
+      .values({
+        tenantId: this.tenantId,
+        name: input.name,
+        materialType: input.materialType,
+        materialTier: input.materialTier ?? 1,
+        nozzleTempC: input.nozzleTempC ?? null,
+        bedTempC: input.bedTempC ?? null,
+        fanPct: input.fanPct ?? null,
+        extrusionMultiplier: input.extrusionMultiplier ?? null,
+        pressureAdvance: input.pressureAdvance ?? null,
+        retraction: input.retraction ?? null,
+        rawJson: input.rawJson ?? null,
+        rawIni: input.rawIni ?? null,
+        resolvedFlatConfig: input.resolvedFlatConfig,
+        importedAt: now,
+        sourcePath: input.sourcePath,
+        syncedFromSlicerVersion: input.slicerVersion ?? null,
+        lastSyncedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [this.schema.filamentProfiles.tenantId, this.schema.filamentProfiles.name],
+        set: {
+          materialType: input.materialType,
+          materialTier: input.materialTier ?? 1,
+          nozzleTempC: input.nozzleTempC ?? null,
+          bedTempC: input.bedTempC ?? null,
+          fanPct: input.fanPct ?? null,
+          extrusionMultiplier: input.extrusionMultiplier ?? null,
+          pressureAdvance: input.pressureAdvance ?? null,
+          retraction: input.retraction ?? null,
+          rawJson: input.rawJson ?? null,
+          rawIni: input.rawIni ?? null,
+          resolvedFlatConfig: input.resolvedFlatConfig,
+          sourcePath: input.sourcePath,
+          syncedFromSlicerVersion: input.slicerVersion ?? null,
+          lastSyncedAt: now,
+        },
+      })
+      .run();
   }
 
   /** Global slicer-printer-name -> PP fleet printer id map (all tenants). */

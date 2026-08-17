@@ -2412,6 +2412,25 @@ export async function fetchPrinters(): Promise<PrinterMachine[]> {
   return body.printers;
 }
 
+/** Row shape from GET /profile-library — mirrors AppRepository.ProfileLibraryRow on the server. */
+export type ProfileLibraryRow = {
+  id: number;
+  kind: "printer" | "process" | "filament";
+  name: string;
+  slicerFormat: string | null;
+  materialType: string | null;
+  resolvedFlatConfig: string | null;
+  sourcePath: string | null;
+  syncedFromSlicerVersion: string | null;
+  lastSyncedAt: string | null;
+  importedAt: string;
+};
+
+export async function fetchProfileLibrary(): Promise<ProfileLibraryRow[]> {
+  const body = await engineFetch<{ profiles: ProfileLibraryRow[] }>("/profile-library");
+  return body.profiles;
+}
+
 export async function fetchPrintPlan(profileId: number): Promise<PrintPlan> {
   const body = await engineFetch<{ plan: PrintPlan }>(
     `/plans/${profileId}/print-plan`,

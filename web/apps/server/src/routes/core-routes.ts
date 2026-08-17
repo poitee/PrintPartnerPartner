@@ -9,6 +9,7 @@ import { registerPartRoutes } from "./parts.js";
 import { registerPlanRoutes } from "./plans.js";
 import { registerPrintPlanRoutes } from "./print-plan.js";
 import { registerPrinterRoutes } from "./printers.js";
+import { registerProfileLibraryRoutes } from "./profile-library.js";
 import { registerRepoManifestRoutes } from "./repo-manifest.js";
 import { registerSourceDocsRoutes } from "./source-docs.js";
 import {
@@ -79,6 +80,7 @@ export async function registerCoreRoutes(
   await registerRepoManifestRoutes(app, { repo: deps.repo });
   await registerSourceDocsRoutes(app, { repo: deps.repo });
   await registerPrinterRoutes(app, { repo: deps.repo });
+  await registerProfileLibraryRoutes(app, { repo: deps.repo });
   await registerPrintPlanRoutes(app, { repo: deps.repo });
   await registerManifestRoutes(app, { repo: deps.repo });
 

@@ -260,6 +260,12 @@ export const printerProfiles = sqliteTable(
     /** Merged, inheritance-resolved flat config as JSON. */
     resolvedFlatConfig: text("resolved_flat_config"),
     importedAt: text("imported_at").notNull(),
+    /** Absolute path inside the container of the slicer-written source file (profile-sync watcher only). */
+    sourcePath: text("source_path"),
+    /** Slicer version string read from the slicer's own config at sync time, e.g. "2.3.2.60". */
+    syncedFromSlicerVersion: text("synced_from_slicer_version"),
+    /** ISO timestamp of the most recent profile-sync watcher upsert for this row. */
+    lastSyncedAt: text("last_synced_at"),
   },
   (t) => [uniqueIndex("uq_printer_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -277,6 +283,9 @@ export const processProfiles = sqliteTable(
     /** Merged, inheritance-resolved flat config as JSON. */
     resolvedFlatConfig: text("resolved_flat_config"),
     importedAt: text("imported_at").notNull(),
+    sourcePath: text("source_path"),
+    syncedFromSlicerVersion: text("synced_from_slicer_version"),
+    lastSyncedAt: text("last_synced_at"),
   },
   (t) => [uniqueIndex("uq_process_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -304,6 +313,9 @@ export const filamentProfiles = sqliteTable(
     /** Merged, inheritance-resolved flat config as JSON. */
     resolvedFlatConfig: text("resolved_flat_config"),
     importedAt: text("imported_at").notNull(),
+    sourcePath: text("source_path"),
+    syncedFromSlicerVersion: text("synced_from_slicer_version"),
+    lastSyncedAt: text("last_synced_at"),
   },
   (t) => [uniqueIndex("uq_filament_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -388,7 +400,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 12;
+export const currentSchemaVersion = 13;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -665,5 +677,21 @@ export const schemaMigrations: string[] = [
   `ALTER TABLE print_jobs ADD COLUMN filament_consumed_g INTEGER`,
   `ALTER TABLE print_jobs ADD COLUMN completed_at TEXT`,
   `CREATE INDEX IF NOT EXISTS idx_print_jobs_tenant_status ON print_jobs (tenant_id, status)`,
+  // v13 — profile-sync provenance columns on the three slicer profile tables.
+  // Populated by the chokidar-based profile-sync watcher (services/profile-sync.ts)
+  // when a profile file changes on disk in the shared slicer config volumes.
+  // NULL on rows that were manually imported or PP-native starters (never synced).
+  `ALTER TABLE printer_profiles ADD COLUMN source_path TEXT`,
+  `ALTER TABLE printer_profiles ADD COLUMN synced_from_slicer_version TEXT`,
+  `ALTER TABLE printer_profiles ADD COLUMN last_synced_at TEXT`,
+  `ALTER TABLE process_profiles ADD COLUMN source_path TEXT`,
+  `ALTER TABLE process_profiles ADD COLUMN synced_from_slicer_version TEXT`,
+  `ALTER TABLE process_profiles ADD COLUMN last_synced_at TEXT`,
+  `ALTER TABLE filament_profiles ADD COLUMN source_path TEXT`,
+  `ALTER TABLE filament_profiles ADD COLUMN synced_from_slicer_version TEXT`,
+  `ALTER TABLE filament_profiles ADD COLUMN last_synced_at TEXT`,
+  `CREATE INDEX IF NOT EXISTS idx_printer_profiles_source_path ON printer_profiles (source_path)`,
+  `CREATE INDEX IF NOT EXISTS idx_process_profiles_source_path ON process_profiles (source_path)`,
+  `CREATE INDEX IF NOT EXISTS idx_filament_profiles_source_path ON filament_profiles (source_path)`,
   `CREATE INDEX IF NOT EXISTS idx_print_jobs_printer ON print_jobs (tenant_id, printer_id)`,
 ];
