@@ -224,6 +224,52 @@ describe("slicerSidecarSlice — legacy fallback", () => {
     expect(seen.map((s) => s.url)).toEqual(["/slice"]);
   });
 
+  it("does not re-POST /slice after a transient socket drop (no second CLI job)", async () => {
+    // QA / CodeRabbit major: retrying a non-idempotent slice POST can start a
+    // second concurrent Orca CLI run. Connection: close is fine; retry must
+    // never re-POST.
+    reset();
+    let posts = 0;
+    handler = (req, res) => {
+      if (req.method === "POST" && req.url === "/slice") {
+        posts += 1;
+        // Drop the socket without an HTTP response → undici TypeError / fetch failed.
+        req.socket.destroy();
+        return;
+      }
+      res.writeHead(404).end();
+    };
+
+    await expect(
+      slicerSidecarSlice(
+        { url: baseUrl, slicer: "orca", api: "legacy" },
+        { model: new Uint8Array([1]), slicer: "orca", resolved_flat_configs: { machine: {} } },
+      ),
+    ).rejects.toBeTruthy();
+
+    expect(posts).toBe(1);
+    expect(seen.filter((s) => s.url === "/slice")).toHaveLength(1);
+  });
+
+  it("retries a dropped GET health probe once (idempotent)", async () => {
+    reset();
+    let healthHits = 0;
+    handler = (req, res) => {
+      if (req.url === "/health") {
+        healthHits += 1;
+        if (healthHits === 1) {
+          req.socket.destroy();
+          return;
+        }
+        return json(res, 200, { status: "ok" });
+      }
+      res.writeHead(404).end();
+    };
+    const result = await slicerSidecarAdapter.testConnection({ url: baseUrl, slicer: "orca" });
+    expect(result.ok).toBe(true);
+    expect(healthHits).toBeGreaterThanOrEqual(2);
+  });
+
   it("rejects when no url is configured", async () => {
     await expect(
       slicerSidecarSlice({}, { model: new Uint8Array([1]), slicer: "orca" }),
