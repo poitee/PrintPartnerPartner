@@ -191,7 +191,7 @@ export default function HelpPage() {
             </span>
             <div>
               <CardTitle className="text-base">Workflow</CardTitle>
-              <CardDescription>Sources → Build → Review</CardDescription>
+              <CardDescription>Library → Plan → Parts, then Progress and Export</CardDescription>
             </div>
           </div>
         </CardHeader>

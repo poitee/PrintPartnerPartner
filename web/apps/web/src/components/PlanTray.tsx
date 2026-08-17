@@ -202,7 +202,7 @@ export default function PlanTray() {
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
           {totals.totalUnits > 0 ? (
             <span className="hidden font-mono text-[11.5px] text-muted-foreground sm:inline">
-              {totals.printedUnits} / {totals.totalUnits} printed
+              {totals.printedUnits} / {totals.totalUnits} units printed
             </span>
           ) : null}
           <Button
