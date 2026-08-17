@@ -109,4 +109,79 @@ describe("AppRepository", () => {
       expect(copy.special_request).toBe("bag separately");
     });
   });
+
+  it("upserts assignment and slot filaments, defaults to auto_match when missing", () => {
+    withRepo((repo) => {
+      expect(repo.getPrinterProfileAssignment("p1")).toBeNull();
+      repo.upsertPrinterProfileAssignment({
+        printerId: "p1",
+        machineProfileId: null,
+        profileSource: "assigned",
+        filamentSlots: [
+          { slotIndex: 1, filamentProfileId: null },
+          { slotIndex: 2, filamentProfileId: null },
+        ],
+      });
+      const row = repo.getPrinterProfileAssignment("p1");
+      expect(row?.profileSource).toBe("assigned");
+      expect(repo.listFilamentSlotAssignments("p1")).toEqual([
+        { slotIndex: 1, filamentProfileId: null },
+        { slotIndex: 2, filamentProfileId: null },
+      ]);
+    });
+  });
+
+  it("loads slicer profiles by id with last_synced_at", () => {
+    withRepo((repo) => {
+      repo.upsertSyncedPrinterProfile({
+        name: "Voron 350",
+        slicerFormat: "orca",
+        resolvedFlatConfig: "{}",
+        sourcePath: "/tmp/machine.json",
+      });
+      repo.upsertSyncedFilamentProfile({
+        name: "PLA Basic",
+        materialType: "PLA",
+        resolvedFlatConfig: "{}",
+        sourcePath: "/tmp/filament.json",
+      });
+      const machine = repo.listSlicerPrinterProfiles().find((p) => p.name === "Voron 350")!;
+      const filament = repo.listSlicerFilamentProfiles().find((p) => p.name === "PLA Basic")!;
+      expect(repo.getSlicerPrinterProfileById(machine.id)?.name).toBe("Voron 350");
+      expect(repo.getSlicerPrinterProfileById(machine.id)?.lastSyncedAt).toBeTruthy();
+      expect(repo.getSlicerFilamentProfileById(filament.id)?.name).toBe("PLA Basic");
+      expect(repo.getSlicerFilamentProfileById(filament.id)?.lastSyncedAt).toBeTruthy();
+    });
+  });
+
+  it("replaces slot assignments on upsert", () => {
+    withRepo((repo) => {
+      repo.upsertPrinterProfileAssignment({
+        printerId: "p1",
+        machineProfileId: null,
+        profileSource: "assigned",
+        filamentSlots: [{ slotIndex: 1, filamentProfileId: null }],
+      });
+      repo.upsertSyncedFilamentProfile({
+        name: "PETG",
+        materialType: "PETG",
+        resolvedFlatConfig: "{}",
+        sourcePath: "/tmp/petg.json",
+      });
+      const filamentId = repo.listSlicerFilamentProfiles().find((p) => p.name === "PETG")!.id;
+      repo.upsertPrinterProfileAssignment({
+        printerId: "p1",
+        machineProfileId: null,
+        profileSource: "assigned",
+        filamentSlots: [
+          { slotIndex: 1, filamentProfileId: filamentId },
+          { slotIndex: 2, filamentProfileId: null },
+        ],
+      });
+      expect(repo.listFilamentSlotAssignments("p1")).toEqual([
+        { slotIndex: 1, filamentProfileId: filamentId },
+        { slotIndex: 2, filamentProfileId: null },
+      ]);
+    });
+  });
 });

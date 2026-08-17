@@ -62,6 +62,7 @@ import {
   type AppDrizzleDb,
 } from "./sync-db-bridge.js";
 import { getRequestTenantId } from "../middleware/tenant-context.js";
+import type { ProfileSourceMode } from "../services/printer-profile-assignments.js";
 import * as defaultSchema from "./schema.js";
 import { DEFAULT_TENANT_ID } from "./schema.js";
 
@@ -91,6 +92,8 @@ export type SchemaTables = Pick<
   | "processProfiles"
   | "filamentProfiles"
   | "printerNameMap"
+  | "printerProfileAssignments"
+  | "printerFilamentSlotAssignments"
 >;
 
 export type ProjectRow = typeof defaultSchema.projects.$inferSelect;
@@ -566,6 +569,188 @@ export class AppRepository {
       })
       .from(this.schema.printerNameMap)
       .all();
+  }
+
+  getPrinterProfileAssignment(
+    printerId: string,
+  ): { machineProfileId: number | null; profileSource: ProfileSourceMode; updatedAt: string } | null {
+    const row = this.db
+      .select({
+        machineProfileId: this.schema.printerProfileAssignments.machineProfileId,
+        profileSource: this.schema.printerProfileAssignments.profileSource,
+        updatedAt: this.schema.printerProfileAssignments.updatedAt,
+      })
+      .from(this.schema.printerProfileAssignments)
+      .where(
+        and(
+          eq(this.schema.printerProfileAssignments.tenantId, this.tenantId),
+          eq(this.schema.printerProfileAssignments.printerId, printerId),
+        ),
+      )
+      .get();
+    if (!row) return null;
+    const profileSource = row.profileSource === "assigned" ? "assigned" : "auto_match";
+    return {
+      machineProfileId: row.machineProfileId ?? null,
+      profileSource,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  listFilamentSlotAssignments(
+    printerId: string,
+  ): Array<{ slotIndex: number; filamentProfileId: number | null }> {
+    return this.db
+      .select({
+        slotIndex: this.schema.printerFilamentSlotAssignments.slotIndex,
+        filamentProfileId: this.schema.printerFilamentSlotAssignments.filamentProfileId,
+      })
+      .from(this.schema.printerFilamentSlotAssignments)
+      .where(
+        and(
+          eq(this.schema.printerFilamentSlotAssignments.tenantId, this.tenantId),
+          eq(this.schema.printerFilamentSlotAssignments.printerId, printerId),
+        ),
+      )
+      .orderBy(asc(this.schema.printerFilamentSlotAssignments.slotIndex))
+      .all()
+      .map((row) => ({
+        slotIndex: row.slotIndex,
+        filamentProfileId: row.filamentProfileId ?? null,
+      }));
+  }
+
+  upsertPrinterProfileAssignment(input: {
+    printerId: string;
+    machineProfileId: number | null;
+    profileSource: ProfileSourceMode;
+    filamentSlots: Array<{ slotIndex: number; filamentProfileId: number | null }>;
+  }): void {
+    if (input.profileSource !== "assigned" && input.profileSource !== "auto_match") {
+      throw new Error(`Invalid profile_source: ${String(input.profileSource)}`);
+    }
+    const now = new Date().toISOString();
+    const normalizedSlots = input.filamentSlots
+      .filter((slot) => slot.slotIndex >= 1 && slot.slotIndex <= 4)
+      .sort((a, b) => a.slotIndex - b.slotIndex);
+
+    this.transaction(() => {
+      this.db
+        .insert(this.schema.printerProfileAssignments)
+        .values({
+          printerId: input.printerId,
+          tenantId: this.tenantId,
+          machineProfileId: input.machineProfileId,
+          profileSource: input.profileSource,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: this.schema.printerProfileAssignments.printerId,
+          set: {
+            machineProfileId: input.machineProfileId,
+            profileSource: input.profileSource,
+            updatedAt: now,
+          },
+        })
+        .run();
+
+      this.db
+        .delete(this.schema.printerFilamentSlotAssignments)
+        .where(
+          and(
+            eq(this.schema.printerFilamentSlotAssignments.tenantId, this.tenantId),
+            eq(this.schema.printerFilamentSlotAssignments.printerId, input.printerId),
+          ),
+        )
+        .run();
+
+      for (const slot of normalizedSlots) {
+        this.db
+          .insert(this.schema.printerFilamentSlotAssignments)
+          .values({
+            tenantId: this.tenantId,
+            printerId: input.printerId,
+            slotIndex: slot.slotIndex,
+            filamentProfileId: slot.filamentProfileId,
+          })
+          .run();
+      }
+    });
+  }
+
+  getSlicerPrinterProfileById(
+    id: number,
+  ): (SlicerProfileRow & { lastSyncedAt: string | null }) | null {
+    const row = this.db
+      .select({
+        id: this.schema.printerProfiles.id,
+        name: this.schema.printerProfiles.name,
+        slicerFormat: this.schema.printerProfiles.slicerFormat,
+        resolvedFlatConfig: this.schema.printerProfiles.resolvedFlatConfig,
+        lastSyncedAt: this.schema.printerProfiles.lastSyncedAt,
+      })
+      .from(this.schema.printerProfiles)
+      .where(
+        and(eq(this.schema.printerProfiles.tenantId, this.tenantId), eq(this.schema.printerProfiles.id, id)),
+      )
+      .get();
+    if (!row) return null;
+    return {
+      id: row.id,
+      name: row.name,
+      slicerFormat: row.slicerFormat,
+      resolvedFlatConfig: row.resolvedFlatConfig,
+      lastSyncedAt: row.lastSyncedAt ?? null,
+    };
+  }
+
+  getSlicerFilamentProfileById(
+    id: number,
+  ): (SlicerProfileRow & { lastSyncedAt: string | null }) | null {
+    const row = this.db
+      .select({
+        id: this.schema.filamentProfiles.id,
+        name: this.schema.filamentProfiles.name,
+        materialType: this.schema.filamentProfiles.materialType,
+        resolvedFlatConfig: this.schema.filamentProfiles.resolvedFlatConfig,
+        lastSyncedAt: this.schema.filamentProfiles.lastSyncedAt,
+      })
+      .from(this.schema.filamentProfiles)
+      .where(
+        and(eq(this.schema.filamentProfiles.tenantId, this.tenantId), eq(this.schema.filamentProfiles.id, id)),
+      )
+      .get();
+    if (!row) return null;
+    return {
+      id: row.id,
+      name: row.name,
+      slicerFormat: null,
+      materialType: row.materialType,
+      resolvedFlatConfig: row.resolvedFlatConfig,
+      lastSyncedAt: row.lastSyncedAt ?? null,
+    };
+  }
+
+  listSlicerProcessProfilesDetailed(): Array<SlicerProfileRow & { compatiblePrinters: string | null }> {
+    return this.db
+      .select({
+        id: this.schema.processProfiles.id,
+        name: this.schema.processProfiles.name,
+        slicerFormat: this.schema.processProfiles.slicerFormat,
+        resolvedFlatConfig: this.schema.processProfiles.resolvedFlatConfig,
+        compatiblePrinters: this.schema.processProfiles.compatiblePrinters,
+      })
+      .from(this.schema.processProfiles)
+      .where(eq(this.schema.processProfiles.tenantId, this.tenantId))
+      .orderBy(asc(this.schema.processProfiles.name))
+      .all()
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        slicerFormat: row.slicerFormat,
+        resolvedFlatConfig: row.resolvedFlatConfig,
+        compatiblePrinters: row.compatiblePrinters ?? null,
+      }));
   }
 
   getGlobalNaming(): StlNamingProfileDict {
