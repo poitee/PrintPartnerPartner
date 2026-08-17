@@ -11,14 +11,16 @@ import { createSelfHostPorts } from "../adapters/self-host/index.js";
  * endpoint that Settings' printer cards call.
  */
 
-let cleanup: Array<() => void> = [];
+let cleanup: Array<() => Promise<void>> = [];
 
-afterEach(() => {
-  for (const fn of cleanup) fn();
+afterEach(async () => {
+  for (const fn of cleanup) await fn();
   cleanup = [];
 });
 
 async function makeApp() {
+  const previousDataDir = process.env.PRINT_PARTNER_DATA_DIR;
+  const previousApiKey = process.env.PRINT_PARTNER_API_KEY;
   const dir = mkdtempSync(join(tmpdir(), "pp-printers-route-"));
   process.env.PRINT_PARTNER_DATA_DIR = dir;
   delete process.env.PRINT_PARTNER_API_KEY;
@@ -26,10 +28,17 @@ async function makeApp() {
   const ports = createSelfHostPorts(dir);
   await ports.db.connect();
   const app = await buildApp(config, ports);
-  cleanup.push(() => {
-    void app.close();
-    void ports.db.close();
-    rmSync(dir, { recursive: true, force: true });
+  cleanup.push(async () => {
+    try {
+      await app.close();
+      await ports.db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      if (previousDataDir === undefined) delete process.env.PRINT_PARTNER_DATA_DIR;
+      else process.env.PRINT_PARTNER_DATA_DIR = previousDataDir;
+      if (previousApiKey === undefined) delete process.env.PRINT_PARTNER_API_KEY;
+      else process.env.PRINT_PARTNER_API_KEY = previousApiKey;
+    }
   });
   return app;
 }
