@@ -85,16 +85,20 @@ Then permissions are automatically remapped. The host directory owner doesn't ne
 
 ## Verification
 
-Verify non-root execution:
+Verify non-root execution of the **app process** (the image starts as root so the entrypoint can chown `/data`; `docker compose exec … id` therefore shows root and is not the right check):
 
 ```bash
-# Check running user (must be ppuser, not root)
-docker compose exec print-partner id
-# Output: uid=1000(ppuser) gid=1000(ppuser) groups=1000(ppuser)
+# App process must be ppuser (uid 1000), not root
+docker top "$(docker compose ps -q print-partner)" -eo uid,user,pid,cmd
+# Expect: uid 1000, user ppuser (or numeric 1000), cmd includes "node dist/index.js"
+
+# Or from /proc inside the container:
+docker compose exec print-partner sh -c 'awk "/^Uid:/{print \$2}" /proc/1/status'
+# Output: 1000
 
 # Check file permissions
 docker compose exec print-partner ls -la /data
-# Output: drwxr-xr-x ppuser ppuser 4096 ... /data
+# Output: drwxr-xr-x ppuser ppuser ... /data  (and repos/, etc.)
 ```
 
 ## Troubleshooting

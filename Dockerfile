@@ -22,14 +22,19 @@ ARG PP_VERSION=3.0.0-web
 RUN apt-get update && apt-get install -y --no-install-recommends dumb-init gosu && \
     rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for application (uid 1000, gid 1000)
-# Check if user/group already exists first (they may exist in base image)
+# Create non-root user for application (uid 1000, gid 1000).
+# node:bookworm-slim already has uid/gid 1000 as "node" — reclaim for ppuser.
 RUN if ! id ppuser >/dev/null 2>&1; then \
-      groupadd -r -g 1000 ppuser 2>/dev/null || groupadd -r ppuser; \
-      useradd -r -g ppuser -d /home/ppuser -s /sbin/nologin -c "Print Partner user" ppuser; \
+      if id node >/dev/null 2>&1; then \
+        groupmod -n ppuser node && \
+        usermod -l ppuser -d /home/ppuser -m -s /sbin/nologin -c "Print Partner user" node; \
+      else \
+        groupadd -g 1000 ppuser && \
+        useradd -u 1000 -g ppuser -d /home/ppuser -s /sbin/nologin -c "Print Partner user" ppuser; \
+      fi; \
     fi && \
     mkdir -p /home/ppuser && \
-    chown -R ppuser:ppuser /home/ppuser 2>/dev/null || true
+    chown -R ppuser:ppuser /home/ppuser
 
 WORKDIR /app/web
 ENV NODE_ENV=production
