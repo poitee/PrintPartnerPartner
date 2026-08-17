@@ -27,3 +27,6 @@ web/apps/server/data/
 
 # Local design / scratch (never commit)
 Do Not Push/
+
+# Git worktrees (local isolation)
+.worktrees/
