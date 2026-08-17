@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Print Partner — self-hostable desk workflow for layered STL kits. Library → Plan → Parts → Progress → Export. Docker on port 8080. MCP attach for Cursor, Grok, and Claude.">
   <title>Print Partner</title>
   <style>
     :root {
@@ -58,7 +59,7 @@
     .tagline {
       color: var(--muted);
       font-size: 1.05rem;
-      max-width: 36rem;
+      max-width: 38rem;
       margin: 0 auto 1.25rem;
     }
     .hero-nav {
@@ -101,18 +102,21 @@
       margin-bottom: 1rem;
     }
     h2 {
-      font-size: 0.8rem;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      color: var(--muted);
-      margin: 0 0 0.85rem;
+      font-size: 1.15rem;
+      margin: 0 0 0.65rem;
     }
-    p { margin: 0 0 0.65rem; }
-    p:last-child { margin-bottom: 0; }
-    a { color: var(--primary); }
-    a:hover { color: var(--accent); }
-    ul { margin: 0; padding-left: 1.2rem; }
-    li { margin-bottom: 0.3rem; }
+    p { margin: 0 0 0.75rem; }
+    ul { margin: 0 0 0.5rem; padding-left: 1.2rem; }
+    li { margin-bottom: 0.35rem; }
+    pre {
+      background: var(--shot-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      overflow-x: auto;
+      font-size: 0.85rem;
+    }
+    code { font-size: 0.9em; }
     .cta-row {
       display: flex;
       flex-wrap: wrap;
@@ -121,55 +125,24 @@
     }
     .cta {
       display: inline-block;
-      padding: 0.55rem 1.1rem;
       background: var(--primary);
       color: #fff;
       text-decoration: none;
+      padding: 0.5rem 0.9rem;
       border-radius: 6px;
       font-weight: 600;
       font-size: 0.9rem;
     }
-    .cta:hover { filter: brightness(1.08); color: #fff; }
+    .cta:hover { filter: brightness(1.05); }
     .cta-secondary {
       background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text);
+      color: var(--primary);
+      border: 1px solid hsl(16 72% 45% / 0.45);
     }
-    .cta-secondary:hover { border-color: var(--primary); color: var(--primary); }
-    pre {
-      background: var(--shot-bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 0.75rem 1rem;
-      overflow-x: auto;
-      font-size: 0.85rem;
-      margin: 0.75rem 0 0;
-    }
-    .shots-intro {
-      color: var(--muted);
-      font-size: 0.9rem;
-      margin-bottom: 1rem;
-    }
-    .shot-block {
-      margin-top: 1.25rem;
-      padding-top: 1.25rem;
-      border-top: 1px solid var(--border);
-    }
-    .shot-block:first-of-type {
-      margin-top: 0;
-      padding-top: 0;
-      border-top: none;
-    }
-    .shot-title {
-      font-weight: 600;
-      margin: 0 0 0.35rem;
-      font-size: 1rem;
-    }
-    .shot-desc {
-      color: var(--muted);
-      font-size: 0.88rem;
-      margin: 0 0 0.75rem;
-    }
+    .shots-intro { color: var(--muted); font-size: 0.92rem; }
+    .shot-block { margin-top: 1.25rem; }
+    .shot-title { font-weight: 700; margin: 0 0 0.2rem; }
+    .shot-desc { color: var(--muted); font-size: 0.9rem; margin: 0 0 0.55rem; }
     .theme-pair {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -208,11 +181,11 @@
     <header class="hero">
       <img class="hero-logo" src="logo.png" alt="Print Partner logo" width="88" height="88">
       <h1>Print Partner</h1>
-      <p class="tagline">Self-hostable web workflow for layered STL kits — sync repos, compose builds, export by role, track prints. Optional kit advisor with your Anthropic/OpenAI key or local Ollama.</p>
+      <p class="tagline">Self-hostable desk workflow for layered STL kits — sync repos, compose a plan, pack plates, export, and check off prints. Attach Cursor / Grok / Claude over HTTP MCP (no in-app Kit Advisor).</p>
       <nav class="hero-nav" aria-label="Site links">
         <a href="https://github.com/poitee/PrintPartnerPartner">GitHub</a>
         <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/INSTALL.md">Install guide</a>
-        <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/KIT_ADVISOR.md">Kit advisor</a>
+        <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/assistant-mcp.md">MCP attach</a>
         <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/README.md">README</a>
         <a href="https://github.com/sponsors/poitee">Sponsor</a>
       </nav>
@@ -224,69 +197,73 @@
         <span class="pipeline-step">Parts</span>
         <span class="pipeline-arrow" aria-hidden="true">→</span>
         <span class="pipeline-step">Progress</span>
+        <span class="pipeline-arrow" aria-hidden="true">→</span>
+        <span class="pipeline-step">Export</span>
       </div>
-      <p class="pipeline-note">Plan management — <strong>Create build</strong>, <strong>Manage builds</strong> on Plan, or sidebar <strong>Builds</strong>. Print checkoff lives on <strong>Progress</strong>.</p>
+      <p class="pipeline-note">Plan management — header <strong>Create plan</strong> or sidebar <strong>Plans</strong>. Utility nav: Plans · Printers · Settings · Help.</p>
     </header>
 
     <section>
-      <h2>Get started</h2>
+      <h2>Get started (LAN Docker)</h2>
       <p>One Docker container serves the API and UI on port <strong>8080</strong>. Your data stays in a local volume.</p>
       <pre><code>git clone https://github.com/poitee/PrintPartnerPartner.git
 cd PrintPartnerPartner
 docker compose pull && docker compose up -d</code></pre>
-      <p>Open <a href="http://localhost:8080">localhost:8080</a>, add a source, then create a build with <strong>Create build</strong> or <strong>Manage builds</strong>.</p>
+      <p>Open <a href="http://localhost:8080">localhost:8080</a> on the host, or <code>http://&lt;lan-ip&gt;:8080</code> from another machine on your network. Add a source on <strong>Library</strong>, then create a plan with <strong>Create plan</strong> or <strong>Plans</strong>.</p>
       <div class="cta-row">
         <a class="cta" href="https://github.com/poitee/PrintPartnerPartner">View on GitHub</a>
         <a class="cta cta-secondary" href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/INSTALL.md">Install guide</a>
-        <a class="cta cta-secondary" href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/KIT_ADVISOR.md">Kit advisor</a>
+        <a class="cta cta-secondary" href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/assistant-mcp.md">MCP attach</a>
       </div>
     </section>
 
     <section>
-      <h2>Workflow</h2>
+      <h2>Desk loop</h2>
       <ul>
         <li><strong>Library</strong> — GitHub, local folders, or zips; categories; import rules; STL search; update badges.</li>
-        <li><strong>Plan</strong> — attach layers, pick files, role filament colors (live previews), Update build, share or export.</li>
-        <li><strong>Parts</strong> — validation by role and filament, 3D previews, quantity edits, Export STLs/3MF, export missing STLs.</li>
-        <li><strong>Progress</strong> — print checkoff: per-unit progress, filters, printable checklist.</li>
+        <li><strong>Plan</strong> — attach layers, pick files, role filament colors (live previews), recompute when stale, share or docs.</li>
+        <li><strong>Parts</strong> — validation by role and filament, 3D previews, quantity edits.</li>
+        <li><strong>Progress</strong> — print checkoff: per-unit progress, assembled toggles, filters, printable checklist.</li>
+        <li><strong>Export</strong> — plate workspace, height bands, slicer links, profile library, STL/3MF packs, printer bind/send.</li>
       </ul>
+      <p>Optional: Spoolman, Moonraker/PrusaLink/Bambu status, Discord digest, Home Assistant, slicer sidecar — see the README.</p>
     </section>
 
     <section>
-      <h2>Optional kit advisor</h2>
-      <p>Bring your own <strong>Anthropic</strong> or <strong>OpenAI</strong> API key, or run <strong>Ollama</strong> fully local — configure under <strong>Settings → AI assistant</strong>. The advisor researches kits, can search the web, and proposes plan changes as Apply cards (nothing writes until you confirm). The app works fully without AI.</p>
-      <p><a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/KIT_ADVISOR.md">Kit advisor guide →</a></p>
+      <h2>MCP attach (kit brain)</h2>
+      <p>There is <strong>no in-app Kit Advisor</strong> and <strong>no Settings → AI</strong>. Connect Cursor, Grok, or Claude to streamable HTTP MCP at <code>/api/v1/mcp</code> with <code>PRINT_PARTNER_API_KEY</code>. Mutations stay confirm-to-apply.</p>
+      <p><a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/assistant-mcp.md">MCP attach guide →</a> · <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/KIT_ADVISOR.md">Kit brain notes →</a></p>
     </section>
 
     <section>
       <h2>Screenshots</h2>
-      <p class="shots-intro">Light and dark themes from the current UI. The app also supports <strong>system</strong> theme and a collapsible sidebar.</p>
+      <p class="shots-intro">Light and dark themes from the current UI. The app also supports <strong>system</strong> theme and a collapsible spine.</p>
 
       <div class="shot-block">
         <p class="shot-title">Library</p>
         <p class="shot-desc">Source library with categories, sync status, update badges, and global STL search.</p>
         <div class="theme-pair">
           <figure>
-            <img src="screenshots/light/sources.png" alt="Sources — light theme" loading="lazy">
+            <img src="screenshots/light/sources.png" alt="Library — light theme" loading="lazy">
             <figcaption>Light</figcaption>
           </figure>
           <figure>
-            <img src="screenshots/dark/sources.png" alt="Sources — dark theme" loading="lazy">
+            <img src="screenshots/dark/sources.png" alt="Library — dark theme" loading="lazy">
             <figcaption>Dark</figcaption>
           </figure>
         </div>
       </div>
 
       <div class="shot-block">
-        <p class="shot-title">Builds</p>
-        <p class="shot-desc">Dedicated plan manager — same CRUD in the header picker and Manage builds on Build.</p>
+        <p class="shot-title">Plans</p>
+        <p class="shot-desc">Dedicated plan manager — create, rename, duplicate, archive. Same actions from Create plan in the header.</p>
         <div class="theme-pair">
           <figure>
-            <img src="screenshots/light/builds.png" alt="Builds — light theme" loading="lazy">
+            <img src="screenshots/light/builds.png" alt="Plans — light theme" loading="lazy">
             <figcaption>Light</figcaption>
           </figure>
           <figure>
-            <img src="screenshots/dark/builds.png" alt="Builds — dark theme" loading="lazy">
+            <img src="screenshots/dark/builds.png" alt="Plans — dark theme" loading="lazy">
             <figcaption>Dark</figcaption>
           </figure>
         </div>
@@ -294,14 +271,14 @@ docker compose pull && docker compose up -d</code></pre>
 
       <div class="shot-block">
         <p class="shot-title">Plan</p>
-        <p class="shot-desc">Manage builds panel, role colors, STL pickers with live preview, Update build.</p>
+        <p class="shot-desc">Role colors, STL pickers with live preview, recompute when stale.</p>
         <div class="theme-pair">
           <figure>
-            <img src="screenshots/light/build.png" alt="Build — light theme" loading="lazy">
+            <img src="screenshots/light/build.png" alt="Plan — light theme" loading="lazy">
             <figcaption>Light</figcaption>
           </figure>
           <figure>
-            <img src="screenshots/dark/build.png" alt="Build — dark theme" loading="lazy">
+            <img src="screenshots/dark/build.png" alt="Plan — dark theme" loading="lazy">
             <figcaption>Dark</figcaption>
           </figure>
         </div>
@@ -309,7 +286,7 @@ docker compose pull && docker compose up -d</code></pre>
 
       <div class="shot-block">
         <p class="shot-title">Parts</p>
-        <p class="shot-desc">Validation summary, parts list with 3D previews, quantity edits, and exports.</p>
+        <p class="shot-desc">Validation summary, parts list with 3D previews, quantity edits.</p>
         <div class="theme-pair">
           <figure>
             <img src="screenshots/light/review.png" alt="Parts — light theme" loading="lazy">
@@ -323,48 +300,8 @@ docker compose pull && docker compose up -d</code></pre>
       </div>
 
       <div class="shot-block">
-        <p class="shot-title">Progress</p>
-        <p class="shot-desc">Print checkoff — per-unit progress, filters, and printable checklist. (Re-run <code>docs/scripts/capture-screenshots.mjs</code> if <code>progress.png</code> is missing.)</p>
-        <div class="theme-pair">
-          <figure>
-            <img src="screenshots/light/progress.png" alt="Progress — light theme" loading="lazy">
-            <figcaption>Light</figcaption>
-          </figure>
-          <figure>
-            <img src="screenshots/dark/progress.png" alt="Progress — dark theme" loading="lazy">
-            <figcaption>Dark</figcaption>
-          </figure>
-        </div>
-      </div>
-
-      <div class="shot-block">
-        <p class="shot-title">AI assistant (Settings)</p>
-        <p class="shot-desc">Provider (Anthropic / OpenAI / Ollama), search, URL research, and budgets.</p>
-        <div class="theme-pair">
-          <figure>
-            <img src="screenshots/light/settings-ai.png" alt="AI assistant settings — light theme" loading="lazy">
-            <figcaption>Light</figcaption>
-          </figure>
-          <figure>
-            <img src="screenshots/dark/settings-ai.png" alt="AI assistant settings — dark theme" loading="lazy">
-            <figcaption>Dark</figcaption>
-          </figure>
-        </div>
-      </div>
-
-      <div class="shot-block">
-        <p class="shot-title">Kit advisor</p>
-        <p class="shot-desc">Header Advisor sheet — chat, research tools, Apply / Dismiss cards.</p>
-        <div class="theme-pair">
-          <figure>
-            <img src="screenshots/light/advisor.png" alt="Kit advisor — light theme" loading="lazy">
-            <figcaption>Light</figcaption>
-          </figure>
-          <figure>
-            <img src="screenshots/dark/advisor.png" alt="Kit advisor — dark theme" loading="lazy">
-            <figcaption>Dark</figcaption>
-          </figure>
-        </div>
+        <p class="shot-title">Progress &amp; Export</p>
+        <p class="shot-desc">Progress is print checkoff; Export is plates, slicer links, and profile library. Re-run <code>docs/scripts/capture-screenshots.mjs</code> to refresh PNGs for those stages.</p>
       </div>
     </section>
 
@@ -373,12 +310,13 @@ docker compose pull && docker compose up -d</code></pre>
       <p>
         <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>
         · <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/LICENSE-SUMMARY.md">Summary</a>
-        · <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/ATTRIBUTION.md">Attribution</a>
+        · <a href="https://github.com/poitee/PrintPartnerPartner/blob/main/ATTRIBUTION.md">Attribution</a> (ThunderKeys + 3D printing community)
       </p>
+      <p>Maintainer: Chad Lynch (<a href="https://github.com/poitee">@poitee</a>).</p>
     </section>
 
     <footer>
-      Print Partner — open source
+      Print Partner — open source desk loop for layered STL kits
     </footer>
   </div>
 </body>

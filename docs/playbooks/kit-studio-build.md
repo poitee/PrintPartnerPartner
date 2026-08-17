@@ -10,8 +10,8 @@ On **Sources**, import [repos.txt](../examples/repos.txt) or add repos manually.
 
 Create or select a plan:
 
-- Header **Create build** button or plan picker
-- **Manage builds** panel on **Build** (collapsible at the top)
+- Header **Create plan** button or plan picker
+- **Plans** page in the spine utility nav (legacy `/builds` redirects)
 - **Builds** page in the sidebar
 
 Name it something recognizable (e.g. "My Voron 2.4 SB Tap").

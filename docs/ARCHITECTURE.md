@@ -55,15 +55,16 @@ File blobs (synced repos, exports, thumbnails) are stored on disk in self-host, 
 
 ## Client rendering
 
-STL previews and the on-scroll Checkoff thumbnails are rendered **client-side with Three.js** in the React SPA — there is no server-side mesh renderer. The browser downloads STL geometry from the API and rasterizes previews locally.
+STL previews and Progress thumbnails are rendered **client-side with Three.js** in the React SPA — there is no server-side mesh renderer. The browser downloads STL geometry from the API and rasterizes previews locally. The SPA keeps a small **IndexedDB mesh cache**, decimates heavy meshes for thumbs, and limits concurrent WebGL work so scrolling Progress stays responsive.
 
 ## HTTP API & integrations
 
 - **Versioned surface:** `GET /api/v1` with OpenAPI at `/api/v1/openapi.json` (legacy flat routes remain for the SPA).
 - **Automation auth (self-host):** optional `PRINT_PARTNER_API_KEY` for `/api/v1/*`.
-- **Integrations:** pluggable adapters under `/api/v1/integrations` (Moonraker test connection first; other vendors stubbed).
+- **Integrations:** pluggable adapters under `/api/v1/integrations` (Moonraker, PrusaLink, Bambu status, Spoolman, slicer sidecar, Discord, Home Assistant).
 - **Fleet presets:** `/printers` bed metadata for 3MF packing — separate from live printer hosts.
 - **Live printer hosts:** Moonraker and PrusaLink support status + G-code upload with verify-first Progress; Bambu LAN MQTT is status-only. Setup: [integrations/PRINTER_SETUP.md](./integrations/PRINTER_SETUP.md); research/UX: [integrations/PRINTER_APIS.md](./integrations/PRINTER_APIS.md), [integrations/PRINTER_UX.md](./integrations/PRINTER_UX.md).
+- **Ops endpoints:** backups, API key CRUD, logging export, `/metrics`, and rate limits — see [`../OPERATIONS.md`](../OPERATIONS.md).
 
 See [API.md](./API.md) for slicer polling, exports, and webhooks.
 
@@ -74,11 +75,12 @@ flowchart LR
   V1 --> Core[Core routes]
   Flat --> Core
   V1 --> Integrations[integrations adapters]
+  V1 --> MCP["/api/v1/mcp"]
 ```
 
 ## Background jobs & progress
 
-Long-running work — repo sync, plan recompute, STL pack export, HTML checklist export, and kit-bundle import/export — runs through a background **job runner** (`web/apps/server/src/routes/jobs.ts`). Self-host and SaaS both use the in-process runner by default; SaaS can be backed by a BullMQ/Redis queue (`REDIS_URL`) for horizontal scaling. Clients start a job over REST and subscribe to live progress via the WebSocket at `/ws/jobs/:id`.
+Long-running work — repo sync, plan recompute, STL pack export, HTML checklist export, kit-bundle import/export, and auto-slice — runs through a background **job runner** (`web/apps/server/src/routes/jobs.ts`). Self-host and SaaS both use the in-process runner by default; SaaS can be backed by a BullMQ/Redis queue (`REDIS_URL`) for horizontal scaling. Clients start a job over REST and subscribe to live progress via the WebSocket at `/ws/jobs/:id`.
 
 ## Workflow
 
@@ -97,40 +99,32 @@ flowchart LR
 1. **Library** — register GitHub/local/zip sources; categories; import rules; cross-repo STL search; update-available badges.
 2. **Plan** — set role filament colors, attach sources, pick files and quantities, rebuild plan; inline repo Docs viewer; kit/manifest options.
 3. **Parts** — validation summary by role/filament; full parts list with 3D previews.
-4. **Progress** — per-unit progress (saved per plan), printable checklist, and missing-STL export.
-5. **Export** — STL packs, share bundles, checklist HTML, 3MF, and printer send.
+4. **Progress** — per-unit progress (saved per plan), assembled toggles, printable checklist, and missing-STL export.
+5. **Export** — plate workspace, height bands, slicer links, profile library, STL packs, share bundles, checklist HTML, 3MF, and printer send.
 
-Plan switching lives in the spine **PlanPicker**; create/rename/duplicate/delete open from Create plan or the Plan page overflow menu. The active plan is shared across Plan, Parts, Progress, and Export.
+Plan switching lives in the spine **PlanPicker**; create/rename/duplicate/archive open from **Create plan** or the **Plans** page. The active plan is shared across Plan, Parts, Progress, and Export. Settings: **Printers / Library / Appearance / Account**.
 
-## Kit advisor (assistant as tool host)
+## MCP attach (kit brain)
 
-Print Partner hosts MCP-shaped **product-verb tools** for the kit advisor LLM. The chat loop in `web/apps/server/src/assistant/` exposes read tools and confirm-to-apply mutate tools; the SPA renders Apply cards (including editable `suggested_excludes`). A thin **stdio MCP server** (`npm run mcp -w @print-partner/server`) reuses the same tool implementations for external hosts — see [`web/DEPLOY.md`](../web/DEPLOY.md).
+Print Partner exposes MCP-shaped **product-verb tools** over streamable HTTP at `/api/v1/mcp` (and optionally a thin stdio MCP server for offline `DATA_DIR` copies). Attach **Cursor / Grok / Claude** — there is **no in-app kit advisor chat** and **no Settings → AI**. Mutations only **propose**; apply with `confirm_apply`. See [assistant-mcp.md](./assistant-mcp.md) and [KIT_ADVISOR.md](./KIT_ADVISOR.md).
 
 ```mermaid
 flowchart LR
-  Chat[Chat / LLM] --> Tools[Assistant tools]
-  Tools --> Graph[Interaction graph]
-  Tools --> Catalog[kit-catalog]
-  Tools --> Domain[assistant-domain]
+  Agent[Cursor / Grok / Claude] --> MCP["/api/v1/mcp"]
+  MCP --> Tools[Product tools]
   Tools --> Sources[Sources + sync]
   Tools --> Plan[Plan layers]
-  Tools -->|"safeOutboundFetch"| Web[Guide URLs]
-  Research[web_search / fetch_web_page / read_source_file] --> Synth[Synthesize]
-  Synth --> Cards[Decision / Apply cards]
-  Chat --> Research
-  Chat --> Prompt[System prompt]
-  Prompt --> PlanCtx[Dynamic plan-context block]
+  Tools --> Farm[Farm / print stats]
+  Tools -->|"confirm_apply"| DB[(App DB)]
 ```
 
-- **Research loop**: read tools (`web_search`, `fetch_web_page`, `read_source_file`, plus catalog/docs tools) gather untrusted evidence; the model synthesizes options, then emits decision / Apply cards (`update_kit_selections`, `ui_focus_kit_option`, etc.). Nothing mutates until the user confirms.
-- **Plan context**: every chat turn injects a dynamic plan snapshot into the system prompt (`## Active plan snapshot` — layers, kit selections, stale flag) via `summarizePlan` in `assistant/assistant-context.ts`, alongside preferences digests and domain packs.
-- **Interaction graph** (`services/interaction-graph.ts`) merges domain `compatibility.yaml`, catalog `pick_one` / `replaces_slot`, and `_global/merge_conflicts.yaml`. Tools: `get_interaction_graph`, `check_stack_compatibility`. Soft warnings also appear on `add_addon` / `apply_stack_preset` proposes and in plan Review (`compat_*` issue codes).
-- **URL ingest**: `ingest_guide_url` / `ingest_guide_text` return untrusted `GuideExtract` evidence (heuristic extract, optional LLM refine when the assistant is configured); `propose_add_source` / `import_guide_notes` / `propose_exclude_replaced_parts` close the loop behind Apply. Confirmed `suggested_excludes` on `add_addon` / `apply_stack_preset` Apply cards merge into kit-manifest exclude.
-- **Link → build pipeline**: applying `propose_add_source` for a syncable source returns a **Sync → Update** follow-up card (same `sync_then_recompute` workflow as `set_base` / `set_source_git_ref`). `inspect_repo_tree` previews a GitHub repo's folders/STL counts pre-sync (tree listing only, `services/repo-tree-summary.ts` + `fetchGithubRepoTreeSummary`); `detect_build_decisions` (`assistant/build-decisions.ts`) turns variant-looking folders + README extract into a decision list (variant / optional_mod / config, heuristic first with a guarded LLM refine) the advisor walks one at a time into `update_kit_selections` / `ui_focus_kit_option`. Repos without manifest YAML or path-hints get sibling-folder fallback option groups in `plan-manifest-builder.ts` so Build pickers appear (e.g. EMU `User_Mods/`, `(Option)` folders).
-- Domain packs under `assistant-domain/` remain runtime context (not training). See [assistant-domain-ingest-schema.md](./assistant-domain-ingest-schema.md).
-- **Decision memory**: Apply/Dismiss write `plan_decisions`; thumbs write `assistant_feedback`. Digests (prefer/avoid, notes, cross-plan patterns, high-confidence thumbs scores) inject into the system prompt every turn. Sync/recompute noise is omitted from Prefer/Avoid unless it is the only signal. Dismissed action fingerprints are hard-filtered on tool propose and soft stack suggest. This is runtime ranking/context only — **no fine-tuning**. Clear chat history does not clear decisions/feedback; use kit advisor **Clear decisions** / **Clear thumbs**, or `DELETE /assistant/decisions?plan_id=` / `?all=true` and `DELETE /assistant/feedback`. Operators can inspect the digest via self-host `GET /assistant/preferences?plan_id=`.
+- **Confirm-to-apply**: mutating tools write proposals; nothing changes until confirm/dismiss.
+- **Domain packs** under `assistant-domain/` remain runtime context (not training). See [assistant-domain-ingest-schema.md](./assistant-domain-ingest-schema.md).
+- **Decision memory**: Apply/Dismiss write `plan_decisions`; feedback writes `assistant_feedback`. This is ranking/context only — **no fine-tuning**.
 
-## Deploy modes at a glance
+## Schema dialects
+
+Self-host defaults to **SQLite** (`schema.ts`, version stamped after DDL). SaaS uses **Postgres** (`schema-pg.ts` + `postgresPostInitMigrations`) with the same `schema_version`. Profile-sync provenance columns (v13) and farm/print_jobs columns (v11–v12) must exist on both dialects.
 
 | Mode | App DB | Files | Auth |
 |------|--------|-------|------|

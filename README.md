@@ -5,8 +5,8 @@
 <h1 align="center">Print Partner</h1>
 
 <p align="center">
-  <strong>Self-hostable web workflow for layered STL kits</strong><br>
-  Base repo plus add-ons, accent parts, quantities in filenames, and a pile of folders to keep straight.
+  <strong>Self-hostable desk workflow for layered STL kits</strong><br>
+  Sync kit repos, compose a plan, pack plates, export, and check off prints — one Docker container on your LAN.
 </p>
 
 <p align="center">
@@ -28,21 +28,22 @@
 </p>
 
 <p align="center">
-  <code>Library</code> → <code>Plan</code> → <code>Parts</code> → <code>Progress</code>
+  <code>Library</code> → <code>Plan</code> → <code>Parts</code> → <code>Progress</code> → <code>Export</code>
 </p>
 
 <p align="center">
   <sub>
-    Plan management — header <strong>Create build</strong>, <strong>Manage builds</strong> on Plan, or the sidebar <strong>Builds</strong> page.
+    Manage plans from the header <strong>Create plan</strong> control or the sidebar <strong>Plans</strong> page.
     Print checkoff lives on <strong>Progress</strong> (legacy <code>/checkoff</code> redirects there).
+    Utility nav: Plans · Printers · Settings · Help.
   </sub>
 </p>
 
 <p align="center">
   <sub>
-    Ships as a single Docker container — <strong>Fastify</strong> API + <strong>React</strong> SPA on one port.
-    Warm UI with <strong>light</strong>, <strong>dark</strong>, or <strong>system</strong> theme. Data stays in a volume you control.
-    Attach <strong>Cursor / Grok / Claude</strong> over HTTP MCP (kit brain; confirm-to-apply).
+    Ships as a single Docker container — <strong>Fastify</strong> API + <strong>React</strong> SPA on port <strong>8080</strong>.
+    Brand theme with <strong>light</strong>, <strong>dark</strong>, or <strong>system</strong> preference. Data stays in a volume you control.
+    Attach <strong>Cursor / Grok / Claude</strong> over HTTP MCP (kit brain; confirm-to-apply — no in-app Kit Advisor).
     Multi-tenant <strong>SaaS</strong> mode (Postgres + S3 + OAuth) is available for hosted deployments.
   </sub>
 </p>
@@ -54,23 +55,30 @@
 | Step | What you are doing |
 |------|--------------------|
 | **Library** | Add GitHub repos, local folders, or zips; assign categories; search STLs across every synced repo; see **update available** badges; sync and set import rules. |
-| **Plan** | **Manage builds** (create/switch plans), attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), **Update build** when stale, kit/manifest options, inline repo **Docs**, export STLs or share a plan bundle. |
-| **Parts** | Confirm validation by role and filament, browse included parts with 3D previews, edit quantities, **Export STLs** / **3MF**, and **Export missing STLs**. |
-| **Progress** | Track **print checkoff** (per-unit progress, filters, printable checklist). |
+| **Plan** | Attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), recompute when stale, kit/manifest options, inline repo **Docs**. |
+| **Parts** | Confirm validation by role and filament, browse included parts with 3D previews, edit quantities. |
+| **Progress** | Track **print checkoff** (per-unit progress, assembled toggles, filters, printable checklist). |
+| **Export** | Plate workspace, height-band packing, slicer links, profile library, STL/3MF packs, printer bind / send, Spoolman deduct when configured. |
 
-**Managing builds** (not a pipeline step): use the header **Create build** button and plan picker, the collapsible **Manage builds** panel on Plan, or the **Builds** page in the sidebar to create, rename, duplicate, and delete plans. The active plan is shared across Plan, Parts, and Progress.
+**Plans** (not a pipeline step): create, rename, duplicate, archive, and delete plans from **Create plan** or the **Plans** page. The active plan is shared across Plan, Parts, Progress, and Export.
 
-**MCP attach:** Print Partner is the kit brain. Connect Cursor / Grok / Claude to HTTP MCP (`/api/v1/mcp` + `PRINT_PARTNER_API_KEY`). Mutations stay confirm-to-apply. Guide: [`docs/assistant-mcp.md`](docs/assistant-mcp.md).
+**MCP attach:** Print Partner is the kit brain. Connect Cursor / Grok / Claude to HTTP MCP (`/api/v1/mcp` + `PRINT_PARTNER_API_KEY`). Mutations stay confirm-to-apply. Guide: [`docs/assistant-mcp.md`](docs/assistant-mcp.md). There is **no in-app Ask / Kit Advisor sheet** and **no Settings → AI**.
 
-**Tips:** **⌘K / Ctrl+K** opens the command palette (sync, recompute, exports, navigation). Collapse the left sidebar to an icon rail; the first-run **Progress** widget hides after you complete Library → Plan → Parts → Progress once. Open **Help** in the sidebar for the full workflow guide.
+**Tips:** **⌘K / Ctrl+K** opens the command palette (sync, recompute, exports, navigation). Collapse the left spine to an icon rail. Open **Help** for the full workflow guide.
 
-Optional **[Spoolman](docs/integrations/SPOOLMAN.md)** integration: connect a Spoolman instance in Settings to pick filaments from your inventory on Plan and see read-only spool remaining weights in Parts. Live printer hosts: **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload with verify-first Progress (see **[Printer setup](docs/integrations/PRINTER_SETUP.md)**); **Bambu** ships as LAN MQTT **status-only** (send deferred) — see **[Printer API research](docs/integrations/PRINTER_APIS.md)** and the **[Printer UX deep dive](docs/integrations/PRINTER_UX.md)**.
+Optional integrations:
+
+- **[Spoolman](docs/integrations/SPOOLMAN.md)** — pick filaments from inventory on Plan; read-only remaining weights in Parts; optional deduct on send.
+- **Live printers** — **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload with verify-first Progress; **Bambu** LAN MQTT is status-only (send deferred). See **[Printer setup](docs/integrations/PRINTER_SETUP.md)**.
+- **Slicer sidecar** — optional Orca/Prusa/Bambu CLI companion for auto-slice (`slicer-sidecar/`, `pp-compose.yml`).
+- **Discord digest / Home Assistant** — optional overnight farm digest and HA hooks when configured.
+- **Backups, metrics, rate limits, API keys** — see [`OPERATIONS.md`](OPERATIONS.md).
 
 ---
 
 ## Attach MCP (Cursor / Grok / Claude)
 
-Print Partner exposes product tools over **streamable HTTP MCP** on the running host. There is **no in-app Ask assistant / Kit Advisor sheet** and **no Settings → AI**.
+Print Partner exposes product tools over **streamable HTTP MCP** on the running host.
 
 | | |
 |--|--|
@@ -78,10 +86,7 @@ Print Partner exposes product tools over **streamable HTTP MCP** on the running 
 | Auth | `PRINT_PARTNER_API_KEY` required when `HOST` is not loopback |
 | Cursor plugin | [`cursor-plugin/print-partner`](cursor-plugin/print-partner) |
 | Connect guide | [`docs/assistant-mcp.md`](docs/assistant-mcp.md) |
-
-Desk-loop tools include `get_plan_snapshot`, `get_remaining`, `list_sources`, plus confirm-to-apply `duplicate_plan` / `archive_plan`. Never `start_print` / auto-tick / auto-compose.
-
-Stdio MCP (`npm run mcp -w @print-partner/server`) is only for a **DATA_DIR copy** (or stop the app) — not against the live Docker volume.
+| Kit brain notes | [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) |
 
 ---
 
@@ -99,46 +104,41 @@ Screenshots switch with your GitHub **light / dark** theme (or see both on the [
 
 Source library: categories, sync status, **update available** badges, global STL search, per-source import rules.
 
-### Builds
+### Plans
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/builds.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/builds.png">
-  <img src="docs/screenshots/light/builds.png" alt="Builds — plan manager with active-build dropdown, create, rename, duplicate, and delete.">
+  <img src="docs/screenshots/light/builds.png" alt="Plans — plan manager with create, rename, duplicate, and archive.">
 </picture>
 
-Sidebar **Builds** page plus the same controls in **Manage builds** on Plan and the header plan picker.
+Sidebar **Plans** page plus **Create plan** in the header spine.
 
 ### Plan
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/build.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/build.png">
-  <img src="docs/screenshots/light/build.png" alt="Plan — Manage builds, role filament colors, STL pickers with live preview, and Update build.">
+  <img src="docs/screenshots/light/build.png" alt="Plan — role filament colors, STL pickers with live preview, and recompute.">
 </picture>
 
-**Manage builds**, role colors, attach sources, pick STLs (live 3D preview), **Update build** when stale, kit options, **Docs**, export and share.
+Role colors, attach sources, pick STLs (live 3D preview), recompute when stale, kit options, **Docs**.
 
 ### Parts
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/review.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/review.png">
-  <img src="docs/screenshots/light/review.png" alt="Parts — validation, parts with 3D previews, quantity edits, and exports.">
+  <img src="docs/screenshots/light/review.png" alt="Parts — validation, parts with 3D previews, quantity edits.">
 </picture>
 
-Validation by role and filament, parts list with **3D previews**, quantity edits, and STL/3MF export.
+Validation by role and filament, parts list with **3D previews**, quantity edits.
 
-### Progress
+### Progress & Export
 
-Print checkoff — per-unit progress, filters, and printable checklist. Capture with `docs/scripts/capture-screenshots.mjs` (writes `progress.png`); re-run if the PNG is not yet in `docs/screenshots/{light,dark}/`.
+Print checkoff lives on **Progress**. Plate packing, slicer links, profile library, and send live on **Export**. Re-run `docs/scripts/capture-screenshots.mjs` to refresh PNGs for those stages.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/progress.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/progress.png">
-  <img src="docs/screenshots/light/progress.png" alt="Progress — print checkoff with per-unit progress and filters.">
-</picture>
-
+---
 
 ## Quick start — Docker self-host
 
@@ -158,14 +158,18 @@ Images are published to **`ghcr.io/poitee/print-partner`** (`latest` plus a tag 
 docker compose up --build
 ```
 
+**LAN Docker host tip:** replace `localhost` with the host’s LAN IP (e.g. `http://192.168.x.x:8080`) from other machines on the network. Keep `PRINT_PARTNER_API_KEY` set if you expose MCP beyond loopback.
+
 **New to Docker?** See the step-by-step guide in [`docs/INSTALL.md`](docs/INSTALL.md). Quick checklist:
 
 1. Install [Docker Desktop](https://docs.docker.com/get-docker/) (or Docker Engine + Compose on Linux) and verify `docker compose version`.
 2. Clone this repo and `cd` into it.
 3. Run `docker compose pull && docker compose up -d` (or `docker compose up --build` to build from source).
-4. Open [http://localhost:8080](http://localhost:8080).
-5. Add a **Source** on the Sources page, then create a build with **Create build** in the header or **Manage builds** on Build (or open **Builds** in the sidebar).
+4. Open [http://localhost:8080](http://localhost:8080) (or `http://<lan-ip>:8080`).
+5. Add a source on **Library**, create a plan with **Create plan** or **Plans**, then walk **Plan → Parts → Progress → Export**.
 6. For MCP attach on Docker (`HOST=0.0.0.0`): set `PRINT_PARTNER_API_KEY`, prefer HTTPS via a reverse proxy, then connect via [`docs/assistant-mcp.md`](docs/assistant-mcp.md).
+
+Optional slicer GUI + sidecar stack (profiles + auto-slice): `docker compose -f docker-compose.yml -f pp-compose.yml up -d` — see comments in `pp-compose.yml`.
 
 ### Environment variables (self-host)
 
@@ -195,7 +199,7 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 
 The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker upgrade: `docker compose pull && docker compose up -d`.
 
-See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables, MCP attach, and desktop-data migration.
+See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables, MCP attach, and desktop-data migration. Day-two ops (backups, API keys, metrics, rate limits): [`OPERATIONS.md`](OPERATIONS.md).
 
 ---
 
@@ -258,13 +262,15 @@ The application lives in the `web/` TypeScript monorepo; the `Dockerfile` and Co
 ├── Dockerfile                 # self-host image (API + SPA, single port)
 ├── docker-compose.yml         # self-host (SQLite, port 8080)
 ├── docker-compose.saas.yml    # SaaS (Postgres + RustFS/S3 + OAuth)
+├── pp-compose.yml             # optional slicer GUIs + sidecar + profile volumes
+├── slicer-sidecar/            # Flask/Waitress Orca CLI companion
 └── web/
     ├── apps/web               # React SPA
     ├── apps/server            # Fastify API
     └── packages/              # contracts, domain
 ```
 
-The server uses a **ports/adapters** design: a `self-host` adapter (SQLite + local disk) and a `saas` adapter (Postgres + S3) implement the same ports. STL rendering happens client-side with Three.js, and long-running work (sync, recompute, exports) runs in a background job runner that streams progress over a WebSocket. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for details.
+The server uses a **ports/adapters** design: a `self-host` adapter (SQLite + local disk) and a `saas` adapter (Postgres + S3) implement the same ports. STL rendering happens client-side with Three.js, and long-running work (sync, recompute, exports, auto-slice) runs in a background job runner that streams progress over a WebSocket. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for details.
 
 ---
 
@@ -282,6 +288,8 @@ Print Partner builds on work shared by the **3D Printing Community** and by **[T
 
 - **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)** — bundled dependency notices
 
+Maintainer: **Chad Lynch** ([@poitee](https://github.com/poitee)).
+
 ---
 
 ## Links
@@ -293,5 +301,6 @@ Print Partner builds on work shared by the **3D Printing Community** and by **[T
 - [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, MCP attach
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design
 - [`docs/API.md`](docs/API.md) — HTTP API overview (`/api/v1`, MCP)
+- [`OPERATIONS.md`](OPERATIONS.md) — backups, API keys, metrics, day-two ops
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
 - [`LICENSE`](LICENSE) — full license text

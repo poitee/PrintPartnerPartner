@@ -125,26 +125,27 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
 
 Moonraker and PrusaLink support test, status, upload, and Progress verify-first checkoff. Bambu supports LAN MQTT status plus **Connect URL handoff** (not MQTT print-start). Setup: [integrations/PRINTER_SETUP.md](integrations/PRINTER_SETUP.md). Research: [integrations/PRINTER_APIS.md](integrations/PRINTER_APIS.md).
 
-**AI assistant (`ai_assistant` integration):** create/update via the integrations API (or **Settings → AI assistant**). Config fields include `provider`, `model`, `api_key`, `base_url` / `ollama_url`, `max_tokens`, budgets, `search_provider`, `search_api_key`, `allow_url_ingest`, `guide_ingest_max_bytes`, `ollama_num_ctx`. Secrets are redacted in list responses. User guide: [KIT_ADVISOR.md](KIT_ADVISOR.md).
+**MCP attach (preferred):** streamable HTTP at `/api/v1/mcp` with `PRINT_PARTNER_API_KEY`. There is **no in-app Kit Advisor** and **no Settings → AI**. Guide: [assistant-mcp.md](assistant-mcp.md), [KIT_ADVISOR.md](KIT_ADVISOR.md).
 
-## Kit advisor (`/assistant/*`)
+Legacy `/assistant/*` routes may still exist for tooling/history; chat UX is external via MCP. Prefer MCP for new integrations.
 
-Flat routes (same handlers also appear under `/api/v1` where mounted). Full schemas: OpenAPI (`GET /api/v1/openapi.json`) when available.
+## Assistant / MCP-related routes (`/assistant/*`)
+
+Flat routes (same handlers also appear under `/api/v1` where mounted). Full schemas: OpenAPI (`GET /api/v1/openapi.json`) when available. Primary product surface for agents is **`/api/v1/mcp`**, not in-app chat.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/assistant/status` | Enabled?, provider, model, `source` (`settings` \| `env` \| `none`), tools, budgets used/cap, search status (no secrets) |
-| `POST` | `/assistant/chat` | Chat turn (SSE/stream); may propose Apply cards. Soft daily budgets → `429` |
+| `GET` | `/assistant/status` | Enabled?, provider, model, tools, budgets (no secrets) |
 | `POST` | `/assistant/actions/apply` | Confirm a proposed action |
 | `POST` | `/assistant/actions/dismiss` | Dismiss a proposed action |
-| `GET` / `DELETE` | `/assistant/history` | Per-tenant chat history |
+| `GET` / `DELETE` | `/assistant/history` | Per-tenant history |
 | `GET` / `DELETE` | `/assistant/decisions` | Decision memory (`?plan_id=` or `?all=true`) |
-| `GET` / `POST` / `DELETE` | `/assistant/feedback` | Thumbs up/down ranking (not training) |
-| `GET` | `/assistant/preferences` | Debug digest used in the system prompt (`?plan_id=`) |
+| `GET` / `POST` / `DELETE` | `/assistant/feedback` | Thumbs ranking (not training) |
+| `GET` | `/assistant/preferences` | Debug digest (`?plan_id=`) |
 | `GET` | `/assistant/domain` | Loaded domain research pack summary |
 | `POST` | `/assistant/domain/import` | Import / backfill domain packs |
 
-Mutations never auto-apply — clients must call `actions/apply`. Operator env + MCP: [`web/DEPLOY.md`](../web/DEPLOY.md).
+Mutations never auto-apply — clients must call `actions/apply` / MCP `confirm_apply`. Operator env + MCP: [`web/DEPLOY.md`](../web/DEPLOY.md).
 
 ## Webhooks (optional)
 
