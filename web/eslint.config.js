@@ -25,4 +25,16 @@ export default tseslint.config(
       "@typescript-eslint/no-empty-object-type": "off",
     },
   },
+  {
+    files: ["apps/web/public/sw.js"],
+    languageOptions: {
+      globals: {
+        self: "readonly",
+        caches: "readonly",
+        fetch: "readonly",
+        Response: "readonly",
+        URL: "readonly",
+      },
+    },
+  },
 );

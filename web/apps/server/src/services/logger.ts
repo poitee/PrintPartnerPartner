@@ -43,10 +43,9 @@ class WorkflowLogger {
     
     // Use simple pino configuration without pretty-printing
     // (pino-pretty is not available in production containers)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.pinoLogger = pino({
       level: config.minSeverity,
-    }) as any;
+    });
   }
 
   /**

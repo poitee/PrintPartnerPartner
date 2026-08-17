@@ -205,7 +205,6 @@ export default function CheckoffPage() {
   // Re-fetch when the service worker flushes its offline checkoff queue
   useSyncComplete(useCallback(() => {
     if (selectedProfileId != null) void reload(selectedProfileId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload, selectedProfileId]));
   const persistedUi = useMemo(() => loadPersistedCheckoffUi(), []);
   const [filter, setFilter] = useState<CheckoffFilterMode>(persistedUi.filter);

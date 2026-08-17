@@ -40,7 +40,7 @@ export default function ManualAssignmentPanel({ profileId, engineReady }: Props)
   const { data, isLoading, error } = usePlateWorkspaceQuery(profileId, enabled);
   const mutation = useSavePrintAssignmentsMutation(profileId);
 
-  const printers = data?.printers ?? [];
+  const printers = useMemo(() => data?.printers ?? [], [data?.printers]);
   const groups = data?.groups ?? [];
   const currentAssignments = data?.plan?.group_assignments ?? {};
 
