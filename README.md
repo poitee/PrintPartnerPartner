@@ -284,11 +284,11 @@ If Print Partner saves you time on a kit build, **[GitHub Sponsors](https://gith
 
 Print Partner is licensed under the **[Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)](LICENSE)**. Plain-language summary: [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md).
 
-Print Partner builds on work shared by the **3D Printing Community** and by **[ThunderKeys' STL Manifest Generator](https://github.com/thunderkeys/stl-manifest-generator)** — see [ATTRIBUTION.md](ATTRIBUTION.md).
+Print Partner builds on **[ThunderKeys' STL Manifest Generator](https://github.com/thunderkeys/stl-manifest-generator)** — see [ATTRIBUTION.md](ATTRIBUTION.md).
 
 - **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)** — bundled dependency notices
 
-Maintainer: **Chad Lynch** ([@poitee](https://github.com/poitee)).
+Credits (people only): **Chad Lynch** ([@poitee](https://github.com/poitee)), **ThunderKeys** ([@thunderkeys](https://github.com/thunderkeys)).
 
 ---
 
