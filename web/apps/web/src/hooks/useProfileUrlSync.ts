@@ -50,7 +50,6 @@ export function useProfileUrlSync() {
       setSelectedProfileId(nextId, { fromUrl: true });
     }
     // selectedProfileId intentionally omitted — including it fights state -> URL sync.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see profileUrlSync tests
   }, [searchParams, profiles, setSelectedProfileId, clearPendingSelection]);
 
   // State -> URL. Only navigate when the param actually changes; calling

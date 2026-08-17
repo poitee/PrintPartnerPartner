@@ -1,26 +1,18 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { getLogger, type LogSeverity } from "../services/logger.js";
 
-declare global {
-  namespace Express {
-    interface Request {
-      startTime?: number;
-    }
-  }
-}
+type RequestWithTiming = FastifyRequest & { startTime?: number; userId?: string };
 
 export async function registerRequestLoggingMiddleware(app: FastifyInstance): Promise<void> {
   const logger = getLogger();
 
   // Track request timing and outcome
   app.addHook("preHandler", async (request) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (request as any).startTime = Date.now();
+    (request as RequestWithTiming).startTime = Date.now();
   });
 
   app.addHook("onResponse", async (request, reply) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const startTime = (request as any).startTime ?? Date.now();
+    const startTime = (request as RequestWithTiming).startTime ?? Date.now();
     const duration = Date.now() - startTime;
 
     // Determine severity based on status code
@@ -42,11 +34,10 @@ export async function registerRequestLoggingMiddleware(app: FastifyInstance): Pr
       return;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     logger.logWorkflow({
       method: request.method,
       url: request.url,
-      userId: (request as any).userId,
+      userId: (request as RequestWithTiming).userId,
       duration,
       statusCode: reply.statusCode,
       severity,
@@ -60,18 +51,16 @@ export async function registerRequestLoggingMiddleware(app: FastifyInstance): Pr
 
   // Log unhandled errors
   app.setErrorHandler(async (error, request, reply) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const startTime = (request as any).startTime ?? Date.now();
+    const startTime = (request as RequestWithTiming).startTime ?? Date.now();
     const duration = Date.now() - startTime;
 
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : undefined;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     logger.logWorkflow({
       method: request.method,
       url: request.url,
-      userId: (request as any).userId,
+      userId: (request as RequestWithTiming).userId,
       duration,
       statusCode: reply.statusCode || 500,
       severity: "error",

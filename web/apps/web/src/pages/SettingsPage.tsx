@@ -509,7 +509,10 @@ export default function SettingsPage() {
                       try {
                         const saved = await saveDiscordNotifySettings({ notify_on_update: e.target.checked });
                         setDiscordSettings(saved);
-                      } catch {}
+                      } catch {
+                        // Intentionally ignored: checkbox reverts to prior value if save fails;
+                        // no separate error surface for this inline toggle.
+                      }
                     }}
                   />
                   Notify when a source is auto-synced (updates)
@@ -522,7 +525,10 @@ export default function SettingsPage() {
                       try {
                         const saved = await saveDiscordNotifySettings({ auto_sync_updates: e.target.checked });
                         setDiscordSettings(saved);
-                      } catch {}
+                      } catch {
+                        // Intentionally ignored: checkbox reverts to prior value if save fails;
+                        // no separate error surface for this inline toggle.
+                      }
                     }}
                   />
                   Auto-sync sources when updates are detected
@@ -535,7 +541,10 @@ export default function SettingsPage() {
                       try {
                         const saved = await saveDiscordNotifySettings({ notify_on_sync: e.target.checked });
                         setDiscordSettings(saved);
-                      } catch {}
+                      } catch {
+                        // Intentionally ignored: checkbox reverts to prior value if save fails;
+                        // no separate error surface for this inline toggle.
+                      }
                     }}
                   />
                   Notify on manual syncs
