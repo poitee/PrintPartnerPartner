@@ -88,6 +88,21 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
    curl "http://localhost:8080/api/v1/plans/1/artifacts"
    ```
 
+## Printer fleet & slicer profile assignment (flat routes)
+
+Settings → Printers uses these same-origin routes (not under `/api/v1`):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/printers` | Fleet bed metadata + filament slots |
+| `GET` | `/slicer-profile-options` | Compact machine / filament / process lists for profile pickers |
+| `GET` | `/printers/:id/profile-assignment` | Assigned machine + slot filaments, compatible processes, last synced |
+| `PUT` | `/printers/:id/profile-assignment` | Save `{ profile_source, machine_profile_id, filament_slots }` |
+
+`profile_source` is `assigned` (use pinned profiles for auto-slice) or `auto_match` (name-based heuristic). When `assigned`, auto-slice fails clearly if machine or slot filaments are missing.
+
+The Export **Profile library** panel was removed; sync status and assignments live on Settings → Printers.
+
 ## Integrations (v1 only)
 
 | Method | Path | Description |
