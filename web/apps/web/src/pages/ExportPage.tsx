@@ -7,7 +7,9 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import ExportActionCards from "../components/export/ExportActionCards";
 import ExportRecentPanel, { hasExportJobs } from "../components/export/ExportRecentPanel";
 import PartsManifestTransfer from "../components/export/PartsManifestTransfer";
+import ManualAssignmentPanel from "../components/export/ManualAssignmentPanel";
 import PlatePreviewPanel from "../components/export/PlatePreviewPanel";
+import SlicerLinksPanel from "../components/export/SlicerLinksPanel";
 // Lazy: PrinterSendPanel pulls in heavy printer integration + dnd-kit
 const PrinterSendPanel = lazy(() => import("../components/export/PrinterSendPanel"));
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
@@ -130,6 +132,13 @@ export default function ExportPage() {
             <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Slicer input
             </p>
+
+            <SlicerLinksPanel />
+
+            <ManualAssignmentPanel
+              profileId={selectedProfileId}
+              engineReady={Boolean(health.ok)}
+            />
 
             <PlatePreviewPanel
               profileId={selectedProfileId}

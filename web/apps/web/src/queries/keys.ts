@@ -12,4 +12,5 @@ export const queryKeys = {
   workflowGuide: ["workflowGuide"] as const,
   buildTrackingSettings: ["buildTrackingSettings"] as const,
   plateWorkspace: (profileId: number) => ["plateWorkspace", profileId] as const,
+  printGroups: (profileId: number) => ["printGroups", profileId] as const,
 };
