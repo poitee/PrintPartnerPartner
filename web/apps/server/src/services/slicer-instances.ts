@@ -69,3 +69,19 @@ export function stockPresets(env: NodeJS.ProcessEnv = process.env): SlicerInstan
     },
   ];
 }
+
+/** Allow only http(s) GUI URLs (empty string clears the link). */
+export function validateSlicerGuiUrl(raw: string): string | null {
+  const value = raw.trim();
+  if (!value) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return "gui_url must be a valid http(s) URL";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return "gui_url must use http or https";
+  }
+  return null;
+}

@@ -3,6 +3,7 @@ import {
   defaultWatchDirs,
   dialectToSyncKind,
   stockPresets,
+  validateSlicerGuiUrl,
 } from "./slicer-instances.js";
 
 describe("dialectToSyncKind", () => {
@@ -42,5 +43,18 @@ describe("stockPresets", () => {
     expect(presets[0]!.watch_path).toBe("/custom/orca");
     expect(presets[1]!.watch_path).toBe("/custom/prusa");
     expect(presets[2]!.watch_path).toBe("/custom/bambu");
+  });
+});
+
+describe("validateSlicerGuiUrl", () => {
+  it("allows empty and http(s) URLs", () => {
+    expect(validateSlicerGuiUrl("")).toBeNull();
+    expect(validateSlicerGuiUrl("http://orca.home")).toBeNull();
+    expect(validateSlicerGuiUrl("https://slicer.example")).toBeNull();
+  });
+
+  it("rejects unsafe schemes", () => {
+    expect(validateSlicerGuiUrl("javascript:alert(1)")).toMatch(/http/);
+    expect(validateSlicerGuiUrl("not a url")).toMatch(/valid/);
   });
 });

@@ -4,6 +4,7 @@ import type {
   SlicerDialect,
   SlicerInstanceKind,
 } from "../services/slicer-instances.js";
+import { validateSlicerGuiUrl } from "../services/slicer-instances.js";
 import { reloadManagedProfileSync } from "../services/profile-sync-manager.js";
 
 type RouteDeps = { repo: AppRepository };
@@ -105,6 +106,8 @@ export async function registerSlicerInstanceRoutes(
 
     const guiUrl = typeof body.gui_url === "string" ? body.gui_url.trim() : "";
     const watchPath = typeof body.watch_path === "string" ? body.watch_path.trim() : "";
+    const guiErr = validateSlicerGuiUrl(guiUrl);
+    if (guiErr) return reply.status(400).send({ detail: guiErr });
     const enabledParsed = parseOptionalBoolean(body.enabled);
     if (!enabledParsed.ok) {
       return reply.status(400).send({ detail: "enabled must be a boolean" });
@@ -149,6 +152,10 @@ export async function registerSlicerInstanceRoutes(
       typeof body.gui_url === "string" ? body.gui_url.trim() : existing.guiUrl;
     const watchPath =
       typeof body.watch_path === "string" ? body.watch_path.trim() : existing.watchPath;
+    if (typeof body.gui_url === "string") {
+      const guiErr = validateSlicerGuiUrl(guiUrl);
+      if (guiErr) return reply.status(400).send({ detail: guiErr });
+    }
     const enabledParsed = parseOptionalBoolean(body.enabled);
     if (!enabledParsed.ok) {
       return reply.status(400).send({ detail: "enabled must be a boolean" });

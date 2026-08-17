@@ -13,7 +13,17 @@ type LinkRow = { key: string; label: string; url: string; hint?: string };
 
 function linksFromInstances(instances: SlicerInstance[]): LinkRow[] {
   return instances
-    .filter((row) => row.enabled && row.gui_url.trim())
+    .filter((row) => {
+      if (!row.enabled) return false;
+      const url = row.gui_url.trim();
+      if (!url) return false;
+      try {
+        const parsed = new URL(url);
+        return parsed.protocol === "http:" || parsed.protocol === "https:";
+      } catch {
+        return false;
+      }
+    })
     .map((row) => ({
       key: row.id,
       label: row.name,

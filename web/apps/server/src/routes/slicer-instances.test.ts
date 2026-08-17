@@ -83,6 +83,20 @@ describe("slicer instance routes", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("rejects javascript: gui_url", async () => {
+    const { app } = await makeApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/slicer-instances",
+      payload: {
+        name: "Bad URL",
+        kind: "orca",
+        gui_url: "javascript:alert(1)",
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it("rejects enabled custom without watch_path", async () => {
     const { app } = await makeApp();
     const res = await app.inject({

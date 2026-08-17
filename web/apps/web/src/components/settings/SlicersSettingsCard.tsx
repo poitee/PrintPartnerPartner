@@ -44,6 +44,17 @@ function defaultDialect(kind: SlicerInstanceKind): SlicerDialect {
   return "orca_json";
 }
 
+function isSafeGuiUrl(raw: string): boolean {
+  const value = raw.trim();
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCardProps) {
   const [instances, setInstances] = useState<SlicerInstance[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -189,9 +200,9 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
                       disabled={busy}
                       onCheckedChange={(v) => void onToggle(row, v)}
                     />
-                    {row.gui_url ? (
+                    {isSafeGuiUrl(row.gui_url) ? (
                       <Button variant="outline" size="sm" asChild className="gap-1">
-                        <a href={row.gui_url} target="_blank" rel="noreferrer noopener">
+                        <a href={row.gui_url.trim()} target="_blank" rel="noreferrer noopener">
                           Open GUI
                           <ExternalLink className="h-3.5 w-3.5" aria-hidden />
                         </a>

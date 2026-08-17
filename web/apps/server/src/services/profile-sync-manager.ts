@@ -16,16 +16,18 @@ export function startManagedProfileSync(
   repository: AppRepository,
   emitter: ProfileSyncEmitter,
 ): WatcherHandle {
+  handle?.stop();
   repo = repository;
   emit = emitter;
-  handle = startProfileSyncWatcher(repository, resolveSettings(repository), emitter);
+  const watcher = startProfileSyncWatcher(repository, resolveSettings(repository), emitter);
+  handle = watcher;
   return {
     stop: () => {
-      handle?.stop();
-      handle = null;
+      watcher.stop();
+      if (handle === watcher) handle = null;
     },
     syncAll: async () => {
-      await handle?.syncAll();
+      await watcher.syncAll();
     },
   };
 }
@@ -48,6 +50,7 @@ function resolveSettings(repository: AppRepository) {
 export function reloadManagedProfileSync(): void {
   if (!repo) return;
   handle?.stop();
-  handle = startProfileSyncWatcher(repo, resolveSettings(repo), emit);
-  void handle.syncAll();
+  const watcher = startProfileSyncWatcher(repo, resolveSettings(repo), emit);
+  handle = watcher;
+  void watcher.syncAll();
 }
