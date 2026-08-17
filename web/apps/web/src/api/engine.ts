@@ -2406,6 +2406,55 @@ export async function fetchPrinters(): Promise<PrinterMachine[]> {
   return body.printers;
 }
 
+export type PrinterProfileAssignment = {
+  printer_id: string;
+  profile_source: "assigned" | "auto_match";
+  machine_profile_id: number | null;
+  filament_slots: Array<{ slot_index: number; filament_profile_id: number | null }>;
+  last_synced_at: string | null;
+  compatible_processes: Array<{ id: number; name: string }>;
+};
+
+export type SlicerProfileOptions = {
+  printers: Array<{ id: number; name: string; last_synced_at: string | null }>;
+  filaments: Array<{
+    id: number;
+    name: string;
+    material_type: string | null;
+    last_synced_at: string | null;
+  }>;
+  processes: Array<{ id: number; name: string; last_synced_at: string | null }>;
+};
+
+export async function fetchPrinterProfileAssignment(
+  printerId: string,
+): Promise<PrinterProfileAssignment> {
+  return engineFetch<PrinterProfileAssignment>(
+    `/printers/${encodeURIComponent(printerId)}/profile-assignment`,
+  );
+}
+
+export async function savePrinterProfileAssignment(
+  printerId: string,
+  body: {
+    profile_source: "assigned" | "auto_match";
+    machine_profile_id: number | null;
+    filament_slots: Array<{ slot_index: number; filament_profile_id: number | null }>;
+  },
+): Promise<PrinterProfileAssignment> {
+  return engineFetch<PrinterProfileAssignment>(
+    `/printers/${encodeURIComponent(printerId)}/profile-assignment`,
+    {
+      method: "PUT",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function fetchSlicerProfileOptions(): Promise<SlicerProfileOptions> {
+  return engineFetch<SlicerProfileOptions>("/slicer-profile-options");
+}
+
 /** Row shape from GET /profile-library — mirrors AppRepository.ProfileLibraryRow on the server. */
 export type ProfileLibraryRow = {
   id: number;

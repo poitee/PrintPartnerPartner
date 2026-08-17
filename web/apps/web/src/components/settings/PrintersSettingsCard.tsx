@@ -37,6 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import PrinterProfileAssignmentSection from "./PrinterProfileAssignmentSection";
 import { cn } from "../../lib/utils";
 import {
   PRINTER_STATUS_POLL_SECONDS_OPTIONS,
@@ -870,6 +871,12 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
                     ))}
                   </div>
                 )}
+
+                <PrinterProfileAssignmentSection
+                  printer={printer}
+                  engineReady={engineReady}
+                  disabled={busy}
+                />
 
                 {(host?.type === "moonraker" || host?.type === "prusalink") && (
                   <div className="flex items-center gap-2 mt-2">
