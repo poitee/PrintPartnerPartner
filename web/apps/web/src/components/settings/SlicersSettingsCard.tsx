@@ -3,13 +3,18 @@ import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import {
   createSlicerInstance,
   deleteSlicerInstance,
+  fetchSlicerDockerLogs,
   fetchSlicerInstances,
+  pullSlicerDocker,
   seedDefaultSlicerInstances,
+  startSlicerDocker,
+  stopSlicerDocker,
   updateSlicerInstance,
   type SlicerDialect,
   type SlicerInstance,
   type SlicerInstanceKind,
 } from "../../api/engine";
+import { useEngineHealth } from "../../hooks/useEngineHealth";
 import { Button } from "../ui/button";
 import {
   Card,
@@ -56,10 +61,13 @@ function isSafeGuiUrl(raw: string): boolean {
 }
 
 export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCardProps) {
+  const { health } = useEngineHealth();
+  const dockerEnabled = health?.deploy_mode !== "saas";
   const [instances, setInstances] = useState<SlicerInstance[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [logsById, setLogsById] = useState<Record<string, string[]>>({});
   const [draftName, setDraftName] = useState("");
   const [draftKind, setDraftKind] = useState<SlicerInstanceKind>("orca");
   const [draftDialect, setDraftDialect] = useState<SlicerDialect>("orca_json");
@@ -170,6 +178,28 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
     }
   };
 
+  const onDocker = async (
+    row: SlicerInstance,
+    action: "pull" | "start" | "stop" | "logs",
+  ) => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (action === "pull") await pullSlicerDocker(row.id);
+      else if (action === "start") await startSlicerDocker(row.id);
+      else if (action === "stop") await stopSlicerDocker(row.id);
+      else {
+        const { lines } = await fetchSlicerDockerLogs(row.id);
+        setLogsById((prev) => ({ ...prev, [row.id]: lines }));
+      }
+      if (action !== "logs") await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Card id="slicers" className="shadow-none">
       <CardHeader>
@@ -204,6 +234,9 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
                     }}
                   />
                   <span className="text-xs text-muted-foreground">{row.kind}</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                    {row.status_cache || "unknown"}
+                  </span>
                   <div className="ml-auto flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">Enabled</span>
                     <Switch
@@ -231,6 +264,56 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
                     </Button>
                   </div>
                 </div>
+                {dockerEnabled ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={controlsDisabled}
+                      onClick={() => void onDocker(row, "pull")}
+                    >
+                      Pull
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={controlsDisabled}
+                      onClick={() => void onDocker(row, "start")}
+                    >
+                      Start
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={controlsDisabled}
+                      onClick={() => void onDocker(row, "stop")}
+                    >
+                      Stop
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={controlsDisabled}
+                      onClick={() => void onDocker(row, "logs")}
+                    >
+                      Logs
+                    </Button>
+                    {row.image ? (
+                      <span className="self-center font-mono text-xs text-muted-foreground">
+                        {row.image}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+                {logsById[row.id]?.length ? (
+                  <pre className="max-h-40 overflow-auto rounded bg-muted p-2 text-[11px] leading-snug">
+                    {logsById[row.id]!.join("\n")}
+                  </pre>
+                ) : null}
                 <div className="grid gap-2 sm:grid-cols-2">
                   <label className="space-y-1 text-xs">
                     <span className="text-muted-foreground">GUI URL</span>

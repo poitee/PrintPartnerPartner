@@ -134,4 +134,11 @@ describe("slicer instance routes", () => {
     const body = list.json() as { instances: Array<{ id: string }> };
     expect(body.instances.find((i) => i.id === id)).toBeUndefined();
   });
+
+  it("seeds docker image defaults for stock orca", async () => {
+    const { app } = await makeApp();
+    const res = await app.inject({ method: "GET", url: "/slicer-instances" });
+    const body = res.json() as { instances: Array<{ kind: string; image: string | null }> };
+    expect(body.instances.find((i) => i.kind === "orca")?.image).toContain("orcaslicer");
+  });
 });

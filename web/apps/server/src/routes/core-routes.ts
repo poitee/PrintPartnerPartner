@@ -81,7 +81,10 @@ export async function registerCoreRoutes(
   await registerRepoManifestRoutes(app, { repo: deps.repo });
   await registerSourceDocsRoutes(app, { repo: deps.repo });
   await registerPrinterRoutes(app, { repo: deps.repo });
-  await registerSlicerInstanceRoutes(app, { repo: deps.repo });
+  await registerSlicerInstanceRoutes(app, {
+    repo: deps.repo,
+    deployMode: deps.config.deployMode,
+  });
   await registerProfileLibraryRoutes(app, { repo: deps.repo });
   await registerPrintPlanRoutes(app, { repo: deps.repo });
   await registerManifestRoutes(app, { repo: deps.repo });

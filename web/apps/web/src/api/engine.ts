@@ -2521,6 +2521,48 @@ export async function seedDefaultSlicerInstances(): Promise<{
   return engineFetch("/slicer-instances/seed-defaults", { method: "POST" });
 }
 
+export type SlicerDockerStatusResponse = {
+  instance: SlicerInstance;
+  status: {
+    state: string;
+    message: string | null;
+    container_id: string | null;
+  };
+};
+
+export async function fetchSlicerDockerStatus(
+  id: string,
+): Promise<SlicerDockerStatusResponse> {
+  return engineFetch(`/slicer-instances/${encodeURIComponent(id)}/docker-status`);
+}
+
+export async function pullSlicerDocker(id: string): Promise<SlicerDockerStatusResponse> {
+  return engineFetch(`/slicer-instances/${encodeURIComponent(id)}/docker-pull`, {
+    method: "POST",
+  });
+}
+
+export async function startSlicerDocker(id: string): Promise<SlicerDockerStatusResponse> {
+  return engineFetch(`/slicer-instances/${encodeURIComponent(id)}/docker-start`, {
+    method: "POST",
+  });
+}
+
+export async function stopSlicerDocker(id: string): Promise<SlicerDockerStatusResponse> {
+  return engineFetch(`/slicer-instances/${encodeURIComponent(id)}/docker-stop`, {
+    method: "POST",
+  });
+}
+
+export async function fetchSlicerDockerLogs(
+  id: string,
+  tail = 200,
+): Promise<{ lines: string[] }> {
+  return engineFetch(
+    `/slicer-instances/${encodeURIComponent(id)}/docker-logs?tail=${encodeURIComponent(String(tail))}`,
+  );
+}
+
 /** Row shape from GET /profile-library — mirrors AppRepository.ProfileLibraryRow on the server. */
 export type ProfileLibraryRow = {
   id: number;
