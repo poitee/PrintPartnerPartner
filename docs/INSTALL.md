@@ -76,16 +76,19 @@ docker compose pull && docker compose up -d
 
 ## First-time app tour
 
-Print Partner follows a four-step pipeline: **Sources → Build → Review → Checkoff**.
+Print Partner follows a five-step desk loop: **Library → Plan → Parts → Progress → Export**.
 
-1. **Sources** — Add GitHub repos, local folders, or zip archives. Assign categories, set import rules, and sync STLs.
-2. **Build** — Create or switch plans (**Create build** in the header, **Manage builds** on this page, or **Builds** in the sidebar). Attach sources, pick STL files, set role filament colors, and **Update build** when the stale banner appears.
-3. **Review** — Validate totals by role and filament, browse 3D previews, and **Export STLs**.
-4. **Checkoff** — Track per-unit print progress, print a checklist, or **Export missing STLs** for the next batch.
+1. **Library** — Add GitHub repos, local folders, or zip archives. Assign categories, set import rules, and sync STLs.
+2. **Plan** — Create or switch plans (**Create plan** in the header, or **Plans** in the sidebar). Attach sources, pick STL files, set role filament colors, and recompute when the stale banner appears.
+3. **Parts** — Validate totals by role and filament, browse 3D previews, and edit quantities.
+4. **Progress** — Track per-unit print progress (and assembled toggles), print a checklist, or export missing STLs.
+5. **Export** — Plate workspace, height-band packing, slicer links, profile library, STL/3MF packs, and printer bind/send.
 
-Use the **sidebar** to move between steps. The left sidebar can be **collapsed** to an icon rail (toggle at the bottom). **Theme** (light, dark, or system) is in the sidebar or header. A first-run **Progress** widget in the sidebar hides automatically after you complete the pipeline once.
+Use the **spine** to move between steps. The left rail can be **collapsed** to icons. **Theme** (light, dark, or system) is under Settings → Appearance.
 
-**Tip:** After the first load, always navigate with the sidebar. Pasting `/sources` or `/build` directly into the address bar on a cold load can hit API routes and show raw JSON instead of the UI.
+**Tip:** After the first load, always navigate with the spine. Pasting legacy paths like `/sources` or `/build` directly into the address bar on a cold load can hit API routes and show raw JSON instead of the UI.
+
+**LAN tip:** From another machine, open `http://<host-lan-ip>:8080`. Set `PRINT_PARTNER_API_KEY` before attaching MCP from a remote agent.
 
 ---
 

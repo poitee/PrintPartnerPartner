@@ -1,9 +1,11 @@
 # Attribution
 
-Print Partner is a community project for organizing layered STL kits. Its
-workflow, naming conventions, and manifest approach build on work shared by
-the **3D Printing Community** and, in particular, **ThunderKeys' STL Manifest
-Generator**.
+Print Partner is maintained by real people. Credits are not shared with bots or agents.
+
+## People
+
+- **Chad Lynch** ([@poitee](https://github.com/poitee)) — maintainer
+- **ThunderKeys** ([@thunderkeys](https://github.com/thunderkeys)) — STL Manifest Generator inspiration
 
 ## ThunderKeys — STL Manifest Generator
 
@@ -12,13 +14,6 @@ Generator**.
 Print Partner's manifest format and kit-organization workflow are inspired by
 ThunderKeys' STL Manifest Generator. Thank you to ThunderKeys for sharing this
 work with the community.
-
-## The 3D Printing Community
-
-Print Partner exists thanks to the broader 3D printing community — the makers,
-designers, and tinkerers who publish STL kits, document build processes, and
-share their conventions openly. This project would not be possible without that
-shared knowledge.
 
 ## License
 

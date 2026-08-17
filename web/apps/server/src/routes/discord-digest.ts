@@ -2,7 +2,7 @@
  * POST /api/discord-digest
  *
  * Trigger the morning farm digest and post it to the configured Discord webhook.
- * Called by the Hermes cron job every morning. Requires no body — all data is
+ * Called by an external morning-digest cron. Requires no body — all data is
  * sourced from the local DB and live printer integrations.
  *
  * Auth: requires a valid API key or session (same as /metrics).

@@ -259,6 +259,12 @@ export const printerProfiles = pgTable(
     /** Merged, inheritance-resolved flat config as JSON. */
     resolvedFlatConfig: text("resolved_flat_config"),
     importedAt: text("imported_at").notNull(),
+    /** Absolute path inside the container of the slicer-written source file (profile-sync watcher only). */
+    sourcePath: text("source_path"),
+    /** Slicer version string read from the slicer's own config at sync time, e.g. "2.3.2.60". */
+    syncedFromSlicerVersion: text("synced_from_slicer_version"),
+    /** ISO timestamp of the most recent profile-sync watcher upsert for this row. */
+    lastSyncedAt: text("last_synced_at"),
   },
   (t) => [uniqueIndex("uq_printer_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -276,6 +282,9 @@ export const processProfiles = pgTable(
     /** Merged, inheritance-resolved flat config as JSON. */
     resolvedFlatConfig: text("resolved_flat_config"),
     importedAt: text("imported_at").notNull(),
+    sourcePath: text("source_path"),
+    syncedFromSlicerVersion: text("synced_from_slicer_version"),
+    lastSyncedAt: text("last_synced_at"),
   },
   (t) => [uniqueIndex("uq_process_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -303,6 +312,9 @@ export const filamentProfiles = pgTable(
     /** Merged, inheritance-resolved flat config as JSON. */
     resolvedFlatConfig: text("resolved_flat_config"),
     importedAt: text("imported_at").notNull(),
+    sourcePath: text("source_path"),
+    syncedFromSlicerVersion: text("synced_from_slicer_version"),
+    lastSyncedAt: text("last_synced_at"),
   },
   (t) => [uniqueIndex("uq_filament_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -387,4 +399,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 12;
+export const currentSchemaVersion = 13;

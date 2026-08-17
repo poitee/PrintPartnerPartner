@@ -2375,23 +2375,6 @@ export async function fetchPlateWorkspace(profileId: number): Promise<PlateWorks
   return engineFetch<PlateWorkspace>(`/plans/${profileId}/plate-workspace`);
 }
 
-export type PackPreviewOptions = {
-  profile_id: number;
-  enabled_printer_ids?: string[];
-  assignments?: Record<string, string>;
-  auto_assign?: boolean;
-  spacing_mm?: number;
-  grouping_strategy?: GroupingStrategy;
-};
-
-export async function startPackPreview(options: PackPreviewOptions): Promise<string> {
-  const body = await engineFetch<{ job_id: string }>("/jobs/pack-preview", {
-    method: "POST",
-    body: JSON.stringify(options),
-  });
-  return body.job_id;
-}
-
 export async function startExportStlPack(
   profileId: number,
   options?: Pick<ExportStlPackOptions, "missing_only" | "group_by">,

@@ -35,7 +35,7 @@
     "lucide-react": "^1.21.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-resizable-panels": "^4.11.2",
+    "react-resizable-panels": "^4.12.3",
     "react-router-dom": "^7.18.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
@@ -54,5 +54,6 @@
     "typescript": "^6.0.3",
     "vite": "^8.1.0",
     "vitest": "^4.1.9"
-  }
+  },
+  "description": "Print Partner React SPA \u2014 desk loop UI, spine navigation, plate export, and Progress checkoff."
 }

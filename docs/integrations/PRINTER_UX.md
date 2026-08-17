@@ -59,7 +59,7 @@ No new app shell. Patterns already exist:
 | Progress shop-floor UI | [`web/apps/web/src/pages/CheckoffPage.tsx`](../../web/apps/web/src/pages/CheckoffPage.tsx) |
 | Offline fleet card | [`web/apps/web/src/components/settings/PrinterFleetCard.tsx`](../../web/apps/web/src/components/settings/PrinterFleetCard.tsx) |
 
-Settings page order today ([`SettingsPage.tsx`](../../web/apps/web/src/pages/SettingsPage.tsx)): Printer fleet → AI assistant → Optional integrations (Spoolman). Printer hosts should sit as a peer accent card (like AI), not only inside the Spoolman `<details>`.
+Settings page order today ([`SettingsPage.tsx`](../../web/apps/web/src/pages/SettingsPage.tsx)): **Printers / Library / Appearance / Account**. Printer hosts sit under Printers; Spoolman and other optional integrations live with Library / Account as wired — there is no Settings → AI card.
 
 ---
 

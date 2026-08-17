@@ -160,4 +160,14 @@ def slice_endpoint():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "2814"))
-    app.run(host="0.0.0.0", port=port)
+    threads = int(os.environ.get("WAITRESS_THREADS", "8"))
+    # Prefer Waitress over Flask's built-in server: it is a production WSGI
+    # server with a proper thread pool, so /health stays responsive while a
+    # plate is mid-slice and Node undici keep-alive clients do not hit a
+    # half-closed werkzeug socket.
+    try:
+        from waitress import serve
+
+        serve(app, host="0.0.0.0", port=port, threads=threads, channel_timeout=SLICE_TIMEOUT_S + 60)
+    except ImportError:
+        app.run(host="0.0.0.0", port=port, threaded=True)

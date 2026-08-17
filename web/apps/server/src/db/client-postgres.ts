@@ -22,9 +22,9 @@ const MIGRATION_SQL = join(
  *
  * Exported so schema-parity tests can assert that every table/column declared
  * in schema-pg.ts is actually created here — the Postgres deploy previously
- * stamped schema_version=12 while never creating the v9-v12 tables
+ * stamped schema_version ahead of DDL while never creating the v9+ tables
  * (print_jobs, printer_telemetry, app_events, the slicer profile tables), so
- * saas installs reported a v12 schema against a v8 database.
+ * saas installs reported a high schema version against a v8 database.
  */
 export const postgresPostInitMigrations: string[] = [
   "ALTER TABLE parts ADD COLUMN IF NOT EXISTS spoolman_spool_id TEXT",
@@ -189,8 +189,8 @@ export const postgresPostInitMigrations: string[] = [
     ON printer_name_map (slicer_name)`,
   // v11 — print_jobs, print_job_parts, printer_telemetry, app_events.
   // (v10 is the print_progress.assembled column, applied above.)
-  // Created with the v12 columns inline; the ALTER statements below upgrade
-  // any saas database that already has a v11-shaped print_jobs table.
+  // CREATE matches the historical v11 shape; the ALTER statements below add
+  // v12 columns for saas databases that already have a v11-shaped print_jobs table.
   `CREATE TABLE IF NOT EXISTS print_jobs (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL DEFAULT 'default',
@@ -256,6 +256,23 @@ export const postgresPostInitMigrations: string[] = [
     ON print_jobs (tenant_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_print_jobs_printer
     ON print_jobs (tenant_id, printer_id)`,
+  // v13 — profile-sync provenance columns on the three slicer profile tables.
+  // Mirrors schemaMigrations v13 in schema.ts (SQLite).
+  "ALTER TABLE printer_profiles ADD COLUMN IF NOT EXISTS source_path TEXT",
+  "ALTER TABLE printer_profiles ADD COLUMN IF NOT EXISTS synced_from_slicer_version TEXT",
+  "ALTER TABLE printer_profiles ADD COLUMN IF NOT EXISTS last_synced_at TEXT",
+  "ALTER TABLE process_profiles ADD COLUMN IF NOT EXISTS source_path TEXT",
+  "ALTER TABLE process_profiles ADD COLUMN IF NOT EXISTS synced_from_slicer_version TEXT",
+  "ALTER TABLE process_profiles ADD COLUMN IF NOT EXISTS last_synced_at TEXT",
+  "ALTER TABLE filament_profiles ADD COLUMN IF NOT EXISTS source_path TEXT",
+  "ALTER TABLE filament_profiles ADD COLUMN IF NOT EXISTS synced_from_slicer_version TEXT",
+  "ALTER TABLE filament_profiles ADD COLUMN IF NOT EXISTS last_synced_at TEXT",
+  `CREATE INDEX IF NOT EXISTS idx_printer_profiles_source_path
+    ON printer_profiles (source_path)`,
+  `CREATE INDEX IF NOT EXISTS idx_process_profiles_source_path
+    ON process_profiles (source_path)`,
+  `CREATE INDEX IF NOT EXISTS idx_filament_profiles_source_path
+    ON filament_profiles (source_path)`,
 ];
 
 export class PostgresDatabase {

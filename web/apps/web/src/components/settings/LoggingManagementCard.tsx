@@ -59,7 +59,8 @@ export default function LoggingManagementCard() {
       const data = (await response.json()) as LogStats;
       setStats(data);
     } catch (err) {
-      // Silent fail for stats
+      // Silent fail for stats — log for diagnostics without surfacing an error to the user.
+      console.error("Failed to load logging stats:", err);
     }
   };
 
