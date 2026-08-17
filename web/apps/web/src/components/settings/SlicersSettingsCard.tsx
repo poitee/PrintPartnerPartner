@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import {
   createSlicerInstance,
@@ -59,25 +59,36 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
   const [instances, setInstances] = useState<SlicerInstance[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [draftName, setDraftName] = useState("");
   const [draftKind, setDraftKind] = useState<SlicerInstanceKind>("orca");
   const [draftDialect, setDraftDialect] = useState<SlicerDialect>("orca_json");
   const [draftGuiUrl, setDraftGuiUrl] = useState("");
   const [draftWatchPath, setDraftWatchPath] = useState("");
+  const refreshGeneration = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!engineReady) return;
+    const generation = ++refreshGeneration.current;
+    setLoading(true);
     try {
-      setInstances(await fetchSlicerInstances());
+      const next = await fetchSlicerInstances();
+      if (generation !== refreshGeneration.current) return;
+      setInstances(next);
       setError(null);
     } catch (e) {
+      if (generation !== refreshGeneration.current) return;
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (generation === refreshGeneration.current) setLoading(false);
     }
   }, [engineReady]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const controlsDisabled = busy || loading || !engineReady;
 
   const onToggle = async (row: SlicerInstance, enabled: boolean) => {
     setBusy(true);
@@ -174,7 +185,7 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
         {instances.length === 0 ? (
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">No slicer instances yet.</p>
-            <Button type="button" size="sm" onClick={() => void onSeed()} disabled={busy || !engineReady}>
+            <Button type="button" size="sm" onClick={() => void onSeed()} disabled={controlsDisabled}>
               Seed defaults (Orca / Prusa / Bambu)
             </Button>
           </div>
@@ -328,7 +339,7 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
                 </SelectContent>
               </Select>
             ) : null}
-            <Button type="button" size="sm" className="gap-1" disabled={busy || !engineReady} onClick={() => void onAdd()}>
+            <Button type="button" size="sm" className="gap-1" disabled={controlsDisabled} onClick={() => void onAdd()}>
               <Plus className="h-4 w-4" />
               Add
             </Button>
