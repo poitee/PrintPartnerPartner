@@ -11,6 +11,7 @@ describe("isSpaClientPath", () => {
     expect(isSpaClientPath("/forgot-password")).toBe(true);
     expect(isSpaClientPath("/reset-password")).toBe(true);
     expect(isSpaClientPath("/plans/7/studio")).toBe(true);
+    expect(isSpaClientPath("/printers")).toBe(true);
   });
 
   it("ignores API-only paths", () => {

@@ -17,6 +17,7 @@ const SPA_PATHS = new Set([
   "/plans",
   "/plate",
   "/print",
+  "/printers",
 ]);
 
 function requestPathname(url: string): string {
