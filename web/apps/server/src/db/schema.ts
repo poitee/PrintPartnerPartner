@@ -357,6 +357,30 @@ export const printerFilamentSlotAssignments = sqliteTable(
   ],
 );
 
+/** Registered slicer GUI / sync targets (Slicer Hub). Docker fields reserved for Plan 3. */
+export const slicerInstances = sqliteTable("slicer_instances", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  name: text("name").notNull(),
+  kind: text("kind").notNull(),
+  dialect: text("dialect").notNull(),
+  guiUrl: text("gui_url").notNull().default(""),
+  watchPath: text("watch_path").notNull().default(""),
+  dockerTarget: text("docker_target").notNull().default("local"),
+  dockerHost: text("docker_host"),
+  composeService: text("compose_service"),
+  image: text("image"),
+  containerName: text("container_name"),
+  portsJson: text("ports_json").notNull().default("[]"),
+  volumesJson: text("volumes_json").notNull().default("[]"),
+  envJson: text("env_json").notNull().default("{}"),
+  statusCache: text("status_cache").notNull().default("unknown"),
+  statusMessage: text("status_message"),
+  enabled: integer("enabled").notNull().default(1),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 /** One print job container (keyed by checkoff link when available). */
 export const printJobs = sqliteTable("print_jobs", {
   id: text("id").primaryKey(),
@@ -422,7 +446,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 14;
+export const currentSchemaVersion = 15;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -733,4 +757,27 @@ export const schemaMigrations: string[] = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS uq_printer_filament_slot
     ON printer_filament_slot_assignments (tenant_id, printer_id, slot_index)`,
+  // v15 — registered slicer GUI / sync targets (Slicer Hub). Docker columns reserved for Plan 3.
+  `CREATE TABLE IF NOT EXISTS slicer_instances (
+    id TEXT PRIMARY KEY NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    dialect TEXT NOT NULL,
+    gui_url TEXT NOT NULL DEFAULT '',
+    watch_path TEXT NOT NULL DEFAULT '',
+    docker_target TEXT NOT NULL DEFAULT 'local',
+    docker_host TEXT,
+    compose_service TEXT,
+    image TEXT,
+    container_name TEXT,
+    ports_json TEXT NOT NULL DEFAULT '[]',
+    volumes_json TEXT NOT NULL DEFAULT '[]',
+    env_json TEXT NOT NULL DEFAULT '{}',
+    status_cache TEXT NOT NULL DEFAULT 'unknown',
+    status_message TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
 ];

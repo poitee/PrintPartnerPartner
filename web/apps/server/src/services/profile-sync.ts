@@ -3,6 +3,11 @@ import { join } from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
 import type { AppRepository } from "../db/repository.js";
 import { getLogger } from "./logger.js";
+import {
+  defaultWatchDirs,
+  dialectToSyncKind,
+  type SlicerDialect,
+} from "./slicer-instances.js";
 
 /**
  * profile-sync — watches the shared slicer config volumes for profile changes
@@ -240,6 +245,32 @@ export function buildProfileSyncSettings(env: NodeJS.ProcessEnv): ProfileSyncSet
     });
   }
 
+  return { enabled: roots.length > 0, roots };
+}
+
+const DIALECTS: ReadonlySet<string> = new Set(["orca_json", "bambu_json", "prusa_ini"]);
+
+/**
+ * Build watch roots from registered slicer instances (Slicer Hub).
+ * Enabled rows with a non-empty watch_path become roots; missing dirs are still
+ * included so first-time mounts work after the volume appears.
+ */
+export function buildProfileSyncSettingsFromInstances(
+  instances: Array<{ enabled: boolean; dialect: string; watch_path: string }>,
+): ProfileSyncSettings {
+  const roots: SlicerWatchRoot[] = [];
+  for (const instance of instances) {
+    if (!instance.enabled) continue;
+    const watchPath = instance.watch_path.trim();
+    if (!watchPath) continue;
+    if (!DIALECTS.has(instance.dialect)) continue;
+    const dialect = instance.dialect as SlicerDialect;
+    roots.push({
+      kind: dialectToSyncKind(dialect),
+      baseDir: watchPath,
+      dirs: defaultWatchDirs(dialect),
+    });
+  }
   return { enabled: roots.length > 0, roots };
 }
 

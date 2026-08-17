@@ -290,6 +290,29 @@ export const postgresPostInitMigrations: string[] = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS uq_printer_filament_slot
     ON printer_filament_slot_assignments (tenant_id, printer_id, slot_index)`,
+  // v15 — registered slicer GUI / sync targets (Slicer Hub). Docker columns reserved for Plan 3.
+  `CREATE TABLE IF NOT EXISTS slicer_instances (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    dialect TEXT NOT NULL,
+    gui_url TEXT NOT NULL DEFAULT '',
+    watch_path TEXT NOT NULL DEFAULT '',
+    docker_target TEXT NOT NULL DEFAULT 'local',
+    docker_host TEXT,
+    compose_service TEXT,
+    image TEXT,
+    container_name TEXT,
+    ports_json TEXT NOT NULL DEFAULT '[]',
+    volumes_json TEXT NOT NULL DEFAULT '[]',
+    env_json TEXT NOT NULL DEFAULT '{}',
+    status_cache TEXT NOT NULL DEFAULT 'unknown',
+    status_message TEXT,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
 ];
 
 export class PostgresDatabase {

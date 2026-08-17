@@ -41,6 +41,7 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { StlNamingSettingsCard } from "../components/settings/StlNamingEditor";
 import IntegrationsSettingsCard from "../components/settings/IntegrationsSettingsCard";
 import PrintersSettingsCard from "../components/settings/PrintersSettingsCard";
+import SlicersSettingsCard from "../components/settings/SlicersSettingsCard";
 import AboutUpdatesCard from "../components/settings/AboutUpdatesCard";
 import AccountPasswordCard from "../components/settings/AccountPasswordCard";
 import BackupManagementCard from "../components/settings/BackupManagementCard";
@@ -278,6 +279,10 @@ export default function SettingsPage() {
 
       <SettingsSection id="printers" title="Printers">
         <PrintersSettingsCard engineReady={Boolean(health)} />
+      </SettingsSection>
+
+      <SettingsSection id="slicers" title="Slicers">
+        <SlicersSettingsCard engineReady={Boolean(health)} />
       </SettingsSection>
 
       <SettingsSection title="Library">

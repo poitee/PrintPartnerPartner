@@ -6,6 +6,7 @@ import { getDb, SqliteDatabase } from "../db/client.js";
 import { AppRepository } from "../db/repository.js";
 import {
   buildProfileSyncSettings,
+  buildProfileSyncSettingsFromInstances,
   inferMaterialType,
   parseProfileFile,
   parseSlicerIni,
@@ -168,5 +169,18 @@ describe("profile-sync watcher end-to-end", () => {
     } as NodeJS.ProcessEnv);
     expect(settings.enabled).toBe(false);
     expect(settings.roots).toHaveLength(0);
+  });
+
+  it("buildProfileSyncSettingsFromInstances maps enabled dialects", () => {
+    const settings = buildProfileSyncSettingsFromInstances([
+      { enabled: true, dialect: "orca_json", watch_path: "/profiles/orca" },
+      { enabled: false, dialect: "prusa_ini", watch_path: "/profiles/prusa" },
+      { enabled: true, dialect: "prusa_ini", watch_path: "  " },
+      { enabled: true, dialect: "bambu_json", watch_path: "/profiles/bambu" },
+    ]);
+    expect(settings.enabled).toBe(true);
+    expect(settings.roots.map((r) => r.kind)).toEqual(["orca", "bambu"]);
+    expect(settings.roots[0]!.baseDir).toBe("/profiles/orca");
+    expect(settings.roots[0]!.dirs.printer).toContain("OrcaSlicer");
   });
 });

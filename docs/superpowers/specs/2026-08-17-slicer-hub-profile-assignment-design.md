@@ -1,7 +1,7 @@
 # Slicer Hub, printer profile assignment, and export-to-slicer
 
 **Date:** 2026-08-17  
-**Status:** Draft for implementation planning  
+**Status:** Plan 1 shipped (printer profile assignment). Plan 2 (slicer instances) in progress. Plans 3–4 deferred.  
 **Approach:** Unified Slicer Hub (Settings) — slicer instances + printer profile assignments; Export loses the flat Profile library and gains clearer plate → slicer handoff.
 
 ## Problem

@@ -103,6 +103,20 @@ Settings → Printers uses these same-origin routes (not under `/api/v1`):
 
 The Export **Profile library** panel was removed; sync status and assignments live on Settings → Printers.
 
+## Slicer instances (Slicer Hub)
+
+Settings → Slicers registers GUI URLs and profile watch paths (schema v15). Startup seeds stock Orca/Prusa/Bambu rows when the table is empty. Profile-sync prefers enabled instance watch paths; Export “Open a slicer” uses enabled `gui_url` values (falls back to hardcoded links if none).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/slicer-instances` | List instances |
+| `POST` | `/slicer-instances` | Create `{ name, kind, dialect?, gui_url?, watch_path?, enabled? }` |
+| `PUT` | `/slicer-instances/:id` | Update fields |
+| `DELETE` | `/slicer-instances/:id` | Remove (204) |
+| `POST` | `/slicer-instances/seed-defaults` | Insert stock presets if empty |
+
+`kind`: `orca` \| `prusa` \| `bambu` \| `custom`. `dialect`: `orca_json` \| `bambu_json` \| `prusa_ini`. Custom + enabled requires `watch_path`. Docker lifecycle fields are stored for a later plan but unused here.
+
 ## Integrations (v1 only)
 
 | Method | Path | Description |
