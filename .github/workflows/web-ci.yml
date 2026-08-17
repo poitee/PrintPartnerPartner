@@ -6,10 +6,12 @@ on:
     paths:
       - "web/**"
       - ".github/workflows/web-ci.yml"
+      - "docs/SNYK.md"
   pull_request:
     paths:
       - "web/**"
       - ".github/workflows/web-ci.yml"
+      - "docs/SNYK.md"
 
 defaults:
   run:
@@ -33,3 +35,78 @@ jobs:
         run: npm run typecheck
       - name: Test
         run: npm run test
+
+  snyk:
+    name: Snyk Open Source
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      # Needed for optional SARIF → Code Scanning upload (upload step is non-fatal).
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        working-directory: web
+        run: npm ci
+
+      # Secrets are empty on fork PRs; never reference secrets directly in `if:`.
+      - name: Resolve Snyk gate
+        id: snyk_gate
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          if [ -n "$SNYK_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Snyk skipped: SNYK_TOKEN unavailable (fork PR or secret not configured)."
+          fi
+
+      - name: Snyk test (fail on high/critical)
+        id: snyk_test
+        if: steps.snyk_gate.outputs.enabled == 'true'
+        continue-on-error: true
+        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          # Single scan of the npm workspaces lockfile (avoid per-package redundancy).
+          # --severity-threshold=high fails on high and critical.
+          args: >-
+            --file=web/package-lock.json
+            --severity-threshold=high
+            --sarif-file-output=snyk.sarif
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: steps.snyk_gate.outputs.enabled == 'true' && hashFiles('snyk.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@f3712979fa5f215279b101dd0a2e3bdfb4353324 # codeql-action@v3.37.7
+        with:
+          sarif_file: snyk.sarif
+
+      - name: Snyk monitor snapshot (main/master only)
+        if: >-
+          steps.snyk_gate.outputs.enabled == 'true'
+          && github.event_name == 'push'
+          && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        continue-on-error: true
+        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04 # v1.0.0
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: monitor
+          args: --file=web/package-lock.json
+
+      - name: Fail job on Snyk high/critical findings
+        if: steps.snyk_gate.outputs.enabled == 'true' && steps.snyk_test.outcome == 'failure'
+        run: |
+          echo "Snyk reported vulnerabilities at severity high or critical (see snyk_test step / Code Scanning)."
+          exit 1

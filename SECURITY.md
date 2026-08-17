@@ -352,6 +352,8 @@ git add package-lock.json
 git commit -m "chore: security updates"
 ```
 
+CI also runs **Snyk Open Source** on `web/package-lock.json` when `SNYK_TOKEN` is set (fails on high/critical). See [`docs/SNYK.md`](docs/SNYK.md).
+
 ## Compliance Considerations
 
 ### GDPR

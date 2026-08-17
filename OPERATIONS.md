@@ -342,6 +342,10 @@ curl -X POST http://localhost:8080/settings/api-keys/key_abc123/regenerate
 
 Tagged releases can publish SPA source maps and optional browser error reporting to Sentry. Configuration is GitHub Actions–only (no tokens in the repo). See [`docs/SENTRY.md`](docs/SENTRY.md).
 
+### Snyk (dependency scanning)
+
+Web CI runs Snyk Open Source against `web/package-lock.json` when `SNYK_TOKEN` is configured. See [`docs/SNYK.md`](docs/SNYK.md).
+
 ### Container Health Checks
 
 Docker compose includes health checks:
