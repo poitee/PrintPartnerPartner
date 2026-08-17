@@ -26,6 +26,7 @@
     "@radix-ui/react-switch": "^1.3.1",
     "@radix-ui/react-tabs": "^1.1.15",
     "@radix-ui/react-tooltip": "^1.2.10",
+    "@sentry/react": "^10.70.0",
     "@tailwindcss/vite": "^4.3.1",
     "@tanstack/react-query": "^5.101.2",
     "class-variance-authority": "^0.7.1",
@@ -55,5 +56,5 @@
     "vite": "^8.1.0",
     "vitest": "^4.1.9"
   },
-  "description": "Print Partner React SPA \u2014 desk loop UI, spine navigation, plate export, and Progress checkoff."
+  "description": "Print Partner React SPA — desk loop UI, spine navigation, plate export, and Progress checkoff."
 }

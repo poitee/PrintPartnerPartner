@@ -99,5 +99,8 @@ export default defineConfig({
   build: {
     target: "es2022",
     outDir: "dist",
+    // Generate .map files for Sentry upload without embedding sourceMappingURL
+    // (maps are stripped from shipped artifacts after CI upload).
+    sourcemap: "hidden",
   },
 });
