@@ -85,6 +85,31 @@ export type ApiError = {
   type?: string;
 };
 
+/**
+ * Validates a Discord incoming-webhook URL: must be
+ * `https://discord.com/api/webhooks/<numeric id>/<non-empty token>`
+ * (also accepts the `ptb.` / `canary.` subdomains Discord itself uses,
+ * and a trailing slash). Returns null when valid, or a human-readable
+ * error message when invalid. Shared between the server route validator
+ * and the Settings form's inline client-side check so both sides agree.
+ */
+export function validateDiscordWebhookUrl(url: string): string | null {
+  const DISCORD_WEBHOOK_RE =
+    /^https:\/\/(?:(?:ptb|canary)\.)?discord(?:app)?\.com\/api\/webhooks\/(\d+)\/([^/?#]+)\/?$/;
+  const match = DISCORD_WEBHOOK_RE.exec(url.trim());
+  if (!match) {
+    return "Webhook URL must look like https://discord.com/api/webhooks/<id>/<token>";
+  }
+  const [, id, token] = match;
+  if (!id || id.length === 0) {
+    return "Webhook URL must include a numeric webhook id";
+  }
+  if (!token || token.trim().length === 0) {
+    return "Webhook URL must include a non-empty token";
+  }
+  return null;
+}
+
 export const JOB_KINDS = [
   "sync",
   "recompute",

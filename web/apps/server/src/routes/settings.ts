@@ -5,6 +5,7 @@ import {
   DATE_FORMAT_DEFAULT,
   DATE_FORMAT_PRESETS,
   type DateFormatId,
+  validateDiscordWebhookUrl,
 } from "@print-partner/contracts";
 import { checkAppUpdate, resetAppUpdateCheckCache } from "../services/app-update-check.js";
 import {
@@ -158,7 +159,7 @@ export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDe
     auto_sync_updates: deps.repo.getSetting("discord_auto_sync_updates", "1") !== "0",
   }));
 
-  app.put("/settings/discord-notify", async (request) => {
+  app.put("/settings/discord-notify", async (request, reply) => {
     const body = request.body as {
       webhook_url?: string | null;
       notify_on_update?: boolean;
@@ -166,7 +167,14 @@ export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDe
       auto_sync_updates?: boolean;
     };
     if (body.webhook_url !== undefined) {
-      deps.repo.setSetting("discord_notify_webhook_url", body.webhook_url ?? "");
+      const trimmed = (body.webhook_url ?? "").trim();
+      if (trimmed.length > 0) {
+        const error = validateDiscordWebhookUrl(trimmed);
+        if (error) {
+          return reply.status(400).send({ detail: error });
+        }
+      }
+      deps.repo.setSetting("discord_notify_webhook_url", trimmed);
     }
     if (body.notify_on_update !== undefined) {
       deps.repo.setSetting("discord_notify_on_update", body.notify_on_update ? "1" : "0");
