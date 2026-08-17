@@ -2455,6 +2455,72 @@ export async function fetchSlicerProfileOptions(): Promise<SlicerProfileOptions>
   return engineFetch<SlicerProfileOptions>("/slicer-profile-options");
 }
 
+export type SlicerInstanceKind = "orca" | "prusa" | "bambu" | "custom";
+export type SlicerDialect = "orca_json" | "bambu_json" | "prusa_ini";
+
+export type SlicerInstance = {
+  id: string;
+  name: string;
+  kind: SlicerInstanceKind | string;
+  dialect: SlicerDialect | string;
+  gui_url: string;
+  watch_path: string;
+  docker_target: string;
+  docker_host: string | null;
+  compose_service: string | null;
+  image: string | null;
+  container_name: string | null;
+  status_cache: string;
+  status_message: string | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SlicerInstanceWrite = {
+  name: string;
+  kind: SlicerInstanceKind;
+  dialect?: SlicerDialect;
+  gui_url?: string;
+  watch_path?: string;
+  enabled?: boolean;
+};
+
+export async function fetchSlicerInstances(): Promise<SlicerInstance[]> {
+  const body = await engineFetch<{ instances: SlicerInstance[] }>("/slicer-instances");
+  return body.instances;
+}
+
+export async function createSlicerInstance(
+  body: SlicerInstanceWrite,
+): Promise<SlicerInstance> {
+  return engineFetch<SlicerInstance>("/slicer-instances", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateSlicerInstance(
+  id: string,
+  body: Partial<SlicerInstanceWrite>,
+): Promise<SlicerInstance> {
+  return engineFetch<SlicerInstance>(`/slicer-instances/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSlicerInstance(id: string): Promise<void> {
+  await engineFetch(`/slicer-instances/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function seedDefaultSlicerInstances(): Promise<{
+  inserted: number;
+  instances: SlicerInstance[];
+}> {
+  return engineFetch("/slicer-instances/seed-defaults", { method: "POST" });
+}
+
 /** Row shape from GET /profile-library — mirrors AppRepository.ProfileLibraryRow on the server. */
 export type ProfileLibraryRow = {
   id: number;

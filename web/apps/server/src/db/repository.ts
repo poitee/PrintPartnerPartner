@@ -63,6 +63,7 @@ import {
 } from "./sync-db-bridge.js";
 import { getRequestTenantId } from "../middleware/tenant-context.js";
 import type { ProfileSourceMode } from "../services/printer-profile-assignments.js";
+import { stockPresets } from "../services/slicer-instances.js";
 import * as defaultSchema from "./schema.js";
 import { DEFAULT_TENANT_ID } from "./schema.js";
 
@@ -94,6 +95,7 @@ export type SchemaTables = Pick<
   | "printerNameMap"
   | "printerProfileAssignments"
   | "printerFilamentSlotAssignments"
+  | "slicerInstances"
 >;
 
 export type ProjectRow = typeof defaultSchema.projects.$inferSelect;
@@ -132,7 +134,28 @@ export type ProfileLibraryRow = {
   importedAt: string;
 };
 
-/** Input for a printer/machine profile upserted by the profile-sync watcher. */
+export type SlicerInstanceRow = {
+  id: string;
+  name: string;
+  kind: string;
+  dialect: string;
+  guiUrl: string;
+  watchPath: string;
+  dockerTarget: string;
+  dockerHost: string | null;
+  composeService: string | null;
+  image: string | null;
+  containerName: string | null;
+  portsJson: string;
+  volumesJson: string;
+  envJson: string;
+  statusCache: string;
+  statusMessage: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type SyncedPrinterProfileInput = {
   name: string;
   slicerFormat: string;
@@ -676,6 +699,171 @@ export class AppRepository {
           .run();
       }
     });
+  }
+
+  listSlicerInstances(): SlicerInstanceRow[] {
+    return this.db
+      .select()
+      .from(this.schema.slicerInstances)
+      .where(eq(this.schema.slicerInstances.tenantId, this.tenantId))
+      .orderBy(asc(this.schema.slicerInstances.name))
+      .all()
+      .map((row) => this.mapSlicerInstance(row));
+  }
+
+  getSlicerInstance(id: string): SlicerInstanceRow | null {
+    const row = this.db
+      .select()
+      .from(this.schema.slicerInstances)
+      .where(
+        and(
+          eq(this.schema.slicerInstances.tenantId, this.tenantId),
+          eq(this.schema.slicerInstances.id, id),
+        ),
+      )
+      .get();
+    return row ? this.mapSlicerInstance(row) : null;
+  }
+
+  upsertSlicerInstance(input: {
+    id?: string;
+    name: string;
+    kind: string;
+    dialect: string;
+    guiUrl?: string;
+    watchPath?: string;
+    enabled?: boolean;
+    dockerTarget?: string;
+    dockerHost?: string | null;
+    composeService?: string | null;
+    image?: string | null;
+    containerName?: string | null;
+    portsJson?: string;
+    volumesJson?: string;
+    envJson?: string;
+    statusCache?: string;
+    statusMessage?: string | null;
+  }): SlicerInstanceRow {
+    const now = new Date().toISOString();
+    const id = input.id?.trim() || `slicer-${crypto.randomUUID()}`;
+    const existing = this.getSlicerInstance(id);
+    const enabled = input.enabled ?? existing?.enabled ?? true;
+    const values = {
+      id,
+      tenantId: this.tenantId,
+      name: input.name.trim(),
+      kind: input.kind,
+      dialect: input.dialect,
+      guiUrl: input.guiUrl ?? existing?.guiUrl ?? "",
+      watchPath: input.watchPath ?? existing?.watchPath ?? "",
+      dockerTarget: input.dockerTarget ?? existing?.dockerTarget ?? "local",
+      dockerHost: input.dockerHost !== undefined ? input.dockerHost : (existing?.dockerHost ?? null),
+      composeService:
+        input.composeService !== undefined ? input.composeService : (existing?.composeService ?? null),
+      image: input.image !== undefined ? input.image : (existing?.image ?? null),
+      containerName:
+        input.containerName !== undefined ? input.containerName : (existing?.containerName ?? null),
+      portsJson: input.portsJson ?? existing?.portsJson ?? "[]",
+      volumesJson: input.volumesJson ?? existing?.volumesJson ?? "[]",
+      envJson: input.envJson ?? existing?.envJson ?? "{}",
+      statusCache: input.statusCache ?? existing?.statusCache ?? "unknown",
+      statusMessage:
+        input.statusMessage !== undefined ? input.statusMessage : (existing?.statusMessage ?? null),
+      enabled: enabled ? 1 : 0,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    this.db
+      .insert(this.schema.slicerInstances)
+      .values(values)
+      .onConflictDoUpdate({
+        target: this.schema.slicerInstances.id,
+        set: {
+          name: values.name,
+          kind: values.kind,
+          dialect: values.dialect,
+          guiUrl: values.guiUrl,
+          watchPath: values.watchPath,
+          dockerTarget: values.dockerTarget,
+          dockerHost: values.dockerHost,
+          composeService: values.composeService,
+          image: values.image,
+          containerName: values.containerName,
+          portsJson: values.portsJson,
+          volumesJson: values.volumesJson,
+          envJson: values.envJson,
+          statusCache: values.statusCache,
+          statusMessage: values.statusMessage,
+          enabled: values.enabled,
+          updatedAt: values.updatedAt,
+        },
+      })
+      .run();
+
+    const row = this.getSlicerInstance(id);
+    if (!row) throw new Error(`Failed to upsert slicer instance ${id}`);
+    return row;
+  }
+
+  deleteSlicerInstance(id: string): boolean {
+    const existing = this.getSlicerInstance(id);
+    if (!existing) return false;
+    this.db
+      .delete(this.schema.slicerInstances)
+      .where(
+        and(
+          eq(this.schema.slicerInstances.tenantId, this.tenantId),
+          eq(this.schema.slicerInstances.id, id),
+        ),
+      )
+      .run();
+    return true;
+  }
+
+  /**
+   * Insert stock Orca/Prusa/Bambu presets when the tenant has zero instances.
+   * Returns the number of rows inserted (0 if already seeded).
+   */
+  seedStockSlicerInstancesIfEmpty(env: NodeJS.ProcessEnv = process.env): number {
+    if (this.listSlicerInstances().length > 0) return 0;
+    let inserted = 0;
+    for (const preset of stockPresets(env)) {
+      this.upsertSlicerInstance({
+        name: preset.name,
+        kind: preset.kind,
+        dialect: preset.dialect,
+        guiUrl: preset.gui_url,
+        watchPath: preset.watch_path,
+        enabled: true,
+      });
+      inserted += 1;
+    }
+    return inserted;
+  }
+
+  private mapSlicerInstance(row: typeof defaultSchema.slicerInstances.$inferSelect): SlicerInstanceRow {
+    return {
+      id: row.id,
+      name: row.name,
+      kind: row.kind,
+      dialect: row.dialect,
+      guiUrl: row.guiUrl,
+      watchPath: row.watchPath,
+      dockerTarget: row.dockerTarget,
+      dockerHost: row.dockerHost ?? null,
+      composeService: row.composeService ?? null,
+      image: row.image ?? null,
+      containerName: row.containerName ?? null,
+      portsJson: row.portsJson,
+      volumesJson: row.volumesJson,
+      envJson: row.envJson,
+      statusCache: row.statusCache,
+      statusMessage: row.statusMessage ?? null,
+      enabled: Boolean(row.enabled),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
   }
 
   getSlicerPrinterProfileById(

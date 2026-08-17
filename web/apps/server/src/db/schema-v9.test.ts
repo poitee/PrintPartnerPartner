@@ -46,6 +46,8 @@ const V14_TABLES = [
   "printer_filament_slot_assignments",
 ];
 
+const V15_TABLES = ["slicer_instances"];
+
 /** Profile-sync provenance columns (schema v13) on the three slicer profile tables. */
 const PROFILE_PROVENANCE_COLUMNS = ["source_path", "synced_from_slicer_version", "last_synced_at"];
 
@@ -106,17 +108,26 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v14 printer assignment tables and records schema version 14", () => {
+  it("creates the v14 printer assignment tables", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
       for (const table of V14_TABLES) {
+        expect(tables, `missing table ${table}`).toContain(table);
+      }
+    });
+  });
+
+  it("creates the v15 slicer_instances table and records schema version 15", () => {
+    withSqlite((sqlite) => {
+      const tables = sqliteTableNames(sqlite);
+      for (const table of V15_TABLES) {
         expect(tables, `missing table ${table}`).toContain(table);
       }
       expect(
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "14" });
+      ).toMatchObject({ value: "15" });
     });
   });
 
@@ -345,8 +356,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(14);
-    expect(pgSchema.currentSchemaVersion).toBe(14);
+    expect(sqliteSchema.currentSchemaVersion).toBe(15);
+    expect(pgSchema.currentSchemaVersion).toBe(15);
   });
 
   it("creates every table declared in schema-pg.ts", () => {

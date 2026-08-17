@@ -167,14 +167,28 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     app.addHook("onClose", async () => { watcherHandle.stop(); });
 
     // Start background slicer profile-sync watcher (chokidar over shared config volumes)
-    const { startProfileSyncWatcher, buildProfileSyncSettings } = await import(
-      "./services/profile-sync.js"
-    );
+    const {
+      startProfileSyncWatcher,
+      buildProfileSyncSettings,
+      buildProfileSyncSettingsFromInstances,
+    } = await import("./services/profile-sync.js");
     const { broadcastProfileSync, registerProfileSyncWebSocket } = await import(
       "./services/profile-sync-broadcast.js"
     );
     registerProfileSyncWebSocket(app);
-    const profileSyncSettings = buildProfileSyncSettings(process.env);
+    // Seed stock slicer instances once so watchers + Export links have defaults.
+    repository.seedStockSlicerInstancesIfEmpty(process.env);
+    const instances = repository.listSlicerInstances();
+    const profileSyncSettings =
+      instances.length > 0
+        ? buildProfileSyncSettingsFromInstances(
+            instances.map((row) => ({
+              enabled: row.enabled,
+              dialect: row.dialect,
+              watch_path: row.watchPath,
+            })),
+          )
+        : buildProfileSyncSettings(process.env);
     const profileSyncHandle = startProfileSyncWatcher(
       repository,
       profileSyncSettings,
