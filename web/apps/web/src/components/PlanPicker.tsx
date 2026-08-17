@@ -227,6 +227,7 @@ export default function PlanPicker({
     if (actionTargetId == null) return;
     const name = duplicateName.trim();
     if (!name) return;
+    const sourceWasSelected = actionTargetId === selectedProfileId;
     try {
       const copy = await duplicateMutation.mutateAsync({
         id: actionTargetId,
@@ -235,12 +236,17 @@ export default function PlanPicker({
       });
       setDuplicateOpen(false);
       closeActionDialog();
-      // On /plans keep the list in view; elsewhere open the copy on Plan.
-      if (isPlansPath(location.pathname)) {
-        setSelectedProfileId(copy.id);
-        touchMutation.mutate(copy.id);
-      } else {
-        activatePlan(copy.id);
+      // Only move the spine selection when the duplicated plan was the
+      // active one — duplicating a different row shouldn't silently switch
+      // what's selected.
+      if (sourceWasSelected) {
+        // On /plans keep the list in view; elsewhere open the copy on Plan.
+        if (isPlansPath(location.pathname)) {
+          setSelectedProfileId(copy.id);
+          touchMutation.mutate(copy.id);
+        } else {
+          activatePlan(copy.id);
+        }
       }
       toast.success(`Duplicated plan “${name}”`);
     } catch (e) {
