@@ -37,9 +37,9 @@ export function isSlicerKind(value: unknown): value is SlicerKind {
 }
 
 /**
- * One retry on transient socket failures (ECONNRESET / undici TypeError) that
- * can appear when a long-running sidecar slice overlaps a keep-alive probe.
- * HTTP error statuses are returned as-is — they are not retried.
+ * Fetch the sidecar with Connection: close.
+ * Retries once on transient socket errors for idempotent GET/HEAD only —
+ * never retry POST /slice (would start a second concurrent CLI run).
  */
 async function fetchSidecar(url: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers);
@@ -47,9 +47,12 @@ async function fetchSidecar(url: string, init: RequestInit): Promise<Response> {
   // half-closed socket left by a previous long-running slice.
   headers.set("Connection", "close");
   const next: RequestInit = { ...init, headers };
+  const method = (init.method ?? "GET").toUpperCase();
+  const canRetry = method === "GET" || method === "HEAD";
   try {
     return await fetch(url, next);
   } catch (err) {
+    if (!canRetry) throw err;
     const msg = err instanceof Error ? err.message : String(err);
     const transient =
       /ECONNRESET|ECONNREFUSED|socket hang up|fetch failed|network/i.test(msg) ||

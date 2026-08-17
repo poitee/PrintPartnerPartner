@@ -1,18 +1,17 @@
-# Build playbook — stack presets and variants
+# Plan playbook — stack presets and variants
 
-End-user guide: sync sources, create a build, apply a stack preset, and pick variants on **Build**.
+End-user guide: sync sources, create a plan, apply a stack preset, and pick variants on **Plan**.
 
 ## 1. Sync sources
 
-On **Sources**, import [repos.txt](../examples/repos.txt) or add repos manually. Sync each GitHub source and verify STLs appear when you expand the import tree on Build.
+On **Library**, import [repos.txt](../examples/repos.txt) or add repos manually. Sync each GitHub source and verify STLs appear when you expand the import tree on Plan.
 
-## 2. Create a build
+## 2. Create a plan
 
 Create or select a plan:
 
 - Header **Create plan** button or plan picker
 - **Plans** page in the spine utility nav (legacy `/builds` redirects)
-- **Builds** page in the sidebar
 
 Name it something recognizable (e.g. "My Voron 2.4 SB Tap").
 
@@ -20,9 +19,9 @@ Name it something recognizable (e.g. "My Voron 2.4 SB Tap").
 
 Author per-repo manifests so stack presets and variant picks work. See [author-manifest-on-stack.md](./author-manifest-on-stack.md). Rules persist as path globs in each repo’s `print-partner.manifest.yaml`.
 
-## 4. Build page
+## 4. Plan page
 
-Open **Build** for your active plan.
+Open **Plan** for your active plan.
 
 ### Attach sources
 
@@ -46,26 +45,27 @@ Expand each source card, check files or folders to include, and use the **STL pr
 
 ### Role filament colors
 
-Set a color per role (primary, accent, clear, opaque) in **Colors by role**. Previews on Build, Review, and Checkoff update when you change a color.
+Set a color per role (primary, accent, clear, opaque) in **Colors by role**. Previews on Plan, Parts, and Progress update when you change a color.
 
-### Update build
+### Recompute
 
-Click **Update build** when the stale banner appears (or enable **auto-recompute stale builds** in Settings). This refreshes Review and Checkoff from your file picks.
+Click **Update** / recompute when the stale banner appears (or enable auto-recompute for stale plans in Settings). This refreshes Parts and Progress from your file picks.
 
-## 5. Review, Checkoff, export
+## 5. Parts, Progress, Export
 
-- **Review** — validation summary, quantity edits, **Export STLs** (by color or color + directory).
-- **Checkoff** — per-unit progress, printable checklist, **Export missing STLs**.
-- **Share build** on Build — export a `.print-partner-kit` zip (plan config, not STLs).
+- **Parts** — validation summary, quantity edits.
+- **Progress** — per-unit progress, printable checklist, **Export missing STLs**.
+- **Export** — plate workspace, STL/3MF packs, slicer links, printer bind/send.
+- **Share plan** on Plan — export a `.print-partner-kit` zip (plan config, not STLs).
 
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| Preset grayed / error | Sync missing repos on Sources |
-| Empty variant choices | Run **Update build**; check manifest rules in repo YAML |
+| Preset grayed / error | Sync missing repos on Library |
+| Empty variant choices | Recompute; check manifest rules in repo YAML |
 | Wrong variants | Check per-repo manifests; shared choice ids must match |
-| Stale Review parts | Click **Update build** on Build |
+| Stale Parts list | Recompute on Plan |
 | Colors not in previews | Change role color again or use Advanced → Regenerate thumbnails |
 
 See [golden LDO 2.4 example](../examples/golden-ldo-voron-2.4-sb-tap.md).

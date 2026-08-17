@@ -17,7 +17,7 @@ Print Partner is a self-hosted desk workflow for layered STL kits:
 
 ## Directory structure (abridged)
 
-```
+```text
 PrintPartnerPartner/
 ├── Dockerfile / docker-compose*.yml / pp-compose.yml
 ├── slicer-sidecar/              # Waitress + Orca CLI companion
