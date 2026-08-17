@@ -39,6 +39,7 @@ export async function registerApiKeyManagementRoutes(app: FastifyInstance, deps:
         const keyInfo = createApiKey(deps.repo);
         reply.status(201).send(keyInfo);
       } catch (error) {
+        console.error("Failed to create API key:", error);
         return sendProblem(reply, 500, "Internal Server Error", "Failed to create API key");
       }
     },
@@ -65,6 +66,7 @@ export async function registerApiKeyManagementRoutes(app: FastifyInstance, deps:
 
         reply.status(201).send(keyInfo);
       } catch (error) {
+        console.error("Failed to regenerate API key:", error);
         return sendProblem(reply, 500, "Internal Server Error", "Failed to regenerate API key");
       }
     },
@@ -90,6 +92,7 @@ export async function registerApiKeyManagementRoutes(app: FastifyInstance, deps:
 
         reply.send({ success });
       } catch (error) {
+        console.error("Failed to revoke API key:", error);
         return sendProblem(reply, 500, "Internal Server Error", "Failed to revoke API key");
       }
     },

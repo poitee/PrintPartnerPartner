@@ -17,7 +17,7 @@
 import type { AppRepository } from "../db/repository.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
 import { getIntegrationConfig, listIntegrationsByType } from "../integrations/store.js";
-import { parseSpoolmanSpoolId, useSpoolFilament } from "../integrations/spoolman-client.js";
+import { parseSpoolmanSpoolId, useSpoolFilament as deductSpoolFilament } from "../integrations/spoolman-client.js";
 import { getLogger } from "./logger.js";
 import type { PrintVerifyDecision } from "@print-partner/contracts";
 
@@ -107,7 +107,7 @@ export async function deductSpoolmanFilamentAfterVerify(
     if (deductMm < 0.1) continue; // Skip negligible amounts
 
     try {
-      await useSpoolFilament(spoolmanIntegration.config, parsed.spoolId, deductMm);
+      await deductSpoolFilament(spoolmanIntegration.config, parsed.spoolId, deductMm);
       log.log("info", `spoolman-deduct: deducted ${Math.round(deductMm)} mm from spool #${parsed.spoolId}`);
     } catch (err) {
       log.log("warn", `spoolman-deduct: failed to deduct from spool #${parsed.spoolId}: ${err}`);

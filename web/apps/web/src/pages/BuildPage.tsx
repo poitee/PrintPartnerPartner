@@ -570,14 +570,14 @@ function BuildPageContent() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuItem
-                  onClick={openDuplicatePlan}
+                  onClick={() => openDuplicatePlan()}
                   disabled={selectedProfileId == null}
                 >
                   <Copy className="mr-2 h-4 w-4" />
                   Duplicate
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={openRenamePlan}
+                  onClick={() => openRenamePlan()}
                   disabled={selectedProfileId == null}
                 >
                   <Pencil className="mr-2 h-4 w-4" />
@@ -585,7 +585,7 @@ function BuildPageContent() {
                 </DropdownMenuItem>
                 {archiveAllowed ? (
                   <DropdownMenuItem
-                    onClick={openArchivePlan}
+                    onClick={() => openArchivePlan()}
                     disabled={selectedProfileId == null}
                   >
                     <Archive className="mr-2 h-4 w-4" />
@@ -593,7 +593,7 @@ function BuildPageContent() {
                   </DropdownMenuItem>
                 ) : null}
                 <DropdownMenuItem
-                  onClick={openDeletePlan}
+                  onClick={() => openDeletePlan()}
                   disabled={selectedProfileId == null}
                 >
                   <Trash2 className="mr-2 h-4 w-4" />

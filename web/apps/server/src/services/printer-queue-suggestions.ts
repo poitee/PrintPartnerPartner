@@ -108,7 +108,7 @@ export function computePrinterQueueSuggestions(
       const preferred = machineById.get(item.printer_id);
       if (!preferred) continue;
 
-      let eligible = false;
+      let eligible: boolean;
       if (item.match === "compatible") {
         // Compatible: any idle printer with the same bed geometry qualifies.
         eligible = sameBed(preferred, printer);

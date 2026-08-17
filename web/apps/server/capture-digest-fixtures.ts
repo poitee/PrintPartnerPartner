@@ -2,9 +2,9 @@
  * Digest fixture capture: invokes the REAL get_farm_status / get_print_stats
  * assistant tools against seeded temp DBs and writes their payloads to JSON.
  *
- * The Python formatter (~/.hermes/scripts/pp_morning_digest.py) is then run
- * over those files, so the digest wording is validated against actual tool
- * output rather than a hand-written guess at the payload shape.
+ * The digest formatter script is then run over those files, so the digest
+ * wording is validated against actual tool output rather than a hand-written
+ * guess at the payload shape.
  *
  * Usage: npx tsx capture-digest-fixtures.ts <outDir>
  */

@@ -12,17 +12,19 @@ import * as sqliteSchema from "./schema.js";
 import { currentSchemaVersion, schemaMigrations } from "./schema.js";
 
 /**
- * Regression tests for the schema v9-v12 migration set.
+ * Regression tests for the schema v9-v13 migration set.
  *
  * The v9 slicer-profile tables and the v11/v12 print_jobs tables that the
  * get_farm_status / get_print_stats MCP tools read were added to the SQLite
  * migration list AND to schema-pg.ts (the Drizzle table declarations), but the
  * Postgres migration runner only executed drizzle/postgres/0000_init.sql — which
- * stops at v8 — while still stamping app_settings.schema_version = 12. A saas
- * (Postgres) install therefore reported "schema v12" against a database with no
- * print_jobs table at all, and any query from those tools failed at runtime.
+ * stops at v8 — while still stamping app_settings.schema_version ahead of DDL.
+ * A saas (Postgres) install therefore reported a high schema version against a
+ * database with no print_jobs table at all, and any query from those tools
+ * failed at runtime. v13 adds profile-sync provenance columns that must exist
+ * on both dialects for the profile library / profile-sync watcher.
  *
- * These tests pin both halves: the SQLite DB really contains the v9-v12 tables
+ * These tests pin both halves: the SQLite DB really contains the v9-v13 tables
  * after migrating, and the Postgres DDL actually creates every table/column
  * declared in schema-pg.ts.
  */
@@ -38,6 +40,9 @@ const V9_TO_V12_TABLES = [
   "printer_telemetry",
   "app_events",
 ];
+
+/** Profile-sync provenance columns (schema v13) on the three slicer profile tables. */
+const PROFILE_PROVENANCE_COLUMNS = ["source_path", "synced_from_slicer_version", "last_synced_at"];
 
 /** Columns get_farm_status / get_print_stats and the Discord digest read off print_jobs. */
 const PRINT_JOBS_REQUIRED_COLUMNS = [
@@ -86,7 +91,7 @@ function sqliteColumnNames(sqlite: SqliteDatabase, table: string): string[] {
   );
 }
 
-describe("schema v9-v12 (SQLite)", () => {
+describe("schema v9-v13 (SQLite)", () => {
   it("creates every v9-v12 table on a fresh database", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
@@ -101,6 +106,17 @@ describe("schema v9-v12 (SQLite)", () => {
       const cols = sqliteColumnNames(sqlite, "print_jobs");
       for (const col of PRINT_JOBS_REQUIRED_COLUMNS) {
         expect(cols, `missing print_jobs.${col}`).toContain(col);
+      }
+    });
+  });
+
+  it("adds v13 profile-sync provenance columns on slicer profile tables", () => {
+    withSqlite((sqlite) => {
+      for (const table of ["printer_profiles", "process_profiles", "filament_profiles"]) {
+        const cols = sqliteColumnNames(sqlite, table);
+        for (const col of PROFILE_PROVENANCE_COLUMNS) {
+          expect(cols, `missing ${table}.${col}`).toContain(col);
+        }
       }
     });
   });
@@ -308,7 +324,11 @@ function pgAddedColumns(table: string): string[] {
   ].map((m) => m[1]!.toLowerCase());
 }
 
-describe("schema v9-v12 (Postgres DDL parity)", () => {
+describe("schema v9-v13 (Postgres DDL parity)", () => {
+  it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
+    expect(pgSchema.currentSchemaVersion).toBe(sqliteSchema.currentSchemaVersion);
+  });
+
   it("creates every table declared in schema-pg.ts", () => {
     const declared = pgTables().map((t) => t.name);
     expect(declared.length).toBeGreaterThan(0);
@@ -322,7 +342,7 @@ describe("schema v9-v12 (Postgres DDL parity)", () => {
     expect(missing, `Postgres DDL never creates: ${missing.join(", ")}`).toEqual([]);
   });
 
-  it("creates every column declared for the v9-v12 tables", () => {
+  it("creates every column declared for the v9-v13 tables", () => {
     const byName = new Map(pgTables().map((t) => [t.name, t.columns]));
     for (const table of V9_TO_V12_TABLES) {
       const declaredCols = byName.get(table);
@@ -331,6 +351,15 @@ describe("schema v9-v12 (Postgres DDL parity)", () => {
       const present = new Set([...pgCreatedColumns(table), ...pgAddedColumns(table)]);
       const missing = declaredCols!.filter((c) => !present.has(c.toLowerCase()));
       expect(missing, `Postgres DDL for ${table} is missing: ${missing.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("adds v13 profile-sync provenance columns on slicer profile tables", () => {
+    for (const table of ["printer_profiles", "process_profiles", "filament_profiles"]) {
+      const present = new Set([...pgCreatedColumns(table), ...pgAddedColumns(table)]);
+      for (const col of PROFILE_PROVENANCE_COLUMNS) {
+        expect(present.has(col), `Postgres ${table} never gets column ${col}`).toBe(true);
+      }
     }
   });
 

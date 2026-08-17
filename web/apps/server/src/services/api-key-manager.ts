@@ -76,7 +76,7 @@ export function createApiKey(repo: AppRepository): ApiKeyInfo {
 export function listApiKeys(repo: AppRepository): Omit<StoredApiKey, "keyHash">[] {
   const keys = loadKeys(repo);
   return keys.map((k) => {
-    const { keyHash, ...rest } = k;
+    const { keyHash: _keyHash, ...rest } = k;
     return rest;
   });
 }

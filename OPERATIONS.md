@@ -23,14 +23,14 @@ open http://localhost:8080
 
 ### Data Persistence
 
-Docker volume mount on host:
-```bash
-# Create data directory (optional, auto-created on first run)
-mkdir -p /var/lib/print-partner
-sudo chown 1000:1000 /var/lib/print-partner
+`docker-compose.yml` uses a plain named volume `print-partner-data`, mounted at `/data` in the container. Docker creates and manages the volume; no host bind path or `driver_opts.device` is required.
 
-# docker-compose.yml uses named volume
+```bash
+# Inspect the named volume (path is under Docker's volume store)
+docker volume inspect print-partner-data
+
 # Data survives container restarts and upgrades
+# (docker compose down does not delete the volume)
 ```
 
 ## Daily Operations
@@ -155,11 +155,11 @@ docker compose exec print-partner sqlite3 /data/primary.db "PRAGMA integrity_che
 
 ### Disk Space
 
-Monitor `/data` directory usage:
+Monitor `/data` directory usage inside the container (or via the named volume):
 
 ```bash
-# Check size
-du -sh /var/lib/print-partner
+# Check size inside the running container
+docker compose exec print-partner du -sh /data
 
 # Typical sizes:
 # - primary.db: 50-500 MB (depends on job history)
@@ -231,9 +231,10 @@ docker compose logs print-partner
 # 1. Port 8080 in use
 sudo netstat -tulpn | grep 8080
 
-# 2. Permission issues on /data
-ls -la /var/lib/print-partner
-sudo chown 1000:1000 /var/lib/print-partner
+# 2. Permission issues on /data (named volume; check inside the container)
+docker compose exec print-partner ls -la /data
+# Container runs as uid 1000; named volumes are normally owned correctly.
+# For a host bind mount instead, see NON_ROOT_SETUP.md Option 2.
 
 # 3. Corrupted database
 # Restore from backup:

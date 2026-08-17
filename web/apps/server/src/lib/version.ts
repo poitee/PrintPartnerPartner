@@ -62,7 +62,8 @@ export function getVersionInfo(): VersionInfo {
 
     return cachedVersionInfo;
   } catch (error) {
-    // Fallback if anything goes wrong
+    // Fallback if anything goes wrong; log for diagnostics.
+    console.error("Failed to resolve version info:", error);
     return {
       version: "unknown",
       commit: "unknown",

@@ -1,0 +1,30 @@
+# Map bot/agent and unlinked identities onto Chad Lynch for display
+# (git shortlog, git blame, GitHub contributors when mailmap is honored).
+# Does NOT rewrite history. ThunderKeys / Brian Almeida stay themselves.
+
+Chad Lynch <lynchdc39987@gmail.com>                         poitee <lynchdc39987@gmail.com>
+Chad Lynch <lynchdc39987@gmail.com>                         Chad Lynch <poitee@users.noreply.github.com>
+Chad Lynch <lynchdc39987@gmail.com>                         poitee <poitee@users.noreply.github.com>
+Chad Lynch <lynchdc39987@gmail.com>                         poitee <915726+poitee@users.noreply.github.com>
+
+Chad Lynch <lynchdc39987@gmail.com>                         Hermes Agent <hermes@localhost>
+Chad Lynch <lynchdc39987@gmail.com>                         <hermes@localhost>
+
+Chad Lynch <lynchdc39987@gmail.com>                         Cursor Agent <cursoragent@cursor.com>
+Chad Lynch <lynchdc39987@gmail.com>                         Cursor <cursoragent@cursor.com>
+Chad Lynch <lynchdc39987@gmail.com>                         <cursoragent@cursor.com>
+Chad Lynch <lynchdc39987@gmail.com>                         cursor[bot] <206951365+cursor[bot]@users.noreply.github.com>
+Chad Lynch <lynchdc39987@gmail.com>                         <206951365+cursor[bot]@users.noreply.github.com>
+
+Chad Lynch <lynchdc39987@gmail.com>                         copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>
+Chad Lynch <lynchdc39987@gmail.com>                         <198982749+Copilot@users.noreply.github.com>
+Chad Lynch <lynchdc39987@gmail.com>                         Copilot Autofix powered by AI <175728472+Copilot@users.noreply.github.com>
+Chad Lynch <lynchdc39987@gmail.com>                         <175728472+Copilot@users.noreply.github.com>
+
+Chad Lynch <lynchdc39987@gmail.com>                         Claude Sonnet 5 <noreply@anthropic.com>
+Chad Lynch <lynchdc39987@gmail.com>                         Claude Sonnet 4.6 <noreply@anthropic.com>
+Chad Lynch <lynchdc39987@gmail.com>                         Claude Opus 5 <noreply@anthropic.com>
+Chad Lynch <lynchdc39987@gmail.com>                         <noreply@anthropic.com>
+
+Chad Lynch <lynchdc39987@gmail.com>                         GitHub <noreply@github.com>
+Chad Lynch <lynchdc39987@gmail.com>                         <noreply@github.com>

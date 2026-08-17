@@ -123,7 +123,7 @@ export type ParsedProfileFile = {
  */
 export function parseProfileFile(raw: string, kindHint: ProfileKind): ParsedProfileFile {
   let flat: Record<string, string>;
-  let version: string | null = null;
+  let version: string | null;
   const trimmed = raw.trimStart();
   if (trimmed.startsWith("{")) {
     flat = parseSlicerJson(raw);
@@ -151,7 +151,7 @@ function findProfileFile(
   name: string,
 ): string | null {
   const dirPath = join(baseDir, kindDir);
-  let entries: string[] = [];
+  let entries: string[];
   try {
     entries = readdirSync(dirPath);
   } catch {
@@ -398,7 +398,7 @@ export function startProfileSyncWatcher(
       for (const dir of Object.values(root.dirs).filter((d): d is string => Boolean(d))) {
         if (!dir) continue;
         const dirPath = join(root.baseDir, dir);
-        let entries: string[] = [];
+        let entries: string[];
         try {
           entries = readdirSync(dirPath)
             .filter((e) => e.endsWith(".json") || e.endsWith(".ini"))
