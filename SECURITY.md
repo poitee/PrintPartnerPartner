@@ -37,10 +37,13 @@ On first run, the container creates `/data` with:
 - Owner: ppuser:ppuser (uid 1000:1000)
 - Permissions: drwxr-xr-x (755)
 
-The host `/data` directory should have:
+Default Compose uses a **named volume** (`print-partner-data`). Docker manages ownership for that volume; you do not set a host bind `device:` path.
+
+If you switch to a **host bind mount** instead (see `NON_ROOT_SETUP.md` Option 2), prepare the host directory for uid 1000:
+
 ```bash
-sudo chown 1000:1000 /var/lib/print-partner
-sudo chmod 755 /var/lib/print-partner
+sudo chown 1000:1000 ~/print-partner-data
+sudo chmod 755 ~/print-partner-data
 ```
 
 ## Network Security
@@ -204,9 +207,10 @@ curl -X POST http://localhost:8080/backups/restore \
 
 ### Backup Storage
 
-Backups are stored on the host at:
+Backups live under `/data/backups/` inside the container (named volume `print-partner-data`). Inspect the volume mount path with:
+
 ```bash
-/var/lib/print-partner/backups/  # Named volume mount
+docker volume inspect print-partner-data
 ```
 
 Secure backup storage:
