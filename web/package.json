@@ -37,5 +37,6 @@
     "shell-quote": "1.10.0",
     "hono": "4.13.1",
     "postcss": "8.5.26"
-  }
+  },
+  "description": "Print Partner monorepo \u2014 Fastify API + React SPA for layered STL kit desk workflow (Library \u2192 Plan \u2192 Parts \u2192 Progress \u2192 Export)."
 }

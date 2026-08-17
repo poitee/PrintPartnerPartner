@@ -17,5 +17,6 @@
   },
   "devDependencies": {
     "typescript": "^6.0.3"
-  }
+  },
+  "description": "Shared Print Partner API types and contracts."
 }
