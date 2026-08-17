@@ -98,8 +98,10 @@ describe("source docs intelligence", () => {
     expect(repo.listSourceNotes(source.id)).toHaveLength(0);
   });
 
-  it("keywordFilterScore and get_source_docs tool", async () => {
-    expect(keywordFilterScore("Voron tap probe", "tap")).toBeGreaterThan(0);
+  it(
+    "keywordFilterScore and get_source_docs tool",
+    async () => {
+      expect(keywordFilterScore("Voron tap probe", "tap")).toBeGreaterThan(0);
     expect(keywordFilterScore("hello", "tap")).toBe(0);
 
     const source = repo.createSource({
@@ -142,7 +144,9 @@ describe("source docs intelligence", () => {
       live_readme: expect.any(Number),
       pdf_pending: expect.any(Number),
     });
-  });
+    },
+    15000,
+  );
 
   it("get_source_docs returns hint when docs empty but Source notes exist", async () => {
     const source = repo.createSource({

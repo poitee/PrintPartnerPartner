@@ -382,6 +382,7 @@ export type PrinterMachine = {
   enabled?: boolean;
   integration_id?: string | null;
   device_id?: string | null;
+  preferred_slicer?: "orca" | "prusa" | "bambu" | null;
 };
 
 export type PrinterPreset = {
@@ -1197,6 +1198,16 @@ export async function addPrinter(body: {
 
 export async function deletePrinter(printerId: string): Promise<void> {
   await engineFetch(`/printers/${printerId}`, { method: "DELETE" });
+}
+
+export async function updatePrinterSlicer(
+  printerId: string,
+  preferredSlicer: "orca" | "prusa" | "bambu" | null,
+): Promise<PrinterMachine> {
+  return engineFetch<PrinterMachine>(`/printers/${printerId}`, {
+    method: "PUT",
+    body: JSON.stringify({ preferred_slicer: preferredSlicer }),
+  });
 }
 
 export async function pickLocalDirectory(): Promise<File[]> {

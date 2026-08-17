@@ -164,6 +164,55 @@ describe("selectSlicerForPrinter", () => {
       expect(selection).toEqual({ slicer: "prusa", reason: "integration" });
     });
   });
+
+  it("explicit preferred_slicer override wins over integration binding", () => {
+    withRepo((repo) => {
+      const port = createIntegrationPort({
+        repo,
+        getAdapter: (type) => (type === "slicer_sidecar" ? slicerSidecarAdapter : undefined),
+      });
+      const moonraker = port.create({
+        type: "moonraker",
+        name: "Redoubt",
+        config: { url: "http://redoubt.home" },
+      });
+      // Would normally route to orca via the moonraker integration.
+      const selection = selectSlicerForPrinter(
+        repo,
+        printer({ integration_id: moonraker.id, preferred_slicer: "prusa" }),
+      );
+      expect(selection).toEqual({ slicer: "prusa", reason: "override" });
+    });
+  });
+
+  it("explicit preferred_slicer override wins over the printer-name fallback", () => {
+    withRepo((repo) => {
+      const selection = selectSlicerForPrinter(
+        repo,
+        printer({ name: "Prusa XL", preferred_slicer: "bambu" }),
+      );
+      expect(selection).toEqual({ slicer: "bambu", reason: "override" });
+    });
+  });
+
+  it("null preferred_slicer (Auto) falls through to the existing routing", () => {
+    withRepo((repo) => {
+      expect(
+        selectSlicerForPrinter(repo, printer({ name: "Prusa XL", preferred_slicer: null })),
+      ).toEqual({ slicer: "prusa", reason: "printer_name" });
+    });
+  });
+
+  it("ignores an invalid/garbage preferred_slicer value and falls back", () => {
+    withRepo((repo) => {
+      const selection = selectSlicerForPrinter(
+        repo,
+        // @ts-expect-error intentionally invalid value to prove routing is defensive
+        printer({ name: "Prusa XL", preferred_slicer: "nonsense" }),
+      );
+      expect(selection).toEqual({ slicer: "prusa", reason: "printer_name" });
+    });
+  });
 });
 
 describe("profileMatchesSlicer / pickProfileForPrinter", () => {

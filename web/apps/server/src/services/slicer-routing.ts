@@ -31,7 +31,7 @@ export type ResolvedFlatConfigs = Record<string, FlatConfig>;
 export type SlicerSelection = {
   slicer: SlicerKind;
   /** How the slicer was chosen — surfaced in job warnings for debuggability. */
-  reason: "integration" | "printer_name" | "default";
+  reason: "override" | "integration" | "printer_name" | "default";
 };
 
 /**
@@ -48,11 +48,22 @@ const FORMATS_BY_SLICER: Record<SlicerKind, string[]> = {
 
 const PORTABLE_FORMAT = "pp_native";
 
-/** Choose the slicer for a printer. Integration binding wins; name is the fallback. */
+/**
+ * Choose the slicer for a printer.
+ *
+ * Precedence: an explicit `preferred_slicer` override always wins (user
+ * chose it deliberately in Settings); otherwise integration binding wins;
+ * name is the last-resort fallback.
+ */
 export function selectSlicerForPrinter(
   repo: AppRepository,
   printer: PrinterMachine | null | undefined,
 ): SlicerSelection {
+  const override = printer?.preferred_slicer;
+  if (override === "orca" || override === "prusa" || override === "bambu") {
+    return { slicer: override, reason: "override" };
+  }
+
   const integrationId = printer?.integration_id;
   if (integrationId) {
     const integ = getIntegrationConfig(repo, integrationId);

@@ -14,6 +14,7 @@ import {
   savePrinterPlanBinding,
   testIntegration,
   updateIntegration,
+  updatePrinterSlicer,
   type IntegrationSummary,
   type PrinterHostStatus,
   type PrinterMachine,
@@ -67,6 +68,14 @@ const HOST_TYPE_LABELS: Record<HostType, string> = {
   moonraker: "Klipper",
   prusalink: "Prusa",
   bambu: "Bambu",
+};
+
+type SlicerOverride = "orca" | "prusa" | "bambu";
+
+const SLICER_OVERRIDE_LABELS: Record<SlicerOverride, string> = {
+  orca: "OrcaSlicer",
+  prusa: "PrusaSlicer",
+  bambu: "BambuStudio",
 };
 
 function machineFromPreset(
@@ -449,6 +458,24 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
     }
   };
 
+  const onSlicerOverrideChange = async (
+    printer: PrinterMachine,
+    value: SlicerOverride | "auto",
+  ) => {
+    const next = value === "auto" ? null : value;
+    setBusy(true);
+    setLoadError(null);
+    try {
+      const updated = await updatePrinterSlicer(printer.id, next);
+      setPrinters((prev) => prev.map((p) => (p.id === printer.id ? updated : p)));
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const canAdd =
     engineReady &&
     !busy &&
@@ -795,6 +822,28 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
                   >
                     Remove
                   </Button>
+                  <label className="flex items-center gap-2 text-sm">
+                    <span className="text-xs text-muted-foreground">Slicer:</span>
+                    <Select
+                      value={printer.preferred_slicer ?? "auto"}
+                      onValueChange={(v) =>
+                        void onSlicerOverrideChange(printer, v as SlicerOverride | "auto")
+                      }
+                      disabled={!engineReady || busy}
+                    >
+                      <SelectTrigger className="h-8 w-40 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Auto</SelectItem>
+                        {(Object.keys(SLICER_OVERRIDE_LABELS) as SlicerOverride[]).map((k) => (
+                          <SelectItem key={k} value={k}>
+                            {SLICER_OVERRIDE_LABELS[k]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
                 </div>
 
                 {printer.loaded_filaments.length > 0 && (

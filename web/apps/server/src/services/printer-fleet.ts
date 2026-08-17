@@ -66,6 +66,13 @@ export function parsePrinterMachine(data: Record<string, unknown>): PrinterMachi
   } else if (data.device_id === null) {
     machine.device_id = null;
   }
+  if (data.preferred_slicer != null) {
+    const raw = String(data.preferred_slicer).trim().toLowerCase();
+    machine.preferred_slicer =
+      raw === "orca" || raw === "prusa" || raw === "bambu" ? raw : null;
+  } else {
+    machine.preferred_slicer = null;
+  }
   return ensureSlots(machine);
 }
 
