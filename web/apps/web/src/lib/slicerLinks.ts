@@ -3,9 +3,13 @@
  * inspect a plate, tweak a setting, or watch a slice run) without leaving
  * Print Partner.
  *
- * These are fixed local hostnames for the self-hosted slicer containers —
- * not something PP discovers at runtime, so there is no server endpoint for
- * them. If the deployment's hostnames ever change, update this list.
+ * These are fixed local hostnames for the self-hosted slicer containers,
+ * reverse-proxied by the shared media-stack Caddy instance under its
+ * `http://*.home` wildcard block (see media-stack/config/caddy/Caddyfile —
+ * no TLS is terminated for this block, so plain http is the only reachable
+ * scheme; https://*.home 000s). Not something PP discovers at runtime, so
+ * there is no server endpoint for these — if the deployment's hostnames or
+ * scheme ever change, update this list.
  */
 export type SlicerKind = "orca" | "prusa" | "bambu";
 
@@ -20,19 +24,19 @@ export const SLICER_LINKS: SlicerLink[] = [
   {
     slicer: "orca",
     label: "OrcaSlicer",
-    url: "https://orca.home",
+    url: "http://orca.home",
     hint: "Klipper / Voron plates route here",
   },
   {
     slicer: "prusa",
     label: "PrusaSlicer",
-    url: "https://prusa.home",
+    url: "http://prusa.home",
     hint: "Prusa XL plates route here",
   },
   {
     slicer: "bambu",
     label: "BambuStudio",
-    url: "https://bambu.home",
+    url: "http://bambu.home",
     hint: "Bambu plates route here",
   },
 ];
