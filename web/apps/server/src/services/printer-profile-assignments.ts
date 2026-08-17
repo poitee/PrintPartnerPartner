@@ -1,3 +1,5 @@
+import type { AppRepository } from "../db/repository.js";
+
 export type ProfileSourceMode = "assigned" | "auto_match";
 
 export function latestSyncedAt(timestamps: Array<string | null | undefined>): string | null {
@@ -46,3 +48,44 @@ export type PrinterProfileAssignmentView = {
   last_synced_at: string | null;
   compatible_processes: Array<{ id: number; name: string }>;
 };
+
+export function buildAssignmentView(
+  repo: AppRepository,
+  printerId: string,
+  slotCount: number,
+): PrinterProfileAssignmentView {
+  const header = repo.getPrinterProfileAssignment(printerId);
+  const profileSource = header?.profileSource ?? "auto_match";
+  const machineProfileId = header?.machineProfileId ?? null;
+  const storedSlots = repo.listFilamentSlotAssignments(printerId);
+  const bySlot = new Map(storedSlots.map((s) => [s.slotIndex, s.filamentProfileId]));
+  const filament_slots = [];
+  for (let i = 1; i <= slotCount; i++) {
+    filament_slots.push({
+      slot_index: i,
+      filament_profile_id: bySlot.get(i) ?? null,
+    });
+  }
+  const machine = machineProfileId != null ? repo.getSlicerPrinterProfileById(machineProfileId) : null;
+  const filamentTs = filament_slots.map((s) =>
+    s.filament_profile_id != null
+      ? repo.getSlicerFilamentProfileById(s.filament_profile_id)?.lastSyncedAt
+      : null,
+  );
+  const last_synced_at = latestSyncedAt([machine?.lastSyncedAt, ...filamentTs]);
+  const machineName = machine?.name ?? "";
+  const compatible_processes = machineName
+    ? repo
+        .listSlicerProcessProfilesDetailed()
+        .filter((p) => processCompatibleWithMachine(p.compatiblePrinters, machineName))
+        .map((p) => ({ id: p.id, name: p.name }))
+    : [];
+  return {
+    printer_id: printerId,
+    profile_source: profileSource,
+    machine_profile_id: machineProfileId,
+    filament_slots,
+    last_synced_at,
+    compatible_processes,
+  };
+}
