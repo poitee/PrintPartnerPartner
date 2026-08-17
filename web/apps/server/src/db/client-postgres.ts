@@ -273,6 +273,23 @@ export const postgresPostInitMigrations: string[] = [
     ON process_profiles (source_path)`,
   `CREATE INDEX IF NOT EXISTS idx_filament_profiles_source_path
     ON filament_profiles (source_path)`,
+  // v14 — per-printer machine profile and per-slot filament assignments.
+  `CREATE TABLE IF NOT EXISTS printer_profile_assignments (
+    printer_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    machine_profile_id INTEGER,
+    profile_source TEXT NOT NULL DEFAULT 'auto_match',
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS printer_filament_slot_assignments (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    printer_id TEXT NOT NULL,
+    slot_index INTEGER NOT NULL,
+    filament_profile_id INTEGER
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_printer_filament_slot
+    ON printer_filament_slot_assignments (tenant_id, printer_id, slot_index)`,
 ];
 
 export class PostgresDatabase {

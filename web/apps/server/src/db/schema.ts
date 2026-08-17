@@ -335,6 +335,28 @@ export const printerNameMap = sqliteTable(
   (t) => [uniqueIndex("uq_printer_name_map_slicer_name").on(t.slicerName)],
 );
 
+export const printerProfileAssignments = sqliteTable("printer_profile_assignments", {
+  printerId: text("printer_id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  machineProfileId: integer("machine_profile_id"),
+  profileSource: text("profile_source").notNull().default("auto_match"),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const printerFilamentSlotAssignments = sqliteTable(
+  "printer_filament_slot_assignments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    printerId: text("printer_id").notNull(),
+    slotIndex: integer("slot_index").notNull(),
+    filamentProfileId: integer("filament_profile_id"),
+  },
+  (t) => [
+    uniqueIndex("uq_printer_filament_slot").on(t.tenantId, t.printerId, t.slotIndex),
+  ],
+);
+
 /** One print job container (keyed by checkoff link when available). */
 export const printJobs = sqliteTable("print_jobs", {
   id: text("id").primaryKey(),
@@ -400,7 +422,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 13;
+export const currentSchemaVersion = 14;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -694,4 +716,21 @@ export const schemaMigrations: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_process_profiles_source_path ON process_profiles (source_path)`,
   `CREATE INDEX IF NOT EXISTS idx_filament_profiles_source_path ON filament_profiles (source_path)`,
   `CREATE INDEX IF NOT EXISTS idx_print_jobs_printer ON print_jobs (tenant_id, printer_id)`,
+  // v14 — per-printer machine profile and per-slot filament assignments.
+  `CREATE TABLE IF NOT EXISTS printer_profile_assignments (
+    printer_id TEXT PRIMARY KEY NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    machine_profile_id INTEGER,
+    profile_source TEXT NOT NULL DEFAULT 'auto_match',
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS printer_filament_slot_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    printer_id TEXT NOT NULL,
+    slot_index INTEGER NOT NULL,
+    filament_profile_id INTEGER
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_printer_filament_slot
+    ON printer_filament_slot_assignments (tenant_id, printer_id, slot_index)`,
 ];
