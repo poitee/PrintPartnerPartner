@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronDown } from "lucide-react";
 import {
   fetchPrinters,
+  startAutoSlice,
   startExport3mf,
   startExportStlPack,
+  type AutoSliceJobResultBody,
   type RoleFilamentRow,
   type StlPackGroupBy,
 } from "../../api/engine";
@@ -14,6 +17,7 @@ import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../../context/ProfileContext";
 import { checkoffUnitTotals } from "../../lib/checkoffProgress";
 import { slicerExportGates } from "../../lib/exportActionGates";
+import { handleAutoSliceJobDone, autoSliceResultOf } from "../../lib/autoSliceJobResult";
 import { handleExport3mfJobDone } from "../../lib/export3mfJobResult";
 import { handleStlPackExportJobDone } from "../../lib/exportStlJobResult";
 import { planHasUnsetRoleColors } from "../../lib/roleColorSet";
@@ -36,6 +40,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
+import SlicedPlatesPanel from "./SlicedPlatesPanel";
 
 type Props = {
   onShare: () => void;
@@ -52,13 +57,17 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
   const { review } = usePlanWorkspace();
   const exportStlJob = useJobRunner("stl-export");
   const export3mfJob = useJobRunner("export-3mf");
+  const autoSliceJob = useJobRunner("auto-slice");
+  // Last auto-slice outcome, kept so the per-plate thumbnails, gcode downloads
+  // and slicer stderr stay on screen after the completion toast expires.
+  const [sliceResult, setSliceResult] = useState<AutoSliceJobResultBody | null>(null);
 
   const includedParts = review
     ? flattenReviewParts(review.part_groups).filter((p) => p.included)
     : [];
   const includedCount = includedParts.length;
   const remainingUnits = checkoffUnitTotals(includedParts).remainingUnits;
-  const exportBusy = exportStlJob.busy || export3mfJob.busy;
+  const exportBusy = exportStlJob.busy || export3mfJob.busy || autoSliceJob.busy;
   const colorsUnset = planHasUnsetRoleColors(roleFilaments);
   const { canExportParts, canExportRemaining } = slicerExportGates({
     profileSelected: selectedProfileId != null,
@@ -114,6 +123,37 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
             }),
           (snap) => {
             handleExport3mfJobDone("3MF export", snap);
+          },
+        );
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+    })();
+  };
+
+  const onAutoSlice = () => {
+    if (selectedProfileId == null) return;
+    void (async () => {
+      try {
+        const printers = await fetchPrinters();
+        if (!printers.length) {
+          toast.error("No printers configured", {
+            description: "Add a printer in Settings before slicing.",
+          });
+          return;
+        }
+        setSliceResult(null);
+        await autoSliceJob.runJob(
+          () =>
+            startAutoSlice({
+              profile_id: selectedProfileId,
+              enabled_printer_ids: printers.map((p) => p.id),
+            }),
+          (snap) => {
+            handleAutoSliceJobDone("Slice", snap);
+            // Keep the per-plate outcome on screen; the toast disappears but
+            // the thumbnails, gcode downloads and any CLI stderr must not.
+            setSliceResult(autoSliceResultOf(snap));
           },
         );
       } catch (e) {
@@ -268,6 +308,24 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
       ),
     },
     {
+      key: "auto-slice",
+      title: "Slice automatically",
+      description:
+        "Export plates and slice each one on the slicer that matches its printer — Klipper→Orca, Prusa→PrusaSlicer, Bambu→BambuStudio.",
+      chips: ["per printer", "gcode + preview"] as const,
+      body: (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canExportParts || exportBusy}
+          loading={autoSliceJob.busy}
+          onClick={onAutoSlice}
+        >
+          {autoSliceJob.busy ? autoSliceJob.message || "Slicing…" : "Slice plates"}
+        </Button>
+      ),
+    },
+    {
       key: "share",
       title: "Share plan",
       description:
@@ -321,6 +379,7 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
           </Card>
         ))}
       </div>
+      <SlicedPlatesPanel result={sliceResult} />
     </div>
   );
 }

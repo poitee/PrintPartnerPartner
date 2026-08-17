@@ -26,14 +26,15 @@ import { loadFleet } from "./printer-fleet.js";
 import { listIntegrationsByType } from "../integrations/store.js";
 import {
   slicerSidecarSlice,
-  SlicerSidecarError,
+  describeSidecarError,
+  stderrTail,
   type SlicerKind,
 } from "../integrations/adapters/slicer-sidecar.js";
+import { selectSlicerForPrinter } from "./slicer-routing.js";
 import {
-  resolveFlatConfigsForPrinter,
-  selectSlicerForPrinter,
-  type ResolvedFlatConfigs,
-} from "./slicer-routing.js";
+  resolveSlicerAndSettings,
+  type ResolveSlicerAndSettingsResult,
+} from "./slicer-settings.js";
 import { safePlanSlug } from "@print-partner/domain";
 
 export type AutoSliceJobOptions = {
@@ -59,6 +60,13 @@ export type AutoSlicePlateResult = {
   error: string | null;
   /** Structured sidecar error code when available (e.g. slicer_timeout). */
   error_code: string | null;
+  /**
+   * Captured slicer CLI stderr for a `slicer_execution_failed` response — the
+   * only place the real cause of a slice failure is stated. Null otherwise.
+   */
+  stderr: string | null;
+  /** Slicer CLI exit code when the sidecar reported one. */
+  exit_code: number | null;
   /** Which resolved_flat_configs keys were sent (machine/process/filament…). */
   settings_keys: string[];
 };
@@ -122,7 +130,9 @@ export async function runAutoSliceJob(
       enabled_printer_ids: options.enabled_printer_ids,
     });
   } catch (e) {
-    throw new Error(`3MF export failed: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`3MF export failed: ${e instanceof Error ? e.message : String(e)}`, {
+      cause: e,
+    });
   }
   warnings.push(...export3mfResult.warnings);
 
@@ -155,144 +165,181 @@ export async function runAutoSliceJob(
   const gcodePaths: string[] = [];
   const total = platePaths.length;
   // Settings resolution is per printer, not per plate — cache it so a 12-plate
-  // job doesn't re-read the profile tables twelve times.
-  const settingsCache = new Map<string, { configs: ResolvedFlatConfigs; keys: string[] }>();
+  // job doesn't re-read the profile tables twelve times. The temp dirs the
+  // resolver writes its settings files into are cleaned up after the loop.
+  const settingsCache = new Map<string, { resolved: ResolveSlicerAndSettingsResult; keys: string[] }>();
+  const cleanups: Array<() => void> = [];
 
-  for (let i = 0; i < platePaths.length; i++) {
-    const platePath = platePaths[i]!;
-    emit({
-      message: `Slicing plate ${i + 1} of ${total}…`,
-      progress: Math.round(10 + (i / total) * 80),
-    });
+  try {
+    for (let i = 0; i < platePaths.length; i++) {
+      const platePath = platePaths[i]!;
+      emit({
+        message: `Slicing plate ${i + 1} of ${total}…`,
+        progress: Math.round(10 + (i / total) * 80),
+      });
 
-    const plateBasename = basename(platePath);
-    const plateIndex = plateIndexFromFilename(plateBasename, i + 1);
+      const plateBasename = basename(platePath);
+      const plateIndex = plateIndexFromFilename(plateBasename, i + 1);
 
-    // Match a printer from the fleet by name slug in the filename
-    // (export-3mf names plates "<plan>_<printerSlug>_plate_NN.3mf").
-    let matchedPrinter = fleet.find((m) => plateBasename.includes(`_${safePlanSlug(m.name)}_`));
-    if (!matchedPrinter) matchedPrinter = fleet[0];
+      // Match a printer from the fleet by name slug in the filename
+      // (export-3mf names plates "<plan>_<printerSlug>_plate_NN.3mf").
+      let matchedPrinter = fleet.find((m) => plateBasename.includes(`_${safePlanSlug(m.name)}_`));
+      if (!matchedPrinter) matchedPrinter = fleet[0];
 
-    const selection = selectSlicerForPrinter(repo, matchedPrinter);
-    const slicerKind = selection.slicer;
-    const printerSlug = matchedPrinter ? safePlanSlug(matchedPrinter.name) : "printer";
-    const printerName = matchedPrinter?.name ?? "Unknown";
+      const selection = selectSlicerForPrinter(repo, matchedPrinter);
+      const slicerKind = selection.slicer;
+      const printerSlug = matchedPrinter ? safePlanSlug(matchedPrinter.name) : "printer";
+      const printerName = matchedPrinter?.name ?? "Unknown";
 
-    const fail = (message: string, code: string | null, settingsKeys: string[] = []) => {
-      warnings.push(`Plate ${plateIndex} (${printerName}, ${slicerKind}): ${message}`);
+      const fail = (
+        message: string,
+        code: string | null,
+        settingsKeys: string[] = [],
+        extra: { stderr?: string | null; exitCode?: number | null } = {},
+      ) => {
+        // The CLI's own stderr names the actual cause; keep it on the warning
+        // line as well as the structured field so it shows up in the job log.
+        const tail = stderrTail(extra.stderr);
+        warnings.push(
+          `Plate ${plateIndex} (${printerName}, ${slicerKind}): ${message}` +
+            (tail ? `\n${tail}` : ""),
+        );
+        results.push({
+          printer_id: matchedPrinter?.id ?? "",
+          printer_name: printerName,
+          plate_index: plateIndex,
+          plate_path: platePath,
+          slicer: slicerKind,
+          status: "error",
+          gcode_path: null,
+          thumbnail_path: null,
+          error: message,
+          error_code: code,
+          stderr: extra.stderr ?? null,
+          exit_code: extra.exitCode ?? null,
+          settings_keys: settingsKeys,
+        });
+      };
+
+      const sidecarCfg = resolveSidecarConfig(repo, slicerKind);
+      if (!sidecarCfg) {
+        fail(
+          `No slicer_sidecar integration configured with slicer="${slicerKind}". ` +
+            "Add one in Settings → Integrations.",
+          "no_sidecar",
+        );
+        continue;
+      }
+
+      // Load 3MF bytes
+      let modelBytes: Uint8Array;
+      try {
+        modelBytes = new Uint8Array(readFileSync(platePath));
+      } catch (e) {
+        fail(
+          `Could not read plate file ${platePath}: ${e instanceof Error ? e.message : String(e)}`,
+          "plate_read_failed",
+        );
+        continue;
+      }
+
+      // Resolve the printer's slicer settings. resolveSlicerAndSettings does
+      // the translation PP-native -> the target slicer's own schema (Orca/Bambu
+      // JSON key names + profile envelope, or PrusaSlicer's INI dialect);
+      // sending the raw PP-native docs instead makes the CLI abort with exit
+      // -5/-51 on an unknown option.
+      const cacheKey = `${matchedPrinter?.id ?? ""}:${slicerKind}`;
+      let cached = settingsCache.get(cacheKey);
+      if (!cached) {
+        const resolved = resolveSlicerAndSettings(repo, matchedPrinter, { slicer: slicerKind });
+        for (const w of resolved.warnings) warnings.push(`${printerName}: ${w}`);
+        cleanups.push(resolved.cleanup);
+        cached = { resolved, keys: Object.keys(resolved.resolvedFlatConfigs) };
+        settingsCache.set(cacheKey, cached);
+      }
+
+      if (!cached.keys.length) {
+        fail(
+          `No resolved slicer settings available for ${printerName}. ` +
+            "Import printer/process/filament profiles for this slicer first.",
+          "no_settings",
+        );
+        continue;
+      }
+
+      // Call sidecar
+      let sliceResult: Awaited<ReturnType<typeof slicerSidecarSlice>>;
+      try {
+        sliceResult = await slicerSidecarSlice(sidecarCfg.config, {
+          model: modelBytes,
+          filename: plateBasename,
+          slicer: slicerKind,
+          resolved_flat_configs: cached.resolved.resolvedFlatConfigs,
+          ...(options.timeout_s != null ? { timeout_s: options.timeout_s } : {}),
+        });
+      } catch (e) {
+        const described = describeSidecarError(e);
+        fail(described.message, described.code, cached.keys, {
+          stderr: described.stderr,
+          exitCode: described.exitCode,
+        });
+        continue;
+      }
+
+      if (!sliceResult.gcode.length) {
+        fail("Sidecar returned an empty gcode file.", "empty_gcode", cached.keys);
+        continue;
+      }
+      for (const w of sliceResult.warnings ?? []) {
+        warnings.push(`Plate ${plateIndex} (${printerName}): ${w}`);
+      }
+
+      // Save gcode. Prefer the sidecar's own extension (BambuStudio may emit
+      // .bgcode, PrusaSlicer .gcode/.bgcode depending on the profile) so the
+      // stored file matches what the firmware expects.
+      const suggested = sliceResult.filename ?? "";
+      const gcodeExt = suggested.toLowerCase().endsWith(".bgcode") ? ".bgcode" : ".gcode";
+      const gcodeName = `${profileSlug}_${printerSlug}_plate_${String(plateIndex).padStart(2, "0")}${gcodeExt}`;
+      const gcodePath = join(gcodeDir, gcodeName);
+      writeFileSync(gcodePath, sliceResult.gcode);
+      gcodePaths.push(gcodePath);
+
+      // Save the plate_N.png thumbnail if the sidecar produced one.
+      let thumbnailPath: string | null = null;
+      if (sliceResult.thumbnail.length > 0) {
+        const thumbName = `plate_${String(plateIndex).padStart(2, "0")}.png`;
+        thumbnailPath = join(thumbDir, thumbName);
+        writeFileSync(thumbnailPath, sliceResult.thumbnail);
+      } else {
+        warnings.push(`Plate ${plateIndex} (${printerName}): sidecar returned no thumbnail.`);
+      }
+
       results.push({
         printer_id: matchedPrinter?.id ?? "",
         printer_name: printerName,
         plate_index: plateIndex,
         plate_path: platePath,
         slicer: slicerKind,
-        status: "error",
-        gcode_path: null,
-        thumbnail_path: null,
-        error: message,
-        error_code: code,
-        settings_keys: settingsKeys,
+        status: "ok",
+        gcode_path: gcodePath,
+        thumbnail_path: thumbnailPath,
+        error: null,
+        error_code: null,
+        stderr: null,
+        exit_code: null,
+        settings_keys: cached.keys,
       });
-    };
-
-    const sidecarCfg = resolveSidecarConfig(repo, slicerKind);
-    if (!sidecarCfg) {
-      fail(
-        `No slicer_sidecar integration configured with slicer="${slicerKind}". ` +
-          "Add one in Settings → Integrations.",
-        "no_sidecar",
-      );
-      continue;
     }
-
-    // Load 3MF bytes
-    let modelBytes: Uint8Array;
-    try {
-      modelBytes = new Uint8Array(readFileSync(platePath));
-    } catch (e) {
-      fail(
-        `Could not read plate file ${platePath}: ${e instanceof Error ? e.message : String(e)}`,
-        "plate_read_failed",
-      );
-      continue;
+  } finally {
+    // The resolver writes its settings files into mkdtemp dirs; drop them
+    // whether or not the loop threw.
+    for (const cleanup of cleanups) {
+      try {
+        cleanup();
+      } catch {
+        /* best effort — a leftover temp dir must not fail the job */
+      }
     }
-
-    // Resolve the printer's slicer settings (machine/process/filament docs).
-    const cacheKey = `${matchedPrinter?.id ?? ""}:${slicerKind}`;
-    let cached = settingsCache.get(cacheKey);
-    if (!cached) {
-      const resolved = resolveFlatConfigsForPrinter(repo, matchedPrinter, slicerKind);
-      for (const w of resolved.warnings) warnings.push(`${printerName}: ${w}`);
-      cached = { configs: resolved.configs, keys: Object.keys(resolved.configs) };
-      settingsCache.set(cacheKey, cached);
-    }
-
-    if (!cached.keys.length) {
-      fail(
-        `No resolved slicer settings available for ${printerName}. ` +
-          "Import printer/process/filament profiles for this slicer first.",
-        "no_settings",
-      );
-      continue;
-    }
-
-    // Call sidecar
-    let sliceResult: Awaited<ReturnType<typeof slicerSidecarSlice>>;
-    try {
-      sliceResult = await slicerSidecarSlice(sidecarCfg.config, {
-        model: modelBytes,
-        filename: plateBasename,
-        slicer: slicerKind,
-        resolved_flat_configs: cached.configs,
-        ...(options.timeout_s != null ? { timeout_s: options.timeout_s } : {}),
-      });
-    } catch (e) {
-      const code = e instanceof SlicerSidecarError ? e.code : "slice_failed";
-      fail(e instanceof Error ? e.message : String(e), code, cached.keys);
-      continue;
-    }
-
-    if (!sliceResult.gcode.length) {
-      fail("Sidecar returned an empty gcode file.", "empty_gcode", cached.keys);
-      continue;
-    }
-    for (const w of sliceResult.warnings ?? []) {
-      warnings.push(`Plate ${plateIndex} (${printerName}): ${w}`);
-    }
-
-    // Save gcode. Prefer the sidecar's own extension (BambuStudio may emit
-    // .bgcode, PrusaSlicer .gcode/.bgcode depending on the profile) so the
-    // stored file matches what the firmware expects.
-    const suggested = sliceResult.filename ?? "";
-    const gcodeExt = suggested.toLowerCase().endsWith(".bgcode") ? ".bgcode" : ".gcode";
-    const gcodeName = `${profileSlug}_${printerSlug}_plate_${String(plateIndex).padStart(2, "0")}${gcodeExt}`;
-    const gcodePath = join(gcodeDir, gcodeName);
-    writeFileSync(gcodePath, sliceResult.gcode);
-    gcodePaths.push(gcodePath);
-
-    // Save the plate_N.png thumbnail if the sidecar produced one.
-    let thumbnailPath: string | null = null;
-    if (sliceResult.thumbnail.length > 0) {
-      const thumbName = `plate_${String(plateIndex).padStart(2, "0")}.png`;
-      thumbnailPath = join(thumbDir, thumbName);
-      writeFileSync(thumbnailPath, sliceResult.thumbnail);
-    } else {
-      warnings.push(`Plate ${plateIndex} (${printerName}): sidecar returned no thumbnail.`);
-    }
-
-    results.push({
-      printer_id: matchedPrinter?.id ?? "",
-      printer_name: printerName,
-      plate_index: plateIndex,
-      plate_path: platePath,
-      slicer: slicerKind,
-      status: "ok",
-      gcode_path: gcodePath,
-      thumbnail_path: thumbnailPath,
-      error: null,
-      error_code: null,
-      settings_keys: cached.keys,
-    });
   }
 
   const failed = results.filter((r) => r.status === "error");

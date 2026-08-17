@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Fake OrcaSlicer/BambuStudio CLI for the auto-slice end-to-end harness.
+
+Stands in for a real `orca-slicer` binary (none is installable in this
+sandbox). It is deliberately strict: it validates the argv and the *content*
+of every settings file the sidecar hands it against the schema the real CLI
+requires, so a malformed preset fails the harness instead of silently
+producing gcode. On success it writes a realistic output.gcode.3mf zip
+containing Metadata/plate_1.gcode and Metadata/plate_1.png.
+
+Usage is identical to the real CLI:
+    orca-slicer --slice 0 --load-settings a.json;b.json \
+        --load-filaments f.json --arrange 1 --allow-rotations --min-save \
+        --export-3mf out.gcode.3mf input.3mf
+"""
+from __future__ import annotations
+
+import json
+import struct
+import sys
+import zipfile
+import zlib
+from pathlib import Path
+
+FLAVOR = Path(sys.argv[0]).name  # orca-slicer | bambu-studio-cli
+
+
+def die(msg: str, code: int) -> None:
+    sys.stderr.write(f"{FLAVOR}: {msg}\n")
+    sys.exit(code)
+
+
+def value_after(flag: str, args: list[str]) -> str:
+    if flag not in args:
+        die(f"missing required flag {flag}", 2)
+    idx = args.index(flag)
+    if idx + 1 >= len(args):
+        die(f"{flag} has no value", 2)
+    return args[idx + 1]
+
+
+def real_png(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
+    raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+# --- argv shape ------------------------------------------------------------
+args = sys.argv[1:]
+if args[0:2] != ["--slice", "0"]:
+    die(f"expected leading '--slice 0', got {' '.join(args[:2])!r}", 2)
+for flag in ("--arrange", "--allow-rotations", "--min-save"):
+    if flag not in args:
+        die(f"missing required flag {flag}", 2)
+
+settings_arg = value_after("--load-settings", args)
+filaments_arg = value_after("--load-filaments", args)
+out_path = value_after("--export-3mf", args)
+input_3mf = args[-1]
+
+settings_paths = [Path(p) for p in settings_arg.split(";") if p]
+filament_paths = [Path(p) for p in filaments_arg.split(";") if p]
+
+if not zipfile.is_zipfile(input_3mf):
+    die(f"input is not a readable 3mf/zip: {input_3mf}", 4)
+
+# --- preset schema validation ---------------------------------------------
+# The real CLI exits -5 (CLI_CONFIG_FILE_ERROR) / -51 (CLI_VALIDATE_ERROR)
+# when a preset omits a required field or types it wrong. Reproduce that so
+# the harness catches a bad translation instead of passing it through.
+REQUIRED = {
+    "machine": ["nozzle_diameter", "printable_area"],
+    "process": ["layer_height"],
+    "filament": ["filament_type"],
+}
+PER_EXTRUDER = {"nozzle_diameter", "filament_type", "nozzle_temperature", "retraction_length"}
+
+docs: dict[str, dict] = {}
+for path in settings_paths + filament_paths:
+    if not path.is_file():
+        die(f"settings file not written: {path}", 3)
+    try:
+        doc = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        die(f"preset {path.name} is not valid JSON: {exc}", 5)
+    kind = doc.get("type")
+    if kind not in REQUIRED:
+        die(f"preset {path.name} has bad/missing 'type': {kind!r}", 5)
+    if doc.get("instantiation") != "true":
+        die(f"preset {path.name} must set instantiation to the string 'true'", 5)
+    if not doc.get("name"):
+        die(f"preset {path.name} has no 'name'", 5)
+    for field in REQUIRED[kind]:
+        if not doc.get(field):
+            die(f"preset {path.name} ({kind}) is missing required field {field}", 51)
+    for field in PER_EXTRUDER & doc.keys():
+        val = doc[field]
+        if not isinstance(val, list) or not all(isinstance(v, str) for v in val):
+            die(f"preset {path.name}: {field} must be an array of strings, got {val!r}", 51)
+    docs[kind] = doc
+
+# Filaments must arrive via --load-filaments, machine/process via --load-settings.
+for path in filament_paths:
+    if json.loads(path.read_text()).get("type") != "filament":
+        die(f"{path.name} passed to --load-filaments is not a filament preset", 5)
+for path in settings_paths:
+    if json.loads(path.read_text()).get("type") == "filament":
+        die(f"filament preset {path.name} passed to --load-settings", 5)
+
+# machine must precede process in the --load-settings list.
+if len(settings_paths) > 1:
+    first = json.loads(settings_paths[0].read_text()).get("type")
+    if first != "machine":
+        die(f"--load-settings must list machine first, got {first!r}", 5)
+
+# process/filament must be linked to the loaded machine preset by name.
+machine_name = docs.get("machine", {}).get("name")
+for kind in ("process", "filament"):
+    doc = docs.get(kind)
+    if not doc:
+        continue
+    compat = doc.get("compatible_printers")
+    if compat is None:
+        continue
+    names = compat if isinstance(compat, list) else [compat]
+    if machine_name and machine_name not in names:
+        die(
+            f"preset {doc['name']} ({kind}) is not compatible with the loaded "
+            f"printer {machine_name!r}: compatible_printers={names!r}",
+            51,
+        )
+
+# --- emit a realistic output.gcode.3mf ------------------------------------
+machine = docs.get("machine", {})
+process = docs.get("process", {})
+filament = docs.get("filament", {})
+
+
+def scalar(value, default="?"):
+    if isinstance(value, list):
+        return value[0] if value else default
+    return value if value is not None else default
+
+
+gcode = "\n".join(
+    [
+        f"; generated by fake-{'bambu' if 'bambu' in FLAVOR else 'orca'} for the PP e2e harness",
+        f"; printer_model = {scalar(machine.get('printer_model'))}",
+        f"; nozzle_diameter = {scalar(machine.get('nozzle_diameter'))}",
+        f"; layer_height = {scalar(process.get('layer_height'))}",
+        f"; filament_type = {scalar(filament.get('filament_type'))}",
+        "M73 P0 R2",
+        "G90",
+        "M83",
+        "G28 ; home all axes",
+        "M104 S210",
+        "M140 S60",
+        "G1 Z0.2 F3000",
+        "G1 X10 Y10 E0.5 F1800",
+        "M104 S0",
+        "M140 S0",
+        "M84",
+        "",
+    ]
+)
+
+png = real_png(120, 120, (30, 144, 255))
+with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+    zf.writestr("3D/3dmodel.model", "<model/>")
+    zf.writestr("Metadata/plate_1.gcode", gcode)
+    zf.writestr("Metadata/plate_1.png", png)
+    zf.writestr("Metadata/slice_info.config", "<config/>")
+
+sys.exit(0)

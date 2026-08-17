@@ -586,6 +586,8 @@ export class InProcessJobRunner {
         thumbnail_path: pl.thumbnail_path,
         error: pl.error,
         error_code: pl.error_code,
+        stderr: pl.stderr,
+        exit_code: pl.exit_code,
         settings_keys: pl.settings_keys,
         download_url: pl.gcode_path ? this.downloadUrlForPath(pl.gcode_path) : null,
         thumbnail_url: pl.thumbnail_path ? this.downloadUrlForPath(pl.thumbnail_path) : null,

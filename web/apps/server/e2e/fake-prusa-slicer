@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Fake PrusaSlicer CLI for the auto-slice end-to-end harness.
+
+PrusaSlicer takes one `--load <file.ini>` per profile and, with
+`--export-gcode`, writes a single gcode file. It embeds the plate thumbnail as
+a base64 PNG in a `; thumbnail begin/end` comment block (which is exactly what
+the sidecar's prusa backend decodes) ONLY when the loaded config sets the
+`thumbnails` option — with no `thumbnails` the real binary emits gcode with no
+thumbnail block at all and the sidecar fails the slice with
+slicer_output_parse_error. This stand-in reproduces that conditional behaviour
+rather than emitting a thumbnail unconditionally, so a regression in PP's
+settings translation (dropping `thumbnails` on the way to the INI) fails the
+harness instead of passing silently. It also validates the INI it is handed: an
+unknown key aborts the real PrusaSlicer's config load, so it aborts here too.
+
+Usage:
+    prusa-slicer --load machine.ini --load process.ini --load filament.ini \
+        --export-gcode --output out.gcode input.3mf
+"""
+from __future__ import annotations
+
+import base64
+import re
+import struct
+import sys
+import zipfile
+import zlib
+from pathlib import Path
+
+FLAVOR = "prusa-slicer"
+
+
+def die(msg: str, code: int) -> None:
+    sys.stderr.write(f"{FLAVOR}: {msg}\n")
+    sys.exit(code)
+
+
+def real_png(width: int, height: int, rgb: tuple[int, int, int]) -> bytes:
+    raw = b"".join(b"\x00" + bytes(rgb) * width for _ in range(height))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+args = sys.argv[1:]
+if "--export-gcode" not in args:
+    die("missing required flag --export-gcode", 2)
+if "--output" not in args:
+    die("missing required flag --output", 2)
+out_path = args[args.index("--output") + 1]
+input_3mf = args[-1]
+
+load_paths = [Path(args[i + 1]) for i, a in enumerate(args) if a == "--load"]
+if not load_paths:
+    die("no --load <profile.ini> flags given", 2)
+
+if not zipfile.is_zipfile(input_3mf):
+    die(f"input is not a readable 3mf/zip: {input_3mf}", 4)
+
+# PrusaSlicer's config parser aborts on an unknown option, so only accept keys
+# from its documented vocabulary (the subset PP's translation table emits).
+KNOWN_KEYS = {
+    # machine
+    "nozzle_diameter", "bed_shape", "max_print_height", "gcode_flavor",
+    "retract_length", "retract_speed", "retract_lift", "start_gcode",
+    "end_gcode", "printer_model", "printer_variant",
+    # process
+    "layer_height", "first_layer_height", "perimeters", "top_solid_layers",
+    "bottom_solid_layers", "fill_density", "fill_pattern", "support_material",
+    "support_material_auto", "perimeter_speed", "infill_speed",
+    "first_layer_speed", "travel_speed", "bridge_speed", "seam_position",
+    "default_acceleration", "thumbnails",
+    # filament
+    "filament_type", "filament_vendor", "temperature", "first_layer_temperature",
+    "bed_temperature", "first_layer_bed_temperature", "max_fan_speed",
+    "min_fan_speed", "extrusion_multiplier", "filament_retract_length",
+    "filament_retract_speed", "filament_retract_lift",
+    "filament_max_volumetric_speed",
+    # linkage
+    "compatible_printers", "compatible_printers_condition",
+}
+
+config: dict[str, str] = {}
+for path in load_paths:
+    if not path.is_file():
+        die(f"config file not written: {path}", 3)
+    for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("["):
+            continue
+        if "=" not in line:
+            die(f"{path.name}:{lineno}: not a 'key = value' line: {line!r}", 5)
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if key not in KNOWN_KEYS:
+            die(f"{path.name}:{lineno}: unknown config option {key!r}", 5)
+        config[key] = value
+
+for required in ("layer_height", "filament_type", "nozzle_diameter"):
+    if required not in config:
+        die(f"missing required config option {required}", 51)
+
+# Real PrusaSlicer only emits the thumbnail block when asked to. `thumbnails`
+# is "WxH" (optionally "WxH/FORMAT" on 2.7+); anything else is a config error.
+thumb_lines: list[str] = []
+spec = config.get("thumbnails", "").strip()
+if spec:
+    size = spec.split("/", 1)[0]
+    if not re.fullmatch(r"\d+x\d+", size):
+        die(f"invalid value for thumbnails: {spec!r} (expected WxH)", 5)
+    w, h = (int(n) for n in size.split("x"))
+    png = real_png(w, h, (255, 140, 0))
+    b64 = base64.b64encode(png).decode("ascii")
+    thumb_lines = [f"; thumbnail begin {w}x{h} {len(png)}"]
+    thumb_lines += [f"; {b64[i:i + 78]}" for i in range(0, len(b64), 78)]
+    thumb_lines.append("; thumbnail end")
+
+gcode = "\n".join(
+    [
+        "; generated by fake-prusa for the PP e2e harness",
+        f"; printer_model = {config.get('printer_model', '?')}",
+        f"; nozzle_diameter = {config.get('nozzle_diameter', '?')}",
+        f"; layer_height = {config.get('layer_height', '?')}",
+        f"; filament_type = {config.get('filament_type', '?')}",
+        f"; thumbnails = {config.get('thumbnails', '<unset>')}",
+        "",
+        *thumb_lines,
+        "",
+        "M73 P0 R2",
+        "G90",
+        "M83",
+        "G28 ; home all axes",
+        "M104 S215",
+        "M140 S60",
+        "G1 Z0.2 F3000",
+        "G1 X10 Y10 E0.5 F1800",
+        "M104 S0",
+        "M84",
+        "",
+    ]
+)
+
+Path(out_path).write_text(gcode, encoding="utf-8")
+sys.exit(0)

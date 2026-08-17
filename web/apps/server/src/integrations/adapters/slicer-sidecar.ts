@@ -91,6 +91,43 @@ export class SlicerSidecarError extends Error {
   }
 }
 
+/**
+ * Flatten a sidecar failure into the pieces a caller wants to log and show.
+ *
+ * The sidecar reports a CLI failure as `slicer_execution_failed` with the
+ * process's `exit_code` and captured `stderr` in `error.details` — that stderr
+ * is the only place the actual reason ("unknown config option", "invalid
+ * printable_area", …) appears, so it has to reach the user rather than being
+ * swallowed behind a generic "orca-slicer exited with code 1".
+ */
+export function describeSidecarError(e: unknown): {
+  message: string;
+  code: string;
+  exitCode: number | null;
+  stderr: string | null;
+} {
+  const message = e instanceof Error ? e.message : String(e);
+  if (!(e instanceof SlicerSidecarError)) {
+    return { message, code: "slice_failed", exitCode: null, stderr: null };
+  }
+  const rawStderr = e.details.stderr;
+  const stderr = typeof rawStderr === "string" && rawStderr.trim() ? rawStderr.trim() : null;
+  const rawExit = e.details.exit_code;
+  const exitCode = typeof rawExit === "number" && Number.isFinite(rawExit) ? rawExit : null;
+  return { message, code: e.code, exitCode, stderr };
+}
+
+/** Last `maxLines` non-blank lines of a CLI stderr blob, for a one-glance summary. */
+export function stderrTail(stderr: string | null | undefined, maxLines = 6): string | null {
+  if (!stderr) return null;
+  const lines = stderr
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim().length > 0);
+  if (!lines.length) return null;
+  return lines.slice(-maxLines).join("\n");
+}
+
 function normUrl(raw: unknown): string | null {
   if (typeof raw !== "string" || !raw.trim()) return null;
   return raw.trim().replace(/\/+$/, "");

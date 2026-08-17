@@ -16,16 +16,26 @@ export async function registerExportRoutes(app: FastifyInstance, deps: RouteDeps
       return reply.status(404).send({ detail: "Export file not found" });
     }
     const name = basename(key);
-    const isZip = name.endsWith(".zip");
-    const isHtml = name.endsWith(".html");
+    const lower = name.toLowerCase();
+    const isZip = lower.endsWith(".zip");
+    const isHtml = lower.endsWith(".html");
+    // Slicer plate thumbnails (auto-slice writes gcode/thumbnails/plate_NN.png)
+    // are displayed in the UI via <img src>, so they must be served inline with
+    // their real image type rather than as an octet-stream attachment.
+    const isPng = lower.endsWith(".png");
     const type = isZip
       ? "application/zip"
       : isHtml
         ? "text/html; charset=utf-8"
-        : "application/octet-stream";
+        : isPng
+          ? "image/png"
+          : "application/octet-stream";
     return reply
       .header("Content-Type", type)
-      .header("Content-Disposition", `attachment; filename="${name}"`)
+      .header(
+        "Content-Disposition",
+        `${isPng ? "inline" : "attachment"}; filename="${name}"`,
+      )
       .send(stream);
   });
 }

@@ -25,6 +25,63 @@ interface ProcessProfileDef {
   resolvedFlatConfig: Record<string, unknown>;
 }
 
+// ---------------------------------------------------------------------------
+// Printer (machine) profile definitions
+// Each entry maps to one row in printer_profiles.
+//
+// Root cause this fixes: printer_profiles started out completely unseeded —
+// only process/filament starters existed. With no machine document at all,
+// resolveFlatConfigsForPrinter() never produces a "machine" key, so no
+// --load-settings machine.json is ever sent to OrcaSlicer. Orca then slices
+// against its own bundled default printer preset while the process/filament
+// docs still carry `compatible_printers: ["<printer> machine"]` (see
+// slicer-settings.ts buildSettingsDocs), a name that was never loaded — hence
+// "The selected printer is not compatible with the process preset in the
+// 3mf." These starter machine profiles close that gap so auto-slice always
+// has *some* real, loadable machine preset to pair against.
+//
+// `printable_area` is intentionally omitted: buildSettingsDocs() synthesizes
+// it per-printer from the PP printer's real bed_width_mm/bed_depth_mm, which
+// is more accurate than a fixed bed size baked in here.
+// ---------------------------------------------------------------------------
+
+interface PrinterProfileDef {
+  name: string;
+  slicerFormat: string;
+  resolvedFlatConfig: Record<string, unknown>;
+}
+
+const PRINTER_PROFILES: PrinterProfileDef[] = [
+  {
+    // Klipper/Voron machines route to OrcaSlicer (see slicer-routing.ts); tag
+    // this "orca" so it outranks the generic pp_native row for that slicer.
+    name: "Generic Klipper Machine",
+    slicerFormat: "orca",
+    resolvedFlatConfig: {
+      nozzle_diameter_mm: 0.4,
+      gcode_flavor: "klipper",
+      extruder_count: 1,
+      printer_model: "Generic Klipper",
+      printer_variant: "0.4",
+      description: "Generic Klipper/Voron-class machine profile (0.4mm nozzle).",
+    },
+  },
+  {
+    // Portable fallback for printers whose slicer isn't Orca (PrusaSlicer,
+    // BambuStudio) and have no dedicated imported machine profile.
+    name: "Generic FDM Machine",
+    slicerFormat: "pp_native",
+    resolvedFlatConfig: {
+      nozzle_diameter_mm: 0.4,
+      gcode_flavor: "marlin2",
+      extruder_count: 1,
+      printer_model: "Generic FDM",
+      printer_variant: "0.4",
+      description: "Generic Marlin-class FDM machine profile (0.4mm nozzle).",
+    },
+  },
+];
+
 const PROCESS_PROFILES: ProcessProfileDef[] = [
   {
     name: "PLA 0.2mm Quality",
@@ -278,6 +335,29 @@ const FILAMENT_PROFILES: FilamentProfileDef[] = [
  */
 export function seedStarterProfiles(sqlite: Database.Database): void {
   const now = NOW();
+
+  // ---- printer (machine) profiles -----------------------------------------
+  const upsertPrinter = sqlite.prepare(`
+    INSERT OR IGNORE INTO printer_profiles
+      (tenant_id, name, slicer_format, extruder_count, resolved_flat_config, imported_at)
+    VALUES
+      (@tenantId, @name, @slicerFormat, @extruderCount, @resolvedFlatConfig, @importedAt)
+  `);
+
+  const insertPrinterMany = sqlite.transaction((profiles: PrinterProfileDef[]) => {
+    for (const m of profiles) {
+      upsertPrinter.run({
+        tenantId: TENANT_ID,
+        name: m.name,
+        slicerFormat: m.slicerFormat,
+        extruderCount: Number(m.resolvedFlatConfig.extruder_count ?? 1),
+        resolvedFlatConfig: JSON.stringify(m.resolvedFlatConfig),
+        importedAt: now,
+      });
+    }
+  });
+
+  insertPrinterMany(PRINTER_PROFILES);
 
   // ---- process profiles ---------------------------------------------------
   const upsertProcess = sqlite.prepare(`
