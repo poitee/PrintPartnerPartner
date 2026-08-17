@@ -100,7 +100,7 @@ flowchart LR
 2. **Plan** — set role filament colors, attach sources, pick files and quantities, rebuild plan; inline repo Docs viewer; kit/manifest options.
 3. **Parts** — validation summary by role/filament; full parts list with 3D previews.
 4. **Progress** — per-unit progress (saved per plan), assembled toggles, printable checklist, and missing-STL export.
-5. **Export** — plate workspace, height bands, slicer links, profile library, STL packs, share bundles, checklist HTML, 3MF, and printer send.
+5. **Export** — plate workspace, height bands, slicer links, STL packs, share bundles, checklist HTML, 3MF, and printer send. Slicer profile assignment and sync status live on **Settings → Printers** (not a flat profile library on Export).
 
 Plan switching lives in the spine **PlanPicker**; create/rename/duplicate/archive open from **Create plan** or the **Plans** page. The active plan is shared across Plan, Parts, Progress, and Export. Settings: **Printers / Library / Appearance / Account**.
 

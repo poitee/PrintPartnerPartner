@@ -334,6 +334,28 @@ export const printerNameMap = pgTable(
   (t) => [uniqueIndex("uq_printer_name_map_slicer_name").on(t.slicerName)],
 );
 
+export const printerProfileAssignments = pgTable("printer_profile_assignments", {
+  printerId: text("printer_id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  machineProfileId: integer("machine_profile_id"),
+  profileSource: text("profile_source").notNull().default("auto_match"),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const printerFilamentSlotAssignments = pgTable(
+  "printer_filament_slot_assignments",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    printerId: text("printer_id").notNull(),
+    slotIndex: integer("slot_index").notNull(),
+    filamentProfileId: integer("filament_profile_id"),
+  },
+  (t) => [
+    uniqueIndex("uq_printer_filament_slot").on(t.tenantId, t.printerId, t.slotIndex),
+  ],
+);
+
 /** One print job container (keyed by checkoff link when available). */
 export const printJobs = pgTable("print_jobs", {
   id: text("id").primaryKey(),
@@ -399,4 +421,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 13;
+export const currentSchemaVersion = 14;

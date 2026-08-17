@@ -109,6 +109,8 @@ export type ResolveSlicerAndSettingsResult = {
   /** Which PP profile row supplied each entry. */
   sources: Record<string, { id: number; name: string }>;
   warnings: string[];
+  /** Blocking assignment errors from resolveFlatConfigsForPrinter. */
+  errors: string[];
   /** Remove the temp dir. No-op when the caller supplied their own `outDir`. */
   cleanup: () => void;
 };
@@ -630,6 +632,7 @@ export function resolveSlicerAndSettings(
   options: ResolveSlicerAndSettingsOptions = {},
 ): ResolveSlicerAndSettingsResult {
   const warnings: string[] = [];
+  const errors: string[] = [];
 
   const selection = options.slicer
     ? ({ slicer: options.slicer, reason: "default" } as SlicerSelection)
@@ -645,6 +648,7 @@ export function resolveSlicerAndSettings(
     configs = resolved.configs;
     sources = resolved.sources;
     warnings.push(...resolved.warnings);
+    errors.push(...resolved.errors);
   }
 
   const machineName = (printer?.name ?? "").trim() || "PP Printer";
@@ -669,6 +673,7 @@ export function resolveSlicerAndSettings(
     dir,
     sources,
     warnings,
+    errors,
     cleanup: () => {
       if (ownsDir) rmSync(dir, { recursive: true, force: true });
     },

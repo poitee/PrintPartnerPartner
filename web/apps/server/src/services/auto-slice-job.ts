@@ -253,6 +253,13 @@ export async function runAutoSliceJob(
       if (!cached) {
         const resolved = resolveSlicerAndSettings(repo, matchedPrinter, { slicer: slicerKind });
         for (const w of resolved.warnings) warnings.push(`${printerName}: ${w}`);
+        if (resolved.errors.length) {
+          for (const err of resolved.errors) {
+            fail(`${printerName}: ${err}`, "assigned_profile_missing");
+          }
+          resolved.cleanup();
+          continue;
+        }
         cleanups.push(resolved.cleanup);
         cached = { resolved, keys: Object.keys(resolved.resolvedFlatConfigs) };
         settingsCache.set(cacheKey, cached);

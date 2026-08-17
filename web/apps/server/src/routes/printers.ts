@@ -6,11 +6,84 @@ import {
   parsePrinterMachine,
   saveFleet,
 } from "../services/printer-fleet.js";
+import { buildAssignmentView } from "../services/printer-profile-assignments.js";
+import type { ProfileSourceMode } from "../services/printer-profile-assignments.js";
 
 type RouteDeps = { repo: AppRepository };
 
+function findFleetPrinter(repo: AppRepository, printerId: string) {
+  return loadFleet(repo).find((m) => m.id === printerId) ?? null;
+}
+
 export async function registerPrinterRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.get("/printers", async () => ({ printers: loadFleet(deps.repo) }));
+
+  app.get("/slicer-profile-options", async () => {
+    const printers = deps.repo.listSlicerPrinterProfiles().map((row) => {
+      const full = deps.repo.getSlicerPrinterProfileById(row.id);
+      return {
+        id: row.id,
+        name: row.name,
+        last_synced_at: full?.lastSyncedAt ?? null,
+      };
+    });
+    const filaments = deps.repo.listSlicerFilamentProfiles().map((row) => {
+      const full = deps.repo.getSlicerFilamentProfileById(row.id);
+      return {
+        id: row.id,
+        name: row.name,
+        material_type: row.materialType ?? null,
+        last_synced_at: full?.lastSyncedAt ?? null,
+      };
+    });
+    const processes = deps.repo.listSlicerProcessProfilesDetailed().map((row) => ({
+      id: row.id,
+      name: row.name,
+      last_synced_at: null as string | null,
+    }));
+    return { printers, filaments, processes };
+  });
+
+  app.get("/printers/:id/profile-assignment", async (request, reply) => {
+    const printerId = (request.params as { id: string }).id;
+    const printer = findFleetPrinter(deps.repo, printerId);
+    if (!printer) {
+      return reply.status(404).send({ detail: "Printer not found" });
+    }
+    return buildAssignmentView(deps.repo, printerId, printer.max_filament_slots);
+  });
+
+  app.put("/printers/:id/profile-assignment", async (request, reply) => {
+    const printerId = (request.params as { id: string }).id;
+    const printer = findFleetPrinter(deps.repo, printerId);
+    if (!printer) {
+      return reply.status(404).send({ detail: "Printer not found" });
+    }
+    const body = request.body as {
+      profile_source?: ProfileSourceMode;
+      machine_profile_id?: number | null;
+      filament_slots?: Array<{ slot_index?: number; filament_profile_id?: number | null }>;
+    };
+    const profileSource = body.profile_source ?? "auto_match";
+    if (profileSource !== "assigned" && profileSource !== "auto_match") {
+      return reply.status(400).send({ detail: "Invalid profile_source" });
+    }
+    const filamentSlots = (body.filament_slots ?? []).map((slot) => ({
+      slotIndex: Number(slot.slot_index ?? 0),
+      filamentProfileId: slot.filament_profile_id ?? null,
+    }));
+    try {
+      deps.repo.upsertPrinterProfileAssignment({
+        printerId,
+        machineProfileId: body.machine_profile_id ?? null,
+        profileSource,
+        filamentSlots,
+      });
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+    }
+    return buildAssignmentView(deps.repo, printerId, printer.max_filament_slots);
+  });
 
   app.put("/printers", async (request, reply) => {
     const body = request.body as { printers?: Array<Record<string, unknown>> };
