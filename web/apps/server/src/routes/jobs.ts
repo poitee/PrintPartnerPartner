@@ -264,19 +264,26 @@ export class InProcessJobRunner {
         }
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        this.emit(jobId, {
-          status: "error",
-          message: errMsg,
-          progress: 100,
-          error: errMsg,
-          result: null,
-          finished_at: new Date().toISOString(),
-        });
-        if (kind === "printer-upload") {
-          reconcileSendQueueJobResult(this.repo, jobId, {
-            ok: false,
+        try {
+          this.emit(jobId, {
+            status: "error",
             message: errMsg,
+            progress: 100,
+            error: errMsg,
+            result: null,
+            finished_at: new Date().toISOString(),
           });
+          if (kind === "printer-upload") {
+            reconcileSendQueueJobResult(this.repo, jobId, {
+              ok: false,
+              message: errMsg,
+            });
+          }
+        } catch {
+          // Best-effort: if the repo/db connection is already gone (e.g. test
+          // teardown raced a still-running background job), there's nothing
+          // more we can do to report the failure — swallow rather than
+          // surface an unhandled rejection.
         }
       }
     });
