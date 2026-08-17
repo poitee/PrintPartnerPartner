@@ -185,14 +185,21 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
     setBusy(true);
     setError(null);
     try {
-      if (action === "pull") await pullSlicerDocker(row.id);
-      else if (action === "start") await startSlicerDocker(row.id);
-      else if (action === "stop") await stopSlicerDocker(row.id);
-      else {
+      if (action === "logs") {
         const { lines } = await fetchSlicerDockerLogs(row.id);
         setLogsById((prev) => ({ ...prev, [row.id]: lines }));
+      } else {
+        const res =
+          action === "pull"
+            ? await pullSlicerDocker(row.id)
+            : action === "start"
+              ? await startSlicerDocker(row.id)
+              : await stopSlicerDocker(row.id);
+        if (res.status.state === "error") {
+          setError(res.status.message || "Docker operation failed");
+        }
+        await refresh();
       }
-      if (action !== "logs") await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -237,6 +244,11 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
                   <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
                     {row.status_cache || "unknown"}
                   </span>
+                  {row.status_message ? (
+                    <span className="max-w-md text-xs text-destructive" title={row.status_message}>
+                      {row.status_message}
+                    </span>
+                  ) : null}
                   <div className="ml-auto flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">Enabled</span>
                     <Switch

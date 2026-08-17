@@ -1,7 +1,12 @@
 import type { SlicerInstanceRow } from "../db/repository.js";
+import { execFile } from "node:child_process";
+import { accessSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
+import { promisify } from "node:util";
 
 const require = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 
 export const SLICER_INSTANCE_LABEL = "printpartner.slicer_instance_id";
 
@@ -148,13 +153,32 @@ export function createFakeDockerAdapter(seed: FakeContainer[] = []): SlicerDocke
     return null;
   }
 
+  function adoptOrConflict(spec: SlicerContainerSpec, byName: FakeContainer): FakeContainer | "conflict" {
+    const label = byName.labels[SLICER_INSTANCE_LABEL];
+    if (label === spec.instanceId) return byName;
+    // Stock pp-compose containers ship unlabeled; adopt when target is pp_compose.
+    if (spec.dockerTarget === "pp_compose" && !label) {
+      byName.labels[SLICER_INSTANCE_LABEL] = spec.instanceId;
+      return byName;
+    }
+    return "conflict";
+  }
+
   async function refreshStatus(spec: SlicerContainerSpec): Promise<SlicerDockerStatus> {
     const byName = findByName(spec.containerName);
-    if (byName && byName.labels[SLICER_INSTANCE_LABEL] !== spec.instanceId) {
+    if (byName) {
+      const adopted = adoptOrConflict(spec, byName);
+      if (adopted === "conflict") {
+        return {
+          state: "error",
+          message: `Container ${spec.containerName} is not labeled for this slicer instance`,
+          containerId: byName.id,
+        };
+      }
       return {
-        state: "error",
-        message: `Container ${spec.containerName} is not labeled for this slicer instance`,
-        containerId: byName.id,
+        state: adopted.state,
+        message: null,
+        containerId: adopted.id,
       };
     }
     const owned = findByInstance(spec.instanceId);
@@ -181,12 +205,18 @@ export function createFakeDockerAdapter(seed: FakeContainer[] = []): SlicerDocke
         return { state: "error", message: "image is required", containerId: null };
       }
       const conflict = findByName(spec.containerName);
-      if (conflict && conflict.labels[SLICER_INSTANCE_LABEL] !== spec.instanceId) {
-        return {
-          state: "error",
-          message: `Container ${spec.containerName} is not labeled for this slicer instance`,
-          containerId: conflict.id,
-        };
+      if (conflict) {
+        const adopted = adoptOrConflict(spec, conflict);
+        if (adopted === "conflict") {
+          return {
+            state: "error",
+            message: `Container ${spec.containerName} is not labeled for this slicer instance`,
+            containerId: conflict.id,
+          };
+        }
+        adopted.state = "running";
+        adopted.logs.push(`started ${spec.image}`);
+        return refreshStatus(spec);
       }
       let owned = findByInstance(spec.instanceId);
       if (!owned) {
@@ -256,17 +286,57 @@ type DockerodeLike = {
   };
 };
 
+export type { DockerodeLike };
+
 export type EngineDockerFactory = (dockerHost?: string | null) => DockerodeLike;
 
+export type DockerHostOptions = {
+  socketPath?: string;
+  host?: string;
+  port?: number;
+  protocol?: "http" | "https" | "ssh";
+};
+
+/** Parse Docker CLI-style host strings into dockerode constructor options. */
+export function parseDockerHostOptions(dockerHost?: string | null): DockerHostOptions {
+  const raw = dockerHost?.trim();
+  if (!raw) {
+    return { socketPath: process.env.DOCKER_SOCKET || "/var/run/docker.sock" };
+  }
+  if (raw.startsWith("unix://")) {
+    return { socketPath: raw.slice("unix://".length) || "/var/run/docker.sock" };
+  }
+  if (raw.startsWith("npipe://")) {
+    return { socketPath: raw.slice("npipe://".length) || "//./pipe/docker_engine" };
+  }
+  const withProto = /:\/\//.test(raw) ? raw : `tcp://${raw}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(withProto);
+  } catch {
+    return { host: raw };
+  }
+  const port = parsed.port
+    ? Number(parsed.port)
+    : parsed.protocol === "https:" || parsed.protocol === "ssh:"
+      ? 2376
+      : 2375;
+  const protocol: DockerHostOptions["protocol"] =
+    parsed.protocol === "https:" || port === 2376
+      ? "https"
+      : parsed.protocol === "ssh:"
+        ? "ssh"
+        : "http";
+  return {
+    protocol,
+    host: parsed.hostname,
+    port,
+  };
+}
+
 function defaultEngineFactory(dockerHost?: string | null): DockerodeLike {
-  const Docker = require("dockerode") as new (opts?: {
-    socketPath?: string;
-    host?: string;
-  }) => DockerodeLike;
-  const host = dockerHost?.trim();
-  if (!host) return new Docker({ socketPath: process.env.DOCKER_SOCKET || "/var/run/docker.sock" });
-  if (host.startsWith("unix://")) return new Docker({ socketPath: host.replace("unix://", "") });
-  return new Docker({ host });
+  const Docker = require("dockerode") as new (opts?: DockerHostOptions) => DockerodeLike;
+  return new Docker(parseDockerHostOptions(dockerHost));
 }
 
 async function bufferLogs(raw: Buffer | NodeJS.ReadableStream): Promise<string> {
@@ -288,8 +358,59 @@ function portBindings(spec: SlicerContainerSpec): Record<string, Array<{ HostPor
   return bindings;
 }
 
+function exposedPorts(spec: SlicerContainerSpec): Record<string, Record<string, never>> {
+  const exposed: Record<string, Record<string, never>> = {};
+  for (const port of spec.ports) {
+    const protocol = port.protocol ?? "tcp";
+    exposed[`${port.container}/${protocol}`] = {};
+  }
+  return exposed;
+}
+
 function binds(spec: SlicerContainerSpec): string[] {
   return spec.volumes.map((v) => `${v.host}:${v.container}:${v.mode ?? "rw"}`);
+}
+
+function canAdoptUnlabeled(
+  spec: SlicerContainerSpec,
+  labels: Record<string, string> | undefined,
+): boolean {
+  if (spec.dockerTarget !== "pp_compose") return false;
+  const label = labels?.[SLICER_INSTANCE_LABEL];
+  return label == null || label === "";
+}
+
+export function resolveComposeFile(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
+  const fromEnv = env.PP_COMPOSE_FILE?.trim();
+  if (fromEnv) return fromEnv;
+  const candidates = [
+    join(cwd, "pp-compose.yml"),
+    join(cwd, "..", "pp-compose.yml"),
+    join(cwd, "..", "..", "pp-compose.yml"),
+    join(cwd, "..", "..", "..", "pp-compose.yml"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      accessSync(candidate);
+      return candidate;
+    } catch {
+      /* try next */
+    }
+  }
+  return candidates[0]!;
+}
+
+export type ComposeExec = (args: string[]) => Promise<{ stdout: string; stderr: string }>;
+
+async function defaultComposeExec(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  const file = resolveComposeFile();
+  const { stdout, stderr } = await execFileAsync("docker", ["compose", "-f", file, ...args], {
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return { stdout: String(stdout), stderr: String(stderr) };
 }
 
 export function createEngineDockerAdapter(
@@ -308,9 +429,9 @@ export function createEngineDockerAdapter(
     );
     if (byName) {
       const label = byName.Labels?.[SLICER_INSTANCE_LABEL];
-      if (label !== spec.instanceId) {
-        return { conflict: byName as (typeof listed)[0] };
-      }
+      if (label === spec.instanceId) return byName;
+      if (canAdoptUnlabeled(spec, byName.Labels)) return byName;
+      return { conflict: byName as (typeof listed)[0] };
     }
     return null;
   }
@@ -392,6 +513,7 @@ export function createEngineDockerAdapter(
           name: spec.containerName,
           Env: Object.entries(spec.env).map(([k, v]) => `${k}=${v}`),
           Labels: { [SLICER_INSTANCE_LABEL]: spec.instanceId },
+          ExposedPorts: exposedPorts(spec),
           HostConfig: {
             PortBindings: portBindings(spec),
             Binds: binds(spec),
@@ -452,9 +574,77 @@ export function createEngineDockerAdapter(
   };
 }
 
-export function createDockerAdapterForSpec(spec: SlicerContainerSpec): SlicerDockerAdapter {
-  // pp_compose uses the same Engine API for lifecycle once containers exist;
-  // compose CLI orchestration can be layered later without changing this contract.
+export type DockerAdapterDeps = {
+  engineFactory?: EngineDockerFactory;
+  composeExec?: ComposeExec;
+};
+
+export function createDockerAdapterForSpec(
+  spec: SlicerContainerSpec,
+  deps: DockerAdapterDeps = {},
+): SlicerDockerAdapter {
   const host = spec.dockerTarget === "remote" ? spec.dockerHost : undefined;
-  return createEngineDockerAdapter(host);
+  const engine = createEngineDockerAdapter(host, deps.engineFactory ?? defaultEngineFactory);
+
+  if (spec.dockerTarget !== "pp_compose") return engine;
+
+  const composeExec = deps.composeExec ?? defaultComposeExec;
+
+  async function composeOrError(
+    args: string[],
+  ): Promise<SlicerDockerStatus | null> {
+    try {
+      await composeExec(args);
+      return null;
+    } catch (e) {
+      return {
+        state: "error",
+        message: e instanceof Error ? e.message : String(e),
+        containerId: null,
+      };
+    }
+  }
+
+  return {
+    refreshStatus: (s) => engine.refreshStatus(s),
+    async pull(s) {
+      if (!s.image.trim()) {
+        return { state: "error", message: "image is required", containerId: null };
+      }
+      const service = s.composeService?.trim();
+      if (service) {
+        const err = await composeOrError(["pull", service]);
+        if (err) return err;
+        return engine.refreshStatus(s);
+      }
+      return engine.pull(s);
+    },
+    async start(s) {
+      if (!s.image.trim()) {
+        return { state: "error", message: "image is required", containerId: null };
+      }
+      const service = s.composeService?.trim();
+      if (!service) {
+        return { state: "error", message: "compose_service is required", containerId: null };
+      }
+      // Refuse foreign labeled containers before compose mutates anything.
+      const pre = await engine.refreshStatus(s);
+      if (pre.state === "error") return pre;
+      const err = await composeOrError(["up", "-d", service]);
+      if (err) return err;
+      return engine.refreshStatus(s);
+    },
+    async stop(s) {
+      const service = s.composeService?.trim();
+      if (!service) {
+        return engine.stop(s);
+      }
+      const pre = await engine.refreshStatus(s);
+      if (pre.state === "error") return pre;
+      const err = await composeOrError(["stop", service]);
+      if (err) return err;
+      return engine.refreshStatus(s);
+    },
+    logs: (s, opts) => engine.logs(s, opts),
+  };
 }
