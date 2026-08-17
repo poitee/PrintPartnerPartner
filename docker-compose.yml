@@ -42,9 +42,3 @@ services:
 
 volumes:
   print-partner-data:
-    # Driver-specific options for proper permissions
-    driver_opts:
-      type: none
-      o: bind
-    # Optional: Use local driver for simpler setup
-    # driver: local
