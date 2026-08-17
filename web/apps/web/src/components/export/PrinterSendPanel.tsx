@@ -170,6 +170,7 @@ export default function PrinterSendPanel({
   const [objectPropose, setObjectPropose] = useState<ProposeCheckoffResult | null>(null);
   const [parseBusy, setParseBusy] = useState(false);
   const [bambuBusy, setBambuBusy] = useState(false);
+  const [printersLoading, setPrintersLoading] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bambuFileInputRef = useRef<HTMLInputElement>(null);
@@ -183,6 +184,7 @@ export default function PrinterSendPanel({
   useEffect(() => {
     if (!engineReady) return;
     let cancelled = false;
+    setPrintersLoading(true);
     void (async () => {
       try {
         const [printers, integrations] = await Promise.all([
@@ -228,6 +230,8 @@ export default function PrinterSendPanel({
         if (cancelled) return;
         setLinkedPrinters([]);
         setBambuPrinters([]);
+      } finally {
+        if (!cancelled) setPrintersLoading(false);
       }
     })();
     return () => {
@@ -567,7 +571,17 @@ export default function PrinterSendPanel({
             onChange={(e) => onFileChosen(e.target.files)}
           />
 
-          {hasLinked ? (
+          {printersLoading && !hasLinked ? (
+            <div
+              className="flex flex-col gap-2"
+              role="status"
+              aria-label="Loading linked printers"
+              data-testid="printer-send-panel-loading"
+            >
+              <div className="h-9 w-full animate-pulse rounded-md bg-muted" />
+              <div className="h-4 w-2/3 animate-pulse rounded bg-muted" />
+            </div>
+          ) : hasLinked ? (
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <select
