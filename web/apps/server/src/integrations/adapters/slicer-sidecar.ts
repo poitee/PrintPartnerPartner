@@ -36,6 +36,29 @@ export function isSlicerKind(value: unknown): value is SlicerKind {
   return typeof value === "string" && (SLICER_KINDS as readonly string[]).includes(value);
 }
 
+/**
+ * One retry on transient socket failures (ECONNRESET / undici TypeError) that
+ * can appear when a long-running sidecar slice overlaps a keep-alive probe.
+ * HTTP error statuses are returned as-is — they are not retried.
+ */
+async function fetchSidecar(url: string, init: RequestInit): Promise<Response> {
+  const headers = new Headers(init.headers);
+  // Prefer closing the connection after each call so undici does not reuse a
+  // half-closed socket left by a previous long-running slice.
+  headers.set("Connection", "close");
+  const next: RequestInit = { ...init, headers };
+  try {
+    return await fetch(url, next);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const transient =
+      /ECONNRESET|ECONNREFUSED|socket hang up|fetch failed|network/i.test(msg) ||
+      (err instanceof TypeError && /fetch/i.test(msg));
+    if (!transient) throw err;
+    return await fetch(url, next);
+  }
+}
+
 export type SliceRequest = {
   /** Raw bytes of the plate 3MF file. */
   model: Uint8Array;
@@ -179,7 +202,7 @@ async function sliceV1(base: string, req: SliceRequest): Promise<SliceResult> {
   form.append("resolved_flat_configs", JSON.stringify(req.resolved_flat_configs ?? {}));
   form.append("timeout_s", String(timeoutS));
 
-  const res = await fetch(endpoint, {
+  const res = await fetchSidecar(endpoint, {
     method: "POST",
     body: form,
     // Give the HTTP call slack over the slicer's own budget so a slicer
@@ -242,7 +265,7 @@ async function sliceLegacy(base: string, req: SliceRequest): Promise<SliceResult
   if (process) form.append("process_config", JSON.stringify(process));
   if (filaments?.length) form.append("filament_configs", JSON.stringify(filaments));
 
-  const res = await fetch(endpoint, {
+  const res = await fetchSidecar(endpoint, {
     method: "POST",
     body: form,
     signal: AbortSignal.timeout(Math.round(((req.timeout_s ?? 300) + 30) * 1000)),
@@ -356,7 +379,10 @@ export const slicerSidecarAdapter: IntegrationAdapter = {
       const healthUrl = `${base}${attempt.path}`;
       try {
         await assertSafeOutboundUrl(healthUrl, { allowPrivate: true });
-        const res = await fetch(healthUrl, { method: "GET", signal: AbortSignal.timeout(10_000) });
+        const res = await fetchSidecar(healthUrl, {
+          method: "GET",
+          signal: AbortSignal.timeout(10_000),
+        });
         if (res.ok) {
           return { ok: true, message: `Slicer sidecar reachable (${slicer}, ${attempt.protocol})` };
         }
