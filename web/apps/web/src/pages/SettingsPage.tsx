@@ -29,6 +29,7 @@ import {
   testDiscordNotify,
   type DiscordNotifySettings,
 } from "../api/engine";
+import { validateDiscordWebhookUrl } from "@print-partner/contracts";
 import {
   useBuildTrackingSettingsQuery,
   useSaveBuildTrackingSettingsMutation,
@@ -126,6 +127,7 @@ export default function SettingsPage() {
   const [autoRecomputeSaving, setAutoRecomputeSaving] = useState(false);
   const [discordSettings, setDiscordSettings] = useState<DiscordNotifySettings | null>(null);
   const [discordWebhookInput, setDiscordWebhookInput] = useState("");
+  const [discordWebhookError, setDiscordWebhookError] = useState<string | null>(null);
   const [discordSaving, setDiscordSaving] = useState(false);
   const [discordTestStatus, setDiscordTestStatus] = useState<string | null>(null);
   const { data: buildTrackingSettings } = useBuildTrackingSettingsQuery(Boolean(health));
@@ -479,16 +481,29 @@ export default function SettingsPage() {
                 placeholder="https://discord.com/api/webhooks/..."
                 autoComplete="off"
                 value={discordWebhookInput}
-                onChange={(e) => setDiscordWebhookInput(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setDiscordWebhookInput(value);
+                  const trimmed = value.trim();
+                  setDiscordWebhookError(trimmed.length > 0 ? validateDiscordWebhookUrl(trimmed) : null);
+                }}
+                aria-invalid={discordWebhookError ? true : undefined}
               />
+              {discordWebhookError && (
+                <p className="mt-1 text-sm text-destructive">{discordWebhookError}</p>
+              )}
             </label>
             <Button
-              disabled={!health || discordSaving}
+              disabled={!health || discordSaving || Boolean(discordWebhookError)}
               onClick={async () => {
+                const trimmed = discordWebhookInput.trim();
+                const error = trimmed.length > 0 ? validateDiscordWebhookUrl(trimmed) : null;
+                setDiscordWebhookError(error);
+                if (error) return;
                 setDiscordSaving(true);
                 setDiscordTestStatus(null);
                 try {
-                  const saved = await saveDiscordNotifySettings({ webhook_url: discordWebhookInput || null });
+                  const saved = await saveDiscordNotifySettings({ webhook_url: trimmed || null });
                   setDiscordSettings(saved);
                 } catch (e) {
                   setLoadError(e instanceof Error ? e.message : String(e));
