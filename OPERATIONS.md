@@ -25,6 +25,8 @@ open http://localhost:8080
 
 `docker-compose.yml` uses a plain named volume `print-partner-data`, mounted at `/data` in the container. Docker creates and manages the volume; no host bind path or `driver_opts.device` is required.
 
+On start, the image entrypoint (as root) runs `chown -R ppuser:ppuser /data`, then drops to `ppuser` before starting Node. Fresh named volumes that are root-owned (common on Docker Desktop) are fixed automatically. Do not set `user: "1000:1000"` in Compose, or that chown is skipped.
+
 ```bash
 # Inspect the named volume (path is under Docker's volume store)
 docker volume inspect print-partner-data
@@ -233,7 +235,9 @@ sudo netstat -tulpn | grep 8080
 
 # 2. Permission issues on /data (named volume; check inside the container)
 docker compose exec print-partner ls -la /data
-# Container runs as uid 1000; named volumes are normally owned correctly.
+# Entrypoint chowns /data to ppuser on start when the container begins as root.
+# Fresh named volumes are often root-owned until that chown runs — do not set
+# user: "1000:1000" in compose (that skips chown and causes EACCES on /data/repos).
 # For a host bind mount instead, see NON_ROOT_SETUP.md Option 2.
 
 # 3. Corrupted database
