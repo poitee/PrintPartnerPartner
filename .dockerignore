@@ -1,6 +1,8 @@
 node_modules
 **/node_modules
 **/dist
+!web/apps/web/dist
+!web/apps/web/dist/**
 **/*.tsbuildinfo
 .git
 .github

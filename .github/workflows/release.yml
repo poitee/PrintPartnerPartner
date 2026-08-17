@@ -14,10 +14,63 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Needed for getsentry/action-release commit association.
+          fetch-depth: 0
 
       - name: Derive version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve Sentry release metadata
+        id: sentry_meta
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG || secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT || secrets.SENTRY_PROJECT }}
+        run: |
+          release="${{ steps.version.outputs.version }}-web"
+          echo "release=${release}" >> "$GITHUB_OUTPUT"
+          if [ -n "$SENTRY_AUTH_TOKEN" ] && [ -n "$SENTRY_ORG" ] && [ -n "$SENTRY_PROJECT" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Sentry upload skipped (SENTRY_AUTH_TOKEN / SENTRY_ORG / SENTRY_PROJECT not fully configured)."
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web workspace
+        working-directory: web
+        run: npm ci
+
+      - name: Build web workspace (hidden source maps)
+        working-directory: web
+        env:
+          VITE_SENTRY_RELEASE: ${{ steps.sentry_meta.outputs.release }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+        run: npm run build
+
+      - name: Create Sentry release and upload source maps
+        if: steps.sentry_meta.outputs.enabled == 'true'
+        uses: getsentry/action-release@v3
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG || secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT || secrets.SENTRY_PROJECT }}
+        with:
+          environment: production
+          release: ${{ steps.sentry_meta.outputs.release }}
+          # Inject Debug IDs into the built JS before the image is packaged.
+          sourcemaps: web/apps/web/dist
+          set_commits: auto
+
+      - name: Strip source maps from shipped SPA assets
+        run: find web/apps/web/dist -type f -name '*.map' -delete
 
       - uses: docker/setup-qemu-action@v3
 
@@ -37,6 +90,7 @@ jobs:
           push: true
           build-args: |
             PP_VERSION=${{ steps.version.outputs.version }}-web
+            USE_PREBUILT_WEB=1
           tags: |
             ghcr.io/poitee/print-partner:latest
             ghcr.io/poitee/print-partner:${{ steps.version.outputs.version }}

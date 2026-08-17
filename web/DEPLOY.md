@@ -113,7 +113,7 @@ git tag v3.1.0
 git push origin v3.1.0
 ```
 
-The `release.yml` workflow builds the multi-arch image (`linux/amd64` + `linux/arm64`), pushes `ghcr.io/poitee/print-partner:latest` and `:3.1.0` with `PP_VERSION=3.1.0-web` baked in, sets the GHCR package visibility to **public**, and creates a GitHub Release with auto-generated notes. Before tagging, move the `[Unreleased]` CHANGELOG entries under the new version and bump `web/package.json` plus the `PP_VERSION` defaults in `web/apps/server/src/config.ts` and the `Dockerfile`.
+The `release.yml` workflow builds the multi-arch image (`linux/amd64` + `linux/arm64`), pushes `ghcr.io/poitee/print-partner:latest` and `:3.1.0` with `PP_VERSION=3.1.0-web` baked in, sets the GHCR package visibility to **public**, and creates a GitHub Release with auto-generated notes. When Sentry GitHub secrets/vars are configured, the same workflow creates a Sentry release (`3.1.0-web`), uploads SPA source maps, then strips `*.map` from the shipped image — see [`docs/SENTRY.md`](../docs/SENTRY.md). Before tagging, move the `[Unreleased]` CHANGELOG entries under the new version and bump `web/package.json` plus the `PP_VERSION` defaults in `web/apps/server/src/config.ts` and the `Dockerfile`.
 
 ### Local development
 

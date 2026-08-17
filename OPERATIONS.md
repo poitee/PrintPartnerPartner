@@ -338,6 +338,10 @@ curl -X POST http://localhost:8080/settings/api-keys/key_abc123/regenerate
 
 ## Monitoring Setup
 
+### Sentry (official releases)
+
+Tagged releases can publish SPA source maps and optional browser error reporting to Sentry. Configuration is GitHub Actions–only (no tokens in the repo). See [`docs/SENTRY.md`](docs/SENTRY.md).
+
 ### Container Health Checks
 
 Docker compose includes health checks:

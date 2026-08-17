@@ -10,8 +10,27 @@ COPY web/packages/contracts/package.json ./packages/contracts/
 COPY web/packages/domain/package.json ./packages/domain/
 RUN npm ci
 COPY web/ ./
-RUN npm run build && \
-    # Remove dev dependencies to reduce final image size
+
+# When CI already built the SPA (Sentry Debug ID injection + map upload), reuse that
+# exact dist so runtime stack traces match uploaded source maps.
+ARG USE_PREBUILT_WEB=0
+# Optional SPA Sentry wiring for non-prebuilt builds (local/compose). Release CI
+# bakes these via the prebuilt dist instead.
+ARG VITE_SENTRY_RELEASE=
+ARG VITE_SENTRY_DSN=
+ENV VITE_SENTRY_RELEASE=$VITE_SENTRY_RELEASE
+ENV VITE_SENTRY_DSN=$VITE_SENTRY_DSN
+
+RUN if [ "$USE_PREBUILT_WEB" = "1" ]; then \
+      test -f apps/web/dist/index.html || (echo "USE_PREBUILT_WEB=1 but apps/web/dist missing" >&2; exit 1); \
+      npm run build -w @print-partner/contracts && \
+      npm run build -w @print-partner/domain && \
+      npm run build -w @print-partner/server; \
+    else \
+      npm run build; \
+    fi && \
+    # Never ship source maps in the runtime image (uploaded to Sentry in release CI).
+    find apps/web/dist -type f -name '*.map' -delete && \
     npm ci --omit=dev
 
 FROM node:22-bookworm-slim AS runtime
