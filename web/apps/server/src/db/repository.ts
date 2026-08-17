@@ -746,6 +746,16 @@ export class AppRepository {
   }): SlicerInstanceRow {
     const now = new Date().toISOString();
     const id = input.id?.trim() || `slicer-${crypto.randomUUID()}`;
+    const ownedElsewhere = this.db
+      .select({
+        tenantId: this.schema.slicerInstances.tenantId,
+      })
+      .from(this.schema.slicerInstances)
+      .where(eq(this.schema.slicerInstances.id, id))
+      .get();
+    if (ownedElsewhere && ownedElsewhere.tenantId !== this.tenantId) {
+      throw new Error(`Slicer instance id belongs to another tenant: ${id}`);
+    }
     const existing = this.getSlicerInstance(id);
     const enabled = input.enabled ?? existing?.enabled ?? true;
     const values = {

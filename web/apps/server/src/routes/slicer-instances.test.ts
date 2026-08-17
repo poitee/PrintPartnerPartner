@@ -6,7 +6,7 @@ import { buildApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
 
-let cleanup: Array<() => Promise<void> | void> = [];
+const cleanup: Array<() => Promise<void> | void> = [];
 const previousDataDir = process.env.PRINT_PARTNER_DATA_DIR;
 
 afterEach(async () => {
