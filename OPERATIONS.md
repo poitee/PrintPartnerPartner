@@ -35,6 +35,35 @@ docker volume inspect print-partner-data
 # (docker compose down does not delete the volume)
 ```
 
+### Authentication and Reverse Proxies
+
+The local commands in this guide rely on a direct, unambiguous loopback
+connection. Loopback access is not inferred from `Origin`, `Referer`,
+`Sec-Fetch-*`, or forwarded headers.
+
+For any remote or reverse-proxy deployment:
+
+1. Configure `PRINT_PARTNER_API_KEY`/`INTEGRATION_API_KEY`, Basic
+   authentication, or multi-user authentication.
+2. Set `TRUST_PROXY=1` only for a controlled proxy.
+3. Send API credentials explicitly, for example:
+
+   ```bash
+   curl -H "Authorization: Bearer $PRINT_PARTNER_API_KEY" \
+     https://print-partner.example.com/api/v1/plans
+   ```
+
+Proxy trust, required authentication, or forwarding headers disable the
+unauthenticated loopback shortcut. This prevents a local proxy's socket address
+from authorizing its remote clients. Administrative routes (backups, API-key
+settings, logging, integrations, webhooks, and `/admin/*`) require a valid API
+key, configured Basic credentials, or an administrator session when the
+shortcut is disabled.
+
+All API keys currently have full administrator authority; key roles/scopes are
+not part of the current API model. Store keys as secrets and issue separate
+keys when independent revocation is needed.
+
 ## Daily Operations
 
 ### Check System Status
@@ -113,10 +142,10 @@ curl -X DELETE http://localhost:8080/settings/api-keys/key_abc123
 
 ```bash
 # List webhooks
-curl http://localhost:8080/webhooks | jq .
+curl http://localhost:8080/api/v1/webhooks | jq .
 
 # Register webhook
-curl -X POST http://localhost:8080/webhooks \
+curl -X POST http://localhost:8080/api/v1/webhooks \
   -H 'Content-Type: application/json' \
   -d '{
     "url": "https://example.com/webhook",
@@ -125,7 +154,7 @@ curl -X POST http://localhost:8080/webhooks \
   }' | jq .
 
 # Delete webhook
-curl -X DELETE http://localhost:8080/webhooks/wh-abc123
+curl -X DELETE http://localhost:8080/api/v1/webhooks/wh-abc123
 ```
 
 ## Maintenance
@@ -294,7 +323,7 @@ curl -X POST http://localhost:8080/settings/logging/config \
 
 ```bash
 # Check webhook registrations
-curl http://localhost:8080/webhooks | jq .
+curl http://localhost:8080/api/v1/webhooks | jq .
 
 # View webhook logs
 curl http://localhost:8080/settings/logging/logs | jq '.[] | select(.context.webhookId)'

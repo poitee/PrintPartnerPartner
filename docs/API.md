@@ -23,14 +23,41 @@ Self-host Docker serves the API on **http://localhost:8080**. The SPA continues 
 
 ## Authentication (self-host)
 
-When `PRINT_PARTNER_API_KEY` is set, `/api/v1/*` requires either:
+When `PRINT_PARTNER_API_KEY` (or its `INTEGRATION_API_KEY` alias) is set,
+`/api/v1/*` requires a valid credential. Settings-created `ppk_…` keys are
+accepted alongside the configured key:
 
 - `Authorization: Bearer <key>`, or
 - `X-Print-Partner-Api-Key: <key>`
 
-Exempt paths: `/health`, `/api/v1/openapi.json`, `/api/v1/docs`, static SPA assets.
+An authenticated non-local session or configured Basic credentials can also
+access the API. For direct self-host use only, a request whose actual socket
+peer is loopback can access the API without a key when authentication and proxy
+trust are both disabled and no forwarding headers are present. Browser-supplied
+`Origin`, `Referer`, and `Sec-Fetch-*` headers never grant access.
 
-Flat routes (`/plans`, …) remain unauthenticated for same-origin SPA use.
+Exempt paths: `/health`, `/api/v1`, `/api/v1/openapi.json`, and
+`/api/v1/docs`. Dotted API paths are not treated as static assets.
+
+Supplying an invalid bearer or custom API key always returns `401`, including
+from loopback. API keys currently have full authority; there is no role or scope
+field in the API-key model. Treat every key as an administrator credential.
+
+Administrative routes (backups, API-key settings, logging, integrations,
+webhooks, and `/admin/*`) allow unambiguous loopback access, a valid API key,
+configured Basic credentials, or an authenticated administrator session.
+Non-admin sessions receive `403`.
+
+### Reverse proxies
+
+Set `TRUST_PROXY=1` only when running behind a controlled reverse proxy. Proxy
+trust, required authentication, or forwarding headers disable the unauthenticated
+loopback shortcut because the socket peer may be the proxy rather than the
+original client. A reverse proxy deployment must therefore configure an API
+key, Basic authentication, or multi-user authentication; never rely on the
+proxy's loopback connection for authorization.
+
+Flat routes (`/plans`, …) remain available for direct single-user SPA use.
 
 ## Errors
 
@@ -203,6 +230,7 @@ Register a URL to receive POST JSON on `job.done` / `job.error`:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/webhooks \
+  -H "Authorization: Bearer $PRINT_PARTNER_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"url":"http://host.docker.internal:9999/hook","events":["job.done"]}'
 ```
