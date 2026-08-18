@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import process from "node:process";
+import { URL } from "node:url";
 import { chromium } from "playwright-core";
 import { createServer } from "vite";
 
@@ -25,7 +27,7 @@ try {
 
   const skipLink = page.getByRole("link", { name: "Skip to main content" });
   const initial = await skipLink.evaluate((element) => {
-    const style = getComputedStyle(element);
+    const style = window.getComputedStyle(element);
     return {
       clip: style.clip,
       clipPath: style.clipPath,
@@ -42,7 +44,7 @@ try {
 
   await skipLink.focus();
   const focused = await skipLink.evaluate((element) => {
-    const style = getComputedStyle(element);
+    const style = window.getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return {
       clip: style.clip,
