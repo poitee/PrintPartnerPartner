@@ -38,6 +38,7 @@ import type { AppRepository } from "./db/repository.js";
 import { getDb } from "./db/client.js";
 import { createAuthStore, type AuthStore } from "./services/auth-store.js";
 import { validateApiKey } from "./services/api-key-manager.js";
+import { migrateLegacySelfHostExports } from "./services/legacy-export-migration.js";
 
 export type RuntimePorts = AppPorts & {
   repository?: AppRepository;
@@ -160,6 +161,9 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
   await registerOpenApi(app, config);
 
   if (repository) {
+    if (config.deployMode === "self-host") {
+      migrateLegacySelfHostExports(config.dataDir, repository);
+    }
     const thumbsDir = join(config.dataDir, "thumbs");
     const coversDir = join(config.dataDir, "covers");
     const getRepo = () => repository;

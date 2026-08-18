@@ -2005,16 +2005,11 @@ export class AppRepository {
       }));
   }
 
-  private saveProgressRows(partId: number, rows: ProgressRow[]): void {
-    this.requirePart(partId);
+  /** Replace progress only after the caller has proved the part belongs to this tenant. */
+  private saveProgressRowsForOwnedPart(partId: number, rows: ProgressRow[]): void {
     this.db
       .delete(this.schema.printProgress)
-      .where(
-        and(
-          eq(this.schema.printProgress.tenantId, this.tenantId),
-          eq(this.schema.printProgress.partId, partId),
-        ),
-      )
+      .where(eq(this.schema.printProgress.partId, partId))
       .run();
     for (const row of rows) {
       const vals: Record<string, unknown> = {
@@ -2034,16 +2029,24 @@ export class AppRepository {
     }
   }
 
-  ensureProgressForPart(part: PartDbRow): void {
-    this.requirePart(part.id);
+  private ensureProgressForOwnedPart(part: PartDbRow): void {
     const rows = this.progressRowsForPart(part.id);
     const qty = Math.max(1, part.quantityEffective);
     const ensured = ensureProgressRows(rows, part.id, qty);
-    this.saveProgressRows(part.id, ensured);
+    this.saveProgressRowsForOwnedPart(part.id, ensured);
+  }
+
+  ensureProgressForPart(part: PartDbRow): void {
+    this.requirePart(part.id);
+    this.ensureProgressForOwnedPart(part);
   }
 
   printUnitsByPartId(profileId: number): Map<number, boolean[]> {
     const partRows = this.listPartRows(profileId);
+    return this.printUnitsForPartRows(partRows);
+  }
+
+  private printUnitsForPartRows(partRows: PartDbRow[]): Map<number, boolean[]> {
     const partIds = partRows.map((p) => p.id);
     if (!partIds.length) return new Map();
 
@@ -2080,8 +2083,7 @@ export class AppRepository {
   }
 
   /** Like printUnitsByPartId but returns raw ProgressRow arrays for access to assembled field. */
-  private progressRowsByPartId(profileId: number): Map<number, ProgressRow[]> {
-    const partRows = this.listPartRows(profileId);
+  private progressRowsByPartId(partRows: PartDbRow[]): Map<number, ProgressRow[]> {
     const partIds = partRows.map((p) => p.id);
     if (!partIds.length) return new Map();
 
@@ -2119,10 +2121,10 @@ export class AppRepository {
   ) {
     const partRows = this.listPartRows(profileId);
     for (const part of partRows) {
-      this.ensureProgressForPart(part);
+      this.ensureProgressForOwnedPart(part);
     }
-    const unitsById = this.printUnitsByPartId(profileId);
-    const progressRowsById = this.progressRowsByPartId(profileId);
+    const unitsById = this.printUnitsForPartRows(partRows);
+    const progressRowsById = this.progressRowsByPartId(partRows);
     const rows = partRows.filter((p) => includeExcluded || p.included);
     return rows.map((p) => {
       const units = unitsById.get(p.id) ?? [];
@@ -2158,9 +2160,9 @@ export class AppRepository {
   getCheckoff(profileId: number, ctx?: FilamentResolveContext) {
     const partRows = this.listPartRows(profileId);
     for (const part of partRows) {
-      this.ensureProgressForPart(part);
+      this.ensureProgressForOwnedPart(part);
     }
-    const unitsById = this.printUnitsByPartId(profileId);
+    const unitsById = this.printUnitsForPartRows(partRows);
     const displayRows = partRows.map((p) => {
       const units = unitsById.get(p.id) ?? [];
       const printedCount = units.filter(Boolean).length;
@@ -2203,11 +2205,11 @@ export class AppRepository {
     const part = this.requirePart(partId);
     const qty = Math.max(1, part.quantityEffective);
     if (unitIndex >= qty) throw new Error("unit_index out of range");
-    this.ensureProgressForPart(part);
+    this.ensureProgressForOwnedPart(part);
     const rows = this.progressRowsForPart(partId);
     const updated = toggleCheckoffUnit(rows, partId, qty, unitIndex, completed);
     const partRowsOnly = updated.filter((r) => r.partId === partId);
-    this.saveProgressRows(partId, partRowsOnly);
+    this.saveProgressRowsForOwnedPart(partId, partRowsOnly);
     const units = getPrintUnits(partRowsOnly, qty);
     const printedCount = units.filter(Boolean).length;
     return {
@@ -2227,13 +2229,13 @@ export class AppRepository {
     const part = this.requirePart(partId);
     const qty = Math.max(1, part.quantityEffective);
     if (unitIndex < 0 || unitIndex >= qty) throw new Error("unit_index out of range");
-    this.ensureProgressForPart(part);
+    this.ensureProgressForOwnedPart(part);
     const rows = this.progressRowsForPart(partId);
     // Domain owns the rule that an unprinted unit can't be assembled.
     const updated = setAssembledUnit(rows, partId, qty, unitIndex, assembled).filter(
       (r) => r.partId === partId,
     );
-    this.saveProgressRows(partId, updated);
+    this.saveProgressRowsForOwnedPart(partId, updated);
     const assembledUnits = getAssembledUnits(updated, qty);
     const assembledCount = assembledUnits.filter(Boolean).length;
     return {
@@ -2247,7 +2249,7 @@ export class AppRepository {
   getPartAssembled(partId: number) {
     const part = this.requirePart(partId);
     const qty = Math.max(1, part.quantityEffective);
-    this.ensureProgressForPart(part);
+    this.ensureProgressForOwnedPart(part);
     const rows = this.progressRowsForPart(partId);
     const assembledUnits = getAssembledUnits(rows, qty);
     return {
@@ -2282,7 +2284,7 @@ export class AppRepository {
     if (patch.quantity_override != null) {
       updates.quantityOverride = patch.quantity_override;
       updates.quantityEffective = patch.quantity_override;
-      this.ensureProgressForPart({ ...part, quantityEffective: patch.quantity_override });
+      this.ensureProgressForOwnedPart({ ...part, quantityEffective: patch.quantity_override });
     }
     if (patch.requirement !== undefined) updates.requirement = patch.requirement;
     if (patch.option_group_id !== undefined) updates.optionGroupId = patch.option_group_id;
@@ -2727,7 +2729,7 @@ export class AppRepository {
             unitIndex,
             completed: Boolean(completed),
           }));
-          this.saveProgressRows(inserted.id, rows);
+          this.saveProgressRowsForOwnedPart(inserted.id, rows);
         }
       }
     }
@@ -3016,7 +3018,6 @@ export class AppRepository {
 
   listPlanDecisions(planId: number, limit = 200): PlanDecision[] {
     if (!this.schema.planDecisions) return [];
-    this.requireProfile(planId);
     const rows = this.db
       .select()
       .from(this.schema.planDecisions)
@@ -3127,7 +3128,6 @@ export class AppRepository {
 
   listPlanSnapshots(planId: number): PlanSnapshotSummary[] {
     if (!this.schema.planSnapshots) return [];
-    this.requireProfile(planId);
     const rows = this.db
       .select()
       .from(this.schema.planSnapshots)
@@ -3348,7 +3348,6 @@ export class AppRepository {
   }
 
   listPrintJobParts(profileId: number): PrintJobPartRow[] {
-    this.requireProfile(profileId);
     return this.db
       .select()
       .from(this.schema.printJobParts)

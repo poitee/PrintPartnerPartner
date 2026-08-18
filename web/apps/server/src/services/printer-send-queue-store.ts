@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import type {
   PrinterCheckoffUnit,
@@ -111,6 +112,39 @@ export function trimPrinterSendQueue(items: PrinterSendQueueItem[]): PrinterSend
 
 function savePrinterSendQueue(repo: AppRepository, items: PrinterSendQueueItem[]): void {
   repo.setSetting(SETTINGS_KEY, JSON.stringify(trimPrinterSendQueue(items)));
+}
+
+export function migratePrinterSendQueueArtifactPaths(
+  repo: AppRepository,
+  legacyExportsDir: string,
+  tenantExportsDir: string,
+): number {
+  const legacyUploads = resolve(legacyExportsDir, "printer-uploads");
+  const tenantUploads = resolve(tenantExportsDir, "printer-uploads");
+  const items = loadPrinterSendQueue(repo);
+  let migrated = 0;
+  for (const item of items) {
+    const current = resolve(item.artifact_path);
+    const relativeArtifact = relative(legacyUploads, current);
+    if (
+      !relativeArtifact ||
+      relativeArtifact.startsWith("..") ||
+      resolve(legacyUploads, relativeArtifact) !== current
+    ) {
+      continue;
+    }
+    const target = resolve(tenantUploads, relativeArtifact);
+    if (
+      resolve(tenantUploads, relativeArtifact) !== target ||
+      !existsSync(target)
+    ) {
+      continue;
+    }
+    item.artifact_path = target;
+    migrated += 1;
+  }
+  if (migrated > 0) savePrinterSendQueue(repo, items);
+  return migrated;
 }
 
 export type EnqueuePrinterSendInput = {

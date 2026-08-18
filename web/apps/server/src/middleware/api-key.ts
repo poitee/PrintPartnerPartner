@@ -6,6 +6,7 @@ import type {
 } from "fastify";
 import type { ServerConfig } from "../config.js";
 import { sendProblem } from "../lib/api-error.js";
+import { isSyntheticAnonymousSession } from "../routes/auth-types.js";
 
 const EXEMPT_PREFIXES = [
   "/api/v1/openapi.json",
@@ -75,15 +76,7 @@ function isUnambiguousLoopback(
 
 function hasAuthenticatedSession(request: FastifyRequest): boolean {
   const user = request.sessionUser;
-  return Boolean(
-    user &&
-      !(user.user_id === "local" && user.provider === "anonymous") &&
-      !(
-        user.user_id === "anonymous" &&
-        user.tenant_id === "anonymous" &&
-        user.provider === "anonymous"
-      ),
-  );
+  return Boolean(user && !isSyntheticAnonymousSession(user));
 }
 
 function hasConfiguredBasicAuth(

@@ -55,10 +55,13 @@ type JobMeta = {
 };
 
 export const COMPLETED_JOB_MAX = 1_000;
+export const COMPLETED_JOB_GLOBAL_MAX = 10_000;
 export const COMPLETED_JOB_RETENTION_MS = 24 * 60 * 60 * 1_000;
+const EMPTY_TENANT_JOB_BUCKET = Symbol("empty-tenant-job-bucket");
 
 export type JobRunnerOptions = {
   completedJobMax?: number;
+  completedJobGlobalMax?: number;
   completedJobRetentionMs?: number;
 };
 
@@ -67,6 +70,7 @@ export class InProcessJobRunner {
   private readonly jobMeta = new Map<string, JobMeta>();
   private readonly listeners = new Map<string, Set<(event: JobSnapshot) => void>>();
   private readonly completedJobMax: number;
+  private readonly completedJobGlobalMax: number;
   private readonly completedJobRetentionMs: number;
 
   constructor(
@@ -76,6 +80,10 @@ export class InProcessJobRunner {
     this.completedJobMax = Math.max(
       1,
       Math.trunc(options.completedJobMax ?? COMPLETED_JOB_MAX),
+    );
+    this.completedJobGlobalMax = Math.max(
+      1,
+      Math.trunc(options.completedJobGlobalMax ?? COMPLETED_JOB_GLOBAL_MAX),
     );
     this.completedJobRetentionMs = Math.max(
       1,
@@ -147,17 +155,23 @@ export class InProcessJobRunner {
       }
     }
 
-    const retainedByTenant = new Map<string, typeof completed>();
+    const retainedByTenant = new Map<string | symbol, typeof completed>();
     for (const item of completed) {
-      if (!item.tenantId || !this.jobs.has(item.jobId)) continue;
-      const retained = retainedByTenant.get(item.tenantId) ?? [];
+      if (!this.jobs.has(item.jobId)) continue;
+      const tenantBucket = item.tenantId || EMPTY_TENANT_JOB_BUCKET;
+      const retained = retainedByTenant.get(tenantBucket) ?? [];
       retained.push(item);
-      retainedByTenant.set(item.tenantId, retained);
+      retainedByTenant.set(tenantBucket, retained);
     }
     for (const retained of retainedByTenant.values()) {
       while (retained.length > this.completedJobMax) {
         this.deleteJob(retained.shift()!.jobId);
       }
+    }
+
+    const retainedGlobally = completed.filter((item) => this.jobs.has(item.jobId));
+    while (retainedGlobally.length > this.completedJobGlobalMax) {
+      this.deleteJob(retainedGlobally.shift()!.jobId);
     }
   }
 
