@@ -215,3 +215,61 @@ resolved. Implementation HEAD before this report update:
   repository query in an isolated Node child process, which avoids event-loop
   deadlock but has process-start overhead; a native asynchronous repository
   is still the long-term production design.
+
+## 2026-08-18 — remaining Minor findings closed
+
+Status: **complete**. Implementation commit: `ca7c4b7`.
+
+### Changes
+
+- Metrics `app_info` now reads and label-escapes the application version passed
+  from `ServerConfig`; no release number remains hard-coded in the route.
+- Added a dated `3.1.0` changelog section matching the tagged release contents:
+  operations UI, rate limiting, Prometheus metrics, and database guidance.
+- Strengthened the Postgres workflow smoke to create a plan and assert the
+  complete `GET /plans` / `listProfiles()` response shape, including mapped
+  integer and boolean aggregate fields.
+- Added a focused test using a real Drizzle Postgres select builder to lock down
+  `_prepare` field metadata and `drizzle-orm/utils` row mapping. The private-API
+  dependency and mandatory upgrade checks are documented.
+- Enforced explicit synchronous-query ceilings of 10,000 returned rows and
+  8 MiB serialized output. The child validates before writing, `spawnSync`
+  keeps only 64 KiB protocol/error headroom, and overflow errors are explicit.
+  Deployment documentation now requires pagination above either ceiling.
+- Invalid or unreadable embedded registry indexes now log their underlying
+  error and return an explicit HTTP 500 response instead of silently presenting
+  an empty catalog.
+
+### Test-first evidence
+
+- Before implementation, the focused suite had four expected failures:
+  configured metrics still emitted `3.1.0`, malformed registry YAML returned
+  HTTP 200 with an empty catalog, and oversized row/byte results did not throw.
+- After implementation, all 11 focused metrics, registry, bridge-mapping, and
+  limit tests passed. The real-Drizzle mapping test exercises the exact private
+  internals on `drizzle-orm@0.45.2`.
+
+### Final verification
+
+- `npm run quality`: passed lint, all workspace typechecks, 1,263 workspace
+  tests (13 contracts + 127 domain + 354 web + 769 server; two server tests
+  skipped), four workflow-smoke guard tests, all production builds, and the
+  real Chrome skip-link test.
+- Fresh live Postgres smoke: health reported a connected Postgres driver;
+  `POST /plans` created id `1`; `GET /plans` returned exactly one profile with
+  correctly mapped `id`, `name`, `part_count`, `remaining_units`,
+  `total_units`, and `build_stale` types.
+- Manifest suite: 9 tests passed, followed by successful v1/v2 schema and
+  embedded-copy drift validation.
+- Actionlint completed with ShellCheck enabled; direct ShellCheck of
+  `workflow-smoke.sh` also passed.
+- `npm audit --audit-level=high`: passed with zero high/critical findings.
+
+### Remaining concerns
+
+- Four moderate findings remain in `drizzle-kit`'s development-only deprecated
+  esbuild loader chain; npm's only automated fix is still a breaking downgrade
+  to `drizzle-kit@0.18.1`.
+- Postgres remains experimental. The private Drizzle bridge is regression
+  tested and bounded, but each query still starts a child process and native
+  asynchronous repository transactions remain the production direction.
