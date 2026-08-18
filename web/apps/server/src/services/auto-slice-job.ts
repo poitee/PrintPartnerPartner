@@ -35,7 +35,7 @@ import {
   resolveSlicerAndSettings,
   type ResolveSlicerAndSettingsResult,
 } from "./slicer-settings.js";
-import { safePlanSlug } from "@print-partner/domain";
+import { safePlanSlug, type PrinterMachine } from "@print-partner/domain";
 
 export type AutoSliceJobOptions = {
   profile_id: number;
@@ -106,6 +106,26 @@ function plateIndexFromFilename(filename: string, fallback: number): number {
   if (!m) return fallback;
   const n = Number(m[1]);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * Prefer the printer id slug now embedded in plate filenames
+ * (`<kit>_<name>_<id>_plate_NN.3mf`) so two machines with the same name
+ * do not collide. Fall back to the name slug for older files.
+ */
+function matchPrinterFromPlateFilename(
+  fleet: PrinterMachine[],
+  plateBasename: string,
+): PrinterMachine | undefined {
+  const ranked = [...fleet].sort(
+    (a, b) => safePlanSlug(b.id).length - safePlanSlug(a.id).length,
+  );
+  const byId = ranked.find((m) => {
+    const idSlug = safePlanSlug(m.id).slice(0, 48);
+    return Boolean(idSlug) && plateBasename.includes(`_${idSlug}_`);
+  });
+  if (byId) return byId;
+  return fleet.find((m) => plateBasename.includes(`_${safePlanSlug(m.name)}_`));
 }
 
 export async function runAutoSliceJob(
@@ -181,9 +201,9 @@ export async function runAutoSliceJob(
       const plateBasename = basename(platePath);
       const plateIndex = plateIndexFromFilename(plateBasename, i + 1);
 
-      // Match a printer from the fleet by name slug in the filename
-      // (export-3mf names plates "<plan>_<printerSlug>_plate_NN.3mf").
-      let matchedPrinter = fleet.find((m) => plateBasename.includes(`_${safePlanSlug(m.name)}_`));
+      // Match a printer from the fleet by id (then name) slug in the filename
+      // (export-3mf names plates "<plan>_<printerName>_<printerId>_plate_NN.3mf").
+      let matchedPrinter = matchPrinterFromPlateFilename(fleet, plateBasename);
       if (!matchedPrinter) matchedPrinter = fleet[0];
 
       const selection = selectSlicerForPrinter(repo, matchedPrinter);

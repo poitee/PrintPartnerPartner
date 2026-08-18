@@ -205,4 +205,67 @@ describe("GET /plans/:id/plate-workspace height bands", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("does not re-enable a disabled printer from a stale assignment pin", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-ws-http-stale-"));
+    const { app, ports, repo } = await makeApp(dir);
+    try {
+      const source = repo.createSource({
+        name: "StaleRepo",
+        url: "https://github.com/a/stale",
+      });
+      const repoPath = join(dir, "repos", String(source.id));
+      mkdirSync(join(repoPath, "parts"), { recursive: true });
+      writeFileSync(join(repoPath, "parts", "bracket.stl"), stlWithHeight(20));
+      repo.updateSource(source.id, { local_path: repoPath });
+      const plan = repo.createProfile("StalePlan", source.id);
+      await repo.recomputeProfile(plan.id);
+
+      const voronRes = await app.inject({
+        method: "POST",
+        url: "/printers",
+        payload: { name: "Voron", bed_width_mm: 200, bed_depth_mm: 200 },
+      });
+      const mk4Res = await app.inject({
+        method: "POST",
+        url: "/printers",
+        payload: { name: "MK4", bed_width_mm: 200, bed_depth_mm: 200 },
+      });
+      const voronId = (voronRes.json() as { id: string }).id;
+      const mk4Id = (mk4Res.json() as { id: string }).id;
+
+      await app.inject({
+        method: "PUT",
+        url: `/plans/${plan.id}/print-plan`,
+        payload: { enabled_printer_ids: [mk4Id] },
+      });
+      const groupsRes = await app.inject({
+        method: "GET",
+        url: `/plans/${plan.id}/print-groups`,
+      });
+      const groups = (groupsRes.json() as { groups: Array<{ group_key: string }> }).groups;
+      expect(groups.length).toBeGreaterThan(0);
+
+      const saved = await app.inject({
+        method: "PUT",
+        url: `/plans/${plan.id}/print-assignments`,
+        payload: {
+          assignments: {
+            ...Object.fromEntries(groups.map((g) => [g.group_key, voronId])),
+            extra: mk4Id,
+          },
+        },
+      });
+      expect(saved.statusCode).toBe(200);
+      const body = saved.json() as {
+        plan: { enabled_printer_ids: string[]; group_assignments: Record<string, string> };
+      };
+      expect(body.plan.enabled_printer_ids).toEqual([mk4Id]);
+      expect(Object.values(body.plan.group_assignments)).toEqual([mk4Id]);
+    } finally {
+      await app.close();
+      await ports.db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

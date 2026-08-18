@@ -61,6 +61,117 @@ describe("plate packer", () => {
     expect(plates[0].items.length).toBe(1);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("splits overflow onto a second plate", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-pack-overflow-"));
+    const stl = join(dir, "bracket.stl");
+    writeFileSync(stl, MINI_STL);
+    const printer: PrinterMachine = {
+      id: "tiny",
+      name: "Tiny",
+      bed_width_mm: 20,
+      bed_depth_mm: 20,
+      bed_height_mm: 200,
+      margin_mm: 4,
+      max_filament_slots: 1,
+      loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+    };
+    const part: MergePart = {
+      matchKey: "bracket.stl",
+      relativePath: "bracket.stl",
+      filename: "bracket.stl",
+      sourceLayer: "base:repo",
+      status: "included",
+      role: "primary",
+      quantityAuto: 2,
+      partSlug: "bracket",
+      included: true,
+      quantityOverride: null,
+      notes: "",
+      geometrySame: null,
+      absolutePath: stl,
+    };
+    const copies: PartCopy[] = [
+      { part, unit: 1 },
+      { part, unit: 2 },
+    ];
+    const [plates, warnings] = packCopiesOnPrinter(printer, copies);
+    expect(plates).toHaveLength(2);
+    expect(plates[0].items).toHaveLength(1);
+    expect(plates[1].items).toHaveLength(1);
+    expect(warnings.some((w) => /too large/.test(w))).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("warns when a part is larger than the bed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-pack-large-"));
+    const stl = join(dir, "bracket.stl");
+    writeFileSync(stl, MINI_STL);
+    const printer: PrinterMachine = {
+      id: "tiny",
+      name: "Tiny",
+      bed_width_mm: 12,
+      bed_depth_mm: 12,
+      bed_height_mm: 200,
+      margin_mm: 4,
+      max_filament_slots: 1,
+      loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+    };
+    const part: MergePart = {
+      matchKey: "bracket.stl",
+      relativePath: "bracket.stl",
+      filename: "bracket.stl",
+      sourceLayer: "base:repo",
+      status: "included",
+      role: "primary",
+      quantityAuto: 1,
+      partSlug: "bracket",
+      included: true,
+      quantityOverride: null,
+      notes: "",
+      geometrySame: null,
+      absolutePath: stl,
+    };
+    const [plates, warnings] = packCopiesOnPrinter(printer, [{ part, unit: 1 }]);
+    expect(plates).toEqual([]);
+    expect(warnings.some((w) => /too large for Tiny bed/.test(w))).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("warns when part height exceeds bed_height_mm", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-pack-z-"));
+    const stl = join(dir, "tall.stl");
+    writeFileSync(stl, stlWithHeight(40));
+    const printer: PrinterMachine = {
+      id: "short-z",
+      name: "ShortZ",
+      bed_width_mm: 200,
+      bed_depth_mm: 200,
+      bed_height_mm: 20,
+      margin_mm: 4,
+      max_filament_slots: 1,
+      loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+    };
+    const part: MergePart = {
+      matchKey: "tall.stl",
+      relativePath: "tall.stl",
+      filename: "tall.stl",
+      sourceLayer: "base:repo",
+      status: "included",
+      role: "primary",
+      quantityAuto: 1,
+      partSlug: "tall",
+      included: true,
+      quantityOverride: null,
+      notes: "",
+      geometrySame: null,
+      absolutePath: stl,
+    };
+    const [plates, warnings] = packCopiesOnPrinter(printer, [{ part, unit: 1 }]);
+    expect(plates).toHaveLength(1);
+    expect(warnings.some((w) => /height 40 mm exceeds ShortZ Z limit 20 mm/.test(w))).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 /**

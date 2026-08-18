@@ -1,7 +1,12 @@
 import { folderKeyFromRelativePath } from "./parts-grouping.js";
 import { repoNameFromSourceLayer } from "./parts-tree.js";
 import type { PartCopy } from "./checkoff-missing.js";
-import { assignPartsToPrinters, type MergePartExport, type PrinterMachine } from "./filament-assigner.js";
+import {
+  assignPartsToPrinters,
+  loadedFilamentKeys,
+  type MergePartExport,
+  type PrinterMachine,
+} from "./filament-assigner.js";
 import { objectDisplayName } from "./export-3mf.js";
 
 export function partFilamentKey(part: MergePartExport): string {
@@ -29,8 +34,10 @@ export type PrintGroupRow = {
   repo: string;
   folder: string;
   part_count: number;
+  parts: string[];
   label: string;
   printer_id: string | null;
+  suggested_printer_id: string | null;
   suggested_printer_name: string | null;
   warning: string | null;
 };
@@ -46,7 +53,7 @@ export function buildPrintGroupRows(
 ): PrintGroupRow[] {
   if (!copies.length) return [];
 
-  const [byPrinter, assignWarnings] = assignPartsToPrinters(copies, printers);
+  const [byPrinter] = assignPartsToPrinters(copies, printers);
   const nameById = Object.fromEntries(printers.map((p) => [p.id, p.name]));
   const copyPrinter: Record<string, string> = {};
   for (const [printerId, pcopies] of Object.entries(byPrinter)) {
@@ -80,34 +87,33 @@ export function buildPrintGroupRows(
       const pid = copyPrinter[`${copy.part.matchKey}:${copy.unit}`];
       if (pid) printerIds.add(pid);
     }
+    let suggestedId: string | null = null;
     let printerName: string | null = null;
     if (printerIds.size === 1) {
-      printerName = nameById[[...printerIds][0]] ?? null;
+      suggestedId = [...printerIds][0];
+      printerName = nameById[suggestedId] ?? null;
     } else if (printerIds.size > 1) {
       printerName = [...printerIds].map((id) => nameById[id] ?? id).sort().join(", ");
     }
 
+    const loaded = new Set(printers.flatMap((p) => [...loadedFilamentKeys(p)]));
     let warning: string | null = null;
     if (key === "__unset__") {
       const role = (sample.role || "").trim();
       warning = role
-        ? `Set filament on these parts in Kit → Compose (role: ${role}).`
-        : "Set filament on these parts in Kit → Compose.";
+        ? `No filament on these parts (role ${role}) — assigned to ${printers[0]?.name ?? "the first printer"}.`
+        : "Set filament on these parts on Plan.";
     } else if (printers.length && printerIds.size > 1) {
       warning = "Parts split across multiple printers.";
-    } else if (printers.length && key !== "__unset__") {
-      const loaded = new Set(printers.flatMap((p) => [...loadedFilamentIds(p)]));
-      if (!loaded.has(key)) {
-        warning = "No enabled printer has this filament loaded in a spool slot.";
-      }
+    } else if (printers.length && !loaded.has(key)) {
+      const hint = printers[0]?.name;
+      warning = hint
+        ? `Assign ${label} to ${hint} or enable another printer.`
+        : `No enabled printer has ${label} loaded.`;
     }
-    if (assignWarnings.length && !warning) {
-      /* keep specific warnings above */
-    }
-
     const sourceBuckets: Record<string, Record<string, number>> = {};
+    const partsByBucket: Record<string, string[]> = {};
     const usedNames: Record<string, Set<string>> = {};
-    const displayByMatch: Record<string, string> = {};
 
     for (const copy of fcopies) {
       const part = copy.part;
@@ -116,9 +122,9 @@ export function buildPrintGroupRows(
       const bucketKey = `${repo}\0${folder}`;
       if (!usedNames[bucketKey]) usedNames[bucketKey] = new Set();
       const display = objectDisplayName(part.filename, copy.unit, usedNames[bucketKey]);
-      displayByMatch[`${repo}\0${folder}\0${part.matchKey}`] = display;
       sourceBuckets[bucketKey] ??= {};
       sourceBuckets[bucketKey][part.matchKey] = (sourceBuckets[bucketKey][part.matchKey] ?? 0) + 1;
+      (partsByBucket[bucketKey] ??= []).push(display);
     }
 
     for (const bucketKey of Object.keys(sourceBuckets).sort()) {
@@ -136,8 +142,13 @@ export function buildPrintGroupRows(
         repo,
         folder,
         part_count: partCount,
+        parts: partsByBucket[bucketKey] ?? [],
         label: labelParts.join(" · "),
-        printer_id: assignments[groupKey] ?? null,
+        printer_id:
+          assignments[groupKey] && nameById[assignments[groupKey]]
+            ? assignments[groupKey]
+            : null,
+        suggested_printer_id: suggestedId,
         suggested_printer_name: printerName,
         warning,
       });
@@ -150,12 +161,4 @@ export function buildPrintGroupRows(
     a.folder.localeCompare(b.folder),
   );
   return rows;
-}
-
-function loadedFilamentIds(printer: PrinterMachine): Set<string> {
-  const ids = new Set<string>();
-  for (const lf of printer.loaded_filaments) {
-    if (lf.filament_color_id) ids.add(lf.filament_color_id);
-  }
-  return ids;
 }

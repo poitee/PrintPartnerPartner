@@ -443,8 +443,10 @@ export type PrintGroup = {
   repo: string;
   folder: string;
   part_count: number;
+  parts?: string[];
   label: string;
   printer_id: string | null;
+  suggested_printer_id?: string | null;
   suggested_printer_name: string | null;
   warning: string | null;
 };

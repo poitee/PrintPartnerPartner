@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   BookOpen,
   ClipboardCheck,
+  FileArchive,
   FolderGit2,
   FolderOpen,
   Hammer,
@@ -32,7 +33,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
-import { buildRoute, reviewRoute, sourcesRoute } from "../lib/routes";
+import { buildRoute, exportRoute, reviewRoute, sourcesRoute } from "../lib/routes";
 
 type LegalTab = "summary" | "license" | "attribution" | "third-party";
 
@@ -43,7 +44,7 @@ const LEGAL_TABS: { id: LegalTab; label: string }[] = [
   { id: "third-party", label: "Third-party notices" },
 ];
 
-const WORKFLOW_STEP_ICONS: LucideIcon[] = [FolderGit2, Hammer, ClipboardCheck];
+const WORKFLOW_STEP_ICONS: LucideIcon[] = [FolderGit2, Hammer, ClipboardCheck, FileArchive];
 
 const WORKFLOW_STEPS = [
   {
@@ -63,6 +64,13 @@ const WORKFLOW_STEPS = [
     label: "Parts",
     path: null as string | null,
     description: "Validate, edit quantities, then continue to Progress and Export",
+  },
+  {
+    num: 4,
+    label: "Export",
+    path: null as string | null,
+    description:
+      "Settings → Printers to load filament; Export to enable machines, preview assignment, and export 3MF per plate",
   },
 ] as const;
 
@@ -111,6 +119,7 @@ export default function HelpPage() {
     if (step.path) return step.path;
     if (step.label === "Plan") return buildRoute(selectedProfileId);
     if (step.label === "Parts") return reviewRoute(selectedProfileId);
+    if (step.label === "Export") return exportRoute(selectedProfileId);
     return buildRoute(selectedProfileId);
   });
 
@@ -191,7 +200,7 @@ export default function HelpPage() {
             </span>
             <div>
               <CardTitle className="text-base">Workflow</CardTitle>
-              <CardDescription>Library → Plan → Parts, then Progress and Export</CardDescription>
+              <CardDescription>Library → Plan → Parts → Export</CardDescription>
             </div>
           </div>
         </CardHeader>

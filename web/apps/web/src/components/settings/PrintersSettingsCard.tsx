@@ -8,9 +8,11 @@ import {
   fetchIntegrations,
   fetchPrinterPlanBindings,
   fetchPrinterPresets,
+  fetchFilamentCatalog,
   fetchPrinters,
   fetchProfiles,
   savePrinterFleet,
+  type FilamentCatalog,
   savePrinterPlanBinding,
   testIntegration,
   updateIntegration,
@@ -38,6 +40,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import PrinterProfileAssignmentSection from "./PrinterProfileAssignmentSection";
+import SlotFilamentPicker from "./SlotFilamentPicker";
 import { cn } from "../../lib/utils";
 import {
   PRINTER_STATUS_POLL_SECONDS_OPTIONS,
@@ -161,6 +164,7 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
   const [renameDraft, setRenameDraft] = useState("");
   const [planBindings, setPlanBindings] = useState<PrinterPlanBinding[]>([]);
   const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
+  const [catalog, setCatalog] = useState<FilamentCatalog | null>(null);
 
   const [hostType, setHostType] = useState<HostType>("moonraker");
   const [newName, setNewName] = useState("");
@@ -222,19 +226,22 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
     if (!engineReady) return;
     setLoadError(null);
     try {
-      const [fleet, presetRows, integrations, bindings, profileList] = await Promise.all([
-        fetchPrinters(),
-        fetchPrinterPresets(),
-        fetchIntegrations(),
-        fetchPrinterPlanBindings(),
-        fetchProfiles(),
-      ]);
+      const [fleet, presetRows, integrations, bindings, profileList, filamentCatalog] =
+        await Promise.all([
+          fetchPrinters(),
+          fetchPrinterPresets(),
+          fetchIntegrations(),
+          fetchPrinterPlanBindings(),
+          fetchProfiles(),
+          fetchFilamentCatalog().catch(() => null),
+        ]);
       setPrinters(fleet);
       setPresets(presetRows);
       setHosts(integrations.filter((i) => HOST_TYPES.has(i.type)));
       setPresetId((prev) => prev || pickDefaultPresetId(presetRows, "moonraker"));
       setPlanBindings(bindings);
       setProfiles(profileList);
+      setCatalog(filamentCatalog);
       void refreshStatuses(fleet);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -432,7 +439,8 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
   const onSlotColorChange = async (
     printerId: string,
     slot: number,
-    filamentColorId: string,
+    filamentColorId: string | null,
+    label: string,
   ) => {
     const next = printers.map((p) => {
       if (p.id !== printerId) return p;
@@ -440,7 +448,11 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
         ...p,
         loaded_filaments: p.loaded_filaments.map((lf) =>
           lf.slot === slot
-            ? { ...lf, filament_color_id: filamentColorId.trim() || null }
+            ? {
+                ...lf,
+                filament_color_id: filamentColorId?.trim() || null,
+                label: label.trim(),
+              }
             : lf,
         ),
       };
@@ -850,24 +862,17 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
                 {printer.loaded_filaments.length > 0 && (
                   <div className="grid gap-2 sm:grid-cols-2">
                     {printer.loaded_filaments.map((slot) => (
-                      <label key={slot.slot} className="block text-xs">
-                        <span className="mb-1 block text-muted-foreground">
-                          Slot {slot.slot} filament color id
-                          {slot.label ? ` · ${slot.label}` : ""}
-                        </span>
-                        <input
-                          className={inputClass}
-                          defaultValue={slot.filament_color_id ?? ""}
-                          placeholder="optional"
-                          disabled={!engineReady || busy}
-                          onBlur={(e) => {
-                            const next = e.target.value.trim();
-                            const prev = slot.filament_color_id ?? "";
-                            if (next === prev) return;
-                            void onSlotColorChange(printer.id, slot.slot, next);
-                          }}
-                        />
-                      </label>
+                      <SlotFilamentPicker
+                        key={slot.slot}
+                        slot={slot.slot}
+                        extraLabel={slot.label && slot.label !== slot.filament_color_id ? slot.label : undefined}
+                        filamentColorId={slot.filament_color_id}
+                        catalog={catalog}
+                        disabled={!engineReady || busy}
+                        onChange={(colorId, label) => {
+                          void onSlotColorChange(printer.id, slot.slot, colorId, label);
+                        }}
+                      />
                     ))}
                   </div>
                 )}

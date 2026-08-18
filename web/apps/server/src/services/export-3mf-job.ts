@@ -2,6 +2,7 @@ import {
   exportProfile3mf,
   exportProfile3mfWithLayout,
   mergePartsToCopies,
+  resolveEnabledPrinters,
   resolveLayoutToPlates,
   unprintedCopies,
   type ExportLayoutMode,
@@ -29,9 +30,9 @@ export function runExport3mfJob(
     options.enabled_printer_ids != null
       ? options.enabled_printer_ids
       : plan.enabled_printer_ids;
-  const enabled = fleet.filter((m) => (ids ?? []).includes(m.id));
+  const enabled = resolveEnabledPrinters(fleet, ids);
   if (!enabled.length) {
-    throw new Error("No printers enabled");
+    throw new Error("No printers configured. Add a printer in Settings.");
   }
 
   const mergeParts = parts as MergePartExport[];
