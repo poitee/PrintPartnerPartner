@@ -34,8 +34,8 @@ The pre-change code confirmed every Task 2 claim:
 
 ## Implementation
 
-- Added a repository ownership assertion and applied it before all
-  profile-scoped repository reads and writes.
+- Added a repository ownership assertion and applied it before profile-id
+  scoped repository reads and writes.
 - Rejected profile-scoped job starts for missing or cross-tenant profiles.
 - Stored job tenant ownership separately from payload data and required it for
   job get, v1 list/artifact reads, cancellation, and WebSocket subscription.
@@ -186,3 +186,128 @@ Documentation:
   `not_authenticated`. `coderabbit auth login --agent` reached
   `awaiting_browser_auth`, which cannot be completed non-interactively in this
   run, so no CodeRabbit result is available.
+
+## Review blocker remediation
+
+Status: DONE
+
+Implementation HEAD before this report update:
+`bf865ab342f7a5510bd18b65f0757c921987e31f`
+
+### Verified findings and fixes
+
+- Part-keyed mutation methods selected by globally unique part id without
+  checking the row's tenant. A tenant that learned another tenant's id could
+  update part fields, print progress, or assembled progress. `requirePart`
+  now resolves through the tenant-filtered accessor before reads, writes, and
+  destructive progress replacement. Progress reads/deletes also include
+  `tenant_id`.
+- The terminal cap was global. A busy tenant could evict another tenant's
+  snapshots. Retention now groups terminal snapshots by tenant before applying
+  the cap; active snapshots remain outside both the cap and TTL.
+- Export jobs and `/exports/*` shared one filesystem namespace. Artifact roots,
+  multipart uploads, queue/handoff operations, slicer handoff exports, URL-key
+  generation, and download resolution now use an encoded tenant directory.
+  Two tenants can produce the same relative filename without collision or
+  cross-tenant download.
+- Source creation now starts its best-effort sync with `request.tenantId`
+  instead of `"default"`.
+- Assistant recipe sequencing now passes its captured tenant explicitly to
+  `waitForTerminal`.
+- The MCP non-loopback setup error now explains both supported API-key sources:
+  Settings and `PRINT_PARTNER_API_KEY`.
+- Idempotent profile deletion remains a tenant-filtered no-op for stale ids.
+  Optional-table and invalid-id guards again run before profile assertions so
+  their intended benign behavior is preserved.
+- Corrected indentation and whitespace in the Task 2 job, queue, and app
+  registration changes.
+
+### Red evidence
+
+`npm run test -w @print-partner/server -- phase6 jobs-tenant exports-route`
+
+- Exit 1 before remediation.
+- Exactly 3 intended failures:
+  - a cross-tenant `patchPart` call did not throw;
+  - tenant A's artifact URL returned 404 because downloads did not resolve a
+    tenant directory;
+  - tenant A retained only its active job because tenant B consumed the global
+    terminal cap.
+
+The same regression tests also cover cross-tenant print/assembled progress
+mutations, owner data remaining unchanged, same-name artifact isolation,
+cross-tenant artifact path denial, and active jobs remaining outside retention.
+
+### Green and final verification
+
+Focused blocker suite:
+
+`npm run test -w @print-partner/server -- phase6 jobs-tenant exports-route`
+
+- Exit 0; 3 files and 10 tests passed.
+
+Dependent route/auth/assistant suite:
+
+`npm run test -w @print-partner/server -- slicer-handoff bambu-connect printer-send-queue assistant/tools http-routes`
+
+- Exit 0; 7 files and 56 tests passed.
+- The first run exposed a stale slicer-handoff mock that returned a shared-root
+  path. The fixture now returns the tenant-root path passed to the exporter.
+
+Complete server suite:
+
+`npm run test -w @print-partner/server`
+
+- Exit 0; 114 files passed, 1 skipped; 730 tests passed, 2 skipped.
+
+Server typecheck:
+
+`npm run typecheck -w @print-partner/server`
+
+- Exit 0; no TypeScript diagnostics.
+
+Lint:
+
+`npm run lint`
+
+- Exit 0; no ESLint diagnostics.
+
+Diff hygiene:
+
+`git diff --check 5915f9e..HEAD`
+
+- Exit 0.
+
+### Remediation files
+
+- `.superpowers/sdd/task-2-report.md`
+- `web/apps/server/src/app.ts`
+- `web/apps/server/src/assistant/tools.ts`
+- `web/apps/server/src/db/repository.ts`
+- `web/apps/server/src/lib/secure-path.ts`
+- `web/apps/server/src/mcp/http-routes.ts`
+- `web/apps/server/src/phase6.test.ts`
+- `web/apps/server/src/routes/bambu-connect.ts`
+- `web/apps/server/src/routes/exports-route.test.ts`
+- `web/apps/server/src/routes/exports.ts`
+- `web/apps/server/src/routes/jobs-tenant.test.ts`
+- `web/apps/server/src/routes/jobs.ts`
+- `web/apps/server/src/routes/printer-send-queue.ts`
+- `web/apps/server/src/routes/slicer-handoff.test.ts`
+- `web/apps/server/src/routes/slicer-handoff.ts`
+- `web/apps/server/src/routes/sources.ts`
+
+### Remediation commits
+
+- `dab7d28` — `test: expose remaining tenant isolation gaps`
+- `c9ce7a9` — `fix: close remaining tenant isolation gaps`
+- `8fdb39a` — `test: verify owner progress remains unchanged`
+- `52f7e73` — `test: model tenant-scoped slicer artifacts`
+- `f3594e6` — `fix: preserve default slicer tenant context`
+- `bf865ab` — `style: normalize Task 2 formatting`
+
+### Remaining concern
+
+- Files generated before this remediation remain in the legacy shared
+  `exports/` root and are intentionally not served by the tenant-scoped route.
+  New export jobs regenerate them in the tenant directory.
