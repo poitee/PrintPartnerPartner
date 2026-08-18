@@ -1,8 +1,20 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import {
+  createReadStream,
+  createWriteStream,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { randomUUID } from "node:crypto";
+import { basename, dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { promises as fs } from "node:fs";
+import { createGzip } from "node:zlib";
+import { pipeline } from "node:stream/promises";
 import * as tar from "tar";
 import type { ReadEntry } from "tar";
+import Database from "better-sqlite3";
 import type { SqliteDatabase } from "../db/client.js";
 
 export type BackupMetadata = {
@@ -23,27 +35,50 @@ const BACKUP_ROOT_FILES = new Set([
   BACKUP_WAL_FILE,
 ]);
 const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "binary");
+const MAX_METADATA_BYTES = 64 * 1024;
+const DEFAULT_MAX_BACKUP_ENTRIES = 100_000;
+const DEFAULT_MAX_BACKUP_TOTAL_BYTES = 20 * 1024 * 1024 * 1024;
+const DEFAULT_MAX_BACKUP_ENTRY_BYTES = 8 * 1024 * 1024 * 1024;
+const DEFAULT_MAX_DECOMPRESSION_RATIO = 200;
 
-async function copyBackupDirectory(source: string, target: string): Promise<void> {
-  const entries = await fs.readdir(source, { withFileTypes: true });
-  await fs.mkdir(target, { recursive: true });
-  for (const entry of entries) {
-    const sourcePath = join(source, entry.name);
-    const targetPath = join(target, entry.name);
-    if (entry.isDirectory()) {
-      await copyBackupDirectory(sourcePath, targetPath);
-    } else if (entry.isFile()) {
-      await fs.copyFile(sourcePath, targetPath);
-    }
-  }
+export type BackupValidationLimits = {
+  maxEntries?: number;
+  maxTotalBytes?: number;
+  maxEntryBytes?: number;
+  maxDecompressionRatio?: number;
+};
+
+type ResolvedBackupLimits = Required<BackupValidationLimits>;
+
+type ArchiveGuardState = {
+  entries: number;
+  totalBytes: number;
+  seen: Set<string>;
+  error: Error | null;
+};
+
+function positiveLimit(value: number | undefined, fallback: number): number {
+  return value == null || !Number.isFinite(value) || value < 0 ? fallback : value;
+}
+
+function resolveBackupLimits(limits: BackupValidationLimits = {}): ResolvedBackupLimits {
+  return {
+    maxEntries: positiveLimit(limits.maxEntries, DEFAULT_MAX_BACKUP_ENTRIES),
+    maxTotalBytes: positiveLimit(limits.maxTotalBytes, DEFAULT_MAX_BACKUP_TOTAL_BYTES),
+    maxEntryBytes: positiveLimit(limits.maxEntryBytes, DEFAULT_MAX_BACKUP_ENTRY_BYTES),
+    maxDecompressionRatio: positiveLimit(
+      limits.maxDecompressionRatio,
+      DEFAULT_MAX_DECOMPRESSION_RATIO,
+    ),
+  };
 }
 
 function normalizedArchivePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
-function assertSafeArchiveEntry(entry: ReadEntry, seen: Set<string>): void {
-  if (entry.meta) return;
+function archiveEntryError(entry: ReadEntry, seen: Set<string>): Error | null {
+  if (entry.meta) return null;
   const rawPath = entry.path;
   const path = normalizedArchivePath(rawPath);
   const parts = path.split("/");
@@ -55,36 +90,67 @@ function assertSafeArchiveEntry(entry: ReadEntry, seen: Set<string>): void {
     /^[A-Za-z]:/.test(rawPath) ||
     parts.some((part) => part === "" || part === "." || part === "..")
   ) {
-    throw new Error(`Unsafe backup entry path: ${rawPath}`);
+    return new Error(`Unsafe backup entry path: ${rawPath}`);
   }
-  const allowed =
-    BACKUP_ROOT_FILES.has(path) ||
-    BACKUP_DIRECTORIES.some((directory) => path === directory || path.startsWith(`${directory}/`));
-  if (!allowed) throw new Error(`Unexpected backup entry: ${rawPath}`);
-  if (entry.type !== "File" && entry.type !== "OldFile" && entry.type !== "Directory") {
-    throw new Error(`Unsupported backup entry type for ${rawPath}: ${entry.type}`);
+  if (BACKUP_ROOT_FILES.has(path)) {
+    if (entry.type !== "File" && entry.type !== "OldFile") {
+      return new Error(`Backup root entry must be a regular file: ${rawPath}`);
+    }
+    if (path === BACKUP_METADATA_FILE && entry.size > MAX_METADATA_BYTES) {
+      return new Error(`Backup metadata exceeds ${MAX_METADATA_BYTES} byte limit`);
+    }
+  } else {
+    const directory = BACKUP_DIRECTORIES.find(
+      (candidate) => path === candidate || path.startsWith(`${candidate}/`),
+    );
+    if (!directory) return new Error(`Unexpected backup entry: ${rawPath}`);
+    if (
+      entry.type !== "File" &&
+      entry.type !== "OldFile" &&
+      entry.type !== "Directory"
+    ) {
+      return new Error(`Unsupported backup entry type for ${rawPath}: ${entry.type}`);
+    }
+    if (path === directory && entry.type !== "Directory") {
+      return new Error(`Backup directory root has invalid type: ${rawPath}`);
+    }
   }
-  if (seen.has(path)) throw new Error(`Duplicate backup entry: ${rawPath}`);
+  if (seen.has(path)) return new Error(`Duplicate backup entry: ${rawPath}`);
   seen.add(path);
+  return null;
 }
 
-async function inspectBackupArchive(backupPath: string): Promise<void> {
-  const seen = new Set<string>();
-  let invalidEntry: Error | null = null;
-  await tar.t({
-    file: backupPath,
-    gzip: true,
-    strict: true,
-    onentry: (entry) => {
-      if (invalidEntry) return;
-      try {
-        assertSafeArchiveEntry(entry, seen);
-      } catch (error) {
-        invalidEntry = error instanceof Error ? error : new Error(String(error));
-      }
-    },
-  });
-  if (invalidEntry) throw invalidEntry;
+function guardArchiveEntry(
+  entry: ReadEntry,
+  state: ArchiveGuardState,
+  limits: ResolvedBackupLimits,
+): boolean {
+  if (state.error) return false;
+  state.entries += 1;
+  if (state.entries > limits.maxEntries) {
+    state.error = new Error(`Backup archive entry limit exceeded (${limits.maxEntries})`);
+    return false;
+  }
+  if (!Number.isSafeInteger(entry.size) || entry.size < 0) {
+    state.error = new Error(`Backup entry has invalid size: ${entry.path}`);
+    return false;
+  }
+  if (entry.size > limits.maxEntryBytes) {
+    state.error = new Error(`Backup entry exceeds decompressed size limit: ${entry.path}`);
+    return false;
+  }
+  state.totalBytes += entry.size;
+  if (!Number.isSafeInteger(state.totalBytes) || state.totalBytes > limits.maxTotalBytes) {
+    state.error = new Error(
+      `Backup archive decompressed byte limit exceeded (${limits.maxTotalBytes})`,
+    );
+    return false;
+  }
+  state.error = archiveEntryError(entry, state.seen);
+  return state.error === null;
+}
+
+function assertRequiredArchiveEntries(seen: Set<string>): void {
   if (!seen.has(BACKUP_METADATA_FILE)) {
     throw new Error(`Backup archive is missing ${BACKUP_METADATA_FILE}`);
   }
@@ -123,22 +189,53 @@ function readValidatedMetadata(tempDir: string): BackupMetadata {
   ) {
     throw new Error("Backup contains an invalid SQLite database");
   }
+  let sqlite: Database.Database | null = null;
+  try {
+    sqlite = new Database(join(tempDir, BACKUP_DATABASE_FILE), { fileMustExist: true });
+    sqlite.pragma("query_only = ON");
+    const result = sqlite.pragma("integrity_check", { simple: true });
+    if (result !== "ok") {
+      throw new Error(`SQLite integrity_check returned: ${String(result)}`);
+    }
+  } catch (error) {
+    throw new Error(
+      `Backup SQLite integrity_check failed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  } finally {
+    sqlite?.close();
+  }
   return metadata as BackupMetadata;
 }
 
-async function extractValidatedBackup(backupPath: string, tempDir: string): Promise<BackupMetadata> {
-  await inspectBackupArchive(backupPath);
-  const extractedEntries = new Set<string>();
+async function extractValidatedBackup(
+  backupPath: string,
+  tempDir: string,
+  extractDataDirectories: boolean,
+  configuredLimits: BackupValidationLimits = {},
+): Promise<BackupMetadata> {
+  const limits = resolveBackupLimits(configuredLimits);
+  const state: ArchiveGuardState = {
+    entries: 0,
+    totalBytes: 0,
+    seen: new Set(),
+    error: null,
+  };
   await tar.x({
     file: backupPath,
     gzip: true,
     strict: true,
     cwd: tempDir,
+    maxDecompressionRatio: limits.maxDecompressionRatio,
     filter: (_path, entry) => {
-      assertSafeArchiveEntry(entry as ReadEntry, extractedEntries);
-      return true;
+      const safe = guardArchiveEntry(entry as ReadEntry, state, limits);
+      if (!safe || entry.meta) return false;
+      const path = normalizedArchivePath(entry.path);
+      return extractDataDirectories || BACKUP_ROOT_FILES.has(path);
     },
   });
+  if (state.error) throw state.error;
+  assertRequiredArchiveEntries(state.seen);
   return readValidatedMetadata(tempDir);
 }
 
@@ -168,78 +265,78 @@ export async function createBackup(
     formatVersion: BACKUP_FORMAT_VERSION,
   };
 
-  mkdirSync(dataDir, { recursive: true });
-  const tempDir = mkdtempSync(join(dataDir, ".backup-tmp-"));
+  const outputDir = dirname(resolve(outputPath));
+  mkdirSync(outputDir, { recursive: true });
+  const workDir = mkdtempSync(join(outputDir, ".backup-work-"));
+  const temporaryArchivePath = join(
+    outputDir,
+    `.${basename(outputPath)}.tmp-${randomUUID()}`,
+  );
 
   try {
-    // Step 1: Create backup of SQLite database
-    const backupDbPath = join(tempDir, BACKUP_DATABASE_FILE);
-    const backupDbWalPath = join(tempDir, BACKUP_WAL_FILE);
-
-    // Use backup methods to get consistent snapshots
-    const mainDbContent = sqlite.backupFileContent();
-    writeFileSync(backupDbPath, mainDbContent);
-
-    const walContent = sqlite.backupWalFileContent();
-    if (walContent) {
-      writeFileSync(backupDbWalPath, walContent);
-    }
-
-    // Step 2: Write metadata
+    const backupDbPath = join(workDir, BACKUP_DATABASE_FILE);
+    await sqlite.backupToFile(backupDbPath);
     writeFileSync(
-      join(tempDir, BACKUP_METADATA_FILE),
+      join(workDir, BACKUP_METADATA_FILE),
       JSON.stringify(metadata, null, 2),
     );
 
-    // Step 3: Build list of files to backup
-    const filesToBackup = [
-      { path: backupDbPath, name: BACKUP_DATABASE_FILE },
-      { path: backupDbWalPath, name: BACKUP_WAL_FILE },
-      { path: join(tempDir, BACKUP_METADATA_FILE), name: BACKUP_METADATA_FILE },
-    ];
+    const uncompressedTarPath = join(workDir, "backup.tar");
+    await tar.c(
+      {
+        file: uncompressedTarPath,
+        cwd: workDir,
+        strict: true,
+      },
+      [BACKUP_DATABASE_FILE, BACKUP_METADATA_FILE],
+    );
+
+    // Append critical directories directly from dataDir. This avoids making a
+    // second full filesystem copy before compression; symbolic links and
+    // special files are deliberately omitted.
     for (const directory of BACKUP_DIRECTORIES) {
       const source = join(dataDir, directory);
       try {
         const stats = await fs.lstat(source);
-        if (!stats.isDirectory()) continue;
+        if (!stats.isDirectory() || stats.isSymbolicLink()) continue;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw error;
       }
-      await copyBackupDirectory(source, join(tempDir, directory));
-      filesToBackup.push({ path: join(tempDir, directory), name: directory });
+      await tar.r(
+        {
+          file: uncompressedTarPath,
+          cwd: dataDir,
+          filter: (_path, stats) => !stats.isSymbolicLink(),
+          portable: true,
+          strict: true,
+        },
+        [directory],
+      );
     }
 
-    // Check what files actually exist
-    const existingFiles: Array<{ path: string; name: string }> = [];
-    for (const file of filesToBackup) {
-      try {
-        await fs.stat(file.path);
-        existingFiles.push(file);
-      } catch {
-        // File doesn't exist; skip it
-      }
-    }
-
-    if (existingFiles.length === 0) {
-      throw new Error("No data found to backup");
-    }
-
-    await tar.c(
-      {
-        file: outputPath,
-        gzip: true,
-        cwd: tempDir,
-        strict: true,
-      },
-      existingFiles.map((file) => file.name),
+    await pipeline(
+      createReadStream(uncompressedTarPath),
+      createGzip(),
+      createWriteStream(temporaryArchivePath, { flags: "wx" }),
     );
-  } finally {
-    // Clean up temporary directory
+    const archiveHandle = await fs.open(temporaryArchivePath, "r");
     try {
-      await fs.rm(tempDir, { recursive: true, force: true });
+      await archiveHandle.sync();
+    } finally {
+      await archiveHandle.close();
+    }
+    await fs.rename(temporaryArchivePath, resolve(outputPath));
+  } finally {
+    try {
+      await fs.rm(temporaryArchivePath, { force: true });
     } catch {
-      // Ignore cleanup errors
+      // Ignore cleanup errors.
+    }
+    try {
+      await fs.rm(workDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors.
     }
   }
 }
@@ -248,12 +345,17 @@ export async function createBackup(
  * Validates archive entries, metadata, and SQLite integrity in an isolated
  * temporary directory without mutating live application data.
  */
-export async function validateBackup(backupPath: string): Promise<BackupMetadata> {
+export async function validateBackup(
+  backupPath: string,
+  limits: BackupValidationLimits = {},
+): Promise<BackupMetadata> {
   const absoluteBackupPath = resolve(backupPath);
-  const tempDir = mkdtempSync(join(dirname(absoluteBackupPath), ".validate-tmp-"));
+  const tempDir = mkdtempSync(join(tmpdir(), "pp-backup-validate-"));
 
   try {
-    return await extractValidatedBackup(absoluteBackupPath, tempDir);
+    // Validation writes only metadata/database files. All other entries are
+    // parsed and bounded, but not extracted.
+    return await extractValidatedBackup(absoluteBackupPath, tempDir, false, limits);
   } finally {
     try {
       await fs.rm(tempDir, { recursive: true, force: true });
@@ -282,7 +384,7 @@ export async function restoreBackup(
 
   try {
     // Parse, validate, and safely extract every entry before mutating live data.
-    const metadata = await extractValidatedBackup(resolve(backupPath), tempDir);
+    const metadata = await extractValidatedBackup(resolve(backupPath), tempDir, true);
 
     // Close the database only after the complete archive has passed validation.
     sqlite.close();
