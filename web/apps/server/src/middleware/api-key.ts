@@ -3,7 +3,6 @@ import type {
   FastifyInstance,
   FastifyReply,
   FastifyRequest,
-  preHandlerAsyncHookHandler,
 } from "fastify";
 import type { ServerConfig } from "../config.js";
 import { sendProblem } from "../lib/api-error.js";
@@ -26,6 +25,10 @@ function isExempt(url: string): boolean {
 }
 
 export type ApiKeyValidator = (rawKey: string) => boolean;
+export type AdminPreHandler = (
+  request: FastifyRequest,
+  reply: FastifyReply,
+) => Promise<unknown>;
 
 export function extractApiKey(request: FastifyRequest): string | null {
   const header = request.headers.authorization;
@@ -102,7 +105,7 @@ export function registerApiKeyAuth(
 export function createAdminPreHandler(
   config: ServerConfig,
   validateApiKey: ApiKeyValidator,
-): preHandlerAsyncHookHandler {
+): AdminPreHandler {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     if (isLoopbackAddress(request.socket.remoteAddress)) return;
 
