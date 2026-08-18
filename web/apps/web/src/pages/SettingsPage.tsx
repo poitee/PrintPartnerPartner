@@ -146,6 +146,7 @@ export default function SettingsPage() {
     }
     setLoadError(null);
     setSettingsLoadError(null);
+    setSettingsLoaded(false);
     try {
       const [filamentRows, patSettings, updateSettings, autoRecomputeSettings, discordNotifySettings] = await Promise.all([
         fetchCustomFilaments(),
