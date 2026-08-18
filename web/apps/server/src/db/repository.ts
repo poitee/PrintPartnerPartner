@@ -64,6 +64,7 @@ import {
 import { getRequestTenantId } from "../middleware/tenant-context.js";
 import type { ProfileSourceMode } from "../services/printer-profile-assignments.js";
 import { stockPresets } from "../services/slicer-instances.js";
+import { dockerPresetsForKind } from "../services/slicer-docker-presets.js";
 import * as defaultSchema from "./schema.js";
 import { DEFAULT_TENANT_ID } from "./schema.js";
 
@@ -840,6 +841,7 @@ export class AppRepository {
       if (this.listSlicerInstances().length > 0) return 0;
       let inserted = 0;
       for (const preset of stockPresets(env)) {
+        const docker = dockerPresetsForKind(preset.kind);
         this.upsertSlicerInstance({
           name: preset.name,
           kind: preset.kind,
@@ -847,6 +849,13 @@ export class AppRepository {
           guiUrl: preset.gui_url,
           watchPath: preset.watch_path,
           enabled: true,
+          image: docker.image || null,
+          containerName: docker.container_name,
+          composeService: docker.compose_service,
+          portsJson: docker.ports_json,
+          volumesJson: docker.volumes_json,
+          envJson: docker.env_json,
+          dockerTarget: "pp_compose",
         });
         inserted += 1;
       }

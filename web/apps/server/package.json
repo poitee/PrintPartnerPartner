@@ -29,10 +29,12 @@
     "@octokit/rest": "^22.0.1",
     "@print-partner/contracts": "*",
     "@print-partner/domain": "*",
+    "@types/dockerode": "^4.0.1",
     "@types/nodemailer": "^8.0.1",
     "adm-zip": "^0.6.0",
     "better-sqlite3": "^12.11.1",
     "chokidar": "^4.0.3",
+    "dockerode": "^5.0.1",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.8.5",
     "fflate": "^0.8.3",
@@ -54,5 +56,5 @@
     "vite": "6.4.3",
     "vitest": "^4.1.9"
   },
-  "description": "Print Partner Fastify API \u2014 SQLite/Postgres, jobs, MCP attach, printer/Spoolman/slicer integrations."
+  "description": "Print Partner Fastify API — SQLite/Postgres, jobs, MCP attach, printer/Spoolman/slicer integrations."
 }
