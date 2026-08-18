@@ -1,23 +1,24 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine
     environment:
-      POSTGRES_USER: printpartner
-      POSTGRES_PASSWORD: printpartner
-      POSTGRES_DB: printpartner
+      # Development defaults only. Override every PP_DEV_* value outside an isolated workstation.
+      POSTGRES_USER: "${PP_DEV_POSTGRES_USER:-printpartner}"
+      POSTGRES_PASSWORD: "${PP_DEV_POSTGRES_PASSWORD:-printpartner-dev-only}"
+      POSTGRES_DB: "${PP_DEV_POSTGRES_DB:-printpartner}"
     ports:
       - "5432:5432"
     volumes:
       - pp-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U printpartner"]
+      test: ["CMD-SHELL", "pg_isready -U ${PP_DEV_POSTGRES_USER:-printpartner}"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   # RustFS runs as UID 10001; fix named-volume ownership before startup.
   rustfs-perms:
-    image: alpine:3.21
+    image: alpine:3.21.3
     user: root
     volumes:
       - pp-rustfs:/data
@@ -26,14 +27,14 @@ services:
     restart: "no"
 
   rustfs:
-    image: rustfs/rustfs:latest
+    image: rustfs/rustfs:1.0.0-rc.2
     environment:
       RUSTFS_VOLUMES: /data
       RUSTFS_ADDRESS: 0.0.0.0:9000
       RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
       RUSTFS_CONSOLE_ENABLE: "true"
-      RUSTFS_ACCESS_KEY: rustfsadmin
-      RUSTFS_SECRET_KEY: rustfsadmin
+      RUSTFS_ACCESS_KEY: "${PP_DEV_S3_ACCESS_KEY:-rustfs-dev-only}"
+      RUSTFS_SECRET_KEY: "${PP_DEV_S3_SECRET_KEY:-rustfs-dev-only-secret}"
       RUSTFS_CORS_ALLOWED_ORIGINS: "*"
     ports:
       - "9000:9000"
@@ -59,8 +60,8 @@ services:
       rustfs:
         condition: service_healthy
     environment:
-      AWS_ACCESS_KEY_ID: rustfsadmin
-      AWS_SECRET_ACCESS_KEY: rustfsadmin
+      AWS_ACCESS_KEY_ID: "${PP_DEV_S3_ACCESS_KEY:-rustfs-dev-only}"
+      AWS_SECRET_ACCESS_KEY: "${PP_DEV_S3_SECRET_KEY:-rustfs-dev-only-secret}"
       AWS_DEFAULT_REGION: us-east-1
     entrypoint:
       - sh
@@ -84,13 +85,13 @@ services:
       DEPLOY_MODE: "saas"
       SAAS_DATA_DIR: "/data"
       STATIC_DIR: "/app/web/apps/web/dist"
-      DATABASE_URL: "postgresql://printpartner:printpartner@postgres:5432/printpartner"
+      DATABASE_URL: "postgresql://${PP_DEV_POSTGRES_USER:-printpartner}:${PP_DEV_POSTGRES_PASSWORD:-printpartner-dev-only}@postgres:5432/${PP_DEV_POSTGRES_DB:-printpartner}"
       # Postgres currently uses an experimental synchronous compatibility bridge.
       POSTGRES_EXPERIMENTAL: "1"
       S3_BUCKET: "print-partner"
       S3_REGION: "us-east-1"
-      AWS_ACCESS_KEY_ID: "rustfsadmin"
-      AWS_SECRET_ACCESS_KEY: "rustfsadmin"
+      AWS_ACCESS_KEY_ID: "${PP_DEV_S3_ACCESS_KEY:-rustfs-dev-only}"
+      AWS_SECRET_ACCESS_KEY: "${PP_DEV_S3_SECRET_KEY:-rustfs-dev-only-secret}"
       S3_ENDPOINT: "http://rustfs:9000"
       S3_FORCE_PATH_STYLE: "1"
       SAAS_ALLOW_ANONYMOUS: "1"
