@@ -42,6 +42,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Kit-import setup panel** — the "Share import setup" panel now reliably appears after importing a shared build; the `?profile=` URL sync no longer drops the navigation state, and the import result is also handed off via a sessionStorage stash as a fallback.
 
+## [3.1.0] - 2026-08-15
+
+### Added
+
+- **Operations management UI** — frontend controls for backups, integration API keys, and runtime logging configuration.
+- **Request rate limiting** — per-IP protection for API routes, with proxy-aware client identification.
+- **Prometheus metrics** — `GET /metrics` exposes HTTP, print-job, plan, printer, filament, runtime, and application-version metrics.
+- **Database optimization guide** — indexing, maintenance, monitoring, and query-tuning guidance in `DATABASE_OPTIMIZATION.md`.
+
 ## [3.0.0-web] - 2026-05-31
 
 Print Partner is now a **single web platform**. The **Sources → Build → Review → Checkoff** workflow moves to a TypeScript monorepo under `web/`: a Vite + React single-page app (`web/apps/web`) and a Fastify API (`web/apps/server`) served together on one port, with shared `contracts` and `domain` packages.
@@ -230,3 +239,4 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 [0.3.0]: https://github.com/poitee/PrintPartnerPartner/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/poitee/PrintPartnerPartner/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/poitee/PrintPartnerPartner/releases/tag/v0.1.0
+[3.1.0]: https://github.com/poitee/PrintPartnerPartner/compare/v3.0.0...v3.1.0

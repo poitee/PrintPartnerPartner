@@ -140,6 +140,14 @@ Versioned API for integrations: `http://127.0.0.1:18765/api/v1` — see [`../doc
 
 SaaS mode can use **Postgres for app data** when `DATABASE_URL` is set (tenant-scoped rows). The current Postgres repository runs through a synchronous compatibility bridge and is **experimental, not production-ready**: it does not provide native transaction semantics for repository mutations. Production startup fails closed unless `POSTGRES_EXPERIMENTAL=1` explicitly acknowledges this limitation. SQLite remains the supported database. `GET /health` reports `db.support_status` as `supported` or `experimental`.
 
+The bridge also depends on Drizzle's private prepared-field metadata and
+`drizzle-orm/utils` result mapper. Dependency updates must pass
+`sync-db-bridge.test.ts` and the live Postgres smoke before release. Each
+synchronous query is limited to 10,000 returned rows and an 8 MiB serialized
+result; callers must paginate larger reads. These ceilings keep the
+child-process protocol bounded and produce an explicit error instead of an
+implicit stdout-buffer failure.
+
 File blobs (repos, exports, thumbs) stay on disk under `SAAS_DATA_DIR` unless `S3_BUCKET` is configured.
 
 ### Quick local SaaS stack

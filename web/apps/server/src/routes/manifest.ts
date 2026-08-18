@@ -42,21 +42,22 @@ export function parseRegistryIndex(raw: string): { entries: Array<Record<string,
 }
 
 function loadRegistryIndex(): { entries: Array<Record<string, unknown>> } {
-  try {
-    const raw = readFileSync(join(DATA_DIR, "registry-index.yaml"), "utf8");
-    return parseRegistryIndex(raw);
-  } catch {
-    return { entries: [] };
-  }
+  const raw = readFileSync(join(DATA_DIR, "registry-index.yaml"), "utf8");
+  return parseRegistryIndex(raw);
 }
 
 export async function registerManifestRoutes(
   app: FastifyInstance,
   deps: RouteDeps,
 ): Promise<void> {
-  app.get("/manifest-registry", async () => {
-    const { entries } = loadRegistryIndex();
-    return { entries };
+  app.get("/manifest-registry", async (request, reply) => {
+    try {
+      const { entries } = loadRegistryIndex();
+      return { entries };
+    } catch (error) {
+      request.log.error({ err: error }, "Failed to load embedded manifest registry");
+      return reply.status(500).send({ detail: "Manifest registry is unavailable" });
+    }
   });
 
   app.get("/manifest-registry/:slug", async (request, reply) => {

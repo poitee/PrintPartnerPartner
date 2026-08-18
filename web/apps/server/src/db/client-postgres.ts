@@ -8,6 +8,8 @@ import pg from "pg";
 import * as schema from "./schema-pg.js";
 import { currentSchemaVersion, schemaVersionKey } from "./schema-pg.js";
 import {
+  POSTGRES_SYNC_MAX_RESULT_BYTES,
+  POSTGRES_SYNC_MAX_RESULT_ROWS,
   registerPostgresSyncQuery,
   unregisterPostgresSyncQuery,
   type PostgresSyncQuery,
@@ -20,6 +22,8 @@ const require = createRequire(import.meta.url);
 const PG_MODULE_PATH = require.resolve("pg");
 const SYNC_QUERY_SCRIPT = `
 const { Client } = require(process.argv[1]);
+const MAX_RESULT_ROWS = ${POSTGRES_SYNC_MAX_RESULT_ROWS};
+const MAX_RESULT_BYTES = ${POSTGRES_SYNC_MAX_RESULT_BYTES};
 let client;
 (async () => {
   try {
@@ -36,11 +40,23 @@ let client;
       input.arrayMode ? { text: input.sql, rowMode: "array" } : input.sql,
       input.params,
     );
-    process.stdout.write(JSON.stringify({
+    if (result.rows.length > MAX_RESULT_ROWS) {
+      throw new Error(
+        \`result row limit of \${MAX_RESULT_ROWS.toLocaleString("en-US")} exceeded (received \${result.rows.length.toLocaleString("en-US")})\`,
+      );
+    }
+    const payload = JSON.stringify({
       ok: true,
       rows: result.rows,
       rowCount: result.rowCount ?? 0,
-    }));
+    });
+    const payloadBytes = Buffer.byteLength(payload, "utf8");
+    if (payloadBytes > MAX_RESULT_BYTES) {
+      throw new Error(
+        \`result byte limit of 8 MiB exceeded (received \${payloadBytes.toLocaleString("en-US")} bytes)\`,
+      );
+    }
+    process.stdout.write(payload);
   } catch (error) {
     process.stdout.write(JSON.stringify({
       ok: false,
@@ -61,7 +77,9 @@ function runPostgresSyncQuery(
     cwd: process.cwd(),
     input: JSON.stringify({ databaseUrl, ...query }),
     encoding: "utf8",
-    maxBuffer: 16 * 1024 * 1024,
+    // The worker checks the 8 MiB payload before writing. Headroom carries the
+    // protocol envelope and a useful error if a future worker violates that contract.
+    maxBuffer: POSTGRES_SYNC_MAX_RESULT_BYTES + 64 * 1024,
     timeout: 30_000,
   });
   let payload: {
@@ -76,8 +94,12 @@ function runPostgresSyncQuery(
     // The detailed process error below is more useful than a secondary JSON error.
   }
   if (result.status !== 0 || !payload.ok) {
+    const spawnErrorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
     const detail =
       payload.error ||
+      (spawnErrorCode === "ENOBUFS"
+        ? "query worker output exceeded the configured 8 MiB result ceiling"
+        : undefined) ||
       result.error?.message ||
       result.stderr.trim() ||
       `query worker exited with status ${String(result.status)}`;

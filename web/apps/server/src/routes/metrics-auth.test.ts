@@ -43,4 +43,28 @@ describe("metrics authentication", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("reports the configured application version", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-metrics-version-"));
+    const config = {
+      ...loadConfig(),
+      dataDir: dir,
+      version: "9.8.7-test",
+    };
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const app = await buildApp(config, ports);
+
+    try {
+      const response = await app.inject({ method: "GET", url: "/metrics" });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain('app_info{version="9.8.7-test"');
+      expect(response.body).not.toContain('app_info{version="3.1.0"');
+    } finally {
+      await app.close();
+      ports.db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

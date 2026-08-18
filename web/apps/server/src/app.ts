@@ -241,6 +241,7 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
       repo: repository,
       validateApiKey: validateRequestApiKey,
       authRequired: config.authRequired,
+      version: config.version,
     });
 
     await app.register(

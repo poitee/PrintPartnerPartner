@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 type SelectedField = { path: string[]; field: unknown };
+// This private Drizzle API is intentionally isolated here. The focused bridge test must
+// pass before upgrading drizzle-orm because `_prepare` and this utility are not stable APIs.
 const { mapResultRow } = require("drizzle-orm/utils") as {
   mapResultRow: (
     fields: SelectedField[],
@@ -26,6 +28,9 @@ export type PostgresSyncResult = {
 };
 
 export type PostgresSyncQueryFn = (query: PostgresSyncQuery) => PostgresSyncResult;
+
+export const POSTGRES_SYNC_MAX_RESULT_ROWS = 10_000;
+export const POSTGRES_SYNC_MAX_RESULT_BYTES = 8 * 1024 * 1024;
 
 const postgresSyncQueries = new WeakMap<object, PostgresSyncQueryFn>();
 
@@ -66,6 +71,23 @@ export function runSerializedSettingsMutation<T>(fn: () => T): T {
   }
 }
 
+function assertPostgresSyncResultWithinLimits(result: PostgresSyncResult): void {
+  if (result.rows.length > POSTGRES_SYNC_MAX_RESULT_ROWS) {
+    throw new Error(
+      `Postgres sync query result row limit of ${POSTGRES_SYNC_MAX_RESULT_ROWS.toLocaleString("en-US")} exceeded (received ${result.rows.length.toLocaleString("en-US")})`,
+    );
+  }
+  const resultBytes = Buffer.byteLength(
+    JSON.stringify({ rows: result.rows, rowCount: result.rowCount }),
+    "utf8",
+  );
+  if (resultBytes > POSTGRES_SYNC_MAX_RESULT_BYTES) {
+    throw new Error(
+      `Postgres sync query result byte limit of 8 MiB exceeded (received ${resultBytes.toLocaleString("en-US")} bytes)`,
+    );
+  }
+}
+
 function runPostgresBuilder(
   builder: object,
   query: PostgresSyncQueryFn,
@@ -87,6 +109,7 @@ function runPostgresBuilder(
   const compiled = toSQL.call(builder) as PostgresSyncQuery;
   const needsArrayRows = Boolean(prepared?.fields || prepared?.customResultMapper);
   const result = query({ ...compiled, arrayMode: needsArrayRows });
+  assertPostgresSyncResultWithinLimits(result);
   const rows = prepared?.customResultMapper
     ? prepared.customResultMapper(result.rows as unknown[][])
     : prepared?.fields
