@@ -5,6 +5,10 @@ updates:
     open-pull-requests-limit: 5
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: pip
     directory: /manifests
@@ -30,9 +34,17 @@ updates:
     open-pull-requests-limit: 3
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
 
   - package-ecosystem: docker
     directory: /slicer-sidecar
     open-pull-requests-limit: 3
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major

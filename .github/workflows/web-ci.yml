@@ -11,7 +11,8 @@ on:
       - "docker-compose*.yml"
       - "pp-compose.yml"
       - "slicer-sidecar/**"
-      - ".github/workflows/web-ci.yml"
+      - ".github/dependabot.yml"
+      - ".github/workflows/**"
   pull_request:
     paths:
       - "web/**"
@@ -20,7 +21,8 @@ on:
       - "docker-compose*.yml"
       - "pp-compose.yml"
       - "slicer-sidecar/**"
-      - ".github/workflows/web-ci.yml"
+      - ".github/dependabot.yml"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
