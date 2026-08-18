@@ -74,4 +74,39 @@ describe("production authentication routes", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("marks production OAuth state cookies Secure", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-auth-production-oauth-cookie-"));
+    const config = {
+      ...loadConfig(),
+      dataDir: dir,
+      multiUser: true,
+      authRequired: true,
+      sessionSecret: "test-session-secret",
+      githubClientId: "github-client",
+      githubClientSecret: "github-secret",
+      githubCallbackUrl: "https://app.example.com/auth/callback",
+      githubOAuthConfigured: true,
+      discordClientId: "discord-client",
+      discordClientSecret: "discord-secret",
+      discordCallbackUrl: "https://app.example.com/auth/discord/callback",
+      discordOAuthConfigured: true,
+    };
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const app = await buildApp(config, ports);
+
+    try {
+      for (const url of ["/auth/github", "/auth/discord"]) {
+        const response = await app.inject({ method: "GET", url });
+
+        expect.soft(response.statusCode, url).toBe(302);
+        expect.soft(response.headers["set-cookie"], url).toContain("Secure");
+      }
+    } finally {
+      await app.close();
+      ports.db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

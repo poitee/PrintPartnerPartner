@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 
 describe("loadConfig", () => {
+  it("enables proxy trust only when explicitly configured", () => {
+    const previous = process.env.TRUST_PROXY;
+    delete process.env.TRUST_PROXY;
+    expect(loadConfig().trustProxy).toBe(false);
+
+    process.env.TRUST_PROXY = "1";
+    expect(loadConfig().trustProxy).toBe(true);
+
+    if (previous === undefined) delete process.env.TRUST_PROXY;
+    else process.env.TRUST_PROXY = previous;
+  });
+
   it("defaults to self-host deploy mode", () => {
     const prev = process.env.DEPLOY_MODE;
     delete process.env.DEPLOY_MODE;

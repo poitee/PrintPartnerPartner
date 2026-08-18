@@ -5,8 +5,19 @@ import { tmpdir } from "node:os";
 import { buildApp } from "../app.js";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
 import { loadConfig } from "../config.js";
+import type { MetricsDeps } from "./metrics.js";
+
+type Assert<T extends true> = T;
+type MetricsValidatorIsRequired = Assert<
+  undefined extends MetricsDeps["validateApiKey"] ? false : true
+>;
+const metricsValidatorIsRequired: MetricsValidatorIsRequired = true;
 
 describe("metrics authentication", () => {
+  it("requires callers to provide an API key validator", () => {
+    expect(metricsValidatorIsRequired).toBe(true);
+  });
+
   it("rejects an invalid bearer credential", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-metrics-auth-"));
     const config = {
