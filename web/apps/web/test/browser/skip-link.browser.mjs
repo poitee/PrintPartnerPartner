@@ -27,7 +27,7 @@ try {
 
   const skipLink = page.getByRole("link", { name: "Skip to main content" });
   const initial = await skipLink.evaluate((element) => {
-    const style = window.getComputedStyle(element);
+    const style = element.ownerDocument.defaultView.getComputedStyle(element);
     return {
       clip: style.clip,
       clipPath: style.clipPath,
@@ -44,7 +44,7 @@ try {
 
   await skipLink.focus();
   const focused = await skipLink.evaluate((element) => {
-    const style = window.getComputedStyle(element);
+    const style = element.ownerDocument.defaultView.getComputedStyle(element);
     const rect = element.getBoundingClientRect();
     return {
       clip: style.clip,
