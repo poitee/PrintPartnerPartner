@@ -64,18 +64,39 @@ describe("GET /exports/*", () => {
     await ports.db.connect();
     const legacyRoot = join(dir, "exports");
     const legacyArtifact = join(legacyRoot, "printer-uploads", "queued", "plate.gcode");
+    const collidingArtifact = join(
+      legacyRoot,
+      "printer-uploads",
+      "colliding",
+      "plate.gcode",
+    );
     const tenantRoot = join(legacyRoot, "tenant-default");
     const targetArtifact = join(tenantRoot, "printer-uploads", "queued", "plate.gcode");
+    const collidingTarget = join(
+      tenantRoot,
+      "printer-uploads",
+      "colliding",
+      "plate.gcode",
+    );
     mkdirSync(join(legacyRoot, "printer-uploads", "queued"), { recursive: true });
-    mkdirSync(tenantRoot, { recursive: true });
+    mkdirSync(join(legacyRoot, "printer-uploads", "colliding"), { recursive: true });
+    mkdirSync(join(tenantRoot, "printer-uploads", "colliding"), { recursive: true });
     mkdirSync(join(legacyRoot, "tenant-other"), { recursive: true });
     writeFileSync(legacyArtifact, "G28\n");
+    writeFileSync(collidingArtifact, "legacy queue artifact");
+    writeFileSync(collidingTarget, "current queue artifact");
     writeFileSync(join(legacyRoot, "collision.txt"), "legacy");
     writeFileSync(join(tenantRoot, "collision.txt"), "current");
     writeFileSync(join(legacyRoot, "tenant-other", "secret.txt"), "other");
     enqueuePrinterSend(ports.repository, {
       filename: "plate.gcode",
       artifact_path: legacyArtifact,
+      printer_id: "printer-1",
+      start: false,
+    });
+    enqueuePrinterSend(ports.repository, {
+      filename: "plate.gcode",
+      artifact_path: collidingArtifact,
       printer_id: "printer-1",
       start: false,
     });
@@ -90,6 +111,9 @@ describe("GET /exports/*", () => {
     expect(readFileSync(targetArtifact, "utf8")).toBe("G28\n");
     expect(existsSync(legacyArtifact)).toBe(false);
     expect(loadPrinterSendQueue(ports.repository)[0]?.artifact_path).toBe(targetArtifact);
+    expect(loadPrinterSendQueue(ports.repository)[1]?.artifact_path).toBe(collidingArtifact);
+    expect(readFileSync(collidingArtifact, "utf8")).toBe("legacy queue artifact");
+    expect(readFileSync(collidingTarget, "utf8")).toBe("current queue artifact");
     expect(readFileSync(join(tenantRoot, "collision.txt"), "utf8")).toBe("current");
     expect(readFileSync(join(legacyRoot, "collision.txt"), "utf8")).toBe("legacy");
     expect(readFileSync(join(legacyRoot, "tenant-other", "secret.txt"), "utf8")).toBe("other");
