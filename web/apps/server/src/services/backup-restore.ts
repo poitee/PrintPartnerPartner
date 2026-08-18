@@ -70,12 +70,21 @@ function assertSafeArchiveEntry(entry: ReadEntry, seen: Set<string>): void {
 
 async function inspectBackupArchive(backupPath: string): Promise<void> {
   const seen = new Set<string>();
+  let invalidEntry: Error | null = null;
   await tar.t({
     file: backupPath,
     gzip: true,
     strict: true,
-    onentry: (entry) => assertSafeArchiveEntry(entry, seen),
+    onentry: (entry) => {
+      if (invalidEntry) return;
+      try {
+        assertSafeArchiveEntry(entry, seen);
+      } catch (error) {
+        invalidEntry = error instanceof Error ? error : new Error(String(error));
+      }
+    },
   });
+  if (invalidEntry) throw invalidEntry;
   if (!seen.has(BACKUP_METADATA_FILE)) {
     throw new Error(`Backup archive is missing ${BACKUP_METADATA_FILE}`);
   }
