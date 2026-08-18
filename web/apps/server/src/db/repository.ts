@@ -331,16 +331,11 @@ export class AppRepository {
   }
 
   async ping(): Promise<boolean> {
-    const db = this.db as DrizzleDb & {
-      execute?: (query: ReturnType<typeof sql>) => { run: () => void };
-    };
-    if (typeof db.run === "function") {
-      db.run(sql`SELECT 1`);
-    } else if (typeof db.execute === "function") {
-      db.execute(sql`SELECT 1`).run();
-    } else {
-      throw new Error("Database driver does not support ping");
-    }
+    this.db
+      .select({ key: this.schema.appSettings.key })
+      .from(this.schema.appSettings)
+      .limit(1)
+      .all();
     return true;
   }
 
