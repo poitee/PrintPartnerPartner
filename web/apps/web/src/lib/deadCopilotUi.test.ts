@@ -12,7 +12,7 @@ function sourceFiles(root: string): string[] {
 
 describe("removed Copilot UI bridge", () => {
   it("does not leave unreachable Copilot UI modules, imports, or comments", () => {
-    const sourceRoot = join(process.cwd(), "apps", "web", "src");
+    const sourceRoot = join(process.cwd(), "src");
     const thisFile = join(sourceRoot, "lib", "deadCopilotUi.test.ts");
     const residue = sourceFiles(sourceRoot)
       .filter((path) => path !== thisFile)
