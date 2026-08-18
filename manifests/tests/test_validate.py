@@ -2,7 +2,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from manifests.scripts.validate import check_embedded_copy_drift, validate_manifest
+from manifests.scripts.validate import (
+    check_embedded_copy_drift,
+    sync_embedded_copies,
+    validate_manifest,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -61,6 +65,23 @@ class ManifestValidatorTests(unittest.TestCase):
 
     def test_repository_embedded_copies_match_canonical_sources(self) -> None:
         self.assertEqual(check_embedded_copy_drift(REPO_ROOT), [])
+
+    def test_sync_regenerates_embedded_copies_from_canonical_sources(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            canonical = root / "manifests" / "community" / "example" / "manifest.yaml"
+            registry = root / "manifests" / "registry" / "index.yaml"
+            canonical.parent.mkdir(parents=True)
+            registry.parent.mkdir(parents=True)
+            canonical.write_text("format: print-partner-manifest\nversion: 1\n")
+            registry.write_text(
+                "entries:\n"
+                "  - slug: example\n"
+                "    manifest_file: example/manifest.yaml\n"
+            )
+
+            self.assertEqual(sync_embedded_copies(root), [])
+            self.assertEqual(check_embedded_copy_drift(root), [])
 
 
 if __name__ == "__main__":
