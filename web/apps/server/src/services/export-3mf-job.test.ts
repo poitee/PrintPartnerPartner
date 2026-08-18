@@ -50,7 +50,7 @@ describe("runExport3mfJob", () => {
   }
 
   it("orchestrates a real 3MF export from the persisted printer and plate plan", () => {
-    const { exportsDir, part, completed } = fixture();
+    const { exportsDir, part, completed } = fixture(3);
     const printer = makePrinter("voron", "Voron");
     const repo = fakeRepo(
       "Fixture Kit",
@@ -64,7 +64,13 @@ describe("runExport3mfJob", () => {
           printers: [
             {
               printer_id: "voron",
-              plates: [[{ match_key: "bracket.stl", unit: 1 }]],
+              plates: [
+                [
+                  { match_key: "bracket.stl", unit: 1 },
+                  { match_key: "bracket.stl", unit: 2 },
+                ],
+                [{ match_key: "bracket.stl", unit: 3 }],
+              ],
               unassigned: [],
             },
           ],
@@ -78,15 +84,20 @@ describe("runExport3mfJob", () => {
     const result = runExport3mfJob(repo, 42, exportsDir, { layout_mode: "per_plate" });
 
     expect(result).toMatchObject({
-      object_count: 1,
-      plate_count: 1,
-      printer_summaries: ["Voron: 1 plate(s)"],
+      object_count: 3,
+      plate_count: 2,
+      printer_summaries: ["Voron: 2 plate(s)"],
     });
-    expect(result.paths).toHaveLength(1);
+    expect(result.paths).toHaveLength(2);
     expect(existsSync(result.primary_path)).toBe(true);
     expect(basename(result.primary_path)).toContain("voron");
     const model = unzipSync(readFileSync(result.primary_path))["3D/3dmodel.model"];
-    expect(new TextDecoder().decode(model)).toContain('name="bracket.stl"');
+    const xml = new TextDecoder().decode(model);
+    expect(xml).toContain('name="bracket.stl"');
+    expect(xml).toContain('name="bracket.stl (2)"');
+    // 10 mm part + persisted 7 mm spacing + 4 mm margin. The fallback path
+    // uses 4 mm spacing and would place this vertex at x=18 instead.
+    expect(xml).toContain('<vertex x="21"');
   });
 
   it("exports only unfinished copies through the real missing-only path", () => {

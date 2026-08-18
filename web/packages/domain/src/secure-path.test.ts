@@ -1,6 +1,7 @@
 import {
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -35,7 +36,7 @@ describe("domain secure paths", () => {
     const file = join(nested, "plan.json");
     writeFileSync(file, "{\"ok\":true}");
 
-    expect(resolvedFileUnderRoot(root, file)).toBe(file);
+    expect(resolvedFileUnderRoot(root, file)).toBe(realpathSync(file));
     expect(readFileUnderRoot(root, file)).toBe("{\"ok\":true}");
     expect(readFileBufferUnderRoot(root, file)).toEqual(Buffer.from("{\"ok\":true}"));
   });

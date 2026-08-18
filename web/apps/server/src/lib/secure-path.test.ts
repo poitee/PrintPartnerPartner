@@ -1,4 +1,11 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -43,7 +50,7 @@ describe("secure-path", () => {
     const root = tempDir();
     const file = join(root, "kit.json");
     writeFileSync(file, "{}");
-    expect(resolvedFileUnderRoot(root, file)).toBe(file);
+    expect(resolvedFileUnderRoot(root, file)).toBe(realpathSync(file));
     expect(resolvedFileUnderRoot(root, "/etc/passwd")).toBeNull();
   });
 
@@ -86,7 +93,7 @@ describe("secure-path", () => {
     const inside = join(dataDir, "nested", "file.bin");
     mkdirSync(join(dataDir, "nested"), { recursive: true });
     writeFileSync(inside, "x");
-    expect(safeDataDirPath(dataDir, inside)).toBe(inside);
+    expect(safeDataDirPath(dataDir, inside)).toBe(realpathSync(inside));
     expect(safeDataDirPath(dataDir, "/tmp/outside")).toBeNull();
   });
 

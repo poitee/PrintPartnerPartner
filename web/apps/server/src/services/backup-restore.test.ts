@@ -2,12 +2,14 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import Database from "better-sqlite3";
 import * as tar from "tar";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SqliteDatabase } from "../db/client.js";
@@ -71,6 +73,25 @@ describe("backup create, validate, and restore", () => {
     );
     expect(sqlite.closeCalls()).toBe(1);
     expect(sqlite.connectCalls()).toBe(1);
+    expect(sqlite.snapshotCalls()).toBe(1);
+  });
+
+  it("keeps an existing published archive intact and cleans temporary files on snapshot failure", async () => {
+    const dataDir = tempDir();
+    const outputPath = join(dataDir, "snapshot.tar.gz");
+    writeFileSync(outputPath, "previous-good-backup");
+    const sqlite = fakeSqlite(dataDir, sqliteFile("unused"), {
+      snapshotError: new Error("snapshot failed"),
+    });
+
+    await expect(
+      createBackup(sqlite.value, dataDir, "3.0.0", outputPath),
+    ).rejects.toThrow("snapshot failed");
+
+    expect(readFileSync(outputPath, "utf8")).toBe("previous-good-backup");
+    expect(
+      readdirSync(dataDir).filter((name) => name.startsWith(".backup-") || name.includes(".tmp-")),
+    ).toEqual([]);
   });
 
   it("rejects corrupt compressed input", async () => {
@@ -138,21 +159,67 @@ describe("backup create, validate, and restore", () => {
 
     await expect(validateBackup(archive)).rejects.toThrow(/SQLite database/);
   });
+
+  it("runs SQLite integrity_check instead of trusting the file header", async () => {
+    const dir = tempDir();
+    const archive = join(dir, "corrupt-pages.tar.gz");
+    await writeArchive(archive, {
+      "backup-metadata.json": JSON.stringify(METADATA),
+      "print-partner.db": sqliteFile("corrupt").subarray(0, 100),
+    });
+
+    await expect(validateBackup(archive)).rejects.toThrow(/integrity|malformed|SQLite/i);
+  });
+
+  it("enforces archive entry and total decompressed byte limits", async () => {
+    const dir = tempDir();
+    const archive = join(dir, "bounded.tar.gz");
+    await writeArchive(archive, {
+      "backup-metadata.json": JSON.stringify(METADATA),
+      "print-partner.db": sqliteFile("bounded"),
+      "exports/plate.3mf": "payload",
+    });
+    const validateWithLimits = validateBackup as unknown as (
+      path: string,
+      limits: { maxEntries?: number; maxTotalBytes?: number },
+    ) => Promise<unknown>;
+
+    await expect(validateWithLimits(archive, { maxEntries: 2 })).rejects.toThrow(
+      /entry limit/i,
+    );
+    await expect(
+      validateWithLimits(archive, { maxTotalBytes: 100 }),
+    ).rejects.toThrow(/decompressed.*limit/i);
+  });
 });
 
 function sqliteFile(marker: string): Buffer {
-  return Buffer.concat([
-    Buffer.from("SQLite format 3\0", "binary"),
-    Buffer.from(marker),
-  ]);
+  const database = new Database(":memory:");
+  try {
+    database.exec("CREATE TABLE marker (value TEXT NOT NULL)");
+    database.prepare("INSERT INTO marker (value) VALUES (?)").run(marker);
+    return database.serialize();
+  } finally {
+    database.close();
+  }
 }
 
-function fakeSqlite(dataDir: string, backupContent: Buffer) {
+function fakeSqlite(
+  dataDir: string,
+  backupContent: Buffer,
+  options: { snapshotError?: Error } = {},
+) {
   let closes = 0;
   let connects = 0;
+  let snapshots = 0;
   const value = {
     dbPath: join(dataDir, "print-partner.db"),
     ping: () => true,
+    backupToFile: async (destination: string) => {
+      snapshots += 1;
+      if (options.snapshotError) throw options.snapshotError;
+      writeFileSync(destination, backupContent);
+    },
     backupFileContent: () => backupContent,
     backupWalFileContent: () => null,
     close: () => {
@@ -166,16 +233,18 @@ function fakeSqlite(dataDir: string, backupContent: Buffer) {
     value,
     closeCalls: () => closes,
     connectCalls: () => connects,
+    snapshotCalls: () => snapshots,
   };
 }
 
 async function writeArchive(
   archive: string,
-  files: Record<string, string>,
+  files: Record<string, string | Buffer>,
 ): Promise<void> {
   const staging = mkdtempSync(join(tmpdir(), "pp-backup-archive-"));
   try {
     for (const [name, contents] of Object.entries(files)) {
+      mkdirSync(dirname(join(staging, name)), { recursive: true });
       writeFileSync(join(staging, name), contents);
     }
     await tar.c({ cwd: staging, file: archive, gzip: true }, Object.keys(files));
