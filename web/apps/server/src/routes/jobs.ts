@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import { DATE_FORMAT_DEFAULT, type DateFormatId, type JobSnapshot } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
-import { exportDownloadKey } from "../lib/secure-path.js";
+import { exportDownloadKey, tenantExportDirectory } from "../lib/secure-path.js";
 import { syncProjectById } from "./sources.js";
 import {
   exportProfileStlPack,
@@ -88,8 +88,8 @@ export class InProcessJobRunner {
   }
 
   /** Used by multipart job routes that need to persist artifacts before start(). */
-  getExportsDir(): string {
-    return this.deps.exportsDir;
+  getExportsDir(tenantId = getRequestTenantId()): string {
+    return tenantExportDirectory(this.deps.exportsDir, tenantId);
   }
 
   getRepo(): AppRepository {
@@ -131,10 +131,14 @@ export class InProcessJobRunner {
   private pruneCompletedJobs(now = Date.now()): void {
     const completed = [...this.jobs.entries()]
       .filter(([, snapshot]) => this.isTerminal(snapshot))
-      .map(([jobId]) => ({
-        jobId,
-        updatedAt: this.jobMeta.get(jobId)?.updatedAt ?? 0,
-      }))
+      .map(([jobId]) => {
+        const meta = this.jobMeta.get(jobId);
+        return {
+          jobId,
+          tenantId: meta?.tenantId,
+          updatedAt: meta?.updatedAt ?? 0,
+        };
+      })
       .sort((a, b) => a.updatedAt - b.updatedAt);
 
     for (const item of completed) {
@@ -143,9 +147,17 @@ export class InProcessJobRunner {
       }
     }
 
-    const retained = completed.filter((item) => this.jobs.has(item.jobId));
-    while (retained.length > this.completedJobMax) {
-      this.deleteJob(retained.shift()!.jobId);
+    const retainedByTenant = new Map<string, typeof completed>();
+    for (const item of completed) {
+      if (!item.tenantId || !this.jobs.has(item.jobId)) continue;
+      const retained = retainedByTenant.get(item.tenantId) ?? [];
+      retained.push(item);
+      retainedByTenant.set(item.tenantId, retained);
+    }
+    for (const retained of retainedByTenant.values()) {
+      while (retained.length > this.completedJobMax) {
+        this.deleteJob(retained.shift()!.jobId);
+      }
     }
   }
 
@@ -274,7 +286,7 @@ export class InProcessJobRunner {
   }
 
   private downloadUrlForPath(absolutePath: string): string | null {
-    const key = exportDownloadKey(this.deps.dataDir, absolutePath);
+    const key = exportDownloadKey(this.deps.dataDir, getRequestTenantId(), absolutePath);
     return key ? `/exports/${key}` : null;
   }
 
@@ -464,7 +476,7 @@ export class InProcessJobRunner {
     const groupBy: StlPackGroupBy = payload.group_by === "color" ? "color" : "color_dir";
     const { name, parts, completedByMatchKey } = this.repo.buildMergePartsForProfile(profileId);
     const naming = this.repo.getGlobalNaming();
-    const { rootPath, fileCounts, warnings } = exportProfileStlPack(name, parts, this.deps.exportsDir, {
+    const { rootPath, fileCounts, warnings } = exportProfileStlPack(name, parts, this.getExportsDir(), {
       missingOnly,
       completedByMatchKey: missingOnly ? completedByMatchKey : undefined,
       roleOrder: naming.export_role_order,
@@ -504,7 +516,7 @@ export class InProcessJobRunner {
       name,
       orderNumber,
       parts,
-      this.deps.exportsDir,
+      this.getExportsDir(),
       profileId,
       completedByMatchKey,
       thumbsDir,
@@ -521,7 +533,7 @@ export class InProcessJobRunner {
   private async runExportKitBundle(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const profileId = Number(payload.profile_id);
     const includePrintProgress = Boolean(payload.include_print_progress);
-    const path = exportKitBundle(this.repo, profileId, this.deps.exportsDir, includePrintProgress);
+    const path = exportKitBundle(this.repo, profileId, this.getExportsDir(), includePrintProgress);
     return {
       path,
       download_url: this.downloadUrlForPath(path),
@@ -533,7 +545,7 @@ export class InProcessJobRunner {
     // Yield once more so concurrent health checks / requests can run before STL packing.
     await new Promise<void>((resolve) => setImmediate(resolve));
     const profileId = Number(payload.profile_id);
-    const result = runExport3mfJob(this.repo, profileId, this.deps.exportsDir, {
+    const result = runExport3mfJob(this.repo, profileId, this.getExportsDir(), {
       layout_mode: String(payload.layout_mode ?? "per_plate"),
       spacing_mm: Number(payload.spacing_mm ?? 4),
       missing_only: Boolean(payload.missing_only),
@@ -650,7 +662,7 @@ export class InProcessJobRunner {
     const profileId = Number(payload.profile_id);
     const result = await runAutoSliceJob(
       this.repo,
-      this.deps.exportsDir,
+      this.getExportsDir(),
       {
         profile_id: profileId,
         layout_mode: typeof payload.layout_mode === "string" ? payload.layout_mode : "per_plate",
@@ -896,7 +908,7 @@ export async function registerJobRoutes(
 
       try {
         const parsed = await parsePrinterUploadMultipart(request, {
-          exportsDir: jobs.getExportsDir(),
+          exportsDir: jobs.getExportsDir(request.tenantId),
         });
         if (!parsed.ok) {
           return sendProblem(

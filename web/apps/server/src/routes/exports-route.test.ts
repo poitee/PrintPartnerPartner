@@ -89,7 +89,7 @@ describe("GET /exports/*", () => {
 
   it("serves an auto-slice plate thumbnail inline as image/png", async () => {
     const { app, dir } = await makeApp();
-    const thumbDir = join(dir, "exports", "my_plan", "gcode", "thumbnails");
+    const thumbDir = join(dir, "exports", "tenant-default", "my_plan", "gcode", "thumbnails");
     mkdirSync(thumbDir, { recursive: true });
     writeFileSync(join(thumbDir, "plate_01.png"), PNG);
 
@@ -106,7 +106,7 @@ describe("GET /exports/*", () => {
 
   it("still serves gcode as a downloadable attachment", async () => {
     const { app, dir } = await makeApp();
-    const gcodeDir = join(dir, "exports", "my_plan", "gcode");
+    const gcodeDir = join(dir, "exports", "tenant-default", "my_plan", "gcode");
     mkdirSync(gcodeDir, { recursive: true });
     writeFileSync(join(gcodeDir, "my_plan_voron_plate_01.gcode"), "G28\n");
 

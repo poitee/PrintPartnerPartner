@@ -79,7 +79,7 @@ export function assertMcpHttpAllowed(
       reply,
       503,
       "Service Unavailable",
-      "PRINT_PARTNER_API_KEY is required for /api/v1/mcp when HOST is not loopback",
+      "Configure an API key in Settings or PRINT_PARTNER_API_KEY before exposing /api/v1/mcp on a non-loopback host",
     );
     return false;
   }

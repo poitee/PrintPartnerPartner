@@ -6,6 +6,7 @@ import { runExport3mfJob } from "../services/export-3mf-job.js";
 import { localAppOpenHint, stagePlatesToExchange } from "../services/slicer-handoff.js";
 import { loadFleet } from "../services/printer-fleet.js";
 import { validateSlicerGuiUrl } from "../services/slicer-instances.js";
+import { tenantExportDirectory } from "../lib/secure-path.js";
 
 type RouteDeps = {
   repo: AppRepository;
@@ -67,10 +68,11 @@ export async function registerSlicerHandoffRoutes(
     if (!enabledIds.length) {
       return reply.status(400).send({ detail: "No printers enabled for export" });
     }
+    const exportsDir = tenantExportDirectory(deps.exportsDir, request.tenantId);
 
     let result: ReturnType<typeof runExport3mfJob>;
     try {
-      result = runExport3mfJob(deps.repo, profileId, deps.exportsDir, {
+      result = runExport3mfJob(deps.repo, profileId, exportsDir, {
         layout_mode: body.layout_mode ?? "per_plate",
         missing_only: body.missing_only ?? false,
         enabled_printer_ids: enabledIds,
@@ -98,7 +100,7 @@ export async function registerSlicerHandoffRoutes(
         instanceId: instance.id,
         sourcePaths: paths,
         planSlug,
-        exportsRoot: deps.exportsDir,
+        exportsRoot: exportsDir,
       });
       return {
         gui_url: instance.guiUrl.trim(),

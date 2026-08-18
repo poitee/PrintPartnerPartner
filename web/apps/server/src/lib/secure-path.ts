@@ -72,8 +72,20 @@ export function createReadStreamUnderRoot(root: string, relativePath: string): R
   return file ? readStreamForFileUnderRoot(root, file) : null;
 }
 
-export function openExportFileStream(dataDir: string, userKey: string): ReadStream | null {
-  return createReadStreamUnderRoot(join(dataDir, "exports"), userKey);
+export function tenantExportDirectory(exportsRoot: string, tenantId: string): string {
+  const segment = `tenant-${encodeURIComponent(tenantId).replace(/\./g, "%2E")}`;
+  return join(exportsRoot, segment);
+}
+
+export function openExportFileStream(
+  dataDir: string,
+  tenantId: string,
+  userKey: string,
+): ReadStream | null {
+  return createReadStreamUnderRoot(
+    tenantExportDirectory(join(dataDir, "exports"), tenantId),
+    userKey,
+  );
 }
 
 export function openRepoStlMeshStream(
@@ -143,9 +155,13 @@ export function assertFileUnderRoot(root: string, relativePath: string, maxBytes
   return file;
 }
 
-/** Map an absolute path to a URL-safe export download key under dataDir/exports. */
-export function exportDownloadKey(dataDir: string, absolutePath: string): string | null {
-  const exportsRoot = resolve(dataDir, "exports");
+/** Map an absolute path to a URL-safe export key under the current tenant's export directory. */
+export function exportDownloadKey(
+  dataDir: string,
+  tenantId: string,
+  absolutePath: string,
+): string | null {
+  const exportsRoot = resolve(tenantExportDirectory(join(dataDir, "exports"), tenantId));
   const file = resolve(absolutePath);
   if (file !== exportsRoot && !file.startsWith(`${exportsRoot}/`)) return null;
   return file.slice(exportsRoot.length).replace(/^\/+/, "");

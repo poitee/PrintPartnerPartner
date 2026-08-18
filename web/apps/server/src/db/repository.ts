@@ -324,6 +324,12 @@ export class AppRepository {
     if (!visible) throw new Error("Profile not found");
   }
 
+  private requirePart(partId: number): PartDbRow {
+    const part = this.getPartRow(partId);
+    if (!part) throw new Error("Part not found");
+    return part;
+  }
+
   async ping(): Promise<boolean> {
     const db = this.db as DrizzleDb & {
       execute?: (query: ReturnType<typeof sql>) => { run: () => void };
@@ -1335,7 +1341,6 @@ export class AppRepository {
   }
 
   deleteProfile(id: number): void {
-    this.requireProfile(id);
     this.db
       .delete(this.schema.buildProfiles)
       .where(and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)))
@@ -1984,7 +1989,12 @@ export class AppRepository {
     return this.db
       .select()
       .from(this.schema.printProgress)
-      .where(eq(this.schema.printProgress.partId, partId))
+      .where(
+        and(
+          eq(this.schema.printProgress.tenantId, this.tenantId),
+          eq(this.schema.printProgress.partId, partId),
+        ),
+      )
       .all()
       .map((r) => ({
         id: r.id,
@@ -1996,7 +2006,16 @@ export class AppRepository {
   }
 
   private saveProgressRows(partId: number, rows: ProgressRow[]): void {
-    this.db.delete(this.schema.printProgress).where(eq(this.schema.printProgress.partId, partId)).run();
+    this.requirePart(partId);
+    this.db
+      .delete(this.schema.printProgress)
+      .where(
+        and(
+          eq(this.schema.printProgress.tenantId, this.tenantId),
+          eq(this.schema.printProgress.partId, partId),
+        ),
+      )
+      .run();
     for (const row of rows) {
       const vals: Record<string, unknown> = {
         tenantId: this.tenantId,
@@ -2016,6 +2035,7 @@ export class AppRepository {
   }
 
   ensureProgressForPart(part: PartDbRow): void {
+    this.requirePart(part.id);
     const rows = this.progressRowsForPart(part.id);
     const qty = Math.max(1, part.quantityEffective);
     const ensured = ensureProgressRows(rows, part.id, qty);
@@ -2030,7 +2050,12 @@ export class AppRepository {
     const allProgress = this.db
       .select()
       .from(this.schema.printProgress)
-      .where(inArray(this.schema.printProgress.partId, partIds))
+      .where(
+        and(
+          eq(this.schema.printProgress.tenantId, this.tenantId),
+          inArray(this.schema.printProgress.partId, partIds),
+        ),
+      )
       .all();
 
     const byPart = new Map<number, ProgressRow[]>();
@@ -2063,7 +2088,12 @@ export class AppRepository {
     const allProgress = this.db
       .select()
       .from(this.schema.printProgress)
-      .where(inArray(this.schema.printProgress.partId, partIds))
+      .where(
+        and(
+          eq(this.schema.printProgress.tenantId, this.tenantId),
+          inArray(this.schema.printProgress.partId, partIds),
+        ),
+      )
       .all();
 
     const byPart = new Map<number, ProgressRow[]>();
@@ -2170,8 +2200,7 @@ export class AppRepository {
   }
 
   patchPartProgress(partId: number, unitIndex: number, completed: boolean) {
-    const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
-    if (!part) throw new Error("Part not found");
+    const part = this.requirePart(partId);
     const qty = Math.max(1, part.quantityEffective);
     if (unitIndex >= qty) throw new Error("unit_index out of range");
     this.ensureProgressForPart(part);
@@ -2195,8 +2224,7 @@ export class AppRepository {
   }
 
   patchPartAssembled(partId: number, unitIndex: number, assembled: boolean) {
-    const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
-    if (!part) throw new Error("Part not found");
+    const part = this.requirePart(partId);
     const qty = Math.max(1, part.quantityEffective);
     if (unitIndex < 0 || unitIndex >= qty) throw new Error("unit_index out of range");
     this.ensureProgressForPart(part);
@@ -2217,8 +2245,7 @@ export class AppRepository {
 
   /** Read accessor: the assembled state of every unit of a single part. */
   getPartAssembled(partId: number) {
-    const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
-    if (!part) throw new Error("Part not found");
+    const part = this.requirePart(partId);
     const qty = Math.max(1, part.quantityEffective);
     this.ensureProgressForPart(part);
     const rows = this.progressRowsForPart(partId);
@@ -2242,8 +2269,7 @@ export class AppRepository {
       manifest_source?: string | null;
     },
   ): PartRow {
-    const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
-    if (!part) throw new Error("Part not found");
+    const part = this.requirePart(partId);
     const updates: Partial<typeof this.schema.parts.$inferInsert> = {};
     if (patch.included != null) updates.included = patch.included;
     if (patch.filament_color_id !== undefined) {
@@ -2262,9 +2288,18 @@ export class AppRepository {
     if (patch.option_group_id !== undefined) updates.optionGroupId = patch.option_group_id;
     if (patch.manifest_source !== undefined) updates.manifestSource = patch.manifest_source;
     if (Object.keys(updates).length) {
-      this.db.update(this.schema.parts).set(updates).where(eq(this.schema.parts.id, partId)).run();
+      this.db
+        .update(this.schema.parts)
+        .set(updates)
+        .where(
+          and(
+            eq(this.schema.parts.tenantId, this.tenantId),
+            eq(this.schema.parts.id, partId),
+          ),
+        )
+        .run();
     }
-    const updated = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get()!;
+    const updated = this.requirePart(partId);
     const row = partRow(updated);
     const color = updated.filamentColorId ? getColorById(updated.filamentColorId) : null;
     row.filament_display = color?.combo_label ?? "";
@@ -2829,8 +2864,8 @@ export class AppRepository {
   }
 
   listSourceNotes(projectId: number, profileId?: number | null): SourceNoteSummary[] {
-    if (profileId != null) this.requireProfile(profileId);
     if (!this.schema.sourceNotes) return [];
+    if (profileId != null) this.requireProfile(profileId);
     const rows = this.db
       .select()
       .from(this.schema.sourceNotes)
@@ -2980,8 +3015,8 @@ export class AppRepository {
   }
 
   listPlanDecisions(planId: number, limit = 200): PlanDecision[] {
-    this.requireProfile(planId);
     if (!this.schema.planDecisions) return [];
+    this.requireProfile(planId);
     const rows = this.db
       .select()
       .from(this.schema.planDecisions)
@@ -3026,8 +3061,8 @@ export class AppRepository {
     rationale?: string | null;
     result?: Record<string, unknown> | null;
   }): PlanDecision {
-    this.requireProfile(input.planId);
     if (!this.schema.planDecisions) throw new Error("plan_decisions table unavailable");
+    this.requireProfile(input.planId);
     const now = new Date().toISOString();
     const inserted = this.db
       .insert(this.schema.planDecisions)
@@ -3051,9 +3086,9 @@ export class AppRepository {
 
   /** Delete plan_decisions for one plan (tenant-scoped). Returns rows removed. */
   deletePlanDecisionsForPlan(planId: number): number {
-    this.requireProfile(planId);
     if (!this.schema.planDecisions) return 0;
     if (!planId || planId <= 0) return 0;
+    this.requireProfile(planId);
     const before = this.listPlanDecisions(planId, 10_000).length;
     if (before === 0) return 0;
     this.db
@@ -3091,8 +3126,8 @@ export class AppRepository {
   }
 
   listPlanSnapshots(planId: number): PlanSnapshotSummary[] {
-    this.requireProfile(planId);
     if (!this.schema.planSnapshots) return [];
+    this.requireProfile(planId);
     const rows = this.db
       .select()
       .from(this.schema.planSnapshots)
@@ -3132,8 +3167,8 @@ export class AppRepository {
     source: PlanSnapshotSource;
     payload: Record<string, unknown>;
   }): PlanSnapshot {
-    this.requireProfile(input.planId);
     if (!this.schema.planSnapshots) throw new Error("plan_snapshots table unavailable");
+    this.requireProfile(input.planId);
     const now = new Date().toISOString();
     const inserted = this.db
       .insert(this.schema.planSnapshots)

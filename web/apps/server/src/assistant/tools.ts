@@ -2969,7 +2969,11 @@ export async function applyAssistantAction(
             steps.some((s) => s.type === "start_recompute")
           ) {
             try {
-              const terminal = await deps.jobs.waitForTerminal(applied.job_id, 180_000);
+              const terminal = await deps.jobs.waitForTerminal(
+                applied.job_id,
+                180_000,
+                deps.tenantId ?? "default",
+              );
               if (terminal.status !== "done") {
                 return {
                   ok: false,
