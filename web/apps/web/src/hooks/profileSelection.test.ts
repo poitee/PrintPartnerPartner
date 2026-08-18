@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   reconcileSelectedProfileId,
   shouldBlockUrlProfileSync,
+  shouldReconcileProfileSelection,
 } from "./profileSelection";
 
 describe("reconcileSelectedProfileId", () => {
@@ -46,5 +47,12 @@ describe("shouldBlockUrlProfileSync", () => {
 
   it("does not block when selection drifted away from pending", () => {
     expect(shouldBlockUrlProfileSync(1, 42, 1)).toBe(false);
+  });
+});
+
+describe("shouldReconcileProfileSelection", () => {
+  it("reconciles only after a successful profile request", () => {
+    expect(shouldReconcileProfileSelection(false)).toBe(false);
+    expect(shouldReconcileProfileSelection(true)).toBe(true);
   });
 });
