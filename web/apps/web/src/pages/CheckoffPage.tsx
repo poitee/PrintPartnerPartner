@@ -886,6 +886,7 @@ export default function CheckoffPage() {
               className="text-sm text-muted-foreground"
               role={engineState === "loading" ? "status" : undefined}
               aria-live={engineState === "loading" ? "polite" : undefined}
+              aria-atomic={engineState === "loading" ? "true" : undefined}
             >
               {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to use Progress."
@@ -914,6 +915,7 @@ export default function CheckoffPage() {
             className="flex items-center gap-2 pt-6"
             role="status"
             aria-live="polite"
+            aria-atomic="true"
           >
             <Spinner className="size-4" aria-hidden="true" />
             <p className="text-sm text-muted-foreground">Loading progress…</p>
@@ -1284,13 +1286,13 @@ export default function CheckoffPage() {
 
               {grouped.map((repo) => (
                 <section key={repo.repoLayer} className="sheet-repo">
-                  <h2 className="sheet-repo-title">
+                  <h3 className="sheet-repo-title">
                     {repo.repoLabel}
                     <span className="sheet-repo-count">{repo.partCount}</span>
-                  </h2>
+                  </h3>
                   {repo.folders.map((group) => (
                     <div key={group.folder} className="sheet-folder">
-                      <h3 className="sheet-folder-title">{group.folder}</h3>
+                      <h4 className="sheet-folder-title">{group.folder}</h4>
                       <div className="sheet-table-wrap">
                         <table className="sheet-table">
                           <thead>

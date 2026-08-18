@@ -2,7 +2,13 @@ import { type FormEvent, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader } from "../components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
 import { useAuth } from "../context/AuthContext";
 import { authOAuthUrl } from "../api/engine";
 
@@ -48,9 +54,9 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <h1 className="text-base font-semibold leading-none tracking-tight">
-            Print Partner
-          </h1>
+          <CardTitle asChild>
+            <h1>Print Partner</h1>
+          </CardTitle>
           <CardDescription>
             {mode === "login" ? "Sign in to your account" : "Create an account"}
           </CardDescription>

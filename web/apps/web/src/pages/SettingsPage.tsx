@@ -410,7 +410,7 @@ export default function SettingsPage() {
 
         <Card className="shadow-none">
           <CardHeader>
-            <CardTitle className="text-base">Custom filaments</CardTitle>
+            <CardTitle level={3} className="text-base">Custom filaments</CardTitle>
             <CardDescription>
               Named colors appear in the filament picker when assigning parts.
             </CardDescription>
@@ -496,7 +496,7 @@ export default function SettingsPage() {
                 <RefreshCw className="h-4 w-4" aria-hidden />
               </span>
               <div>
-                <CardTitle className="text-base">Source update checks</CardTitle>
+                <CardTitle level={3} className="text-base">Source update checks</CardTitle>
                 <CardDescription>
                   Compare synced Git repos to their remotes without pulling. Badges appear on
                   Sources when updates are available.
@@ -557,7 +557,7 @@ export default function SettingsPage() {
 
         <Card>
           <CardHeader accent>
-            <CardTitle className="text-base">Auto update build</CardTitle>
+            <CardTitle level={3} className="text-base">Auto update build</CardTitle>
             <CardDescription>
               When enabled, Print Partner automatically recomputes small plans a few seconds after
               file picks or colors change (when the stale banner appears on Build).
@@ -611,7 +611,7 @@ export default function SettingsPage() {
                 <KeyRound className="h-4 w-4" aria-hidden />
               </span>
               <div>
-                <CardTitle className="text-base">GitHub personal access token</CardTitle>
+                <CardTitle level={3} className="text-base">GitHub personal access token</CardTitle>
                 <CardDescription>
                   Optional. Improves GitHub API rate limits when syncing private repos. Token is stored
                   locally in the engine database.
@@ -678,7 +678,7 @@ export default function SettingsPage() {
 
         <Card>
           <CardHeader accent>
-            <CardTitle className="text-base">Discord notifications</CardTitle>
+            <CardTitle level={3} className="text-base">Discord notifications</CardTitle>
             <CardDescription>
               Get notified in Discord when repos update — like Sonarr/Radarr.
             </CardDescription>
@@ -830,7 +830,7 @@ export default function SettingsPage() {
       <SettingsSection id="build-tracking" title="Build Tracking">
         <Card>
           <CardHeader accent>
-            <CardTitle className="text-base">Assembly tracking</CardTitle>
+            <CardTitle level={3} className="text-base">Assembly tracking</CardTitle>
             <CardDescription>
               Adds an Assembled toggle to each completed part - useful for multi-week builds where
               you want to track which printed parts have been physically installed. Tracks
@@ -890,7 +890,7 @@ export default function SettingsPage() {
                 <SunMoon className="h-4 w-4" aria-hidden />
               </span>
               <div>
-                <CardTitle className="text-base">Appearance</CardTitle>
+                <CardTitle level={3} className="text-base">Appearance</CardTitle>
                 <CardDescription>
                   Choose light, dark, or match your system preference. In-app Export and
                   print dialogs follow the theme. Paper checkoff sheets stay light when
@@ -911,7 +911,7 @@ export default function SettingsPage() {
                 <CalendarClock className="h-4 w-4" aria-hidden />
               </span>
               <div>
-                <CardTitle className="text-base">Date &amp; time format</CardTitle>
+                <CardTitle level={3} className="text-base">Date &amp; time format</CardTitle>
                 <CardDescription>
                   Controls how timestamps like &quot;Last synced&quot; and printed-checklist &quot;Generated&quot;
                   lines are displayed everywhere in the app.

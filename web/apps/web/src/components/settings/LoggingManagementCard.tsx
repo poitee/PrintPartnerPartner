@@ -131,7 +131,7 @@ export default function LoggingManagementCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Logging & Monitoring</CardTitle>
+        <CardTitle level={3}>Logging & Monitoring</CardTitle>
         <CardDescription>
           Configure logging verbosity and view system workflow statistics
         </CardDescription>

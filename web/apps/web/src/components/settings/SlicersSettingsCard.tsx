@@ -210,7 +210,7 @@ export default function SlicersSettingsCard({ engineReady }: SlicersSettingsCard
   return (
     <Card id="slicers" className="shadow-none">
       <CardHeader>
-        <CardTitle className="text-base">Slicers</CardTitle>
+        <CardTitle level={3} className="text-base">Slicers</CardTitle>
         <CardDescription>
           Register slicer GUIs and profile watch paths. Profile sync and Export links use enabled
           instances. Changing watch paths or enablement reloads sync watchers automatically.

@@ -38,7 +38,7 @@ function PageLoader() {
     <div
       role="status"
       aria-live="polite"
-      aria-label="Loading page"
+      aria-atomic="true"
       style={{
         display: "flex",
         alignItems: "center",

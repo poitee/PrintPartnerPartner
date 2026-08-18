@@ -387,6 +387,8 @@ export default function Preview3D({
 
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
+        controls.minDistance = maxDim * 0.25;
+        controls.maxDistance = maxDim * 8;
         controlsRef.current = controls;
 
         const resize = () => {
@@ -500,6 +502,11 @@ export default function Preview3D({
     if (!handled) return;
     event.preventDefault();
     spherical.phi = THREE.MathUtils.clamp(spherical.phi, 0.05, Math.PI - 0.05);
+    spherical.radius = THREE.MathUtils.clamp(
+      spherical.radius,
+      controls.minDistance,
+      controls.maxDistance,
+    );
     camera.position.copy(controls.target).add(new THREE.Vector3().setFromSpherical(spherical));
     camera.lookAt(controls.target);
     controls.update();
@@ -517,7 +524,12 @@ export default function Preview3D({
     <div className={`preview3d ${className}`.trim()}>
       {filename && <p className="preview-filename">{filename}</p>}
       {mode === "loading" && (
-        <p className="muted flex items-center gap-2" role="status" aria-live="polite">
+        <p
+          className="muted flex items-center gap-2"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
           Loading 3D preview…
         </p>
@@ -573,9 +585,9 @@ export default function Preview3D({
           </p>
         )}
         <p id={instructionsId} className="muted small mt-2">
-          Drag or swipe to rotate and scroll or pinch to zoom. Keyboard: use the
-          arrow keys to rotate and + or − to zoom. Use Measure for a text
-          alternative with exact dimensions.
+          Drag or swipe to orbit. Scroll or pinch to zoom. With the preview
+          focused, use arrow keys to orbit and + or − to zoom. Measure shows
+          exact dimensions.
         </p>
       </div>
     </div>

@@ -62,6 +62,7 @@ describe("lazy route loading", () => {
     const loading = screen.getByRole("status");
     expect(loading.getAttribute("aria-live")).toBe("polite");
     expect(loading.getAttribute("aria-atomic")).toBe("true");
+    expect(loading.getAttribute("aria-label")).toBeNull();
     expect(loading.textContent).toContain("Loading");
 
     loginPageModule.resolve({

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
 import { cn } from "@/lib/utils";
 
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
@@ -34,10 +35,22 @@ const CardHeader = React.forwardRef<HTMLDivElement, CardHeaderProps>(
 );
 CardHeader.displayName = "CardHeader";
 
-const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
-  ({ className, ...props }, ref) => (
-    <h3 ref={ref} className={cn("text-base font-semibold leading-none tracking-tight", className)} {...props} />
-  ),
+type CardTitleProps = React.HTMLAttributes<HTMLHeadingElement> & {
+  asChild?: boolean;
+  level?: 2 | 3 | 4 | 5 | 6;
+};
+
+const CardTitle = React.forwardRef<HTMLElement, CardTitleProps>(
+  ({ asChild = false, className, level = 2, ...props }, ref) => {
+    const Component: React.ElementType = asChild ? Slot : `h${level}`;
+    return (
+      <Component
+        ref={ref}
+        className={cn("text-base font-semibold leading-none tracking-tight", className)}
+        {...props}
+      />
+    );
+  },
 );
 CardTitle.displayName = "CardTitle";
 

@@ -35,7 +35,7 @@ export default function AccountPasswordCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
+        <CardTitle level={3} className="flex items-center gap-2 text-base">
           <KeyRound className="size-4" aria-hidden />
           Account password
         </CardTitle>

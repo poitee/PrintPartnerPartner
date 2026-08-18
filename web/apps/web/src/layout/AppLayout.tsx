@@ -137,7 +137,7 @@ export default function AppLayout() {
         <div className="flex min-h-screen min-w-0 bg-background">
           <a
             href="#main-content"
-            className="sr-only fixed left-3 top-3 z-[100] rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-lg focus:not-sr-only focus:outline-none focus:ring-2 focus:ring-ring"
+            className="skip-link"
           >
             Skip to main content
           </a>

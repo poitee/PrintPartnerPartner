@@ -265,7 +265,7 @@ export default function PartsPage() {
 
           {(mergeConflicts.length > 0 || blockers.length > 0 || warnings.length > 0) && (
             <section className="section-card space-y-3">
-              <h3 className="text-sm font-semibold">Issues</h3>
+              <h2 className="text-sm font-semibold">Issues</h2>
               {mergeConflicts.length > 0 && (
                 <div
                   className="flex gap-2 rounded-md border border-warning bg-warning/15 px-3 py-2.5 text-sm"
@@ -367,7 +367,7 @@ export default function PartsPage() {
           )}
 
           <section className="section-card">
-            <h3 className="mb-2 text-sm font-semibold">Sources</h3>
+            <h2 className="mb-2 text-sm font-semibold">Sources</h2>
             <ul className="space-y-2 text-sm">
               {review.layers.map((layer) => (
                 <li key={layer.id} className="flex flex-wrap items-center gap-2">

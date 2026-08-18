@@ -137,7 +137,7 @@ export default function BackupManagementCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Backup & Restore</CardTitle>
+        <CardTitle level={3}>Backup & Restore</CardTitle>
         <CardDescription>
           Create and manage database backups with automatic rollback protection
         </CardDescription>

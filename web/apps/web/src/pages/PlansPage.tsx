@@ -23,6 +23,7 @@ import { SegmentedControl } from "../components/ui/segmented-control";
 import { usePlanActions } from "../context/PlanActionsContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { canArchivePlan } from "../lib/planPickerGroups";
 import {
   filterPlansList,
@@ -57,6 +58,7 @@ export default function PlansPage() {
     openArchivePlan,
   } = usePlanActions();
   const touchMutation = useTouchProfileLastUsedMutation();
+  const useCompactPlanList = useMediaQuery("(max-width: 639px)");
 
   const [filter, setFilter] = useState<PlansListFilter>("active");
   const engineState = resolveEngineState({
@@ -169,6 +171,7 @@ export default function PlansPage() {
               className="text-sm text-muted-foreground"
               role={engineState === "loading" ? "status" : undefined}
               aria-live={engineState === "loading" ? "polite" : undefined}
+              aria-atomic={engineState === "loading" ? "true" : undefined}
             >
               {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to manage plans."
@@ -194,6 +197,7 @@ export default function PlansPage() {
               className="text-sm text-muted-foreground"
               role="status"
               aria-live="polite"
+              aria-atomic="true"
             >
               Loading plans…
             </p>
@@ -224,10 +228,8 @@ export default function PlansPage() {
             </p>
           ) : (
             <>
-              <ul
-                className="space-y-2 sm:hidden"
-                aria-label="Plans on small screens"
-              >
+              {useCompactPlanList ? (
+              <ul className="space-y-2" aria-label="Plans">
                 {rows.map((plan) => {
                   const selected = plan.id === selectedProfileId;
                   return (
@@ -268,9 +270,12 @@ export default function PlansPage() {
                   );
                 })}
               </ul>
-
-              <div className="hidden overflow-x-auto sm:block">
-              <table className="w-full min-w-[36rem] border-collapse text-sm">
+              ) : (
+              <div className="overflow-x-auto">
+              <table
+                className="w-full min-w-[36rem] border-collapse text-sm"
+                aria-label="Plans"
+              >
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
                     <th className="py-2 pr-3 font-medium">Name</th>
@@ -332,6 +337,7 @@ export default function PlansPage() {
                 </tbody>
               </table>
               </div>
+              )}
             </>
           )}
         </>
