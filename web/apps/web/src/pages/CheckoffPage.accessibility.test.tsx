@@ -187,7 +187,7 @@ describe("CheckoffPage accessibility", () => {
   });
 
   it("keeps the printable title subordinate to the single page h1", () => {
-    render(
+    const { container } = render(
       <MemoryRouter>
         <CheckoffPage />
       </MemoryRouter>,
@@ -195,7 +195,9 @@ describe("CheckoffPage accessibility", () => {
 
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Progress");
-    expect(screen.getByRole("heading", { level: 2, name: "Voron" })).toBeTruthy();
+    const printTitle = container.querySelector(".sheet-title");
+    expect(printTitle?.tagName).toBe("H2");
+    expect(printTitle?.textContent).toBe("Voron");
   });
 
   it("announces initial progress failures as alerts", () => {
