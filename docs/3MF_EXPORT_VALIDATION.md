@@ -14,7 +14,7 @@ Print Partner writes **3MF Core + Materials** packages via an in-process **fflat
 
 ## Setup
 
-1. **Settings → Printer fleet** — add machines (presets or custom bed). Set **loaded filament color ids** on each slot so kit colors can route to the right printer.
+1. **Settings → Printer fleet** — add machines (presets or custom bed). Set **loaded filament** on each slot from the catalog so kit colors can route to the right printer.
 2. On **Export**, use **Printers for this plan** to enable a subset of the fleet for the active kit (empty selection = whole fleet).
 3. Choose **Export 3MF** layout:
    - **One file per plate** (default) — best for Prusa / Bambu / Orca

@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **Multi-printer 3MF print plan** — Export uses the kit’s enabled fleet machines (Settings → Printer fleet + Export “Printers for this plan”). Parts assign by loaded `filament_color_id`, pack per bed, and write one 3MF per plate (zip / single-offset / single-plate-only modes) plus a `print_plan.json` manifest. See `docs/3MF_EXPORT_VALIDATION.md`.
+- **Multi-printer 3MF print plan** — Export uses the kit’s enabled fleet machines (Settings → Printer fleet + Export “Printers for this plan”). Parts assign by loaded `filament_color_id`, pack per bed, and write one 3MF per plate (zip / single-offset / single-plate-only modes) plus a `print_plan.json` manifest. Settings slots use the filament catalog picker; Export shows per-printer plate estimates. See `docs/3MF_EXPORT_VALIDATION.md`.
 - **Auto-sync missing STLs + background thumbs (GRE-235)** — when a plan is selected (or Parts opens / compose applies) and STLs are missing or thumbs are empty, one coordinated job syncs sources then regenerates thumbnails. Parts shows Spinner + “Syncing STLs…” while running; Sync remains as retry on failure or if files are still gone. Review parts expose `stl_missing` / `thumb_empty` (distinct from checkoff `missing`).
 - **HTTP MCP attach (GRE-225)** — streamable HTTP at `/api/v1/mcp`; `PRINT_PARTNER_API_KEY` required unless `HOST` is loopback; pending proposes are per MCP session; Cursor plugin at `cursor-plugin/print-partner`; tools `get_remaining`, `duplicate_plan`, `archive_plan` (confirm-to-apply). Connect guide: `docs/assistant-mcp.md`.
 

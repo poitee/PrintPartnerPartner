@@ -8,8 +8,24 @@ import { Link } from "react-router-dom";
 import { usePlateWorkspaceQuery } from "../../queries/plateWorkspace";
 import { useEnabledPrintersMutation } from "../../queries/printAssignments";
 import { settingsPrintersRoute } from "../../lib/routes";
+import type { PrinterBedPreview, PrinterMachine } from "../../api/engine";
 import { Badge } from "../ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+
+export function formatPlateEstimates(
+  printers: PrinterMachine[],
+  preview: PrinterBedPreview[],
+  enabledIds: string[],
+): string {
+  const enabled = new Set(enabledIds);
+  return printers
+    .filter((p) => enabled.has(p.id))
+    .map((p) => {
+      const n = preview.find((row) => row.printer_id === p.id)?.plates.length ?? 0;
+      return `${p.name}: ~${n} plate${n === 1 ? "" : "s"}`;
+    })
+    .join(" · ");
+}
 
 type Props = {
   profileId: number | null;
@@ -117,9 +133,12 @@ export default function KitPrinterSelectPanel({ profileId, engineReady }: Props)
             })}
           </ul>
         )}
-        {data && data.plate_count > 0 ? (
+        {data ? (
           <p className="mt-2 text-[11px] text-muted-foreground">
-            Estimated {data.plate_count} plate{data.plate_count === 1 ? "" : "s"}
+            {formatPlateEstimates(printers, data.preview, treatAllAsEnabled ? printers.map((p) => p.id) : savedIds) ||
+              (data.plate_count > 0
+                ? `Estimated ${data.plate_count} plate${data.plate_count === 1 ? "" : "s"}`
+                : "No plates yet")}
             {data.warnings.length ? ` · ${data.warnings.length} warning(s)` : ""}
           </p>
         ) : null}

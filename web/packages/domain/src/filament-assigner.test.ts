@@ -121,6 +121,16 @@ describe("assignPartsToPrinters", () => {
     expect(Math.abs(byPrinter.a.length - byPrinter.b.length)).toBeLessThanOrEqual(1);
   });
 
+  it("matches a display-only part to a loaded slot label", () => {
+    const voron = printer("voron", "Voron 350", [
+      { slot: 1, filament_color_id: "asa-black", label: "ASA · Black" },
+    ]);
+    const copies = [copy("panel.stl", { filamentDisplay: "ASA · Black" })];
+    const [byPrinter, warnings] = assignPartsToPrinters(copies, [voron]);
+    expect(warnings).toEqual([]);
+    expect(byPrinter.voron.map((c) => c.part.filename)).toEqual(["panel.stl"]);
+  });
+
   it("returns a warning when no printers are enabled", () => {
     const copies = [copy("bracket.stl", { filamentColorId: "asa-black" })];
     const [byPrinter, warnings] = assignPartsToPrinters(copies, []);

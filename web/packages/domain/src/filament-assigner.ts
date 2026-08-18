@@ -51,6 +51,8 @@ function loadedFilamentIds(printer: PrinterMachine): Set<string> {
   const ids = new Set<string>();
   for (const lf of printer.loaded_filaments) {
     if (lf.filament_color_id) ids.add(lf.filament_color_id);
+    const label = lf.label.trim();
+    if (label) ids.add(`display:${label}`);
   }
   return ids;
 }
