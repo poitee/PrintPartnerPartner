@@ -433,7 +433,6 @@ export default function CheckoffPage() {
         markAuxiliarySuccess("phase-progress");
       })
       .catch((e) => {
-        setPhaseManifest(null);
         reportAuxiliaryError(
           "phase-progress",
           `Could not load phase progress: ${e instanceof Error ? e.message : String(e)}`,
