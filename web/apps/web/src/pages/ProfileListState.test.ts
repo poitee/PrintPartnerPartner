@@ -31,6 +31,12 @@ describe("engine-dependent page states", () => {
     expect(settings).toMatch(/disabled=\{!engineReady[^}]*\}[\s\S]*?Save token/);
   });
 
+  it("keeps Settings controls unavailable after its initial load fails", () => {
+    expect(settings).toContain("settingsLoadError");
+    expect(settings).toContain("Could not load settings");
+    expect(settings).toContain("const settingsReady");
+  });
+
   it("does not render the Export send panel without a selected plan", () => {
     expect(exportPage).toMatch(
       /selectedProfileId == null[\s\S]*?Open a plan to send[\s\S]*?:\s*\([\s\S]*?<PrinterSendPanel/,
