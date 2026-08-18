@@ -197,7 +197,7 @@ export default function ExportPage() {
               remainingParts={remainingParts}
               profileId={selectedProfileId}
               planName={planName}
-              engineReady={Boolean(health.ok)}
+              engineReady={engineState === "ready"}
             />
           </Suspense>
 
@@ -211,17 +211,17 @@ export default function ExportPage() {
 
             <KitPrinterSelectPanel
               profileId={selectedProfileId}
-              engineReady={Boolean(health.ok)}
+              engineReady={engineState === "ready"}
             />
 
             <ManualAssignmentPanel
               profileId={selectedProfileId}
-              engineReady={Boolean(health.ok)}
+              engineReady={engineState === "ready"}
             />
 
             <PlatePreviewPanel
               profileId={selectedProfileId}
-              engineReady={Boolean(health.ok)}
+              engineReady={engineState === "ready"}
             />
 
             {loading && !review ? (
