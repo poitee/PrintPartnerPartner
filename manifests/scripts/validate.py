@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import shutil
 import sys
 from typing import Any
 
@@ -121,6 +122,32 @@ def check_embedded_copy_drift(repo_root: Path = REPO_ROOT) -> list[str]:
     return errors
 
 
+def sync_embedded_copies(repo_root: Path = REPO_ROOT) -> list[str]:
+    """Regenerate server copies from the canonical registry and manifests."""
+    pairs, errors = _canonical_embedded_pairs(repo_root)
+    errors = [
+        error
+        for error in errors
+        if "generated embedded copy has no canonical registry entry" not in error
+    ]
+    if errors:
+        return errors
+
+    embedded_dir = repo_root / "web" / "apps" / "server" / "src" / "data" / "manifests"
+    expected = {embedded.name for _, embedded in pairs}
+    embedded_dir.mkdir(parents=True, exist_ok=True)
+    for path in embedded_dir.glob("*.yaml"):
+        if path.name not in expected:
+            path.unlink()
+    for canonical, embedded in pairs:
+        if not canonical.is_file():
+            errors.append(f"{canonical}: canonical manifest source is missing")
+            continue
+        embedded.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(canonical, embedded)
+    return errors
+
+
 def validate_repository(repo_root: Path = REPO_ROOT) -> list[str]:
     """Validate every canonical community manifest, registry YAML, and drift."""
     manifests_root = repo_root / "manifests"
@@ -149,8 +176,15 @@ def main(argv: list[str] | None = None) -> int:
         default=REPO_ROOT,
         help="repository root (defaults to the validator's checkout)",
     )
+    parser.add_argument(
+        "--sync-embedded",
+        action="store_true",
+        help="regenerate server copies from canonical manifests before validation",
+    )
     args = parser.parse_args(argv)
-    errors = validate_repository(args.repo_root.resolve())
+    repo_root = args.repo_root.resolve()
+    errors = sync_embedded_copies(repo_root) if args.sync_embedded else []
+    errors.extend(validate_repository(repo_root))
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
