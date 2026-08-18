@@ -202,9 +202,9 @@ export default function ExportPage() {
           </Suspense>
 
           <div className="space-y-3">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Slicer input
-            </p>
+            </h2>
 
             <SlicerLinksPanel />
             <SlicerHandoffPanel />

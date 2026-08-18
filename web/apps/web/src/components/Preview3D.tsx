@@ -32,6 +32,8 @@ type Props = {
   filename?: string;
   meshColor?: string;
   className?: string;
+  /** Keep full controls discoverable without persistent copy in compact surfaces. */
+  instructions?: "visible" | "sr-only";
 };
 
 const DEFAULT_COLOR = "#c41230";
@@ -187,6 +189,7 @@ export default function Preview3D({
   filename,
   meshColor = DEFAULT_COLOR,
   className = "",
+  instructions = "visible",
 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const materialRef = useRef<THREE.MeshStandardMaterial | null>(null);
@@ -522,14 +525,17 @@ export default function Preview3D({
 
   return (
     <div className={`preview3d ${className}`.trim()}>
+      <p
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {mode === "loading" ? "Loading 3D preview…" : ""}
+      </p>
       {filename && <p className="preview-filename">{filename}</p>}
       {mode === "loading" && (
-        <p
-          className="muted flex items-center gap-2"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-        >
+        <p className="muted flex items-center gap-2" aria-hidden="true">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
           Loading 3D preview…
         </p>
@@ -584,7 +590,10 @@ export default function Preview3D({
             {formatMm(dims.x)} × {formatMm(dims.y)} × {formatMm(dims.z)} mm (X × Y × Z)
           </p>
         )}
-        <p id={instructionsId} className="muted small mt-2">
+        <p
+          id={instructionsId}
+          className={instructions === "sr-only" ? "sr-only" : "muted small mt-2"}
+        >
           Drag or swipe to orbit. Scroll or pinch to zoom. With the preview
           focused, use arrow keys to orbit and + or − to zoom. Measure shows
           exact dimensions.

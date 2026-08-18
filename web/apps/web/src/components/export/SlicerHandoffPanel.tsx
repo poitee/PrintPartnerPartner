@@ -148,7 +148,7 @@ export default function SlicerHandoffPanel() {
   return (
     <Card className="border-border shadow-sm">
       <CardHeader className="gap-1 pb-2">
-        <CardTitle className="text-[13.5px] font-semibold leading-snug">
+        <CardTitle level={3} className="text-[13.5px] font-semibold leading-snug">
           Send plate(s) to slicer
         </CardTitle>
         <CardDescription className="text-[12.5px] leading-relaxed">

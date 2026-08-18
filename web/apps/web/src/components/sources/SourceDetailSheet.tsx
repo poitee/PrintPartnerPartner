@@ -486,6 +486,7 @@ export default function SourceDetailSheet({
                     preferSource
                     filename={selectedFilePath.split("/").pop() ?? selectedFilePath}
                     className="h-full w-full"
+                    instructions="sr-only"
                   />
                 </Suspense>
               </div>

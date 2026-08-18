@@ -75,6 +75,12 @@ export default function PlansPage() {
     profilesError,
     profiles.length > 0,
   );
+  const loadingAnnouncement =
+    engineState === "loading"
+      ? "Connecting to the engine…"
+      : profilesState === "loading"
+        ? "Loading plans…"
+        : "";
 
   const rows = useMemo(
     () => filterPlansList(profiles, filter),
@@ -157,6 +163,14 @@ export default function PlansPage() {
           </PageHeaderActions>
         ) : undefined}
       />
+      <p
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {loadingAnnouncement}
+      </p>
 
       {profilesBackgroundError && (
         <p className="text-sm text-destructive" role="alert">
@@ -169,9 +183,7 @@ export default function PlansPage() {
           <CardContent className="pt-6">
             <p
               className="text-sm text-muted-foreground"
-              role={engineState === "loading" ? "status" : undefined}
-              aria-live={engineState === "loading" ? "polite" : undefined}
-              aria-atomic={engineState === "loading" ? "true" : undefined}
+              aria-hidden={engineState === "loading" ? "true" : undefined}
             >
               {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to manage plans."
@@ -195,9 +207,7 @@ export default function PlansPage() {
           <CardContent className="pt-6">
             <p
               className="text-sm text-muted-foreground"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
+              aria-hidden="true"
             >
               Loading plans…
             </p>

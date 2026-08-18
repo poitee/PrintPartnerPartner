@@ -26,7 +26,7 @@ export default function SlicedPlatesPanel({ result }: Props) {
   return (
     <Card className="border-border shadow-sm">
       <CardHeader className="space-y-1 pb-3">
-        <CardTitle className="text-[13.5px] font-semibold leading-snug">Sliced plates</CardTitle>
+        <CardTitle level={3} className="text-[13.5px] font-semibold leading-snug">Sliced plates</CardTitle>
         <CardDescription className="text-[12.5px] leading-relaxed">
           {result.plate_count} of {result.attempted_count} plate(s) sliced. G-code and thumbnails
           are saved in the plan&apos;s export folder.

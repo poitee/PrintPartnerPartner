@@ -95,7 +95,7 @@ export default function ManualAssignmentPanel({ profileId, engineReady }: Props)
   return (
     <Card className="border-border shadow-sm">
       <CardHeader className="gap-1 pb-2">
-        <CardTitle className="flex items-center gap-2 text-[13.5px] font-semibold leading-snug">
+        <CardTitle level={3} className="flex items-center gap-2 text-[13.5px] font-semibold leading-snug">
           <ListTree className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           Printer assignment
         </CardTitle>

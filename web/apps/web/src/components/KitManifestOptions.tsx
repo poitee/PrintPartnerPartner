@@ -145,6 +145,9 @@ export default function KitManifestOptions({
       ),
     [optionGroups],
   );
+  const title = baseSourceName ? `${baseSourceName} kit variants` : "Kit variants";
+  const TitleHeading = compact ? "h3" : "h2";
+  const GroupHeading = compact ? "h4" : "h3";
 
   useEffect(() => {
     if (!focusSeq || focusSeq === appliedFocusSeqRef.current) return;
@@ -196,9 +199,9 @@ export default function KitManifestOptions({
       return (
         <details className="group rounded-md border border-border">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
-            <span className="text-xs font-semibold text-muted-foreground">
-              {baseSourceName ? `${baseSourceName} kit variants` : "Kit variants"}
-            </span>
+            <TitleHeading className="text-xs font-semibold text-muted-foreground">
+              {title}
+            </TitleHeading>
             <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
           </summary>
           <div className="border-t border-border px-3 pb-3 pt-2">{emptyHint}</div>
@@ -209,9 +212,7 @@ export default function KitManifestOptions({
     return (
       <section className="rounded-lg border border-border bg-card p-4">
         <div className="mb-1">
-          <h3 className="text-sm font-semibold">
-            {baseSourceName ? `${baseSourceName} kit variants` : "Kit variants"}
-          </h3>
+          <TitleHeading className="text-sm font-semibold">{title}</TitleHeading>
           <p className="text-xs text-muted-foreground">
             Pick one option per group, then run{" "}
             <strong className="font-medium text-foreground">Update build</strong> to apply.
@@ -221,8 +222,6 @@ export default function KitManifestOptions({
       </section>
     );
   }
-
-  const title = baseSourceName ? `${baseSourceName} kit variants` : "Kit variants";
 
   const staleHint = buildStale ? (
     <p className="text-xs text-amber-700 dark:text-amber-300">
@@ -281,7 +280,9 @@ export default function KitManifestOptions({
               data-kit-group={groupId}
             >
               <div className="flex flex-wrap items-center gap-2">
-                <h4 className="text-sm font-medium capitalize">{groupLabel(groupId, group)}</h4>
+                <GroupHeading className="text-sm font-medium capitalize">
+                  {groupLabel(groupId, group)}
+                </GroupHeading>
                 <Badge variant="muted">choose one</Badge>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -324,7 +325,9 @@ export default function KitManifestOptions({
         onToggle={(e) => setDetailsOpen((e.target as HTMLDetailsElement).open)}
       >
         <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
-          <span className="text-xs font-semibold text-muted-foreground">{title}</span>
+          <TitleHeading className="text-xs font-semibold text-muted-foreground">
+            {title}
+          </TitleHeading>
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
         </summary>
         <div className="space-y-2 border-t border-border px-3 pb-3 pt-2">
@@ -349,7 +352,7 @@ export default function KitManifestOptions({
       )}
     >
       <div className="mb-1">
-        <h3 className="text-sm font-semibold">{title}</h3>
+        <TitleHeading className="text-sm font-semibold">{title}</TitleHeading>
         <p className="text-xs text-muted-foreground">
           Pick one option per group, then run{" "}
           <strong className="font-medium text-foreground">Update build</strong> to apply.{" "}
