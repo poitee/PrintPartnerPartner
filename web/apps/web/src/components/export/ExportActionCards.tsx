@@ -3,11 +3,13 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronDown } from "lucide-react";
 import {
+  fetchPrintPlan,
   fetchPrinters,
   startAutoSlice,
   startExport3mf,
   startExportStlPack,
   type AutoSliceJobResultBody,
+  type Export3mfOptions,
   type RoleFilamentRow,
   type StlPackGroupBy,
 } from "../../api/engine";
@@ -22,6 +24,7 @@ import { handleExport3mfJobDone } from "../../lib/export3mfJobResult";
 import { handleStlPackExportJobDone } from "../../lib/exportStlJobResult";
 import { planHasUnsetRoleColors } from "../../lib/roleColorSet";
 import { flattenReviewParts } from "../../lib/reviewParts";
+import { resolveEnabledPrinterIds } from "../../lib/enabledPrinters";
 import { settingsPrintersRoute } from "../../lib/routes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -103,23 +106,33 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
     );
   };
 
-  const onExport3mf = (layoutMode: "per_plate" | "zip") => {
+  const resolveEnabledIds = async (): Promise<string[] | undefined> => {
+    const printers = await fetchPrinters();
+    if (!printers.length) {
+      toast.error("No printers configured", {
+        description: "Add a printer in Settings before exporting 3MF.",
+      });
+      return undefined;
+    }
+    const plan = await fetchPrintPlan(selectedProfileId!);
+    return resolveEnabledPrinterIds(
+      printers.map((p) => p.id),
+      plan.enabled_printer_ids,
+    );
+  };
+
+  const onExport3mf = (layoutMode: NonNullable<Export3mfOptions["layout_mode"]>) => {
     if (selectedProfileId == null) return;
     void (async () => {
       try {
-        const printers = await fetchPrinters();
-        if (!printers.length) {
-          toast.error("No printers configured", {
-            description: "Add a printer in Settings before exporting 3MF.",
-          });
-          return;
-        }
+        const enabledIds = await resolveEnabledIds();
+        if (!enabledIds) return;
         await export3mfJob.runJob(
           () =>
             startExport3mf({
               profile_id: selectedProfileId,
               layout_mode: layoutMode,
-              enabled_printer_ids: printers.map((p) => p.id),
+              enabled_printer_ids: enabledIds,
             }),
           (snap) => {
             handleExport3mfJobDone("3MF export", snap);
@@ -135,19 +148,14 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
     if (selectedProfileId == null) return;
     void (async () => {
       try {
-        const printers = await fetchPrinters();
-        if (!printers.length) {
-          toast.error("No printers configured", {
-            description: "Add a printer in Settings before slicing.",
-          });
-          return;
-        }
+        const enabledIds = await resolveEnabledIds();
+        if (!enabledIds) return;
         setSliceResult(null);
         await autoSliceJob.runJob(
           () =>
             startAutoSlice({
               profile_id: selectedProfileId,
-              enabled_printer_ids: printers.map((p) => p.id),
+              enabled_printer_ids: enabledIds,
             }),
           (snap) => {
             handleAutoSliceJobDone("Slice", snap);
@@ -294,6 +302,24 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
                 <span>Zip all plates</span>
                 <span className="text-xs text-muted-foreground">
                   Plate 3MFs plus print_plan.json
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onExport3mf("single_offset")}>
+              <div className="flex flex-col">
+                <span>Single file — plates spaced apart</span>
+                <span className="text-xs text-muted-foreground">
+                  One 3MF; plates offset in X (arrange in slicer)
+                </span>
+              </div>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onExport3mf("single_plate_only")}>
+              <div className="flex flex-col">
+                <span>Single plate only</span>
+                <span className="text-xs text-muted-foreground">
+                  Fails if the kit needs more than one bed
                 </span>
               </div>
             </DropdownMenuItem>
