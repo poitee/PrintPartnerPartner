@@ -7,7 +7,11 @@ import { InProcessJobRunner } from "./jobs.js";
 
 const dirs: string[] = [];
 
-function createRunner(options?: { completedJobMax?: number; completedJobRetentionMs?: number }) {
+function createRunner(options?: {
+  completedJobMax?: number;
+  completedJobGlobalMax?: number;
+  completedJobRetentionMs?: number;
+}) {
   const dataDir = mkdtempSync(join(tmpdir(), "pp-jobs-tenant-"));
   dirs.push(dataDir);
   const repo = {
@@ -124,5 +128,47 @@ describe("InProcessJobRunner tenant ownership", () => {
     expect(tenantB).toHaveLength(3);
     expect(tenantB.map((job) => job.job_id)).toContain(activeB);
     expect(tenantB.filter((job) => job.status === "done")).toHaveLength(2);
+  });
+
+  it("applies the per-tenant cap to jobs with an empty tenant id", async () => {
+    const runner = createRunner({
+      completedJobMax: 2,
+      completedJobGlobalMax: 10,
+      completedJobRetentionMs: 60_000,
+    });
+    const jobs = await Promise.all([
+      runner.start("empty-1", {}, ""),
+      runner.start("empty-2", {}, ""),
+      runner.start("empty-3", {}, ""),
+    ]);
+    await waitForTerminal(runner, jobs[2]!, "");
+
+    expect(runner.listJobs({}, "")).toHaveLength(2);
+    expect(await runner.get(jobs[0]!, "")).toBeNull();
+  });
+
+  it("enforces a global terminal ceiling across tenant buckets", async () => {
+    const runner = createRunner({
+      completedJobMax: 3,
+      completedJobGlobalMax: 3,
+      completedJobRetentionMs: 60_000,
+    });
+    const tenantA = await Promise.all([
+      runner.start("a-1", {}, "tenant-a"),
+      runner.start("a-2", {}, "tenant-a"),
+    ]);
+    await waitForTerminal(runner, tenantA[1]!, "tenant-a");
+    const tenantB = await Promise.all([
+      runner.start("b-1", {}, "tenant-b"),
+      runner.start("b-2", {}, "tenant-b"),
+    ]);
+    await waitForTerminal(runner, tenantB[1]!, "tenant-b");
+
+    const retained = [
+      ...runner.listJobs({}, "tenant-a"),
+      ...runner.listJobs({}, "tenant-b"),
+    ];
+    expect(retained).toHaveLength(3);
+    expect(retained.map((job) => job.job_id)).not.toContain(tenantA[0]);
   });
 });

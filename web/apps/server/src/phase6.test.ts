@@ -144,4 +144,54 @@ describe("Phase 6 tenant isolation", () => {
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("replaces stale cross-tenant progress rows for an owned part", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-progress-owner-repair-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), "default", sqlite.reposDir);
+    const repoPath = join(dir, "source");
+    mkdirSync(repoPath, { recursive: true });
+    writeFileSync(join(repoPath, "part.stl"), "solid part\nendsolid part\n");
+    const source = repo.createSource({
+      name: "Progress source",
+      source_kind: "local",
+      local_path: repoPath,
+    });
+    repo.updateSource(source.id, { local_path: repoPath });
+    const profile = repo.createProfile("Progress plan", source.id);
+    expect(repo.recomputeProfile(profile.id).merged).toBe(true);
+    const partId = repo.listParts(profile.id).parts[0]!.id;
+    repo.patchPartProgress(partId, 0, true);
+
+    const native = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
+    native.prepare("UPDATE print_progress SET tenant_id = ? WHERE part_id = ?").run(
+      "stale-tenant",
+      partId,
+    );
+
+    expect(repo.patchPartProgress(partId, 0, false).print_units).toEqual([false]);
+    expect(
+      native
+        .prepare("SELECT tenant_id FROM print_progress WHERE part_id = ?")
+        .all(partId),
+    ).toEqual([{ tenant_id: "default" }]);
+
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns empty history lists for missing positive plans", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-missing-plan-lists-"));
+    const sqlite = new SqliteDatabase(dir);
+    sqlite.connect();
+    const repo = new AppRepository(getDb(sqlite), "default", sqlite.reposDir);
+
+    expect(repo.listPlanDecisions(999_999)).toEqual([]);
+    expect(repo.listPlanSnapshots(999_999)).toEqual([]);
+    expect(repo.listPrintJobParts(999_999)).toEqual([]);
+
+    sqlite.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

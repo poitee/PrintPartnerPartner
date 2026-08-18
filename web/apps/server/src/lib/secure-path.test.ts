@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertFileUnderRoot,
@@ -9,6 +9,7 @@ import {
   resolvedFileUnderRoot,
   safeDataDirPath,
   safePathUnderRoot,
+  tenantExportDirectory,
   trimmedString,
 } from "./secure-path.js";
 
@@ -75,5 +76,16 @@ describe("secure-path", () => {
     writeFileSync(inside, "x");
     expect(safeDataDirPath(dataDir, inside)).toBe(inside);
     expect(safeDataDirPath(dataDir, "/tmp/outside")).toBeNull();
+  });
+
+  it("uses lowercase collision-safe export directories for mixed-case tenant ids", () => {
+    const root = tempDir();
+    const mixed = tenantExportDirectory(root, "Tenant-A");
+    const lower = tenantExportDirectory(root, "tenant-a");
+
+    expect(basename(mixed)).toBe(basename(mixed).toLowerCase());
+    expect(mixed).not.toBe(lower);
+    expect(tenantExportDirectory(root, "Tenant-A")).toBe(mixed);
+    expect(tenantExportDirectory(root, "default")).toBe(join(root, "tenant-default"));
   });
 });

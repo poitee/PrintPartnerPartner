@@ -1,11 +1,22 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Fastify from "fastify";
 import { buildApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
+import {
+  enqueuePrinterSend,
+  loadPrinterSendQueue,
+} from "../services/printer-send-queue-store.js";
 import { registerExportRoutes } from "./exports.js";
 
 /**
@@ -45,6 +56,45 @@ const PNG = Buffer.from(
 );
 
 describe("GET /exports/*", () => {
+  it("migrates legacy self-host exports and queued artifact paths without overwriting", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-exports-legacy-migration-"));
+    process.env.PRINT_PARTNER_DATA_DIR = dir;
+    delete process.env.PRINT_PARTNER_API_KEY;
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const legacyRoot = join(dir, "exports");
+    const legacyArtifact = join(legacyRoot, "printer-uploads", "queued", "plate.gcode");
+    const tenantRoot = join(legacyRoot, "tenant-default");
+    const targetArtifact = join(tenantRoot, "printer-uploads", "queued", "plate.gcode");
+    mkdirSync(join(legacyRoot, "printer-uploads", "queued"), { recursive: true });
+    mkdirSync(tenantRoot, { recursive: true });
+    mkdirSync(join(legacyRoot, "tenant-other"), { recursive: true });
+    writeFileSync(legacyArtifact, "G28\n");
+    writeFileSync(join(legacyRoot, "collision.txt"), "legacy");
+    writeFileSync(join(tenantRoot, "collision.txt"), "current");
+    writeFileSync(join(legacyRoot, "tenant-other", "secret.txt"), "other");
+    enqueuePrinterSend(ports.repository, {
+      filename: "plate.gcode",
+      artifact_path: legacyArtifact,
+      printer_id: "printer-1",
+      start: false,
+    });
+
+    const app = await buildApp(loadConfig(), ports);
+    cleanup.push(() => {
+      void app.close();
+      void ports.db.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    expect(readFileSync(targetArtifact, "utf8")).toBe("G28\n");
+    expect(existsSync(legacyArtifact)).toBe(false);
+    expect(loadPrinterSendQueue(ports.repository)[0]?.artifact_path).toBe(targetArtifact);
+    expect(readFileSync(join(tenantRoot, "collision.txt"), "utf8")).toBe("current");
+    expect(readFileSync(join(legacyRoot, "collision.txt"), "utf8")).toBe("legacy");
+    expect(readFileSync(join(legacyRoot, "tenant-other", "secret.txt"), "utf8")).toBe("other");
+  });
+
   it("serves same-named artifacts only from the authenticated tenant directory", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-exports-tenant-route-"));
     const app = Fastify();
