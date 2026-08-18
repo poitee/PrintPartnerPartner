@@ -1,6 +1,4 @@
 import {
-  createReadStream,
-  createWriteStream,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -10,8 +8,6 @@ import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { promises as fs } from "node:fs";
-import { createGzip } from "node:zlib";
-import { pipeline } from "node:stream/promises";
 import * as tar from "tar";
 import type { Stats } from "node:fs";
 import type { ReadEntry } from "tar";
@@ -267,9 +263,10 @@ export async function createBackup(
     formatVersion: BACKUP_FORMAT_VERSION,
   };
 
+  mkdirSync(dataDir, { recursive: true });
   const outputDir = dirname(resolve(outputPath));
   mkdirSync(outputDir, { recursive: true });
-  const workDir = mkdtempSync(join(outputDir, ".backup-work-"));
+  const workDir = mkdtempSync(join(dataDir, ".backup-work-"));
   const temporaryArchivePath = join(
     outputDir,
     `.${basename(outputPath)}.tmp-${randomUUID()}`,
@@ -283,19 +280,7 @@ export async function createBackup(
       JSON.stringify(metadata, null, 2),
     );
 
-    const uncompressedTarPath = join(workDir, "backup.tar");
-    await tar.c(
-      {
-        file: uncompressedTarPath,
-        cwd: workDir,
-        strict: true,
-      },
-      [BACKUP_DATABASE_FILE, BACKUP_METADATA_FILE],
-    );
-
-    // Append critical directories directly from dataDir. This avoids making a
-    // second full filesystem copy before compression; symbolic links and
-    // special files are deliberately omitted.
+    const archiveEntries: string[] = [];
     for (const directory of BACKUP_DIRECTORIES) {
       const source = join(dataDir, directory);
       try {
@@ -305,22 +290,34 @@ export async function createBackup(
         if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw error;
       }
-      await tar.r(
-        {
-          file: uncompressedTarPath,
-          cwd: dataDir,
-          filter: (_path, stats) => !(stats as Stats).isSymbolicLink(),
-          portable: true,
-          strict: true,
-        },
-        [directory],
-      );
+      archiveEntries.push(directory);
     }
 
-    await pipeline(
-      createReadStream(uncompressedTarPath),
-      createGzip(),
-      createWriteStream(temporaryArchivePath, { flags: "wx" }),
+    const snapshotRelativePath = join(
+      basename(workDir),
+      BACKUP_DATABASE_FILE,
+    ).replace(/\\/g, "/");
+    const metadataRelativePath = join(
+      basename(workDir),
+      BACKUP_METADATA_FILE,
+    ).replace(/\\/g, "/");
+    await tar.c(
+      {
+        file: temporaryArchivePath,
+        gzip: true,
+        cwd: dataDir,
+        strict: true,
+        portable: true,
+        filter: (_path, value) => {
+          const stats = value as Stats;
+          return !stats.isSymbolicLink() && (stats.isFile() || stats.isDirectory());
+        },
+        onWriteEntry: (entry) => {
+          if (entry.path === snapshotRelativePath) entry.path = BACKUP_DATABASE_FILE;
+          else if (entry.path === metadataRelativePath) entry.path = BACKUP_METADATA_FILE;
+        },
+      },
+      [snapshotRelativePath, metadataRelativePath, ...archiveEntries],
     );
     const archiveHandle = await fs.open(temporaryArchivePath, "r");
     try {
