@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { Loader2, Ruler } from "lucide-react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -185,7 +192,10 @@ export default function Preview3D({
   const materialRef = useRef<THREE.MeshStandardMaterial | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const dimsGroupRef = useRef<THREE.Group | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
   const showDimsRef = useRef(false);
+  const instructionsId = useId();
   const [mode, setMode] = useState<"loading" | "mesh" | "png" | "empty" | "error">("empty");
   const [pngSrc, setPngSrc] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -223,6 +233,8 @@ export default function Preview3D({
       materialRef.current = null;
       sceneRef.current = null;
       dimsGroupRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
       return;
     }
 
@@ -237,6 +249,8 @@ export default function Preview3D({
     const cleanupThree = () => {
       if (frameId) cancelAnimationFrame(frameId);
       controls?.dispose();
+      controlsRef.current = null;
+      cameraRef.current = null;
       geometry?.dispose();
       geometry = null;
       materialRef.current?.dispose();
@@ -358,6 +372,7 @@ export default function Preview3D({
 
         const camera = new THREE.PerspectiveCamera(45, 1, 0.1, maxDim * 20);
         camera.position.set(maxDim * 1.4, maxDim * 1.1, maxDim * 1.6);
+        cameraRef.current = camera;
 
         renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -372,6 +387,7 @@ export default function Preview3D({
 
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
+        controlsRef.current = controls;
 
         const resize = () => {
           if (!mount || !renderer) return;
@@ -446,6 +462,49 @@ export default function Preview3D({
     };
   }, [resolvedColor, mode, target, targetKind, targetPartId, targetSourceId, targetRelativePath]);
 
+  const onPreviewKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+
+    const offset = camera.position.clone().sub(controls.target);
+    const spherical = new THREE.Spherical().setFromVector3(offset);
+    const rotationStep = Math.PI / 18;
+    let handled = true;
+
+    switch (event.key) {
+      case "ArrowLeft":
+        spherical.theta -= rotationStep;
+        break;
+      case "ArrowRight":
+        spherical.theta += rotationStep;
+        break;
+      case "ArrowUp":
+        spherical.phi -= rotationStep;
+        break;
+      case "ArrowDown":
+        spherical.phi += rotationStep;
+        break;
+      case "+":
+      case "=":
+        spherical.radius *= 0.9;
+        break;
+      case "-":
+      case "_":
+        spherical.radius *= 1.1;
+        break;
+      default:
+        handled = false;
+    }
+
+    if (!handled) return;
+    event.preventDefault();
+    spherical.phi = THREE.MathUtils.clamp(spherical.phi, 0.05, Math.PI - 0.05);
+    camera.position.copy(controls.target).add(new THREE.Vector3().setFromSpherical(spherical));
+    camera.lookAt(controls.target);
+    controls.update();
+  };
+
   if (target == null) {
     return (
       <div className={`preview3d ${className}`.trim()}>
@@ -458,7 +517,7 @@ export default function Preview3D({
     <div className={`preview3d ${className}`.trim()}>
       {filename && <p className="preview-filename">{filename}</p>}
       {mode === "loading" && (
-        <p className="muted flex items-center gap-2">
+        <p className="muted flex items-center gap-2" role="status" aria-live="polite">
           <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
           Loading 3D preview…
         </p>
@@ -484,7 +543,20 @@ export default function Preview3D({
         </p>
       )}
       <div className="preview3d-stage" hidden={mode !== "mesh"}>
-        <div ref={mountRef} className="preview3d-canvas" aria-label="3D STL preview" />
+        <div
+          ref={mountRef}
+          className="preview3d-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          role="application"
+          tabIndex={0}
+          aria-label={
+            filename
+              ? `Interactive 3D preview of ${filename}`
+              : "Interactive 3D STL preview"
+          }
+          aria-describedby={instructionsId}
+          aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown + -"
+          onKeyDown={onPreviewKeyDown}
+        />
         <button
           type="button"
           className="preview3d-measure-btn"
@@ -500,6 +572,11 @@ export default function Preview3D({
             {formatMm(dims.x)} × {formatMm(dims.y)} × {formatMm(dims.z)} mm (X × Y × Z)
           </p>
         )}
+        <p id={instructionsId} className="muted small mt-2">
+          Drag or swipe to rotate and scroll or pinch to zoom. Keyboard: use the
+          arrow keys to rotate and + or − to zoom. Use Measure for a text
+          alternative with exact dimensions.
+        </p>
       </div>
     </div>
   );

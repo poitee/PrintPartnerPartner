@@ -36,6 +36,9 @@ const WelcomePage    = lazy(() => import("./pages/WelcomePage"));
 function PageLoader() {
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-label="Loading page"
       style={{
         display: "flex",
         alignItems: "center",

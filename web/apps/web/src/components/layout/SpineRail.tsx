@@ -109,11 +109,11 @@ export default function SpineRail({
           {collapsed ? (
             <LayeredSheetMark />
           ) : (
-            <h1
+            <div
               className="font-serif text-[15px] font-semibold tracking-[-0.01em] text-foreground"
             >
               Print Partner
-            </h1>
+            </div>
           )}
         </div>
       </div>

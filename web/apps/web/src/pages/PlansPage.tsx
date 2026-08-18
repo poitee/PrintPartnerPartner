@@ -85,6 +85,50 @@ export default function PlansPage() {
     touchMutation.mutate(id);
   };
 
+  const renderPlanActions = (plan: (typeof rows)[number]) => {
+    const archiveAllowed = canArchivePlan({
+      archived: Boolean(plan.archived_at),
+      totalUnits: plan.total_units,
+      remainingUnits: plan.remaining_units,
+    });
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0"
+            disabled={engineState !== "ready"}
+            aria-label={`Actions for ${plan.name}`}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem onClick={() => openRenamePlan(plan.id)}>
+            <Pencil className="mr-2 h-4 w-4" />
+            Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => openDuplicatePlan(plan.id)}>
+            <Copy className="mr-2 h-4 w-4" />
+            Duplicate
+          </DropdownMenuItem>
+          {archiveAllowed ? (
+            <DropdownMenuItem onClick={() => openArchivePlan(plan.id)}>
+              <Archive className="mr-2 h-4 w-4" />
+              Archive
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem onClick={() => openDeletePlan(plan.id)}>
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
+
   // Profiles query is disabled until health.ok; treat that as not-yet-loaded, not empty.
   const emptyAll = engineState === "ready" && profilesState === "ready" && profiles.length === 0;
   const emptyFilter = profilesState === "ready" && profiles.length > 0 && rows.length === 0;
@@ -121,7 +165,11 @@ export default function PlansPage() {
       {engineState !== "ready" ? (
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">
+            <p
+              className="text-sm text-muted-foreground"
+              role={engineState === "loading" ? "status" : undefined}
+              aria-live={engineState === "loading" ? "polite" : undefined}
+            >
               {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to manage plans."
                 : "Connecting to the engine…"}
@@ -131,7 +179,7 @@ export default function PlansPage() {
       ) : profilesState === "error" ? (
         <Card className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
-            <p className="text-sm text-destructive">
+            <p className="text-sm text-destructive" role="alert">
               Could not load plans: {profilesError}
             </p>
             <Button size="sm" variant="secondary" onClick={() => void reloadProfiles()}>
@@ -142,7 +190,13 @@ export default function PlansPage() {
       ) : profilesState === "loading" ? (
         <Card className="border-border shadow-sm">
           <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Loading plans…</p>
+            <p
+              className="text-sm text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
+              Loading plans…
+            </p>
           </CardContent>
         </Card>
       ) : emptyAll ? (
@@ -169,7 +223,53 @@ export default function PlansPage() {
               No {filter === "archived" ? "archived" : "active"} plans.
             </p>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              <ul
+                className="space-y-2 sm:hidden"
+                aria-label="Plans on small screens"
+              >
+                {rows.map((plan) => {
+                  const selected = plan.id === selectedProfileId;
+                  return (
+                    <li key={plan.id}>
+                      <Card
+                        className={cn(
+                          "shadow-none",
+                          selected && "border-primary/35 bg-primary/8",
+                        )}
+                      >
+                        <CardContent className="space-y-3 p-3">
+                          <div className="flex items-start gap-2">
+                            <button
+                              type="button"
+                              className={cn(
+                                "min-w-0 flex-1 truncate text-left font-medium underline-offset-2 hover:underline",
+                                selected && "text-primary",
+                              )}
+                              aria-label={`Select ${plan.name}`}
+                              onClick={() => selectPlan(plan.id)}
+                              disabled={engineState !== "ready"}
+                            >
+                              {plan.name}
+                            </button>
+                            {renderPlanActions(plan)}
+                          </div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
+                            <span>{planStatusLabel(plan)}</span>
+                            <span>{plan.remaining_units} remaining</span>
+                            <span>{plan.part_count} parts</span>
+                            {plan.build_stale ? (
+                              <span className="text-warning">stale</span>
+                            ) : null}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              <div className="hidden overflow-x-auto sm:block">
               <table className="w-full min-w-[36rem] border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -186,11 +286,6 @@ export default function PlansPage() {
                 <tbody>
                   {rows.map((plan) => {
                     const selected = plan.id === selectedProfileId;
-                    const archiveAllowed = canArchivePlan({
-                      archived: Boolean(plan.archived_at),
-                      totalUnits: plan.total_units,
-                      remainingUnits: plan.remaining_units,
-                    });
                     return (
                       <tr
                         key={plan.id}
@@ -229,56 +324,15 @@ export default function PlansPage() {
                           )}
                         </td>
                         <td className="py-2.5 pl-2 text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                disabled={engineState !== "ready"}
-                                aria-label={`Actions for ${plan.name}`}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-44">
-                              <DropdownMenuItem
-                                onClick={() => openRenamePlan(plan.id)}
-                              >
-                                <Pencil className="mr-2 h-4 w-4" />
-                                Rename
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => openDuplicatePlan(plan.id)}
-                              >
-                                <Copy className="mr-2 h-4 w-4" />
-                                Duplicate
-                              </DropdownMenuItem>
-                              {archiveAllowed ? (
-                                <DropdownMenuItem
-                                  onClick={() => openArchivePlan(plan.id)}
-                                >
-                                  <Archive className="mr-2 h-4 w-4" />
-                                  Archive
-                                </DropdownMenuItem>
-                              ) : null}
-                              <DropdownMenuItem
-                                onClick={() => openDeletePlan(plan.id)}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          {renderPlanActions(plan)}
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </>
           )}
         </>
       )}

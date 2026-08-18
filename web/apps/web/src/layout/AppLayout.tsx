@@ -135,6 +135,12 @@ export default function AppLayout() {
   return (
     <TooltipProvider delayDuration={300}>
         <div className="flex min-h-screen min-w-0 bg-background">
+          <a
+            href="#main-content"
+            className="sr-only fixed left-3 top-3 z-[100] rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-lg focus:not-sr-only focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            Skip to main content
+          </a>
           <SpineRail
             collapsed={sidebarCollapsed}
             onToggleCollapsed={toggleSidebar}
@@ -197,6 +203,8 @@ export default function AppLayout() {
             </header>
 
             <main
+              id="main-content"
+              tabIndex={-1}
               className={cn(
                 "flex-1 overflow-x-hidden overflow-y-auto p-3 pb-28 sm:p-5 sm:pb-24 lg:pb-20 print:overflow-visible print:p-0",
               )}

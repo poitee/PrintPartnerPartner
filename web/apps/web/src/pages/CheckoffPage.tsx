@@ -882,7 +882,11 @@ export default function CheckoffPage() {
       stateContent = (
         <Card className="no-print">
           <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">
+            <p
+              className="text-sm text-muted-foreground"
+              role={engineState === "loading" ? "status" : undefined}
+              aria-live={engineState === "loading" ? "polite" : undefined}
+            >
               {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to use Progress."
                 : "Connecting to the engine…"}
@@ -894,7 +898,7 @@ export default function CheckoffPage() {
       stateContent = (
         <Card className="no-print border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
-            <p className="text-sm text-destructive">
+            <p className="text-sm text-destructive" role="alert">
               Could not load plans: {profilesError}
             </p>
             <Button size="sm" variant="secondary" onClick={() => void reloadProfiles()}>
@@ -906,8 +910,12 @@ export default function CheckoffPage() {
     } else if (profilesState === "loading" || reviewState === "loading") {
       stateContent = (
         <Card className="no-print border-border shadow-sm">
-          <CardContent className="flex items-center gap-2 pt-6">
-            <Spinner className="size-4" />
+          <CardContent
+            className="flex items-center gap-2 pt-6"
+            role="status"
+            aria-live="polite"
+          >
+            <Spinner className="size-4" aria-hidden="true" />
             <p className="text-sm text-muted-foreground">Loading progress…</p>
           </CardContent>
         </Card>
@@ -916,7 +924,7 @@ export default function CheckoffPage() {
       stateContent = (
         <Card className="no-print border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
-            <p className="text-sm text-destructive">
+            <p className="text-sm text-destructive" role="alert">
               Could not load Progress: {workspaceError}
             </p>
             <Button
@@ -1088,6 +1096,7 @@ export default function CheckoffPage() {
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <input
             type="search"
+            aria-label="Search progress parts"
             className="checkoff-search w-full min-w-0 rounded-md border border-input bg-background px-3 py-2.5 text-base sm:flex-1 sm:py-1.5 sm:text-sm"
             placeholder="Search parts…"
             value={search}
@@ -1267,7 +1276,7 @@ export default function CheckoffPage() {
               )}
             >
               <header className="sheet-header">
-                <h1 className="sheet-title">{planName}</h1>
+                <h2 className="sheet-title">{planName}</h2>
                 <p className="sheet-subtitle">
                   {filtered.length} part{filtered.length === 1 ? "" : "s"} · {printedLine}
                 </p>

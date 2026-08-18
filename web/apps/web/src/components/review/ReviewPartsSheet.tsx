@@ -694,6 +694,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
 
         <input
           type="search"
+          aria-label="Search review parts"
           className="checkoff-search w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm"
           placeholder="Search parts…"
           value={ui.search}
