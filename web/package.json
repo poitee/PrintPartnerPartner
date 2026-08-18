@@ -3,6 +3,10 @@
   "private": true,
   "version": "3.0.0",
   "type": "module",
+  "engines": {
+    "node": "22.x",
+    "npm": ">=10"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -12,8 +16,10 @@
     "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @print-partner/server\" \"npm run dev -w @print-partner/web\"",
     "build": "npm run build -w @print-partner/contracts && npm run build -w @print-partner/domain && npm run build -w @print-partner/server && npm run build -w @print-partner/web",
     "test": "npm run test -w @print-partner/contracts --if-present && npm run test -w @print-partner/domain --if-present && npm run test -w @print-partner/web --if-present && npm run test -w @print-partner/server --if-present",
+    "test:browser": "npm run test:browser -w @print-partner/web",
     "lint": "eslint .",
     "typecheck": "npm run build -w @print-partner/contracts && npm run build -w @print-partner/domain && npm run typecheck -w @print-partner/server && npm run typecheck -w @print-partner/web",
+    "quality": "npm run lint && npm run typecheck && npm test && npm run build && npm run test:browser",
     "db:migrate": "npm run db:migrate -w @print-partner/server"
   },
   "devDependencies": {
@@ -23,13 +29,10 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "joi": "17.13.4",
     "typescript-eslint": "^8.62.0",
-    "vite": "6.4.3"
+    "vite": "^8.2.1"
   },
   "overrides": {
     "joi": "$joi",
-    "vitest": {
-      "vite": "$vite"
-    },
     "brace-expansion": "5.0.9",
     "fast-uri": "3.1.5",
     "find-my-way": "9.7.0",

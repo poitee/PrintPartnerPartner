@@ -3,8 +3,10 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import type { IncomingMessage } from "node:http";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const API_TARGET = process.env.VITE_DEV_API_TARGET ?? "http://127.0.0.1:18765";
+const SOURCE_DIR = fileURLToPath(new URL("./src", import.meta.url));
 
 /** Backend route prefixes proxied to the Fastify server during `npm run dev`. */
 const API_PREFIXES = [
@@ -89,7 +91,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(SOURCE_DIR),
     },
   },
   server: {
