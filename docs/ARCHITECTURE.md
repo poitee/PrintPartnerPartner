@@ -37,7 +37,7 @@ The server is built around a small set of ports (`web/apps/server/src/ports/inde
 
 | Concern | self-host (`web/apps/server/src/adapters/self-host`) | saas (`web/apps/server/src/adapters/saas`) |
 |---------|------------------------------------------------------|--------------------------------------------|
-| App data | SQLite under the data dir | Postgres when `DATABASE_URL` is set, else SQLite fallback |
+| App data | SQLite under the data dir | Supported SQLite fallback; experimental Postgres when explicitly enabled |
 | Blob storage | Local disk (`SelfHostStoragePort`) | S3-compatible when `S3_BUCKET` is set, else tenant-scoped local disk |
 | Tenancy | Single `"default"` tenant | Per-request tenant resolution (header / OAuth / dev anonymous) |
 | Auth | None (optional HTTP Basic at the edge) | GitHub OAuth, HTTP Basic, or `SAAS_ALLOW_ANONYMOUS` for dev |
@@ -49,7 +49,7 @@ Both adapters expose the same repository API, so routes are written once against
 Persistence uses **Drizzle ORM** with two backends selected at startup (`web/apps/server/src/db/database.ts`):
 
 - **SQLite** (`schema.ts`, `client.ts`) — the default for self-host; the database file and synced repos live under `PRINT_PARTNER_DATA_DIR` (`/data` in Docker).
-- **Postgres** (`schema-pg.ts`, `client-postgres.ts`) — used in SaaS when `DATABASE_URL` is set; rows are tenant-scoped and migrations run on startup.
+- **Postgres** (`schema-pg.ts`, `client-postgres.ts`) — experimental in SaaS when `DATABASE_URL` is set. Rows are tenant-scoped and migrations run on startup, but the synchronous compatibility bridge does not provide native repository transaction semantics. Production startup requires `POSTGRES_EXPERIMENTAL=1`; health reports the backend as experimental.
 
 File blobs (synced repos, exports, thumbnails) are stored on disk in self-host, and on disk or S3 in SaaS.
 

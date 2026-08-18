@@ -236,7 +236,7 @@ Open [http://localhost:8080](http://localhost:8080).
 
 ## SaaS mode
 
-Set `DEPLOY_MODE=saas` to enable multi-tenant hosting: Postgres for app data (when `DATABASE_URL` is set), S3-compatible blob storage (when `S3_BUCKET` is set), and GitHub OAuth. A ready-to-run stack with Postgres 16 and RustFS (S3-compatible) is provided:
+Set `DEPLOY_MODE=saas` to enable the multi-tenant adapter, S3-compatible blob storage (when `S3_BUCKET` is set), and GitHub OAuth. The Postgres repository path is currently experimental because its synchronous compatibility bridge does not provide native transaction semantics; production startup requires the explicit `POSTGRES_EXPERIMENTAL=1` acknowledgement. SQLite remains the supported database. A development stack with Postgres 16 and RustFS (S3-compatible) is provided:
 
 ```bash
 docker compose -f docker-compose.saas.yml up --build

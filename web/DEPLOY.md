@@ -129,7 +129,9 @@ Versioned API for integrations: `http://127.0.0.1:18765/api/v1` — see [`../doc
 
 ## SaaS mode (`DEPLOY_MODE=saas`)
 
-SaaS mode uses **Postgres for app data** when `DATABASE_URL` is set (tenant-scoped rows). File blobs (repos, exports, thumbs) stay on disk under `SAAS_DATA_DIR` unless `S3_BUCKET` is configured.
+SaaS mode can use **Postgres for app data** when `DATABASE_URL` is set (tenant-scoped rows). The current Postgres repository runs through a synchronous compatibility bridge and is **experimental, not production-ready**: it does not provide native transaction semantics for repository mutations. Production startup fails closed unless `POSTGRES_EXPERIMENTAL=1` explicitly acknowledges this limitation. SQLite remains the supported database. `GET /health` reports `db.support_status` as `supported` or `experimental`.
+
+File blobs (repos, exports, thumbs) stay on disk under `SAAS_DATA_DIR` unless `S3_BUCKET` is configured.
 
 ### Quick local SaaS stack
 
@@ -147,7 +149,8 @@ Includes Postgres 16, [RustFS](https://rustfs.com) (S3-compatible), and the app 
 |----------|----------|-------------|
 | `DEPLOY_MODE` | Yes | Set to `saas` |
 | `SAAS_DATA_DIR` | Recommended | Repos, exports, thumbs scratch dir (default `./data`) |
-| `DATABASE_URL` | **Yes (prod)** | Postgres connection string — migrations on startup; app data in Postgres |
+| `DATABASE_URL` | Experimental | Postgres connection string — migrations on startup; requires explicit experimental opt-in in production |
+| `POSTGRES_EXPERIMENTAL` | With production Postgres | Set `1` to acknowledge that the sync bridge is experimental and lacks native repository transactions |
 | `S3_BUCKET` | Optional | Tenant-prefixed S3 blobs |
 | `S3_REGION` / `AWS_REGION` | With S3 | AWS region |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | With S3 | S3 credentials (RustFS dev stack: `rustfsadmin` / `rustfsadmin`) |
