@@ -7,6 +7,7 @@ BASE="${BASE:-http://localhost:8080}"
 SOURCE_URL="${SOURCE_URL:-https://github.com/Klipper3d/klipper}"
 SOURCE_BRANCH="${SOURCE_BRANCH:-master}"
 SOURCE_KIND="${SOURCE_KIND:-github}"
+SOURCE_UPLOAD_FILE="${SOURCE_UPLOAD_FILE:-}"
 PLAN_NAME="${PLAN_NAME:-smoke-test-plan-$(date +%s)}"
 
 AUTH_ARGS=()
@@ -56,6 +57,14 @@ SRC_RESP=$(request -s -w "\nHTTP:%{http_code}" -X POST "$BASE/sources" \
 echo "$SRC_RESP" | body_only
 echo "HTTP:$(echo "$SRC_RESP" | http_code)"
 SOURCE_ID=$(echo "$SRC_RESP" | body_only | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+
+if [[ -n "$SOURCE_UPLOAD_FILE" ]]; then
+  echo "== 1b. POST /sources/$SOURCE_ID/upload-files =="
+  request --fail --silent --show-error -X POST "$BASE/sources/$SOURCE_ID/upload-files" \
+    -F "files=@${SOURCE_UPLOAD_FILE}" \
+    -F 'relative_paths=["cube.stl"]' \
+    | python3 -m json.tool
+fi
 
 if [[ "$SOURCE_KIND" == "local" ]]; then
   echo "== 2. Local source is already mounted; sync not required =="

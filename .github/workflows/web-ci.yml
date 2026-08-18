@@ -94,4 +94,5 @@ jobs:
           PRINT_PARTNER_API_KEY: ci-smoke-key
           SOURCE_KIND: local
           SOURCE_URL: /smoke-source
+          SOURCE_UPLOAD_FILE: ${{ runner.temp }}/smoke-source/cube.stl
         run: ./web/scripts/workflow-smoke.sh
