@@ -299,7 +299,7 @@ export function exportProfile3mf(
 
   const printers = opts.enabled_printers ?? [];
   if (!printers.length) {
-    warnings.push("No printers enabled. Configure printers on the Print tab.");
+    warnings.push("No printers configured. Add a printer in Settings.");
     return empty;
   }
 
@@ -367,16 +367,45 @@ export function exportProfile3mf(
   }
 
   const summaries: string[] = [];
+  const manifestPrinters: Array<{
+    id: string;
+    name: string;
+    bed_mm: [number, number];
+    plates: Array<{ file: string; filaments: string[]; parts: string[] }>;
+  }> = [];
   for (const printer of printers) {
     const printerPlates = allPlates.filter(([pr]) => pr.id === printer.id);
     if (!printerPlates.length) continue;
     summaries.push(`${printer.name}: ${printerPlates.length} plate(s)`);
+    const plateEntries = printerPlates.map(([, plate]) => {
+      const usedNames = new Set<string>();
+      const filaments = new Set<string>();
+      const parts: string[] = [];
+      for (const item of plate.items) {
+        const part = item.copy.part as MergePartExport;
+        const label = (part.filamentDisplay ?? part.filament_display ?? part.filamentColorId ?? part.role ?? "").trim();
+        if (label) filaments.add(label);
+        parts.push(objectDisplayName(part.filename, item.copy.unit, usedNames));
+      }
+      const slugPrinter = safePlanSlug(printer.name);
+      const slugGroup = plate.group_label ? `_${safePlanSlug(plate.group_label).slice(0, 80)}` : "";
+      const fname = plate.group_label
+        ? `${safeProfile}_${slugPrinter}${slugGroup}_p${String(plate.index).padStart(2, "0")}.3mf`
+        : `${safeProfile}_${slugPrinter}_plate_${String(plate.index).padStart(2, "0")}.3mf`;
+      return { file: fname, filaments: [...filaments].sort(), parts };
+    });
+    manifestPrinters.push({
+      id: printer.id,
+      name: printer.name,
+      bed_mm: [printer.bed_width_mm, printer.bed_depth_mm],
+      plates: plateEntries,
+    });
   }
 
   const manifest = {
     kit: profileName,
     layout_mode: layoutMode,
-    printers: summaries,
+    printers: manifestPrinters,
     warnings,
   };
   const manifestPath = join(outputDir, "print_plan.json");

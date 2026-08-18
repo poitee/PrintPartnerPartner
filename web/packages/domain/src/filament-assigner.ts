@@ -55,6 +55,17 @@ function loadedFilamentIds(printer: PrinterMachine): Set<string> {
   return ids;
 }
 
+/** Empty `enabledIds` means "use the whole fleet" (first-visit default). */
+export function resolveEnabledPrinters(
+  fleet: PrinterMachine[],
+  enabledIds: string[] | null | undefined,
+): PrinterMachine[] {
+  const ids = enabledIds ?? [];
+  if (!ids.length) return [...fleet];
+  const selected = fleet.filter((m) => ids.includes(m.id));
+  return selected.length ? selected : [...fleet];
+}
+
 export function assignPartsToPrinters(
   copies: PartCopy[],
   printers: PrinterMachine[],

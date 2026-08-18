@@ -105,4 +105,188 @@ describe("export 3mf", () => {
     expect(xml).toContain('partnumber="bracket.stl"');
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("writes one 3MF per printer and a print_plan.json manifest", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-3mf-multi-"));
+    const exportsDir = join(dir, "exports");
+    const blackStl = join(dir, "bracket.stl");
+    const redStl = join(dir, "clip.stl");
+    writeFileSync(blackStl, MINI_STL);
+    writeFileSync(redStl, MINI_STL);
+    const voron: PrinterMachine = {
+      id: "voron-350",
+      name: "Voron 350",
+      bed_width_mm: 200,
+      bed_depth_mm: 200,
+      bed_height_mm: 200,
+      margin_mm: 4,
+      max_filament_slots: 1,
+      loaded_filaments: [{ slot: 1, filament_color_id: "asa-black", label: "ASA · Black" }],
+    };
+    const mk4: PrinterMachine = {
+      id: "mk4",
+      name: "MK4",
+      bed_width_mm: 200,
+      bed_depth_mm: 200,
+      bed_height_mm: 200,
+      margin_mm: 4,
+      max_filament_slots: 1,
+      loaded_filaments: [{ slot: 1, filament_color_id: "pla-red", label: "PLA · Red" }],
+    };
+    const black: MergePartExport = {
+      matchKey: "bracket.stl",
+      relativePath: "bracket.stl",
+      filename: "bracket.stl",
+      sourceLayer: "base:repo",
+      status: "included",
+      role: "primary",
+      quantityAuto: 1,
+      partSlug: "bracket",
+      included: true,
+      quantityOverride: null,
+      notes: "",
+      geometrySame: null,
+      absolutePath: blackStl,
+      quantityEffective: 1,
+      filamentColorId: "asa-black",
+      filamentDisplay: "ASA · Black",
+    };
+    const red: MergePartExport = {
+      ...black,
+      matchKey: "clip.stl",
+      relativePath: "clip.stl",
+      filename: "clip.stl",
+      partSlug: "clip",
+      absolutePath: redStl,
+      filamentColorId: "pla-red",
+      filamentDisplay: "PLA · Red",
+    };
+    const result = exportProfile3mf("MyKit", [black, red], exportsDir, {
+      enabled_printers: [voron, mk4],
+      layout_mode: "per_plate",
+    });
+    expect(result.plate_count).toBe(2);
+    expect(result.paths).toHaveLength(2);
+    expect(result.printer_summaries).toEqual(
+      expect.arrayContaining(["Voron 350: 1 plate(s)", "MK4: 1 plate(s)"]),
+    );
+    const outputDir = profileExportDir(exportsDir, "MyKit", "3mf");
+    expect(existsSync(join(outputDir, "MyKit_Voron_350_plate_01.3mf"))).toBe(true);
+    expect(existsSync(join(outputDir, "MyKit_MK4_plate_01.3mf"))).toBe(true);
+    const manifest = JSON.parse(readFileSync(join(outputDir, "print_plan.json"), "utf8")) as {
+      kit: string;
+      printers: Array<{
+        id: string;
+        name: string;
+        bed_mm: [number, number];
+        plates: Array<{ file: string; filaments: string[]; parts: string[] }>;
+      }>;
+    };
+    expect(manifest.kit).toBe("MyKit");
+    const voronEntry = manifest.printers.find((p) => p.id === "voron-350");
+    expect(voronEntry).toMatchObject({
+      name: "Voron 350",
+      bed_mm: [200, 200],
+    });
+    expect(voronEntry?.plates[0]).toMatchObject({
+      file: "MyKit_Voron_350_plate_01.3mf",
+      filaments: ["ASA · Black"],
+      parts: ["bracket.stl"],
+    });
+    const mk4Entry = manifest.printers.find((p) => p.id === "mk4");
+    expect(mk4Entry?.plates[0]).toMatchObject({
+      file: "MyKit_MK4_plate_01.3mf",
+      filaments: ["PLA · Red"],
+      parts: ["clip.stl"],
+    });
+    const voronZip = unzipSync(readFileSync(join(outputDir, "MyKit_Voron_350_plate_01.3mf")));
+    const voronXml = new TextDecoder().decode(voronZip["3D/3dmodel.model"]);
+    expect(voronXml).toContain('name="bracket.stl"');
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("zips plate files with print_plan.json", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-3mf-zip-"));
+    const exportsDir = join(dir, "exports");
+    const stl = join(dir, "bracket.stl");
+    writeFileSync(stl, MINI_STL);
+    const printer: PrinterMachine = {
+      id: "p1",
+      name: "Test",
+      bed_width_mm: 200,
+      bed_depth_mm: 200,
+      bed_height_mm: 200,
+      margin_mm: 4,
+      max_filament_slots: 1,
+      loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+    };
+    const part: MergePartExport = {
+      matchKey: "bracket.stl",
+      relativePath: "bracket.stl",
+      filename: "bracket.stl",
+      sourceLayer: "base:repo",
+      status: "included",
+      role: "primary",
+      quantityAuto: 1,
+      partSlug: "bracket",
+      included: true,
+      quantityOverride: null,
+      notes: "",
+      geometrySame: null,
+      absolutePath: stl,
+      quantityEffective: 1,
+    };
+    const result = exportProfile3mf("Kit", [part], exportsDir, {
+      enabled_printers: [printer],
+      layout_mode: "zip",
+    });
+    expect(result.primary_path.endsWith("Kit_plates.zip")).toBe(true);
+    const zip = unzipSync(readFileSync(result.primary_path));
+    expect(Object.keys(zip)).toEqual(
+      expect.arrayContaining(["print_plan.json", "Kit_Test_plate_01.3mf"]),
+    );
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("errors in single_plate_only when more than one plate is needed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-3mf-single-"));
+    const exportsDir = join(dir, "exports");
+    const a = join(dir, "a.stl");
+    const b = join(dir, "b.stl");
+    writeFileSync(a, MINI_STL);
+    writeFileSync(b, MINI_STL);
+    const printer: PrinterMachine = {
+      id: "tiny",
+      name: "Tiny",
+      bed_width_mm: 20,
+      bed_depth_mm: 20,
+      bed_height_mm: 200,
+      margin_mm: 4,
+      max_filament_slots: 1,
+      loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+    };
+    const makePart = (filename: string, path: string): MergePartExport => ({
+      matchKey: filename,
+      relativePath: filename,
+      filename,
+      sourceLayer: "base:repo",
+      status: "included",
+      role: "primary",
+      quantityAuto: 1,
+      partSlug: filename.replace(".stl", ""),
+      included: true,
+      quantityOverride: null,
+      notes: "",
+      geometrySame: null,
+      absolutePath: path,
+      quantityEffective: 1,
+    });
+    const result = exportProfile3mf("Kit", [makePart("a.stl", a), makePart("b.stl", b)], exportsDir, {
+      enabled_printers: [printer],
+      layout_mode: "single_plate_only",
+    });
+    expect(result.paths).toEqual([]);
+    expect(result.warnings.some((w) => /Single-plate export/.test(w))).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

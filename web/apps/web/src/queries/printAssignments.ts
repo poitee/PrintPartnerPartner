@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { savePrintAssignments } from "../api/engine";
+import { savePrintAssignments, savePrintPlan } from "../api/engine";
 import { invalidatePlateWorkspace } from "./plateWorkspace";
 
 /**
@@ -15,6 +15,18 @@ export function useSavePrintAssignmentsMutation(profileId: number | null) {
   return useMutation({
     mutationFn: (assignments: Record<string, string>) =>
       savePrintAssignments(profileId!, assignments),
+    onSuccess: () => {
+      if (profileId != null) void invalidatePlateWorkspace(qc, profileId);
+    },
+  });
+}
+
+/** Persist which fleet machines are used for this plan's pack/export. */
+export function useEnabledPrintersMutation(profileId: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled_printer_ids: string[]) =>
+      savePrintPlan(profileId!, { enabled_printer_ids }),
     onSuccess: () => {
       if (profileId != null) void invalidatePlateWorkspace(qc, profileId);
     },

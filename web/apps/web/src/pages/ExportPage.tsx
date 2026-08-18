@@ -7,6 +7,7 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import ExportActionCards from "../components/export/ExportActionCards";
 import ExportRecentPanel, { hasExportJobs } from "../components/export/ExportRecentPanel";
 import PartsManifestTransfer from "../components/export/PartsManifestTransfer";
+import KitPrinterSelectPanel from "../components/export/KitPrinterSelectPanel";
 import ManualAssignmentPanel from "../components/export/ManualAssignmentPanel";
 import PlatePreviewPanel from "../components/export/PlatePreviewPanel";
 import SlicerLinksPanel from "../components/export/SlicerLinksPanel";
@@ -134,6 +135,11 @@ export default function ExportPage() {
             </p>
 
             <SlicerLinksPanel />
+
+            <KitPrinterSelectPanel
+              profileId={selectedProfileId}
+              engineReady={Boolean(health.ok)}
+            />
 
             <ManualAssignmentPanel
               profileId={selectedProfileId}

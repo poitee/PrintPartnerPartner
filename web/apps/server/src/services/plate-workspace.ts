@@ -6,6 +6,7 @@ import {
   packCopiesGrouped,
   partFilamentKey,
   assignPartsToPrinters,
+  resolveEnabledPrinters,
   repoNameFromSourceLayer,
   folderKeyFromRelativePath,
   type GroupingStrategy,
@@ -148,11 +149,11 @@ function countUnassignedGroups(
 export function buildPlateWorkspace(repo: AppRepository, profileId: number) {
   const fleet = loadFleet(repo);
   const plan = loadKitPrintPlan(repo, profileId);
-  const enabledIds = new Set(plan.enabled_printer_ids);
   const { parts } = repo.buildMergePartsForProfile(profileId);
   const copies = mergePartsToCopies(parts as MergePartExport[]);
   const assignments = { ...plan.group_assignments };
-  const enabled = fleet.filter((m) => enabledIds.has(m.id));
+  const enabled = resolveEnabledPrinters(fleet, plan.enabled_printer_ids);
+  const enabledIds = new Set(enabled.map((m) => m.id));
   const groups = buildPrintGroupRows(copies, fleet, assignments);
   const spacing = plan.plate_layout?.spacing_mm ?? 4;
   const { preview, plate_count, warnings } = packPreviewForPrinters(
@@ -214,7 +215,7 @@ export function runPackPreview(
     options.enabled_printer_ids != null
       ? options.enabled_printer_ids
       : plan.enabled_printer_ids;
-  const enabled = fleet.filter((m) => (ids ?? []).includes(m.id));
+  const enabled = resolveEnabledPrinters(fleet, ids);
   const { parts } = repo.buildMergePartsForProfile(profileId);
   const copies = mergePartsToCopies(parts as MergePartExport[]);
   const groupingStrategy = options.grouping_strategy ?? plan.grouping_strategy;
