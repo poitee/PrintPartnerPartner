@@ -4,6 +4,7 @@ import {
   mergePartsToCopies,
   unprintedCopies,
   autoPlateLayout,
+  resolveEnabledPrinters,
   type MergePartExport,
 } from "@print-partner/domain";
 import type { FastifyInstance } from "fastify";
@@ -64,14 +65,14 @@ export async function registerPrintPlanRoutes(
     if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = request.body as { assignments?: Record<string, string> };
     const plan = loadKitPrintPlan(deps.repo, id);
-    plan.group_assignments = { ...(body.assignments ?? {}) };
-    const enabled = new Set(plan.enabled_printer_ids);
-    for (const printerId of Object.values(plan.group_assignments)) {
-      if (printerId) enabled.add(printerId);
-    }
-    plan.enabled_printer_ids = [...enabled];
-    saveKitPrintPlan(deps.repo, id, plan);
     const fleet = loadFleet(deps.repo);
+    const enabledIds = new Set(
+      resolveEnabledPrinters(fleet, plan.enabled_printer_ids).map((p) => p.id),
+    );
+    plan.group_assignments = Object.fromEntries(
+      Object.entries(body.assignments ?? {}).filter(([, printerId]) => enabledIds.has(printerId)),
+    );
+    saveKitPrintPlan(deps.repo, id, plan);
     const { parts } = deps.repo.buildMergePartsForProfile(id);
     const copies = mergePartsToCopies(parts as MergePartExport[]);
     const groups = buildPrintGroupRows(copies, fleet, plan.group_assignments);

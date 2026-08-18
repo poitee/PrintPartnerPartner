@@ -68,10 +68,13 @@ export default function ManualAssignmentPanel({ profileId, engineReady }: Props)
 
   const onAssign = (groupKey: string, printerId: string) => {
     if (profileId == null) return;
-    const next = { ...currentAssignments };
+    const enabledIds = new Set(enabledPrinters.map((p) => p.id));
+    const next = Object.fromEntries(
+      Object.entries(currentAssignments).filter(([, id]) => enabledIds.has(id)),
+    );
     if (printerId === AUTO_VALUE) {
       delete next[groupKey];
-    } else {
+    } else if (enabledIds.has(printerId)) {
       next[groupKey] = printerId;
     }
     mutation.mutate(next, {

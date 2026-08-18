@@ -240,6 +240,15 @@ describe("packPreviewForPrinters height_band serialization", () => {
   });
 });
 
+function mergePartsResult(parts: MergePartExport[] = []) {
+  return {
+    name: "kit",
+    orderNumber: null,
+    parts,
+    completedByMatchKey: {},
+  };
+}
+
 function memoryRepo(): AppRepository {
   const settings = new Map<string, string>();
   return {
@@ -247,7 +256,7 @@ function memoryRepo(): AppRepository {
     setSetting: (k: string, v: string) => {
       settings.set(k, v);
     },
-    buildMergePartsForProfile: () => ({ parts: [] }),
+    buildMergePartsForProfile: () => mergePartsResult(),
   } as unknown as AppRepository;
 }
 
@@ -289,7 +298,7 @@ describe("buildPlateWorkspace enabled printer subset", () => {
         grouping_strategy: "location",
         plate_layout: null,
       });
-      repo.buildMergePartsForProfile = () => ({ parts });
+      repo.buildMergePartsForProfile = () => mergePartsResult(parts);
 
       const workspace = buildPlateWorkspace(repo, 1);
       expect(workspace.groups).toHaveLength(1);
