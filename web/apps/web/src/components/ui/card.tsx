@@ -40,7 +40,7 @@ type CardTitleProps = React.HTMLAttributes<HTMLHeadingElement> & {
   level?: 2 | 3 | 4 | 5 | 6;
 };
 
-const CardTitle = React.forwardRef<HTMLElement, CardTitleProps>(
+const CardTitle = React.forwardRef<HTMLHeadingElement, CardTitleProps>(
   ({ asChild = false, className, level = 2, ...props }, ref) => {
     const Component: React.ElementType = asChild ? Slot : `h${level}`;
     return (
