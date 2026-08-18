@@ -84,7 +84,7 @@ const proxy: Record<string, ProxyOptions> = Object.fromEntries(
 
 export default defineConfig({
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
   },
   plugins: [react(), tailwindcss()],
   resolve: {

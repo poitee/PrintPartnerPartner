@@ -42,11 +42,13 @@
     "three": "^0.184.0"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.184.1",
     "@vitejs/plugin-react": "^6.0.3",
     "autoprefixer": "^10.5.2",
+    "jsdom": "^29.1.1",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.1",
     "tailwindcss-animate": "^1.0.7",
@@ -55,5 +57,5 @@
     "vite": "^8.1.0",
     "vitest": "^4.1.9"
   },
-  "description": "Print Partner React SPA \u2014 desk loop UI, spine navigation, plate export, and Progress checkoff."
+  "description": "Print Partner React SPA — desk loop UI, spine navigation, plate export, and Progress checkoff."
 }
