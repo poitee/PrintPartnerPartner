@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- **Snyk** — dropped the committed VS Code Snyk org binding; CI no longer uses Snyk PR checks.
 - **In-app kit advisor (GRE-225)** — Ask assistant / Kit Advisor sheet, Settings → AI, and `/assistant/chat` (410). Desk loop unchanged; attach Cursor / Grok / Claude via MCP instead.
 
 ### Added (prior)
