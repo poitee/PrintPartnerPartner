@@ -9,6 +9,7 @@ SOURCE_BRANCH="${SOURCE_BRANCH:-master}"
 SOURCE_KIND="${SOURCE_KIND:-github}"
 SOURCE_UPLOAD_FILE="${SOURCE_UPLOAD_FILE:-}"
 PLAN_NAME="${PLAN_NAME:-smoke-test-plan-$(date +%s)}"
+SOURCE_NAME="${SOURCE_NAME:-Smoke Source ${PLAN_NAME}}"
 
 AUTH_ARGS=()
 if [[ -n "${PRINT_PARTNER_API_KEY:-}" ]]; then
@@ -47,9 +48,9 @@ grep -q '"ok":true' /tmp/pp-smoke-health.txt
 
 echo "== 1. POST /sources =="
 if [[ "$SOURCE_KIND" == "local" ]]; then
-  SOURCE_PAYLOAD="{\"name\":\"Smoke Source\",\"local_path\":\"$SOURCE_URL\",\"source_kind\":\"local\"}"
+  SOURCE_PAYLOAD="{\"name\":\"$SOURCE_NAME\",\"local_path\":\"$SOURCE_URL\",\"source_kind\":\"local\"}"
 else
-  SOURCE_PAYLOAD="{\"name\":\"Smoke Source\",\"url\":\"$SOURCE_URL\",\"branch\":\"$SOURCE_BRANCH\",\"source_kind\":\"$SOURCE_KIND\"}"
+  SOURCE_PAYLOAD="{\"name\":\"$SOURCE_NAME\",\"url\":\"$SOURCE_URL\",\"branch\":\"$SOURCE_BRANCH\",\"source_kind\":\"$SOURCE_KIND\"}"
 fi
 SRC_RESP=$(request -s -w "\nHTTP:%{http_code}" -X POST "$BASE/sources" \
   -H 'Content-Type: application/json' \
