@@ -5,7 +5,9 @@ export function setAuxiliaryError(
   key: string,
   message: string,
 ): AuxiliaryErrors {
-  return { ...errors, [key]: message };
+  const next = { ...errors };
+  delete next[key];
+  return { ...next, [key]: message };
 }
 
 export function clearAuxiliaryError(

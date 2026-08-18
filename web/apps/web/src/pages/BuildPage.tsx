@@ -734,7 +734,7 @@ function BuildPageContent() {
       )}
 
       {engineState !== "ready" ? (
-        <Card className="border-border shadow-sm">
+        <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
               {engineState === "offline"

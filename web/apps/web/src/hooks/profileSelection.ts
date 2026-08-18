@@ -43,7 +43,3 @@ export function shouldBlockUrlProfileSync(
   if (urlId === pendingSelectionId) return false;
   return selectedProfileId === pendingSelectionId;
 }
-
-export function shouldReconcileProfileSelection(requestSucceeded: boolean): boolean {
-  return requestSucceeded;
-}

@@ -880,7 +880,7 @@ export default function CheckoffPage() {
     let stateContent;
     if (engineState !== "ready") {
       stateContent = (
-        <Card className="no-print border-border shadow-sm">
+        <Card className="no-print">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
               {engineState === "offline"

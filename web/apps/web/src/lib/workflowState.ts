@@ -1,5 +1,10 @@
 export type EngineState = "loading" | "offline" | "ready";
 export type ResourceState = "loading" | "error" | "ready";
+export type SettingsResourceDisplay =
+  | "loading"
+  | "initial-error"
+  | "background-error"
+  | "ready";
 
 type EngineStateInput = {
   health: { ok: boolean } | null;
@@ -13,36 +18,44 @@ type ResourceStateInput = {
   hasData: boolean;
 };
 
-export function resolveEngineState(_input: EngineStateInput): EngineState {
-  if (_input.health?.ok) return "ready";
-  if (_input.health || _input.error || !_input.loading) return "offline";
+export function resolveEngineState(input: EngineStateInput): EngineState {
+  if (input.health?.ok) return "ready";
+  if (input.health || input.error || !input.loading) return "offline";
   return "loading";
 }
 
-export function resolveResourceState(_input: ResourceStateInput): ResourceState {
-  if (_input.hasData) return "ready";
-  if (_input.error) return "error";
-  return _input.loading ? "loading" : "ready";
+export function resolveResourceState(input: ResourceStateInput): ResourceState {
+  if (input.hasData) return "ready";
+  if (input.error) return "error";
+  return input.loading ? "loading" : "ready";
 }
 
-export function getBackgroundError(_error: string | null, _hasData: boolean): string | null {
-  return _hasData ? _error : null;
+export function getBackgroundError(error: string | null, hasData: boolean): string | null {
+  return hasData ? error : null;
+}
+
+export function resolveSettingsResourceDisplay(
+  resource: ResourceStateInput,
+): SettingsResourceDisplay {
+  if (resource.hasData) return resource.error ? "background-error" : "ready";
+  if (resource.error) return "initial-error";
+  return resource.loading ? "loading" : "ready";
 }
 
 export function canUseSettingsResource(
-  _engineState: EngineState,
-  _resource: ResourceStateInput,
+  engineState: EngineState,
+  resource: ResourceStateInput,
 ): boolean {
-  return _engineState === "ready" && resolveResourceState(_resource) === "ready";
+  return engineState === "ready" && resolveResourceState(resource) === "ready";
 }
 
-export function canUseRecoveryTools(_engineState: EngineState): boolean {
-  return _engineState === "ready";
+export function canUseRecoveryTools(engineState: EngineState): boolean {
+  return engineState === "ready";
 }
 
 export function shouldMountPlanTools(
-  _engineState: EngineState,
-  _selectedProfileId: number | null,
+  engineState: EngineState,
+  selectedProfileId: number | null,
 ): boolean {
-  return _engineState === "ready" && _selectedProfileId != null;
+  return engineState === "ready" && selectedProfileId != null;
 }

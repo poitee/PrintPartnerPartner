@@ -959,7 +959,7 @@ export default function SourcesPage() {
     return (
       <div className="space-y-4">
         <RouteBreadcrumbs items={[{ label: "Library" }]} />
-        <Card className="border-border shadow-sm">
+        <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
               {engineState === "offline"

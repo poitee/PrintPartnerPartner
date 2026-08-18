@@ -80,6 +80,7 @@ import {
   canUseRecoveryTools,
   canUseSettingsResource,
   resolveEngineState,
+  resolveSettingsResourceDisplay,
 } from "../lib/workflowState";
 
 const UPDATE_INTERVAL_OPTIONS = [
@@ -246,12 +247,23 @@ export default function SettingsPage() {
       error: resourceLoads[resource].error,
       hasData: resourceLoads[resource].loaded,
     });
+  const resourceDisplay = (resource: SettingsResource) =>
+    resolveSettingsResourceDisplay({
+      loading: resourceLoads[resource].loading,
+      error: resourceLoads[resource].error,
+      hasData: resourceLoads[resource].loaded,
+    });
   const filamentsReady = resourceReady("filaments");
   const githubPatReady = resourceReady("githubPat");
   const sourceUpdatesReady = resourceReady("sourceUpdates");
   const autoRecomputeReady = resourceReady("autoRecompute");
   const discordReady = resourceReady("discord");
   const recoveryToolsReady = canUseRecoveryTools(engineState);
+  const filamentsDisplay = resourceDisplay("filaments");
+  const githubPatDisplay = resourceDisplay("githubPat");
+  const sourceUpdatesDisplay = resourceDisplay("sourceUpdates");
+  const autoRecomputeDisplay = resourceDisplay("autoRecompute");
+  const discordDisplay = resourceDisplay("discord");
 
   // Scroll to hash targets (e.g. /settings#printers) after layout.
   useEffect(() => {
@@ -361,7 +373,7 @@ export default function SettingsPage() {
       />
 
       {engineState !== "ready" && (
-        <Card className="border-border shadow-sm">
+        <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
               {engineState === "offline"
@@ -404,9 +416,9 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {!resourceLoads.filaments.loaded && resourceLoads.filaments.loading ? (
+            {filamentsDisplay === "loading" ? (
               <p className="text-sm text-muted-foreground">Loading custom filaments…</p>
-            ) : !resourceLoads.filaments.loaded && resourceLoads.filaments.error ? (
+            ) : filamentsDisplay === "initial-error" ? (
               <div className="space-y-2 text-sm text-destructive" role="alert">
                 <p>Could not load custom filaments: {resourceLoads.filaments.error}</p>
                 <Button size="sm" variant="secondary" onClick={() => void refresh()}>
@@ -469,7 +481,7 @@ export default function SettingsPage() {
                 Add filament
               </Button>
             </div>
-            {resourceLoads.filaments.loaded && resourceLoads.filaments.error && (
+            {filamentsDisplay === "background-error" && (
               <p className="text-sm text-destructive" role="alert">
                 Could not refresh custom filaments: {resourceLoads.filaments.error}
               </p>
@@ -493,16 +505,17 @@ export default function SettingsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {!resourceLoads.sourceUpdates.loaded && (
+            {(sourceUpdatesDisplay === "loading" ||
+              sourceUpdatesDisplay === "initial-error") && (
               <p
                 className={
-                  resourceLoads.sourceUpdates.error
+                  sourceUpdatesDisplay === "initial-error"
                     ? "text-sm text-destructive"
                     : "text-sm text-muted-foreground"
                 }
-                role={resourceLoads.sourceUpdates.error ? "alert" : undefined}
+                role={sourceUpdatesDisplay === "initial-error" ? "alert" : undefined}
               >
-                {resourceLoads.sourceUpdates.error
+                {sourceUpdatesDisplay === "initial-error"
                   ? `Could not load source update settings: ${resourceLoads.sourceUpdates.error}`
                   : "Loading source update settings…"}
               </p>
@@ -534,7 +547,7 @@ export default function SettingsPage() {
             >
               {updateBusy ? "Checking…" : "Check now"}
             </Button>
-            {resourceLoads.sourceUpdates.loaded && resourceLoads.sourceUpdates.error && (
+            {sourceUpdatesDisplay === "background-error" && (
               <p className="text-sm text-destructive" role="alert">
                 Could not refresh source update settings: {resourceLoads.sourceUpdates.error}
               </p>
@@ -551,16 +564,17 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {!resourceLoads.autoRecompute.loaded && (
+            {(autoRecomputeDisplay === "loading" ||
+              autoRecomputeDisplay === "initial-error") && (
               <p
                 className={
-                  resourceLoads.autoRecompute.error
+                  autoRecomputeDisplay === "initial-error"
                     ? "text-sm text-destructive"
                     : "text-sm text-muted-foreground"
                 }
-                role={resourceLoads.autoRecompute.error ? "alert" : undefined}
+                role={autoRecomputeDisplay === "initial-error" ? "alert" : undefined}
               >
-                {resourceLoads.autoRecompute.error
+                {autoRecomputeDisplay === "initial-error"
                   ? `Could not load auto-recompute settings: ${resourceLoads.autoRecompute.error}`
                   : "Loading auto-recompute settings…"}
               </p>
@@ -582,7 +596,7 @@ export default function SettingsPage() {
                 aria-label="Auto-recompute stale builds"
               />
             </label>
-            {resourceLoads.autoRecompute.loaded && resourceLoads.autoRecompute.error && (
+            {autoRecomputeDisplay === "background-error" && (
               <p className="text-sm text-destructive" role="alert">
                 Could not refresh auto-recompute settings: {resourceLoads.autoRecompute.error}
               </p>
@@ -606,16 +620,17 @@ export default function SettingsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {!resourceLoads.githubPat.loaded ? (
+            {githubPatDisplay === "loading" ||
+            githubPatDisplay === "initial-error" ? (
               <p
                 className={
-                  resourceLoads.githubPat.error
+                  githubPatDisplay === "initial-error"
                     ? "text-sm text-destructive"
                     : "text-sm text-muted-foreground"
                 }
-                role={resourceLoads.githubPat.error ? "alert" : undefined}
+                role={githubPatDisplay === "initial-error" ? "alert" : undefined}
               >
-                {resourceLoads.githubPat.error
+                {githubPatDisplay === "initial-error"
                   ? `Could not load token status: ${resourceLoads.githubPat.error}`
                   : "Loading token status…"}
               </p>
@@ -653,7 +668,7 @@ export default function SettingsPage() {
                 Clear token
               </Button>
             </div>
-            {resourceLoads.githubPat.loaded && resourceLoads.githubPat.error && (
+            {githubPatDisplay === "background-error" && (
               <p className="text-sm text-destructive" role="alert">
                 Could not refresh token status: {resourceLoads.githubPat.error}
               </p>
@@ -669,16 +684,16 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {!resourceLoads.discord.loaded && (
+            {(discordDisplay === "loading" || discordDisplay === "initial-error") && (
               <p
                 className={
-                  resourceLoads.discord.error
+                  discordDisplay === "initial-error"
                     ? "text-sm text-destructive"
                     : "text-sm text-muted-foreground"
                 }
-                role={resourceLoads.discord.error ? "alert" : undefined}
+                role={discordDisplay === "initial-error" ? "alert" : undefined}
               >
-                {resourceLoads.discord.error
+                {discordDisplay === "initial-error"
                   ? `Could not load Discord settings: ${resourceLoads.discord.error}`
                   : "Loading Discord settings…"}
               </p>
@@ -801,7 +816,7 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
-            {resourceLoads.discord.loaded && resourceLoads.discord.error && (
+            {discordDisplay === "background-error" && (
               <p className="text-sm text-destructive" role="alert">
                 Could not refresh Discord settings: {resourceLoads.discord.error}
               </p>

@@ -1,9 +1,6 @@
-export function optimisticReviewCacheKey(
-  profileId: number,
-  includeExcluded: boolean,
-) {
-  return ["planReview", profileId, includeExcluded] as const;
-}
+import { queryKeys } from "../queries/keys";
+
+export const optimisticReviewCacheKey = queryKeys.planReview;
 
 export type OptimisticRollback<T> =
   | { kind: "restore"; previous: T }
