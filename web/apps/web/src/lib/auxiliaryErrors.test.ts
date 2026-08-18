@@ -24,4 +24,13 @@ describe("auxiliary error lifecycle", () => {
 
     expect(currentAuxiliaryError(errors)).toBe("Phase progress failed");
   });
+
+  it("displays the most recently updated error even when its key already existed", () => {
+    let errors: AuxiliaryErrors = {};
+    errors = setAuxiliaryError(errors, "printer-activity", "Printer activity failed");
+    errors = setAuxiliaryError(errors, "phase-progress", "Phase progress failed");
+    errors = setAuxiliaryError(errors, "printer-activity", "Printer activity failed again");
+
+    expect(currentAuxiliaryError(errors)).toBe("Printer activity failed again");
+  });
 });

@@ -5,6 +5,7 @@ import {
   getBackgroundError,
   resolveEngineState,
   resolveResourceState,
+  resolveSettingsResourceDisplay,
   shouldMountPlanTools,
 } from "./workflowState";
 
@@ -64,6 +65,41 @@ describe("resolveResourceState", () => {
 });
 
 describe("settings and plan gates", () => {
+  it("shows a background settings error without disabling cached data", () => {
+    const resource = {
+      loading: false,
+      error: "refresh failed",
+      hasData: true,
+    };
+
+    expect(resolveSettingsResourceDisplay(resource)).toBe("background-error");
+    expect(canUseSettingsResource("ready", resource)).toBe(true);
+  });
+
+  it("distinguishes initial settings loading and failure from ready data", () => {
+    expect(
+      resolveSettingsResourceDisplay({
+        loading: true,
+        error: null,
+        hasData: false,
+      }),
+    ).toBe("loading");
+    expect(
+      resolveSettingsResourceDisplay({
+        loading: false,
+        error: "initial failure",
+        hasData: false,
+      }),
+    ).toBe("initial-error");
+    expect(
+      resolveSettingsResourceDisplay({
+        loading: true,
+        error: null,
+        hasData: true,
+      }),
+    ).toBe("ready");
+  });
+
   it("does not let one settings endpoint disable another card or recovery tools", () => {
     const engineState = resolveEngineState({
       health: { ok: true },
