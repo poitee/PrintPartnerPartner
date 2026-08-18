@@ -3,7 +3,7 @@ import type {
   FastifyInstance,
   FastifyReply,
   FastifyRequest,
-  preHandlerHookHandler,
+  preHandlerAsyncHookHandler,
 } from "fastify";
 import type { ServerConfig } from "../config.js";
 import { sendProblem } from "../lib/api-error.js";
@@ -102,7 +102,7 @@ export function registerApiKeyAuth(
 export function createAdminPreHandler(
   config: ServerConfig,
   validateApiKey: ApiKeyValidator,
-): preHandlerHookHandler {
+): preHandlerAsyncHookHandler {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     if (isLoopbackAddress(request.socket.remoteAddress)) return;
 
