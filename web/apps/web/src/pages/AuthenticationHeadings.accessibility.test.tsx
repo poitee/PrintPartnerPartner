@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import ForgotPasswordPage from "./ForgotPasswordPage";
 import ResetPasswordPage from "./ResetPasswordPage";
@@ -23,6 +23,8 @@ vi.mock("sonner", () => ({
 }));
 
 describe("authentication page headings", () => {
+  afterEach(cleanup);
+
   it("uses an h1 for the forgot-password page title", () => {
     render(
       <MemoryRouter>

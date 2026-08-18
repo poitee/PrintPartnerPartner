@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { PlanReview } from "../api/engine";
 import CheckoffPage from "./CheckoffPage";
@@ -156,6 +156,8 @@ vi.mock("../components/PlanSpecialRequestLine", () => ({
 }));
 
 describe("CheckoffPage accessibility", () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     state.profiles = [
       {

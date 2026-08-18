@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import WelcomePage from "./WelcomePage";
 
@@ -23,6 +23,8 @@ function PlanDestination() {
 }
 
 describe("WelcomePage", () => {
+  afterEach(cleanup);
+
   it("keeps the welcome page h1 in the completed setup state", () => {
     render(
       <MemoryRouter>

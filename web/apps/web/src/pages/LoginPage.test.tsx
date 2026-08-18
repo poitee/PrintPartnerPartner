@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import LoginPage from "./LoginPage";
 
@@ -27,6 +27,8 @@ vi.mock("sonner", () => ({
 }));
 
 describe("LoginPage", () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     auth.loginEmail.mockReset().mockResolvedValue(undefined);
     auth.registerEmail.mockReset().mockResolvedValue(undefined);
