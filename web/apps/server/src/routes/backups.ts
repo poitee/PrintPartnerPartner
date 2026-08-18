@@ -241,46 +241,70 @@ export async function registerBackupRoutes(
    * Expects the backup file as form data.
    * WARNING: This replaces all current application data.
    */
-  app.post<{ Reply: { success: boolean; message: string } | { detail: string } }>(
+  app.post<{
+    Body: { backupName?: string };
+    Reply: { success: boolean; message: string } | { detail: string };
+  }>(
     "/backups/restore",
     {
       config: { rateLimit: { max: 3, timeWindow: "5 minutes" } },
       schema: { consumes: ["multipart/form-data"] },
     },
     async (request, reply) => {
+      let tempDir: string | null = null;
       try {
-        const data = await request.file();
-        if (!data) {
-          return reply.status(400).send({
-            detail: "No backup file provided",
-          });
-        }
-
-        mkdirSync(deps.dataDir, { recursive: true });
-        const tempDir = mkdtempSync(join(deps.dataDir, ".restore-upload-"));
-
-        try {
+        let backupPath: string;
+        if (request.isMultipart()) {
+          const data = await request.file();
+          if (!data) {
+            return reply.status(400).send({
+              detail: "No backup file provided",
+            });
+          }
+          mkdirSync(deps.dataDir, { recursive: true });
+          tempDir = mkdtempSync(join(deps.dataDir, ".restore-upload-"));
           const tempFilePath = safeBackupUploadPath(tempDir, data.filename);
           await pipeline(data.file, createWriteStream(tempFilePath, { flags: "wx" }));
+          backupPath = tempFilePath;
+        } else {
+          const name = request.body?.backupName?.trim();
+          if (!name) {
+            return reply.status(400).send({ detail: "backupName is required" });
+          }
+          const backupsDir = join(deps.dataDir, "backups");
+          const storedPath = safeStoredBackupPath(backupsDir, name);
+          if (!storedPath) {
+            return reply.status(400).send({ detail: "Invalid backup name" });
+          }
+          try {
+            const stats = await fs.stat(storedPath);
+            if (!stats.isFile()) {
+              return reply.status(404).send({ detail: "Backup file not found" });
+            }
+          } catch {
+            return reply.status(404).send({ detail: "Backup file not found" });
+          }
+          backupPath = storedPath;
+        }
 
-          const metadata = await restoreBackup(tempFilePath, deps.dataDir, deps.sqlite);
-
-          return reply.send({
-            success: true,
-            message: `Backup restored successfully (${metadata.createdAt}). Application will restart.`,
-          });
-        } finally {
+        const metadata = await restoreBackup(backupPath, deps.dataDir, deps.sqlite);
+        return reply.send({
+          success: true,
+          message: `Backup restored successfully (${metadata.createdAt}). Application will restart.`,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return reply.status(500).send({
+          detail: `Restore failed: ${message}`,
+        });
+      } finally {
+        if (tempDir) {
           try {
             await fs.rm(tempDir, { recursive: true, force: true });
           } catch {
             // Ignore cleanup errors
           }
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return reply.status(500).send({
-          detail: `Restore failed: ${message}`,
-        });
       }
     },
   );
