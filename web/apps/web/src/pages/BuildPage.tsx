@@ -273,7 +273,6 @@ function BuildPageContent() {
       setLayers([]);
       setAddonSourceId("");
       setPendingBaseSourceId("");
-      setKitFocus(null);
       setRoleFilaments([]);
       return;
     }
@@ -283,7 +282,6 @@ function BuildPageContent() {
       setLayers([]);
       setAddonSourceId("");
       setPendingBaseSourceId("");
-      setKitFocus(null);
       setRoleFilaments([]);
       setLoadError(null);
     }

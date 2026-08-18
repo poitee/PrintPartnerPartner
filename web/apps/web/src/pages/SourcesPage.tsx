@@ -1458,7 +1458,6 @@ export default function SourcesPage() {
           if (!open) {
             setDetailSource(null);
             setHighlightPath(null);
-            setDocsQuery(undefined);
           }
         }}
         initialTab={detailTab}
