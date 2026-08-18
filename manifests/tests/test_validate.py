@@ -44,7 +44,11 @@ class ManifestValidatorTests(unittest.TestCase):
             for path in (canonical_manifest, canonical_registry, embedded_manifest, embedded_registry):
                 path.parent.mkdir(parents=True, exist_ok=True)
             canonical_manifest.write_text("format: print-partner-manifest\nversion: 1\n")
-            canonical_registry.write_text("entries: []\n")
+            canonical_registry.write_text(
+                "entries:\n"
+                "  - slug: example\n"
+                "    manifest_file: example/manifest.yaml\n"
+            )
             embedded_manifest.write_text("format: print-partner-manifest\nversion: 2\n")
             embedded_registry.write_text("entries: []\n")
 
