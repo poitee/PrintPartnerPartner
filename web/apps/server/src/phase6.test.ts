@@ -52,6 +52,7 @@ describe("Phase 6 tenant isolation", () => {
     writeFileSync(join(repoPath, "parts", "part.stl"), "solid part\nendsolid part\n");
 
     let profileId = 0;
+    let partId = 0;
     tenantStorage.run("tenant-a", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
       const source = repo.createSource({
@@ -63,11 +64,19 @@ describe("Phase 6 tenant isolation", () => {
       repo.updateImportRules(source.id, ["parts/"]);
       profileId = repo.createProfile("Tenant A plan", source.id).id;
       expect(repo.recomputeProfile(profileId).merged).toBe(true);
+      partId = repo.listParts(profileId).parts[0]!.id;
+      repo.patchPartProgress(partId, 0, true);
+      repo.patchPartAssembled(partId, 0, true);
     });
 
     tenantStorage.run("tenant-b", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
       expect(repo.getProfile(profileId)).toBeNull();
+      expect(repo.getPartRow(partId)).toBeNull();
+      expect(() => repo.patchPart(partId, { included: false })).toThrow("Part not found");
+      expect(() => repo.patchPartProgress(partId, 0, false)).toThrow("Part not found");
+      expect(() => repo.patchPartAssembled(partId, 0, false)).toThrow("Part not found");
+      expect(() => repo.getPartAssembled(partId)).toThrow("Part not found");
       expect(() => repo.listParts(profileId)).toThrow("Profile not found");
       expect(() => repo.recomputeProfile(profileId)).toThrow("Profile not found");
       expect(() => repo.buildMergePartsForProfile(profileId)).toThrow("Profile not found");
@@ -81,6 +90,13 @@ describe("Phase 6 tenant isolation", () => {
           summary: "must be rejected",
         }),
       ).toThrow("Profile not found");
+    });
+
+    tenantStorage.run("tenant-a", () => {
+      const repo = new AppRepository(db, "default", sqlite.reposDir);
+      expect(repo.getPartRow(partId)?.included).toBe(true);
+      expect(repo.getPartAssembled(partId).assembled_units).toEqual([true]);
+      expect(repo.listParts(profileId).parts[0]?.print_units).toEqual([true]);
     });
 
     sqlite.close();

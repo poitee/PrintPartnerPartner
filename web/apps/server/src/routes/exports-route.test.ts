@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Fastify from "fastify";
 import { buildApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
+import { registerExportRoutes } from "./exports.js";
 
 /**
  * GET /exports/* serves the files export jobs produce. Auto-slice writes a
@@ -43,6 +45,48 @@ const PNG = Buffer.from(
 );
 
 describe("GET /exports/*", () => {
+  it("serves same-named artifacts only from the authenticated tenant directory", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-exports-tenant-route-"));
+    const app = Fastify();
+    app.decorateRequest("tenantId", "default");
+    app.addHook("onRequest", async (request) => {
+      request.tenantId = String(request.headers["x-test-tenant"] ?? "default");
+    });
+    await registerExportRoutes(app, { dataDir: dir });
+    cleanup.push(() => {
+      void app.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+    const tenantA = join(dir, "exports", "tenant-tenant-a", "same");
+    const tenantB = join(dir, "exports", "tenant-tenant-b", "same");
+    mkdirSync(tenantA, { recursive: true });
+    mkdirSync(tenantB, { recursive: true });
+    writeFileSync(join(tenantA, "plate.gcode"), "TENANT-A\n");
+    writeFileSync(join(tenantB, "plate.gcode"), "TENANT-B\n");
+
+    const a = await app.inject({
+      method: "GET",
+      url: "/exports/same/plate.gcode",
+      headers: { "x-test-tenant": "tenant-a" },
+    });
+    const b = await app.inject({
+      method: "GET",
+      url: "/exports/same/plate.gcode",
+      headers: { "x-test-tenant": "tenant-b" },
+    });
+    const crossTenant = await app.inject({
+      method: "GET",
+      url: "/exports/tenant-tenant-a/same/plate.gcode",
+      headers: { "x-test-tenant": "tenant-b" },
+    });
+
+    expect(a.statusCode).toBe(200);
+    expect(a.body).toBe("TENANT-A\n");
+    expect(b.statusCode).toBe(200);
+    expect(b.body).toBe("TENANT-B\n");
+    expect(crossTenant.statusCode).toBe(404);
+  });
+
   it("serves an auto-slice plate thumbnail inline as image/png", async () => {
     const { app, dir } = await makeApp();
     const thumbDir = join(dir, "exports", "my_plan", "gcode", "thumbnails");

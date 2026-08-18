@@ -73,4 +73,56 @@ describe("InProcessJobRunner tenant ownership", () => {
     expect(retained.map((job) => job.job_id)).toContain(second);
     expect(await runner.get(first, "tenant-a")).toBeNull();
   });
+
+  it("applies the terminal cap independently per tenant without counting active jobs", async () => {
+    const runner = createRunner({
+      completedJobMax: 2,
+      completedJobRetentionMs: 60_000,
+    });
+    const originalRunJob = (
+      runner as unknown as {
+        runJob: (
+          jobId: string,
+          kind: string,
+          payload: Record<string, unknown>,
+        ) => Promise<void>;
+      }
+    ).runJob.bind(runner);
+    (
+      runner as unknown as {
+        runJob: (
+          jobId: string,
+          kind: string,
+          payload: Record<string, unknown>,
+        ) => Promise<void>;
+      }
+    ).runJob = async (jobId, kind, payload) => {
+      if (kind === "active") return new Promise<void>(() => undefined);
+      return originalRunJob(jobId, kind, payload);
+    };
+
+    const activeA = await runner.start("active", {}, "tenant-a");
+    const activeB = await runner.start("active", {}, "tenant-b");
+    const completedA = await Promise.all([
+      runner.start("a-1", {}, "tenant-a"),
+      runner.start("a-2", {}, "tenant-a"),
+      runner.start("a-3", {}, "tenant-a"),
+    ]);
+    await waitForTerminal(runner, completedA[2]!, "tenant-a");
+    const completedB = await Promise.all([
+      runner.start("b-1", {}, "tenant-b"),
+      runner.start("b-2", {}, "tenant-b"),
+      runner.start("b-3", {}, "tenant-b"),
+    ]);
+    await waitForTerminal(runner, completedB[2]!, "tenant-b");
+
+    const tenantA = runner.listJobs({}, "tenant-a");
+    const tenantB = runner.listJobs({}, "tenant-b");
+    expect(tenantA).toHaveLength(3);
+    expect(tenantA.map((job) => job.job_id)).toContain(activeA);
+    expect(tenantA.filter((job) => job.status === "done")).toHaveLength(2);
+    expect(tenantB).toHaveLength(3);
+    expect(tenantB.map((job) => job.job_id)).toContain(activeB);
+    expect(tenantB.filter((job) => job.status === "done")).toHaveLength(2);
+  });
 });
