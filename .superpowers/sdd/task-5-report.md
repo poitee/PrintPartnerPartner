@@ -121,3 +121,121 @@ Server: 4 files, 24 tests passed
 - Critical directory backups can be substantially larger than the previous
   database-only archive. Symbolic links are deliberately omitted rather than
   followed or restored.
+
+## Review remediation
+
+Status: complete on `cursor/full-codebase-audit-2c41`.
+
+Implementation HEAD before this report:
+`fc277835a2103eb7a54c8489666614dcf4e8f73c`.
+
+### Fixed Important, Minor, and adjacent findings
+
+- Strengthened the persisted export orchestration fixture to use three copies
+  across two explicit plates. The test now proves that persisted plate
+  boundaries override fallback packing and that the persisted 7 mm spacing,
+  rather than the 4 mm fallback, produces the second-copy x-coordinate.
+- Malformed print-plan PUT bodies now return `400`, log a structured warning,
+  and leave the persisted plan unchanged. GET now returns
+  `grouping_strategy`. Loading persisted plans salvages each independently
+  valid field while logging and defaulting malformed fields instead of
+  discarding the entire plan.
+- Backup creation now snapshots SQLite with better-sqlite3's backup API,
+  which incorporates committed WAL data into one consistent database file.
+  Critical directories stream directly into the compressed archive; they are
+  no longer copied into a duplicate staging tree.
+- Backup publication writes a unique sibling temporary archive, syncs it, and
+  atomically renames it into place. Snapshot/archive failures clean temporary
+  state and cannot truncate an existing published backup.
+- Validation parses every archive entry but extracts only metadata, database,
+  and optional WAL state. Validation and restore enforce defaults of 100,000
+  entries, 20 GiB total decompressed bytes, 8 GiB per entry, 64 KiB metadata,
+  and a 200:1 decompression ratio.
+- Tar callbacks no longer throw from `filter`; they record the first invalid
+  entry, reject extraction for it, allow the parser to settle, and then reject
+  through the awaited promise.
+- Validation opens the isolated database and requires
+  `PRAGMA integrity_check` to return `ok`; a valid SQLite header is no longer
+  sufficient.
+- Backup multipart filenames are normalized and sanitized for both POSIX and
+  Windows separators. Each request receives a unique contained upload
+  directory, and uploads stream to a create-only file instead of buffering the
+  complete archive in memory.
+- Backup download/delete lookup now rejects backslashes and unsafe stored
+  names and uses canonical containment rather than string-prefix checks.
+- Realpath behavior is documented in both secure-path modules: in-root
+  symlinks resolve to a canonical path, escaping symlinks are rejected, and
+  canonical temporary paths can differ on macOS. Tests compare canonical
+  paths and are portable across `/tmp` aliases.
+- Domain production builds now use a dedicated build tsconfig, clean stale
+  output, exclude tests/specs, and keep composite build-info inside `dist` so
+  every clean build re-emits declarations. Server builds continue to exclude
+  tests/specs.
+
+### TDD evidence for review fixes
+
+The review regression tests were committed and pushed before production
+changes (`2a37d72`).
+
+Initial focused server run:
+
+```text
+Test Files 5 failed | 1 passed
+Tests 14 failed | 8 passed
+```
+
+Failures matched the missing SQLite snapshot API, non-atomic backup behavior,
+missing decompressed limits/integrity check, malformed HTTP `500` responses,
+whole-plan fallback without warnings, missing grouping strategy, and absent
+multipart path sanitizer. The expanded persisted multi-plate/spacing export
+test passed against the existing orchestration.
+
+The pre-fix domain build inspection exited non-zero because test/spec outputs
+were present. A later clean domain-then-server build exposed stale composite
+build information preventing domain re-emission; moving production build-info
+under cleaned `dist` fixed the repeat-build failure.
+
+Final focused review suite:
+
+```text
+9 files passed
+40 tests passed
+```
+
+### Final verification after all review fixes
+
+- Domain tests: 18 files, 127 tests passed.
+- Server tests: 120 files passed, 1 skipped; 761 tests passed, 2 skipped.
+- Domain and server typechecks: passed with no diagnostics.
+- Workspace lint: passed with no ESLint diagnostics.
+- Domain and server production builds: passed.
+- Domain `dist`: 108 generated files including `dist/index.js`; zero
+  test/spec modules, declarations, or maps.
+- Server `dist`: 760 generated files including `dist/index.js`; zero
+  test/spec modules, declarations, or maps.
+- `git diff --check`: passed.
+
+### Review-fix commits
+
+- `2a37d72` — `test: expose Task 5 review blockers`
+- `0a74b56` — `fix: reject malformed print-plan requests`
+- `5c26fd8` — `fix: snapshot SQLite through backup API`
+- `9ad4237` — `fix: bound and atomically publish backups`
+- `59dab5d` — `fix: narrow archive callback inputs`
+- `588400c` — `fix: confine streamed backup uploads`
+- `bd6462d` — `build: exclude domain tests from production output`
+- `37083da` — `fix: regenerate clean domain build output`
+- `fc27783` — `refactor: stream backup archives from source data`
+
+### Remaining concerns
+
+- SQLite is transactionally snapshotted, but critical filesystem directories
+  are streamed from the live data tree and are not a cross-filesystem
+  point-in-time snapshot. Concurrent changes can make those non-database files
+  represent slightly different instants; an I/O failure aborts publication.
+- Restore retains its pre-restore safety copy and validates before mutation,
+  but replacing SQLite plus several directories remains a recoverable
+  multi-step operation rather than one filesystem-wide atomic transaction.
+- Backups exceeding the documented archive limits are intentionally rejected.
+  Installations with legitimately larger data trees must raise the limits in a
+  future configurable policy rather than bypassing validation.
