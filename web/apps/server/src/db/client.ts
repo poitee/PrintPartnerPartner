@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import * as schema from "./schema.js";
 import { currentSchemaVersion, schemaMigrations, schemaVersionKey } from "./schema.js";
@@ -129,24 +129,10 @@ export class SqliteDatabase {
     this.drizzle = null;
   }
 
-  /**
-   * Backups the database file by reading it directly.
-   * Use this when the database is open to get a consistent snapshot.
-   */
-  backupFileContent(): Buffer {
+  /** Create a transactionally consistent snapshot, including committed WAL data. */
+  async backupToFile(destinationPath: string): Promise<void> {
     if (!this.sqlite) throw new Error("Database not connected");
-    return readFileSync(this.dbPath);
-  }
-
-  /**
-   * Backups the database WAL file if it exists.
-   */
-  backupWalFileContent(): Buffer | null {
-    try {
-      return readFileSync(this.dbPath + "-wal");
-    } catch {
-      return null;
-    }
+    await this.sqlite.backup(destinationPath);
   }
 }
 
