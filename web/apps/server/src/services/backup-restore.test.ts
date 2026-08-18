@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -54,12 +55,14 @@ describe("backup create, validate, and restore", () => {
     expect(metadata).toMatchObject({ appVersion: "3.0.0", formatVersion: 1 });
 
     writeFileSync(dbPath, sqliteFile("mutated-db"));
+    writeFileSync(`${dbPath}-wal`, "stale-wal");
     writeFileSync(join(dataDir, "sources", "repo", "part.stl"), "mutated-stl");
     writeFileSync(join(dataDir, "exports", "kit", "plate.3mf"), "mutated-3mf");
 
     await restoreBackup(outputPath, dataDir, sqlite.value);
 
     expect(readFileSync(dbPath)).toEqual(backupDb);
+    expect(existsSync(`${dbPath}-wal`)).toBe(false);
     expect(readFileSync(join(dataDir, "sources", "repo", "part.stl"), "utf8")).toBe(
       "original-stl",
     );

@@ -8,6 +8,7 @@ import type {
   PrinterSendQueueState,
 } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
+import { resolvedFileUnderRoot } from "../lib/secure-path.js";
 
 const SETTINGS_KEY = "printer.send_queue";
 const MAX_ITEMS = 50;
@@ -136,7 +137,7 @@ export function migratePrinterSendQueueArtifactPaths(
     const target = resolve(tenantUploads, relativeArtifact);
     if (
       existsSync(current) ||
-      !existsSync(target)
+      !resolvedFileUnderRoot(tenantUploads, target)
     ) {
       continue;
     }

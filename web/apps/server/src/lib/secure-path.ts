@@ -1,8 +1,33 @@
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import type { ReadStream } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { resolveCaseInsensitiveRepoPath } from "../services/part-paths.js";
 import { globalPreviewPath, globalThumbnailPath } from "./thumbnails.js";
+
+function resolvedExistingPathUnderRoot(root: string, path: string): string | null {
+  try {
+    const base = realpathSync(resolve(root));
+    const candidate = realpathSync(resolve(path));
+    const relativePath = relative(base, candidate);
+    if (
+      relativePath === ".." ||
+      relativePath.startsWith(`..${sep}`) ||
+      isAbsolute(relativePath)
+    ) {
+      return null;
+    }
+    return candidate;
+  } catch {
+    return null;
+  }
+}
 
 /** Walk relative path under root using directory listings only (no user strings in join). */
 function resolveFileByWalk(root: string, relativeKey: string): string | null {
@@ -11,7 +36,6 @@ function resolveFileByWalk(root: string, relativeKey: string): string | null {
   const parts = normalized.split("/").filter(Boolean);
   if (!parts.length) return null;
   let current = resolve(root);
-  const base = current;
   for (const part of parts) {
     let entries: string[];
     try {
@@ -24,24 +48,23 @@ function resolveFileByWalk(root: string, relativeKey: string): string | null {
     current = join(current, match);
   }
   try {
-    if (!statSync(current).isFile()) return null;
-    if (current !== base && !current.startsWith(`${base}/`)) return null;
-    return current;
+    const candidate = resolvedExistingPathUnderRoot(root, current);
+    if (!candidate || !statSync(candidate).isFile()) return null;
+    return candidate;
   } catch {
     return null;
   }
 }
 
 function readStreamForFileUnderRoot(root: string, file: string): ReadStream | null {
-  const base = resolve(root);
-  const candidate = resolve(file);
-  if (candidate !== base && !candidate.startsWith(`${base}/`)) return null;
   try {
+    const candidate = resolvedExistingPathUnderRoot(root, file);
+    if (!candidate) return null;
     if (!statSync(candidate).isFile()) return null;
+    return createReadStream(candidate);
   } catch {
     return null;
   }
-  return createReadStream(candidate);
 }
 
 /** Resolve a relative path under root; reject traversal outside root. */
@@ -56,15 +79,14 @@ export function safePathUnderRoot(root: string, relativePath: string): string | 
 
 /** Ensure an absolute path resolves to a regular file under root. */
 export function resolvedFileUnderRoot(root: string, absolutePath: string): string | null {
-  const base = resolve(root);
-  const candidate = resolve(absolutePath);
-  if (candidate !== base && !candidate.startsWith(`${base}/`)) return null;
   try {
+    const candidate = resolvedExistingPathUnderRoot(root, absolutePath);
+    if (!candidate) return null;
     if (!statSync(candidate).isFile()) return null;
+    return candidate;
   } catch {
     return null;
   }
-  return candidate;
 }
 
 export function createReadStreamUnderRoot(root: string, relativePath: string): ReadStream | null {
@@ -164,16 +186,13 @@ export function exportDownloadKey(
   tenantId: string,
   absolutePath: string,
 ): string | null {
-  const exportsRoot = resolve(tenantExportDirectory(join(dataDir, "exports"), tenantId));
-  const file = resolve(absolutePath);
-  if (file !== exportsRoot && !file.startsWith(`${exportsRoot}/`)) return null;
-  return file.slice(exportsRoot.length).replace(/^\/+/, "");
+  const exportsRoot = tenantExportDirectory(join(dataDir, "exports"), tenantId);
+  const file = resolvedFileUnderRoot(exportsRoot, absolutePath);
+  if (!file) return null;
+  return relative(realpathSync(exportsRoot), file).split(sep).join("/");
 }
 
 /** Resolve kit import path: must exist under dataDir (self-host local paths only). */
 export function safeDataDirPath(dataDir: string, userPath: string): string | null {
-  const resolved = resolve(userPath);
-  const root = resolve(dataDir);
-  if (resolved !== root && !resolved.startsWith(`${root}/`)) return null;
-  return resolved;
+  return resolvedExistingPathUnderRoot(dataDir, userPath);
 }
