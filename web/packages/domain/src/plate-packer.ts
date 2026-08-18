@@ -107,8 +107,8 @@ function loadMeshForCopy(copy: PartCopy): [StlMesh | null, string | null] {
  * grouping strategy (location, height band, or none) selected the parts on it —
  * mixed-height plates cause uneven cooling / support needs during printing.
  *
- * Logged to console for diagnostics; also returned so callers can surface it
- * to the user (e.g. as a toast) alongside other pack warnings — see
+ * Returned so callers can surface it to the user (e.g. as a toast) alongside
+ * other pack warnings — see
  * export3mfJobResult.ts / exportStlJobResult.ts for the existing
  * warnings-array-to-toast pattern this plugs into.
  */
@@ -126,7 +126,6 @@ function checkPlateHeightVariance(
   const warning =
     `Plate ${plateIndex} on ${printer.name}: height variance ${variance.toFixed(1)} mm exceeds ` +
     `2× the shortest part (${minH.toFixed(1)} mm) — consider grouping by Height Band.`;
-  console.warn(`[plate-packer] ${warning}`);
   return warning;
 }
 

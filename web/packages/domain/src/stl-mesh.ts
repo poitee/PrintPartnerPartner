@@ -13,8 +13,15 @@ function parseAsciiStlMesh(text: string): StlMesh | null {
   const vertexRe = /vertex\s+([-+eE0-9.]+)\s+([-+eE0-9.]+)\s+([-+eE0-9.]+)/g;
   let match: RegExpExecArray | null;
   while ((match = vertexRe.exec(text)) !== null) {
-    vertices.push([Number(match[1]), Number(match[2]), Number(match[3])]);
+    const vertex: [number, number, number] = [
+      Number(match[1]),
+      Number(match[2]),
+      Number(match[3]),
+    ];
+    if (!vertex.every(Number.isFinite)) return null;
+    vertices.push(vertex);
   }
+  if (vertices.length === 0 || vertices.length % 3 !== 0) return null;
   for (let i = 0; i + 2 < vertices.length; i += 3) {
     faces.push([i, i + 1, i + 2]);
   }
@@ -61,11 +68,13 @@ function parseBinaryStlMesh(buf: Buffer): StlMesh | null {
     offset += 12;
     const base = vertices.length;
     for (let v = 0; v < 3; v++) {
-      vertices.push([
+      const vertex: [number, number, number] = [
         buf.readFloatLE(offset),
         buf.readFloatLE(offset + 4),
         buf.readFloatLE(offset + 8),
-      ]);
+      ];
+      if (!vertex.every(Number.isFinite)) return null;
+      vertices.push(vertex);
       offset += 12;
     }
     faces.push([base, base + 1, base + 2]);
