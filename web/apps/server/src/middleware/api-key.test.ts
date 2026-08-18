@@ -46,6 +46,7 @@ describe("/api/v1 API key authentication", () => {
       const response = await app.inject({
         method: "GET",
         url: "/api/v1/plans",
+        remoteAddress: "203.0.113.10",
         headers: { "sec-fetch-site": "same-origin" },
       });
 
