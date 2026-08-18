@@ -8,7 +8,9 @@ import { OutboundUrlError } from "../lib/outbound-url.js";
 type RouteDeps = { repo: AppRepository };
 
 export async function registerWebhookRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
-  app.get("/webhooks", async () => ({ webhooks: listWebhooks(deps.repo) }));
+  app.get("/webhooks", async () => ({
+    webhooks: listWebhooks(deps.repo).map(({ secret: _secret, ...webhook }) => webhook),
+  }));
 
   app.post("/webhooks", async (request, reply) => {
     const body = request.body as {

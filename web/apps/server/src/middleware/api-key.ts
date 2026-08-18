@@ -1,4 +1,10 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import type {
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+  preHandlerHookHandler,
+} from "fastify";
 import type { ServerConfig } from "../config.js";
 import { sendProblem } from "../lib/api-error.js";
 
@@ -19,7 +25,9 @@ function isExempt(url: string): boolean {
   return false;
 }
 
-function extractApiKey(request: FastifyRequest): string | null {
+export type ApiKeyValidator = (rawKey: string) => boolean;
+
+export function extractApiKey(request: FastifyRequest): string | null {
   const header = request.headers.authorization;
   if (typeof header === "string" && header.startsWith("Bearer ")) {
     return header.slice("Bearer ".length).trim() || null;
@@ -29,61 +37,86 @@ function extractApiKey(request: FastifyRequest): string | null {
   return null;
 }
 
-/**
- * True when the request looks like it came from the SPA itself (same-origin browser fetch).
- * Same-origin requests have no Origin header, or an Origin that matches the Host.
- * External API callers (MCP, slicers, scripts) always send an Origin that differs from Host,
- * or no Origin but also no Referer/Sec-Fetch-Site that would indicate browser navigation.
- */
-function isSameOriginBrowser(request: FastifyRequest): boolean {
-  // Browsers set Sec-Fetch-Site on all fetches. "same-origin" means SPA → own server.
-  const secFetchSite = request.headers["sec-fetch-site"];
-  if (secFetchSite === "same-origin" || secFetchSite === "same-site") return true;
+function constantTimeSecretEqual(left: string, right: string): boolean {
+  const context = "print-partner:credential-compare:v1";
+  const leftDigest = createHmac("sha256", context).update(left).digest();
+  const rightDigest = createHmac("sha256", context).update(right).digest();
+  return timingSafeEqual(leftDigest, rightDigest);
+}
 
-  // Fallback: no Origin header + has Referer on same host = SPA navigation.
-  const origin = request.headers.origin;
-  if (!origin) {
-    const referer = request.headers.referer;
-    if (referer) {
-      try {
-        const host = request.headers.host ?? "";
-        const refHost = new URL(referer).host;
-        if (refHost === host) return true;
-      } catch {
-        /* ignore parse errors */
-      }
-    }
-    // No Origin and no Referer: likely a CLI/script call, not the SPA.
-    return false;
-  }
+function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  return (
+    address === "::1" ||
+    address.startsWith("127.") ||
+    address.startsWith("::ffff:127.")
+  );
+}
 
-  // Origin present: check it matches the server's Host.
-  try {
-    const host = request.headers.host ?? "";
-    const originHost = new URL(origin).host;
-    if (originHost === host) return true;
-  } catch {
-    /* ignore */
-  }
-  return false;
+function hasConfiguredBasicAuth(
+  request: FastifyRequest,
+  config: ServerConfig,
+): boolean {
+  const header = request.headers.authorization;
+  if (typeof header !== "string" || !header.startsWith("Basic ")) return false;
+
+  const configured =
+    config.deployMode === "saas"
+      ? config.saasBasicAuth
+      : config.basicAuthUser && config.basicAuthPass
+        ? `${config.basicAuthUser}:${config.basicAuthPass}`
+        : null;
+  if (!configured) return false;
+
+  const expected = `Basic ${Buffer.from(configured).toString("base64")}`;
+  return constantTimeSecretEqual(header, expected);
 }
 
 /** Require API key on /api/v1/* when PRINT_PARTNER_API_KEY is configured (self-host).
- *  Same-origin browser requests (the SPA itself) are always exempt — the key is for
- *  external integrations (MCP, slicers, scripts) only. */
-export function registerApiKeyAuth(app: FastifyInstance, config: ServerConfig): void {
-  if (!config.integrationApiKey) return;
+ * Settings-created API keys are accepted through the repository-backed validator. */
+export function registerApiKeyAuth(
+  app: FastifyInstance,
+  config: ServerConfig,
+  validateRepositoryKey: ApiKeyValidator,
+): ApiKeyValidator {
+  const validateKey: ApiKeyValidator = (rawKey) =>
+    (config.integrationApiKey !== null &&
+      constantTimeSecretEqual(rawKey, config.integrationApiKey)) ||
+    validateRepositoryKey(rawKey);
 
   app.addHook("onRequest", async (request, reply) => {
     const path = request.url.split("?")[0] ?? request.url;
     if (!path.startsWith("/api/v1")) return;
     if (isExempt(path)) return;
-    // The SPA itself is always allowed — the key guards external callers only.
-    if (isSameOriginBrowser(request)) return;
 
     const provided = extractApiKey(request);
-    if (!provided || provided !== config.integrationApiKey) {
+    if (!provided && !config.integrationApiKey) return;
+    if (!provided || !validateKey(provided)) {
       return sendProblem(reply, 401, "Unauthorized", "Valid API key required");
     }
   });
+
+  return validateKey;
+}
+
+export function createAdminPreHandler(
+  config: ServerConfig,
+  validateApiKey: ApiKeyValidator,
+): preHandlerHookHandler {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    if (isLoopbackAddress(request.socket.remoteAddress)) return;
+
+    const provided = extractApiKey(request);
+    if (provided && validateApiKey(provided)) return;
+    if (hasConfiguredBasicAuth(request, config)) return;
+
+    const user = request.sessionUser;
+    const isImplicitLocalUser =
+      user?.user_id === "local" && user.provider === "anonymous";
+    if (user?.is_admin && !isImplicitLocalUser) return;
+    if (user && !isImplicitLocalUser) {
+      return sendProblem(reply, 403, "Forbidden", "Administrator access required");
+    }
+    return sendProblem(reply, 401, "Unauthorized", "Authentication required");
+  };
 }

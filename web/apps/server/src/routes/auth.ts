@@ -28,6 +28,7 @@ function setSessionCookie(reply: FastifyReply, rawToken: string): void {
     httpOnly: true,
     path: "/",
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
     maxAge: 60 * 60 * 24 * 14,
   });
 }
@@ -234,7 +235,12 @@ export function registerAuthRoutes(
         scope: "read:user user:email",
         state,
       });
-      reply.setCookie("oauth_state", state, { httpOnly: true, path: "/", maxAge: 600 });
+      reply.setCookie("oauth_state", state, {
+        httpOnly: true,
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 600,
+      });
       return reply.redirect(`https://github.com/login/oauth/authorize?${params}`);
     });
 
@@ -301,7 +307,12 @@ export function registerAuthRoutes(
         scope: "identify email",
         state,
       });
-      reply.setCookie("oauth_state", state, { httpOnly: true, path: "/", maxAge: 600 });
+      reply.setCookie("oauth_state", state, {
+        httpOnly: true,
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 600,
+      });
       return reply.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
     });
 
@@ -351,30 +362,32 @@ export function registerAuthRoutes(
     });
   }
 
-  app.post("/auth/dev-login", async (request, reply) => {
-    if (config.deployMode !== "saas" && !config.multiUser) {
-      return reply.status(404).send({ detail: "Not available" });
-    }
-    if (!authStore) return reply.status(503).send({ detail: "Auth store unavailable" });
-    const body = request.body as { tenant_id?: string; login?: string; email?: string };
-    const user = authStore.createUser({
-      email: body.email ?? `${body.login ?? "dev"}@dev.local`,
-      displayName: body.login ?? "dev",
+  if (process.env.NODE_ENV !== "production") {
+    app.post("/auth/dev-login", async (request, reply) => {
+      if (config.deployMode !== "saas" && !config.multiUser) {
+        return reply.status(404).send({ detail: "Not available" });
+      }
+      if (!authStore) return reply.status(503).send({ detail: "Auth store unavailable" });
+      const body = request.body as { tenant_id?: string; login?: string; email?: string };
+      const user = authStore.createUser({
+        email: body.email ?? `${body.login ?? "dev"}@dev.local`,
+        displayName: body.login ?? "dev",
+      });
+      const raw = authStore.createSession(user.id);
+      setSessionCookie(reply, raw);
+      return {
+        user: toPublicUser({
+          user_id: user.id,
+          tenant_id: user.id,
+          login: user.email ?? user.displayName,
+          display_name: user.displayName,
+          email: user.email,
+          provider: "anonymous",
+          is_admin: user.isAdmin,
+        }),
+      };
     });
-    const raw = authStore.createSession(user.id);
-    setSessionCookie(reply, raw);
-    return {
-      user: toPublicUser({
-        user_id: user.id,
-        tenant_id: user.id,
-        login: user.email ?? user.displayName,
-        display_name: user.displayName,
-        email: user.email,
-        provider: "anonymous",
-        is_admin: user.isAdmin,
-      }),
-    };
-  });
+  }
 }
 
 export function resolveRequestAuth(

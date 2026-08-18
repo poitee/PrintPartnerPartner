@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { AppRepository } from "../db/repository.js";
 
 export interface ApiKeyInfo {
@@ -12,7 +12,7 @@ export interface ApiKeyInfo {
 
 export interface StoredApiKey {
   id: string;
-  keyHash: string; // bcrypt or simple hash
+  keyHash: string;
   createdAt: string;
   lastUsedAt: string | null;
   expiresAt: string | null;
@@ -20,11 +20,27 @@ export interface StoredApiKey {
 }
 
 const SETTINGS_KEY = "api_keys_v1";
+const API_KEY_HMAC_CONTEXT = "print-partner:settings-api-key:v1";
 
 function getHash(key: string): string {
-  // Simple hash for API keys (not user passwords — bcrypt is overkill)
-  // In production, consider using a proper KDF like scrypt/argon2
-  return Buffer.from(key).toString("base64");
+  return createHmac("sha256", API_KEY_HMAC_CONTEXT).update(key).digest("hex");
+}
+
+function isDigest(value: string): boolean {
+  return /^[a-f0-9]{64}$/.test(value);
+}
+
+function migrateLegacyHash(value: string): string {
+  const decoded = Buffer.from(value, "base64").toString("utf8");
+  const canonical = Buffer.from(decoded).toString("base64");
+  return getHash(canonical === value ? decoded : value);
+}
+
+function hashesMatch(storedHash: string, rawKey: string): boolean {
+  if (!isDigest(storedHash)) return false;
+  const expected = Buffer.from(storedHash, "hex");
+  const candidate = Buffer.from(getHash(rawKey), "hex");
+  return timingSafeEqual(expected, candidate);
 }
 
 function loadKeys(repo: AppRepository): StoredApiKey[] {
@@ -32,7 +48,17 @@ function loadKeys(repo: AppRepository): StoredApiKey[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as StoredApiKey[];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+
+    let migrated = false;
+    for (const key of parsed) {
+      if (typeof key.keyHash === "string" && !isDigest(key.keyHash)) {
+        key.keyHash = migrateLegacyHash(key.keyHash);
+        migrated = true;
+      }
+    }
+    if (migrated) saveKeys(repo, parsed);
+    return parsed;
   } catch {
     return [];
   }
@@ -40,6 +66,17 @@ function loadKeys(repo: AppRepository): StoredApiKey[] {
 
 function saveKeys(repo: AppRepository, keys: StoredApiKey[]): void {
   repo.setSetting(SETTINGS_KEY, JSON.stringify(keys));
+}
+
+function toApiKeyInfo(stored: StoredApiKey, key: string): ApiKeyInfo {
+  return {
+    id: stored.id,
+    key,
+    createdAt: stored.createdAt,
+    lastUsedAt: stored.lastUsedAt,
+    expiresAt: stored.expiresAt,
+    isActive: stored.isActive,
+  };
 }
 
 /**
@@ -64,10 +101,7 @@ export function createApiKey(repo: AppRepository): ApiKeyInfo {
   keys.push(stored);
   saveKeys(repo, keys);
 
-  return {
-    ...stored,
-    key, // Only exposed once
-  };
+  return toApiKeyInfo(stored, key);
 }
 
 /**
@@ -124,10 +158,7 @@ export function regenerateApiKey(repo: AppRepository, keyId: string): ApiKeyInfo
   keys.push(stored);
   saveKeys(repo, keys);
 
-  return {
-    ...stored,
-    key: newKey,
-  };
+  return toApiKeyInfo(stored, newKey);
 }
 
 /**
@@ -138,8 +169,12 @@ export function validateApiKey(repo: AppRepository, rawKey: string): string | nu
   if (!rawKey) return null;
 
   const keys = loadKeys(repo);
-  const keyHash = getHash(rawKey);
-  const key = keys.find((k) => k.keyHash === keyHash && k.isActive);
+  const key = keys.find(
+    (candidate) =>
+      candidate.isActive &&
+      !isKeyExpired(candidate) &&
+      hashesMatch(candidate.keyHash, rawKey),
+  );
 
   if (!key) return null;
 
@@ -155,5 +190,6 @@ export function validateApiKey(repo: AppRepository, rawKey: string): string | nu
  */
 export function isKeyExpired(key: StoredApiKey): boolean {
   if (!key.expiresAt) return false;
-  return new Date(key.expiresAt) < new Date();
+  const expiresAt = Date.parse(key.expiresAt);
+  return !Number.isFinite(expiresAt) || expiresAt <= Date.now();
 }
