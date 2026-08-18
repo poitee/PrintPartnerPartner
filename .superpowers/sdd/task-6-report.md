@@ -128,3 +128,90 @@ complete, exported one file, and fetched the production static assets.
   connectivity, not production-readiness.
 - The PrusaSlicer noVNC image has no maintained semantic release stream; it is
   pinned to the newest available date tag rather than floating on `latest`.
+
+## Review remediation (2026-08-18)
+
+### Status and implementation SHA
+
+All Critical, Important, Minor, and adjacent registry-parser findings are
+resolved. Implementation HEAD before this report update:
+`b0260a18935f606d684b204721f432467848aa4d`.
+
+### Corrections
+
+- Restored the `SourcesPage` consumer for `CommandPalette`'s
+  `{ stlSearch: true }` navigation state. It expands and focuses the global STL
+  search, consumes the state with a replace navigation, and does not restore
+  any Copilot bridge.
+- Replaced the broken line-oriented runtime registry parser with real YAML
+  parsing and required-field validation. Quoted values and arbitrary field
+  ordering now work.
+- Added v2 `variant_dimensions` schema support and schema meta-validation via
+  `Draft202012Validator.check_schema`.
+- Hardened `workflow-smoke.sh`: every request fails on non-2xx responses, zero
+  parts and zero exported files are fatal, and production pages must expose
+  fetchable assets.
+- Made the Postgres workflow production-config-valid with explicit
+  `MULTI_USER=0` and `SESSION_SECRET`, and made it run automatically for
+  relevant pull requests and main pushes.
+- The live Postgres run exposed the pre-existing Promise/`Atomics.wait`
+  deadlock in the experimental synchronous repository bridge. Postgres query
+  builders now compile to SQL and execute through a synchronous child-process
+  bridge, with Drizzle result mapping restored before repository consumers see
+  rows.
+- Aligned app, package, Docker, Compose, metrics, and documentation defaults on
+  release `3.1.0` / `3.1.0-web`.
+- SaaS Compose ports bind to `127.0.0.1` by default with explicit
+  `PP_BIND_ADDRESS` override; development auth/session settings and override
+  guidance are documented. Accurate optional Ollama environment comments are
+  restored without claiming the removed in-app advisor UI exists.
+- Updated OrcaSlicer to current LinuxServer release `v2.4.2-ls35`; main Docker
+  CI now builds the sidecar, so its base image is pulled and validated on
+  relevant changes.
+- Dependabot PR counts are bounded. The unsafe all-npm mega-group is removed,
+  while the Actions group is limited to minor/patch updates.
+- Actionlint's ShellCheck findings are cleared.
+
+### Test-first evidence
+
+- Regression commit `83c857c` was pushed before implementation. The Sources
+  route-state test could not find the STL search, registry parser tests
+  reported the parser export missing, v2 validation rejected
+  `variant_dimensions`, malformed schemas crashed validation, and three smoke
+  harness scenarios incorrectly exited zero for no parts, no exports, and a
+  500 asset.
+- The first valid-env live Postgres run stalled after migrations. A focused
+  bridge regression timed out under the old `Atomics.wait` implementation;
+  the final synchronous-query regression now passes and the live server
+  reaches health plus a Postgres-backed `/sources` query.
+
+### Final verification
+
+- `npm ci`: passed from the committed lockfile (759 packages).
+- `npm run quality`: passed lint, all workspace typechecks, 1,258 unit and
+  integration tests (13 contracts + 127 domain + 354 web + 764 server), four
+  workflow-smoke guard tests, all production builds, and the real Chrome
+  skip-link test.
+- `npm audit --audit-level=high`: passed with zero high/critical findings.
+- Manifest suite: 9 tests passed; repository schema and embedded-copy drift
+  validation passed.
+- `actionlint` with ShellCheck, direct `shellcheck`, workflow/Dependabot YAML,
+  and all three Compose configurations passed.
+- Production Docker image built successfully and reported `3.1.0-web`.
+- Live production workflow smoke passed with one STL part, one progress
+  update, one exported file, and three successful production assets.
+- Live Postgres smoke passed with `driver=postgres`, `connected=true`,
+  `support_status=experimental`, version `3.1.0-web`, and a successful
+  Postgres-backed `/sources` query.
+- Pinned OrcaSlicer `v2.4.2-ls35` pulled successfully, the sidecar image built,
+  and its live health response reported the Orca binary exists.
+
+### Remaining concerns
+
+- Four moderate findings remain in `drizzle-kit`'s development-only deprecated
+  esbuild loader chain. npm still proposes a breaking downgrade to
+  `drizzle-kit@0.18.1`; no unsafe forced remediation was applied.
+- Postgres remains experimental. The correctness bridge runs each synchronous
+  repository query in an isolated Node child process, which avoids event-loop
+  deadlock but has process-start overhead; a native asynchronous repository
+  is still the long-term production design.
