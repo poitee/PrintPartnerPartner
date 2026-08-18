@@ -115,7 +115,7 @@ Settings → Slicers registers GUI URLs and profile watch paths (schema v15). St
 | `DELETE` | `/slicer-instances/:id` | Remove (204) |
 | `POST` | `/slicer-instances/seed-defaults` | Insert stock presets if empty |
 
-`kind`: `orca` \| `prusa` \| `bambu` \| `custom`. `dialect`: `orca_json` \| `bambu_json` \| `prusa_ini`. Custom + enabled requires `watch_path`. Docker lifecycle fields are stored for a later plan but unused here.
+`kind`: `orca` \| `prusa` \| `bambu` \| `custom`. `dialect`: `orca_json` \| `bambu_json` \| `prusa_ini`. Custom + enabled requires `watch_path`.
 
 ### Docker lifecycle (self-host)
 
@@ -128,6 +128,15 @@ Containers must carry label `printpartner.slicer_instance_id=<instance id>`. Saa
 | `POST` | `/slicer-instances/:id/docker-start` | Create/start labeled container |
 | `POST` | `/slicer-instances/:id/docker-stop` | Stop labeled container |
 | `GET` | `/slicer-instances/:id/docker-logs?tail=200` | Bounded log tail |
+
+### Export plate → slicer handoff
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/slicer-handoff/exchange-status` | Whether `PP_EXCHANGE_DIR` is writable |
+| `POST` | `/slicer-instances/:id/open-plates` | Export plates, stage into exchange inbox, return `gui_url` + staged paths |
+
+Body: `{ profile_id, layout_mode?, missing_only?, enabled_printer_ids? }`. Does not change 3MF object names. Managed open requires a writable exchange dir; otherwise use Download via `/jobs/export-3mf`.
 
 ## Integrations (v1 only)
 
