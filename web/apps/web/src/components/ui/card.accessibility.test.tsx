@@ -16,11 +16,11 @@ describe("CardTitle semantics", () => {
   });
 
   it("allows nested cards to select a deeper heading level", () => {
-    render(<CardTitle level={3}>Source update checks</CardTitle>);
+    render(<CardTitle level={4}>Plate 1</CardTitle>);
 
     expect(
-      screen.getByRole("heading", { level: 3, name: "Source update checks" }).tagName,
-    ).toBe("H3");
+      screen.getByRole("heading", { level: 4, name: "Plate 1" }).tagName,
+    ).toBe("H4");
   });
 
   it("composes CardTitle styling onto an explicit semantic heading", () => {

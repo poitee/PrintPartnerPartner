@@ -90,6 +90,23 @@ describe("Preview3D accessibility", () => {
     expect(instructions?.textContent.length).toBeLessThan(180);
   });
 
+  it("keeps instructions available to assistive tech without persistent compact help", async () => {
+    render(
+      <Preview3D
+        partId={7}
+        filename="gantry.stl"
+        instructions="sr-only"
+      />,
+    );
+
+    const preview = await screen.findByRole("application");
+    const descriptionId = preview.getAttribute("aria-describedby");
+    const instructions = descriptionId ? document.getElementById(descriptionId) : null;
+
+    expect(instructions?.classList.contains("sr-only")).toBe(true);
+    expect(instructions?.textContent).toMatch(/arrow keys/i);
+  });
+
   it("rotates the real preview camera with arrow keys", async () => {
     render(<Preview3D partId={7} filename="gantry.stl" />);
     const preview = await screen.findByRole("application");

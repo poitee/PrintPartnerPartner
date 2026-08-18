@@ -106,7 +106,7 @@ describe("PlansPage", () => {
     state.profiles = [];
     state.loading = true;
 
-    render(
+    const { rerender } = render(
       <MemoryRouter>
         <PlansPage />
       </MemoryRouter>,
@@ -116,6 +116,16 @@ describe("PlansPage", () => {
     expect(status.getAttribute("aria-live")).toBe("polite");
     expect(status.getAttribute("aria-atomic")).toBe("true");
     expect(status.textContent).toContain("Loading plans");
+
+    state.loading = false;
+    rerender(
+      <MemoryRouter>
+        <PlansPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("status")).toBe(status);
+    expect(status.textContent).toBe("");
   });
 
   it("announces initial plan load failures as alerts", () => {
