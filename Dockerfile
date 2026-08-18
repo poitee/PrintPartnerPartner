@@ -1,7 +1,7 @@
 # Print Partner web — self-host (API + SPA on one port)
 # Multi-stage build with security hardening
 
-FROM node:22-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 COPY web/apps/web/package.json ./apps/web/
@@ -14,7 +14,7 @@ RUN npm run build && \
     # Remove dev dependencies to reduce final image size
     npm ci --omit=dev
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 # Baked in by the release workflow (vX.Y.Z tag -> X.Y.Z-web); reported by GET /health.
 ARG PP_VERSION=3.1.0-web
 
