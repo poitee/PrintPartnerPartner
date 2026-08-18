@@ -17,6 +17,7 @@ import { ListTree } from "lucide-react";
 import { usePlateWorkspaceQuery } from "../../queries/plateWorkspace";
 import { useSavePrintAssignmentsMutation } from "../../queries/printAssignments";
 import { groupAssignmentsByPrinter } from "../../lib/assignmentPreview";
+import { resolveEnabledPrinterIds } from "../../lib/enabledPrinters";
 import { guessSlicerForPrinterName } from "../../lib/printerSlicerGuess";
 import { SLICER_LINKS } from "../../lib/slicerLinks";
 import { Badge } from "../ui/badge";
@@ -44,6 +45,15 @@ export default function ManualAssignmentPanel({ profileId, engineReady }: Props)
   const printers = useMemo(() => data?.printers ?? [], [data?.printers]);
   const groups = data?.groups ?? [];
   const currentAssignments = data?.plan?.group_assignments ?? {};
+  const enabledPrinters = useMemo(() => {
+    const enabledIds = new Set(
+      resolveEnabledPrinterIds(
+        printers.map((p) => p.id),
+        data?.plan?.enabled_printer_ids,
+      ),
+    );
+    return printers.filter((p) => enabledIds.has(p.id));
+  }, [data?.plan?.enabled_printer_ids, printers]);
 
   const slicerByPrinterId = useMemo(() => {
     const map = new Map<string, string>();
@@ -98,13 +108,13 @@ export default function ManualAssignmentPanel({ profileId, engineReady }: Props)
           <p className="text-[12.5px] text-destructive">
             Could not load print groups: {error instanceof Error ? error.message : String(error)}
           </p>
-        ) : printers.length === 0 ? (
+        ) : enabledPrinters.length === 0 ? (
           <p className="text-[12.5px] text-muted-foreground">
             No printers configured yet — add one in Settings to assign groups.
           </p>
         ) : (
           <ul className="space-y-3">
-            {groupAssignmentsByPrinter(groups, printers, currentAssignments).map((bucket) => (
+            {groupAssignmentsByPrinter(groups, enabledPrinters, currentAssignments).map((bucket) => (
               <li key={bucket.printerId ?? "unassigned"} className="space-y-2">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                   {bucket.printerName}
@@ -114,7 +124,11 @@ export default function ManualAssignmentPanel({ profileId, engineReady }: Props)
                 </p>
                 <ul className="space-y-2">
                   {bucket.groups.map((group) => {
-                    const assignedId = currentAssignments[group.group_key] ?? AUTO_VALUE;
+                    const rawAssigned = currentAssignments[group.group_key];
+                    const assignedId =
+                      rawAssigned && enabledPrinters.some((p) => p.id === rawAssigned)
+                        ? rawAssigned
+                        : AUTO_VALUE;
                     const partNames = group.parts?.length
                       ? group.parts.join(", ")
                       : `${group.part_count} part${group.part_count === 1 ? "" : "s"}`;
@@ -134,7 +148,7 @@ export default function ManualAssignmentPanel({ profileId, engineReady }: Props)
                                 {group.warning}
                               </Badge>
                             ) : null}
-                            {currentAssignments[group.group_key] ? (
+                            {assignedId !== AUTO_VALUE ? (
                               <Badge variant="info" className="text-[10px] font-normal">
                                 manually assigned
                               </Badge>
@@ -151,7 +165,7 @@ export default function ManualAssignmentPanel({ profileId, engineReady }: Props)
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value={AUTO_VALUE}>Auto (recommended)</SelectItem>
-                            {printers.map((p) => (
+                            {enabledPrinters.map((p) => (
                               <SelectItem key={p.id} value={p.id}>
                                 {p.name}
                                 {slicerLabel(p.id) ? ` · ${slicerLabel(p.id)}` : ""}

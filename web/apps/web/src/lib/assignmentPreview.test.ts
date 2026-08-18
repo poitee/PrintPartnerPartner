@@ -51,4 +51,13 @@ describe("groupAssignmentsByPrinter", () => {
     );
     expect(buckets.map((b) => b.printerName)).toEqual(["MK4"]);
   });
+
+  it("falls back to the suggestion when the assignment is not in the enabled set", () => {
+    const buckets = groupAssignmentsByPrinter(
+      [group({ group_key: "a", label: "ASA · Black · repo", suggested_printer_id: "mk4" })],
+      [printer("mk4", "MK4")],
+      { a: "voron" },
+    );
+    expect(buckets.map((b) => b.printerName)).toEqual(["MK4"]);
+  });
 });

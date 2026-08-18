@@ -241,10 +241,10 @@ function itemsToObjects(
 
 function plateFileName(
   safeProfile: string,
-  printerName: string,
+  printer: Pick<PrinterMachine, "id" | "name">,
   plate: PlateLayout,
 ): string {
-  const slugPrinter = safePlanSlug(printerName);
+  const slugPrinter = `${safePlanSlug(printer.name)}_${safePlanSlug(printer.id).slice(0, 48)}`;
   const slugGroup = plate.group_label ? `_${safePlanSlug(plate.group_label).slice(0, 80)}` : "";
   return plate.group_label
     ? `${safeProfile}_${slugPrinter}${slugGroup}_p${String(plate.index).padStart(2, "0")}.3mf`
@@ -366,7 +366,7 @@ export function exportProfile3mf(
     }
   } else {
     for (const [printer, plate] of allPlates) {
-      const fname = plateFileName(safeProfile, printer.name, plate);
+      const fname = plateFileName(safeProfile, printer, plate);
       const outPath = join(outputDir, fname);
       const n = writePlateFile(outPath, plate.items);
       objectCount += n;
@@ -398,7 +398,7 @@ export function exportProfile3mf(
       const fname =
         layoutMode === "single_offset"
           ? `${safeProfile}.3mf`
-          : plateFileName(safeProfile, printer.name, plate);
+          : plateFileName(safeProfile, printer, plate);
       return { file: fname, filaments: [...filaments].sort(), parts };
     });
     manifestPrinters.push({

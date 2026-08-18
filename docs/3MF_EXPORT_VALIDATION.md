@@ -9,7 +9,7 @@ Print Partner writes **3MF Core + Materials** packages via an in-process **fflat
 | **Object names** | Each `<object type="model">` has `name` (and `partnumber`) set to the STL basename, e.g. `bracket.stl`. Quantity copies use `bracket.stl (2)`. PrusaSlicer / Orca read **object `@name`** for the plate object list — not the ZIP filename and not build-item `partnumber` alone. |
 | **Materials / colors** | Filament colors are **display hints** via Base Materials (`displaycolor`). Map AMS / MMU slots in the slicer after import. |
 | **Printer routing** | Parts go to an enabled fleet machine whose loaded slot `filament_color_id` matches the part. Matching is **id-exact** (no hex-fuzzy “close enough” in v1). Unmatched parts warn and fall back to the first enabled printer. |
-| **Layout** | Default **one 3MF per plate per printer** (or a zip of those plates + `print_plan.json`). Import each plate file into a slicer profile that matches that physical printer’s bed. |
+| **Layout** | Default **one 3MF per plate per printer** (or a zip of those plates + `print_plan.json`). Filenames include the printer name and id (`<kit>_<printer>_<id>_plate_NN.3mf`) so two machines with the same display name cannot overwrite each other. Import each plate file into a slicer profile that matches that physical printer’s bed. |
 | **Not included** | Print settings, G-code, Prusa/Bambu project XML, multi-plate slicer project metadata. |
 
 ## Setup

@@ -24,6 +24,7 @@ import { handleExport3mfJobDone } from "../../lib/export3mfJobResult";
 import { handleStlPackExportJobDone } from "../../lib/exportStlJobResult";
 import { planHasUnsetRoleColors } from "../../lib/roleColorSet";
 import { flattenReviewParts } from "../../lib/reviewParts";
+import { resolveEnabledPrinterIds } from "../../lib/enabledPrinters";
 import { settingsPrintersRoute } from "../../lib/routes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -114,9 +115,10 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
       return undefined;
     }
     const plan = await fetchPrintPlan(selectedProfileId!);
-    const ids = plan.enabled_printer_ids ?? [];
-    if (!ids.length) return printers.map((p) => p.id);
-    return ids;
+    return resolveEnabledPrinterIds(
+      printers.map((p) => p.id),
+      plan.enabled_printer_ids,
+    );
   };
 
   const onExport3mf = (layoutMode: NonNullable<Export3mfOptions["layout_mode"]>) => {

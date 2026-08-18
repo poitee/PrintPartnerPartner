@@ -1,12 +1,14 @@
 /**
  * Per-plan printer enablement — which fleet machines pack/export this kit.
- * Empty enabled list means "use the whole fleet" (same as resolveEnabledPrinters).
+ * Empty or unknown-only enabled lists mean "use the whole fleet"
+ * (same as resolveEnabledPrinters).
  */
 import { toast } from "sonner";
 import { Printer } from "lucide-react";
 import { Link } from "react-router-dom";
 import { usePlateWorkspaceQuery } from "../../queries/plateWorkspace";
 import { useEnabledPrintersMutation } from "../../queries/printAssignments";
+import { resolveEnabledPrinterIds } from "../../lib/enabledPrinters";
 import { settingsPrintersRoute } from "../../lib/routes";
 import type { PrinterBedPreview, PrinterMachine } from "../../api/engine";
 import { Badge } from "../ui/badge";
@@ -44,11 +46,14 @@ export default function KitPrinterSelectPanel({ profileId, engineReady }: Props)
 
   const printers = data?.printers ?? [];
   const savedIds = data?.plan?.enabled_printer_ids ?? [];
-  const treatAllAsEnabled = savedIds.length === 0;
+  const resolvedIds = resolveEnabledPrinterIds(
+    printers.map((p) => p.id),
+    savedIds,
+  );
 
   const onToggle = (printerId: string, nextChecked: boolean) => {
     if (profileId == null) return;
-    const current = treatAllAsEnabled ? printers.map((p) => p.id) : [...savedIds];
+    const current = [...resolvedIds];
     const next = nextChecked
       ? [...new Set([...current, printerId])]
       : current.filter((id) => id !== printerId);
@@ -96,7 +101,7 @@ export default function KitPrinterSelectPanel({ profileId, engineReady }: Props)
         ) : (
           <ul className="space-y-2">
             {printers.map((printer) => {
-              const checked = treatAllAsEnabled || savedIds.includes(printer.id);
+              const checked = resolvedIds.includes(printer.id);
               const slots = printer.loaded_filaments ?? [];
               return (
                 <li
@@ -139,7 +144,7 @@ export default function KitPrinterSelectPanel({ profileId, engineReady }: Props)
         )}
         {data ? (
           <p className="mt-2 text-[11px] text-muted-foreground">
-            {formatPlateEstimates(printers, data.preview, treatAllAsEnabled ? printers.map((p) => p.id) : savedIds) ||
+            {formatPlateEstimates(printers, data.preview, resolvedIds) ||
               (data.plate_count > 0
                 ? `Estimated ${data.plate_count} plate${data.plate_count === 1 ? "" : "s"}`
                 : "No plates yet")}

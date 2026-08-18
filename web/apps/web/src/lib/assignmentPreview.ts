@@ -26,7 +26,11 @@ export function groupAssignmentsByPrinter(
     groups: [],
   };
   for (const group of groups) {
-    const id = assignments[group.group_key] || group.suggested_printer_id || null;
+    const assigned = assignments[group.group_key];
+    const id =
+      (assigned && buckets.has(assigned) ? assigned : null) ||
+      group.suggested_printer_id ||
+      null;
     const bucket = id && buckets.has(id) ? buckets.get(id) : leftover;
     bucket!.groups.push(group);
   }

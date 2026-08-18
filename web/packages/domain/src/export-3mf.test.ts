@@ -89,7 +89,7 @@ describe("export 3mf", () => {
     });
     expect(result.object_count).toBeGreaterThan(0);
     const outputDir = profileExportDir(exportsDir, "Kit", "3mf");
-    const expectedPath = join(outputDir, "Kit_Test_plate_01.3mf");
+    const expectedPath = join(outputDir, "Kit_Test_p1_plate_01.3mf");
     expect(result.primary_path).toBe(expectedPath);
     expect(existsSync(expectedPath)).toBe(true);
     const zip = readFileSync(expectedPath);
@@ -171,8 +171,8 @@ describe("export 3mf", () => {
       expect.arrayContaining(["Voron 350: 1 plate(s)", "MK4: 1 plate(s)"]),
     );
     const outputDir = profileExportDir(exportsDir, "MyKit", "3mf");
-    expect(existsSync(join(outputDir, "MyKit_Voron_350_plate_01.3mf"))).toBe(true);
-    expect(existsSync(join(outputDir, "MyKit_MK4_plate_01.3mf"))).toBe(true);
+    expect(existsSync(join(outputDir, "MyKit_Voron_350_voron-350_plate_01.3mf"))).toBe(true);
+    expect(existsSync(join(outputDir, "MyKit_MK4_mk4_plate_01.3mf"))).toBe(true);
     const manifest = JSON.parse(readFileSync(join(outputDir, "print_plan.json"), "utf8")) as {
       kit: string;
       printers: Array<{
@@ -189,17 +189,17 @@ describe("export 3mf", () => {
       bed_mm: [200, 200],
     });
     expect(voronEntry?.plates[0]).toMatchObject({
-      file: "MyKit_Voron_350_plate_01.3mf",
+      file: "MyKit_Voron_350_voron-350_plate_01.3mf",
       filaments: ["ASA · Black"],
       parts: ["bracket.stl"],
     });
     const mk4Entry = manifest.printers.find((p) => p.id === "mk4");
     expect(mk4Entry?.plates[0]).toMatchObject({
-      file: "MyKit_MK4_plate_01.3mf",
+      file: "MyKit_MK4_mk4_plate_01.3mf",
       filaments: ["PLA · Red"],
       parts: ["clip.stl"],
     });
-    const voronZip = unzipSync(readFileSync(join(outputDir, "MyKit_Voron_350_plate_01.3mf")));
+    const voronZip = unzipSync(readFileSync(join(outputDir, "MyKit_Voron_350_voron-350_plate_01.3mf")));
     const voronXml = new TextDecoder().decode(voronZip["3D/3dmodel.model"]);
     expect(voronXml).toContain('name="bracket.stl"');
     rmSync(dir, { recursive: true, force: true });
@@ -243,7 +243,7 @@ describe("export 3mf", () => {
     expect(result.primary_path.endsWith("Kit_plates.zip")).toBe(true);
     const zip = unzipSync(readFileSync(result.primary_path));
     expect(Object.keys(zip)).toEqual(
-      expect.arrayContaining(["print_plan.json", "Kit_Test_plate_01.3mf"]),
+      expect.arrayContaining(["print_plan.json", "Kit_Test_p1_plate_01.3mf"]),
     );
     rmSync(dir, { recursive: true, force: true });
   });
@@ -332,6 +332,78 @@ describe("export 3mf", () => {
       printers: Array<{ plates: Array<{ file: string }> }>;
     };
     expect(manifest.printers[0].plates[0].file).toBe("Kit.3mf");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("keeps distinct plate files when two printers share a name", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-3mf-dup-name-"));
+    const exportsDir = join(dir, "exports");
+    const blackStl = join(dir, "bracket.stl");
+    const redStl = join(dir, "clip.stl");
+    writeFileSync(blackStl, MINI_STL);
+    writeFileSync(redStl, MINI_STL);
+    const makePrinter = (id: string, filamentId: string, label: string): PrinterMachine => ({
+      id,
+      name: "Workshop Printer",
+      bed_width_mm: 200,
+      bed_depth_mm: 200,
+      bed_height_mm: 200,
+      margin_mm: 4,
+      max_filament_slots: 1,
+      loaded_filaments: [{ slot: 1, filament_color_id: filamentId, label }],
+    });
+    const makePart = (
+      filename: string,
+      path: string,
+      filamentId: string,
+      label: string,
+    ): MergePartExport => ({
+      matchKey: filename,
+      relativePath: filename,
+      filename,
+      sourceLayer: "base:repo",
+      status: "included",
+      role: "primary",
+      quantityAuto: 1,
+      partSlug: filename.replace(".stl", ""),
+      included: true,
+      quantityOverride: null,
+      notes: "",
+      geometrySame: null,
+      absolutePath: path,
+      quantityEffective: 1,
+      filamentColorId: filamentId,
+      filamentDisplay: label,
+    });
+    const result = exportProfile3mf(
+      "Kit",
+      [
+        makePart("bracket.stl", blackStl, "asa-black", "ASA · Black"),
+        makePart("clip.stl", redStl, "pla-red", "PLA · Red"),
+      ],
+      exportsDir,
+      {
+        enabled_printers: [
+          makePrinter("voron", "asa-black", "ASA · Black"),
+          makePrinter("mk4", "pla-red", "PLA · Red"),
+        ],
+        layout_mode: "per_plate",
+      },
+    );
+    expect(result.paths).toHaveLength(2);
+    expect(result.paths[0]).not.toBe(result.paths[1]);
+    const outputDir = profileExportDir(exportsDir, "Kit", "3mf");
+    const manifest = JSON.parse(readFileSync(join(outputDir, "print_plan.json"), "utf8")) as {
+      printers: Array<{ id: string; plates: Array<{ file: string; parts: string[] }> }>;
+    };
+    const files = manifest.printers.flatMap((p) => p.plates.map((plate) => plate.file));
+    expect(new Set(files).size).toBe(2);
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "Kit_Workshop_Printer_voron_plate_01.3mf",
+        "Kit_Workshop_Printer_mk4_plate_01.3mf",
+      ]),
+    );
     rmSync(dir, { recursive: true, force: true });
   });
 });

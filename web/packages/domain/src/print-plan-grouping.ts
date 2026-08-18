@@ -144,7 +144,10 @@ export function buildPrintGroupRows(
         part_count: partCount,
         parts: partsByBucket[bucketKey] ?? [],
         label: labelParts.join(" · "),
-        printer_id: assignments[groupKey] ?? null,
+        printer_id:
+          assignments[groupKey] && nameById[assignments[groupKey]]
+            ? assignments[groupKey]
+            : null,
         suggested_printer_id: suggestedId,
         suggested_printer_name: printerName,
         warning,
