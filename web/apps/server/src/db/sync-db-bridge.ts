@@ -24,12 +24,12 @@ export function syncAwait<T>(promise: Promise<T>): T {
 
 /** True when Drizzle exposes sync SQLite-style builders (`.all` / sync `.transaction`). */
 export function isSyncSqliteDrizzle(db: AppDrizzleDb): boolean {
-  try {
-    const sample = (db as DrizzleDb).select();
-    return typeof (sample as { all?: unknown }).all === "function";
-  } catch {
-    return false;
-  }
+  const candidate = db as DrizzleDb;
+  return (
+    typeof candidate.run === "function" &&
+    typeof candidate.all === "function" &&
+    typeof candidate.get === "function"
+  );
 }
 
 /** In-process serialization for settings RMW when sync DB transactions are unavailable (Postgres).

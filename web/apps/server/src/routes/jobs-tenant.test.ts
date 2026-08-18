@@ -65,15 +65,12 @@ describe("InProcessJobRunner tenant ownership", () => {
     const first = await runner.start("first", {}, "tenant-a");
     const second = await runner.start("second", {}, "tenant-a");
     const third = await runner.start("third", {}, "tenant-a");
-    await Promise.all([
-      waitForTerminal(runner, first, "tenant-a"),
-      waitForTerminal(runner, second, "tenant-a"),
-      waitForTerminal(runner, third, "tenant-a"),
-    ]);
+    await waitForTerminal(runner, third, "tenant-a");
 
     const retained = runner.listJobs({}, "tenant-a");
     expect(retained).toHaveLength(2);
     expect(retained.map((job) => job.job_id)).not.toContain(first);
+    expect(retained.map((job) => job.job_id)).toContain(second);
     expect(await runner.get(first, "tenant-a")).toBeNull();
   });
 });
