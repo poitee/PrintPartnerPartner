@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { ListTree } from "lucide-react";
 import { usePlateWorkspaceQuery } from "../../queries/plateWorkspace";
 import { useSavePrintAssignmentsMutation } from "../../queries/printAssignments";
+import { groupAssignmentsByPrinter } from "../../lib/assignmentPreview";
 import { guessSlicerForPrinterName } from "../../lib/printerSlicerGuess";
 import { SLICER_LINKS } from "../../lib/slicerLinks";
 import { Badge } from "../ui/badge";
@@ -86,8 +87,8 @@ export default function ManualAssignmentPanel({ profileId, engineReady }: Props)
           Printer assignment
         </CardTitle>
         <CardDescription className="text-[12.5px] leading-relaxed">
-          Override which printer (and slicer) each filament/source group is packed onto. Leave on
-          Auto to use PP&apos;s automatic filament-slot matching.
+          Preview: printer → filament group → parts. Leave Auto to match loaded slots, or pin a
+          group to another machine.
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">
@@ -102,58 +103,68 @@ export default function ManualAssignmentPanel({ profileId, engineReady }: Props)
             No printers configured yet — add one in Settings to assign groups.
           </p>
         ) : (
-          <ul className="space-y-2">
-            {groups.map((group) => {
-              const assignedId = currentAssignments[group.group_key] ?? AUTO_VALUE;
-              return (
-                <li
-                  key={group.group_key}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-2"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12.5px] font-medium leading-snug">
-                      {group.label}
-                    </p>
-                    <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-                      <span>
-                        {group.part_count} part{group.part_count === 1 ? "" : "s"}
-                      </span>
-                      {group.suggested_printer_name ? (
-                        <span>· suggested: {group.suggested_printer_name}</span>
-                      ) : null}
-                      {group.warning ? (
-                        <Badge variant="warning" className="text-[10px] font-normal">
-                          {group.warning}
-                        </Badge>
-                      ) : null}
-                      {currentAssignments[group.group_key] ? (
-                        <Badge variant="info" className="text-[10px] font-normal">
-                          manually assigned
-                        </Badge>
-                      ) : null}
-                    </p>
-                  </div>
-                  <Select
-                    value={assignedId}
-                    onValueChange={(value) => onAssign(group.group_key, value)}
-                    disabled={mutation.isPending}
-                  >
-                    <SelectTrigger className="h-8 w-56 shrink-0 text-[12px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={AUTO_VALUE}>Auto (recommended)</SelectItem>
-                      {printers.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                          {slicerLabel(p.id) ? ` · ${slicerLabel(p.id)}` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </li>
-              );
-            })}
+          <ul className="space-y-3">
+            {groupAssignmentsByPrinter(groups, printers, currentAssignments).map((bucket) => (
+              <li key={bucket.printerId ?? "unassigned"} className="space-y-2">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {bucket.printerName}
+                  {bucket.printerId && slicerLabel(bucket.printerId)
+                    ? ` · ${slicerLabel(bucket.printerId)}`
+                    : ""}
+                </p>
+                <ul className="space-y-2">
+                  {bucket.groups.map((group) => {
+                    const assignedId = currentAssignments[group.group_key] ?? AUTO_VALUE;
+                    const partNames = group.parts?.length
+                      ? group.parts.join(", ")
+                      : `${group.part_count} part${group.part_count === 1 ? "" : "s"}`;
+                    return (
+                      <li
+                        key={group.group_key}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[12.5px] font-medium leading-snug">
+                            {group.filament_label}
+                          </p>
+                          <p className="truncate text-[11px] text-muted-foreground">{partNames}</p>
+                          <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                            {group.warning ? (
+                              <Badge variant="warning" className="text-[10px] font-normal">
+                                {group.warning}
+                              </Badge>
+                            ) : null}
+                            {currentAssignments[group.group_key] ? (
+                              <Badge variant="info" className="text-[10px] font-normal">
+                                manually assigned
+                              </Badge>
+                            ) : null}
+                          </p>
+                        </div>
+                        <Select
+                          value={assignedId}
+                          onValueChange={(value) => onAssign(group.group_key, value)}
+                          disabled={mutation.isPending}
+                        >
+                          <SelectTrigger className="h-8 w-56 shrink-0 text-[12px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={AUTO_VALUE}>Auto (recommended)</SelectItem>
+                            {printers.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.name}
+                                {slicerLabel(p.id) ? ` · ${slicerLabel(p.id)}` : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </li>
+            ))}
           </ul>
         )}
       </CardContent>

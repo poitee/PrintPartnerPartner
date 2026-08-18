@@ -47,7 +47,7 @@ function partFilamentKey(part: MergePartExport): string | null {
   return null;
 }
 
-function loadedFilamentIds(printer: PrinterMachine): Set<string> {
+export function loadedFilamentKeys(printer: PrinterMachine): Set<string> {
   const ids = new Set<string>();
   for (const lf of printer.loaded_filaments) {
     if (lf.filament_color_id) ids.add(lf.filament_color_id);
@@ -79,7 +79,7 @@ export function assignPartsToPrinters(
 
   const filamentToPrinters: Record<string, string[]> = {};
   for (const printer of printers) {
-    for (const fid of loadedFilamentIds(printer)) {
+    for (const fid of loadedFilamentKeys(printer)) {
       (filamentToPrinters[fid] ??= []).push(printer.id);
     }
   }
