@@ -205,3 +205,70 @@ Diff hygiene:
   validate the state/cache decisions as executable pure behavior while
   TypeScript and ESLint validate their React wiring. There is no browser-level
   assertion of the rendered cards or dialogs.
+
+## Minor re-review follow-up
+
+Implementation HEAD before this report update: `d9bfe976e3548c8f835d697b5be6fa3aa14fb94d`
+
+### Changes
+
+- `optimisticReviewCacheKey` is now the canonical
+  `queryKeys.planReview` function rather than a duplicate tuple builder; its
+  behavioral test requires reference identity and validates both cache
+  variants.
+- Removed the identity-only profile reconciliation helper and test.
+  `ProfileContext` now uses the query's `isSuccess` condition directly.
+- Added a pure Settings resource-display decision for loading, initial error,
+  background error, and ready states. All five endpoint-scoped cards use it;
+  cached values remain enabled while background refresh errors stay visible.
+- Renamed all used underscore-prefixed workflow-state parameters.
+- Auxiliary errors now remove and reinsert an updated key so property order
+  deterministically represents the newest update.
+- Offline cards on Library, Plan, Plans, Progress, and Settings now use the
+  shared Card chrome defaults. Progress retains only its functional
+  `no-print` class.
+
+### Red evidence
+
+`npm run test -w @print-partner/web -- reviewCache auxiliaryErrors workflowState profileSelection`
+
+- Exit 1 before implementation.
+- 4 intended failures covered canonical cache-key identity, Settings
+  background/initial display states, and updating an existing auxiliary key as
+  the newest visible error.
+
+### Green and final verification
+
+Focused behavioral suite:
+
+`npm run test -w @print-partner/web -- reviewCache auxiliaryErrors workflowState profileSelection`
+
+- Exit 0; 4 files and 27 tests passed.
+
+Complete web suite:
+
+`npm run test -w @print-partner/web`
+
+- Exit 0; 61 files and 322 tests passed.
+
+Web typecheck:
+
+`npm run typecheck -w @print-partner/web`
+
+- Exit 0; no TypeScript diagnostics.
+
+Repository lint:
+
+`npm run lint` (cwd: `/workspace/web`)
+
+- Exit 0; no ESLint diagnostics.
+
+Diff hygiene:
+
+`git diff --check 4d1347f..d9bfe97`
+
+- Exit 0.
+
+### Minor re-review concerns
+
+- No new concerns beyond the existing absence of browser-level DOM tests.
