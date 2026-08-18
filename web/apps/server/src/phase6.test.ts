@@ -68,9 +68,19 @@ describe("Phase 6 tenant isolation", () => {
     tenantStorage.run("tenant-b", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
       expect(repo.getProfile(profileId)).toBeNull();
+      expect(() => repo.listParts(profileId)).toThrow("Profile not found");
       expect(() => repo.recomputeProfile(profileId)).toThrow("Profile not found");
       expect(() => repo.buildMergePartsForProfile(profileId)).toThrow("Profile not found");
       expect(() => repo.buildKitBundle(profileId, false)).toThrow("Profile not found");
+      expect(() =>
+        repo.createPlanDecision({
+          planId: profileId,
+          actor: "user",
+          kind: "applied_action",
+          label: "Cross-tenant decision",
+          summary: "must be rejected",
+        }),
+      ).toThrow("Profile not found");
     });
 
     sqlite.close();
