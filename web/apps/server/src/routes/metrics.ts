@@ -7,10 +7,10 @@ import {
   type ApiKeyValidator,
 } from "../middleware/api-key.js";
 
-type MetricsDeps = {
+export type MetricsDeps = {
   repo: AppRepository;
   integrations?: IntegrationPort;
-  validateApiKey?: ApiKeyValidator;
+  validateApiKey: ApiKeyValidator;
   authRequired?: boolean;
 };
 
@@ -32,7 +32,7 @@ type MetricsDeps = {
  */
 export async function registerMetricsRoutes(
   app: FastifyInstance,
-  deps?: MetricsDeps,
+  deps: MetricsDeps,
 ): Promise<void> {
   // In-memory HTTP metrics store
   const httpMetrics = {
@@ -67,10 +67,10 @@ export async function registerMetricsRoutes(
    */
   app.get("/metrics", async (request, reply) => {
     const apiKey = extractApiKey(request);
-    if (apiKey && !deps?.validateApiKey?.(apiKey)) {
+    if (apiKey && !deps.validateApiKey(apiKey)) {
       return reply.status(401).send({ detail: "Valid API key required" });
     }
-    if (!request.sessionUser && !apiKey && deps?.authRequired) {
+    if (!request.sessionUser && !apiKey && deps.authRequired) {
       return reply.status(401).send({ detail: "Authentication required" });
     }
 
@@ -116,7 +116,7 @@ export async function registerMetricsRoutes(
     );
 
     // ─── Print-job counters and gauges ────────────────────────────────────────
-    if (deps?.repo) {
+    if (deps.repo) {
       const repo = deps.repo;
 
       // Query print_jobs table for counter metrics (grouped by printer_id, material, status)

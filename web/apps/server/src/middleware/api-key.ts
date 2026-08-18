@@ -19,8 +19,6 @@ function isExempt(url: string): boolean {
   if (EXEMPT_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) {
     return true;
   }
-  // SPA static assets (extension paths) and root HTML
-  if (path === "/" || path.includes(".")) return true;
   return false;
 }
 
@@ -53,6 +51,32 @@ function isLoopbackAddress(address: string | undefined): boolean {
     address === "::1" ||
     address.startsWith("127.") ||
     address.startsWith("::ffff:127.")
+  );
+}
+
+function hasForwardingHeaders(request: FastifyRequest): boolean {
+  return Boolean(
+    request.headers.forwarded ||
+    request.headers["x-forwarded-for"] ||
+    request.headers["x-forwarded-host"] ||
+    request.headers["x-forwarded-proto"],
+  );
+}
+
+function isUnambiguousLoopback(
+  request: FastifyRequest,
+  config: ServerConfig,
+): boolean {
+  if (config.trustProxy || config.authRequired || hasForwardingHeaders(request)) {
+    return false;
+  }
+  return isLoopbackAddress(request.socket.remoteAddress);
+}
+
+function hasAuthenticatedSession(request: FastifyRequest): boolean {
+  const user = request.sessionUser;
+  return Boolean(
+    user && !(user.user_id === "local" && user.provider === "anonymous"),
   );
 }
 
@@ -93,10 +117,15 @@ export function registerApiKeyAuth(
     if (isExempt(path)) return;
 
     const provided = extractApiKey(request);
-    if (!provided && !config.integrationApiKey) return;
-    if (!provided || !validateKey(provided)) {
+    if (provided) {
+      if (validateKey(provided)) return;
       return sendProblem(reply, 401, "Unauthorized", "Valid API key required");
     }
+    if (!config.integrationApiKey) return;
+    if (isUnambiguousLoopback(request, config)) return;
+    if (hasAuthenticatedSession(request)) return;
+    if (hasConfiguredBasicAuth(request, config)) return;
+    return sendProblem(reply, 401, "Unauthorized", "Valid API key required");
   });
 
   return validateKey;
@@ -107,17 +136,15 @@ export function createAdminPreHandler(
   validateApiKey: ApiKeyValidator,
 ): AdminPreHandler {
   return async (request: FastifyRequest, reply: FastifyReply) => {
-    if (isLoopbackAddress(request.socket.remoteAddress)) return;
+    if (isUnambiguousLoopback(request, config)) return;
 
     const provided = extractApiKey(request);
     if (provided && validateApiKey(provided)) return;
     if (hasConfiguredBasicAuth(request, config)) return;
 
     const user = request.sessionUser;
-    const isImplicitLocalUser =
-      user?.user_id === "local" && user.provider === "anonymous";
-    if (user?.is_admin && !isImplicitLocalUser) return;
-    if (user && !isImplicitLocalUser) {
+    if (user?.is_admin && hasAuthenticatedSession(request)) return;
+    if (hasAuthenticatedSession(request)) {
       return sendProblem(reply, 403, "Forbidden", "Administrator access required");
     }
     return sendProblem(reply, 401, "Unauthorized", "Authentication required");

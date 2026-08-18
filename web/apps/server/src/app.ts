@@ -99,7 +99,11 @@ function isAdministrativeRoute(url: string): boolean {
 }
 
 export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
-  const app = Fastify({ logger: true, bodyLimit: config.uploadMaxBytes });
+  const app = Fastify({
+    logger: true,
+    bodyLimit: config.uploadMaxBytes,
+    trustProxy: config.trustProxy,
+  });
   const authStore = resolveAuthStore(ports, config);
   const repository = resolveRepository(ports);
 
