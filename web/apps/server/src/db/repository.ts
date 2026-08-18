@@ -1688,6 +1688,7 @@ export class AppRepository {
     parts: PartRow[];
     total: number;
   } {
+    this.requireProfile(profileId);
     const total = this.db
       .select({ c: count() })
       .from(this.schema.parts)
@@ -2446,6 +2447,7 @@ export class AppRepository {
     customHex?: string | null,
     spoolRef?: string | null,
   ): number {
+    this.requireProfile(profileId);
     const targetRole = normalizePartRole(role);
     const defaultPatch: Partial<RoleFilamentDefault> = {
       filament_color_id: colorId,
@@ -2827,6 +2829,7 @@ export class AppRepository {
   }
 
   listSourceNotes(projectId: number, profileId?: number | null): SourceNoteSummary[] {
+    if (profileId != null) this.requireProfile(profileId);
     if (!this.schema.sourceNotes) return [];
     const rows = this.db
       .select()
@@ -2890,6 +2893,7 @@ export class AppRepository {
     authorUserId?: string | null;
   }): SourceNoteSummary {
     if (!this.schema.sourceNotes) throw new Error("source_notes table unavailable");
+    if (input.profileId != null) this.requireProfile(input.profileId);
     const now = new Date().toISOString();
     const inserted = this.db
       .insert(this.schema.sourceNotes)
@@ -2916,6 +2920,7 @@ export class AppRepository {
     if (!this.schema.sourceNotes) throw new Error("source_notes table unavailable");
     const existing = this.getSourceNote(noteId);
     if (!existing) throw new Error("Note not found");
+    if (patch.profileId != null) this.requireProfile(patch.profileId);
     const updates: Partial<typeof this.schema.sourceNotes.$inferInsert> = {
       updatedAt: new Date().toISOString(),
     };
@@ -2975,6 +2980,7 @@ export class AppRepository {
   }
 
   listPlanDecisions(planId: number, limit = 200): PlanDecision[] {
+    this.requireProfile(planId);
     if (!this.schema.planDecisions) return [];
     const rows = this.db
       .select()
@@ -3020,6 +3026,7 @@ export class AppRepository {
     rationale?: string | null;
     result?: Record<string, unknown> | null;
   }): PlanDecision {
+    this.requireProfile(input.planId);
     if (!this.schema.planDecisions) throw new Error("plan_decisions table unavailable");
     const now = new Date().toISOString();
     const inserted = this.db
@@ -3044,6 +3051,7 @@ export class AppRepository {
 
   /** Delete plan_decisions for one plan (tenant-scoped). Returns rows removed. */
   deletePlanDecisionsForPlan(planId: number): number {
+    this.requireProfile(planId);
     if (!this.schema.planDecisions) return 0;
     if (!planId || planId <= 0) return 0;
     const before = this.listPlanDecisions(planId, 10_000).length;
@@ -3083,6 +3091,7 @@ export class AppRepository {
   }
 
   listPlanSnapshots(planId: number): PlanSnapshotSummary[] {
+    this.requireProfile(planId);
     if (!this.schema.planSnapshots) return [];
     const rows = this.db
       .select()
@@ -3123,6 +3132,7 @@ export class AppRepository {
     source: PlanSnapshotSource;
     payload: Record<string, unknown>;
   }): PlanSnapshot {
+    this.requireProfile(input.planId);
     if (!this.schema.planSnapshots) throw new Error("plan_snapshots table unavailable");
     const now = new Date().toISOString();
     const inserted = this.db
@@ -3174,6 +3184,7 @@ export class AppRepository {
     completedAt?: string;
     linkId?: string;
   }): PrintJobRow {
+    this.requireProfile(job.profileId);
     const inserted = this.db
       .insert(this.schema.printJobs)
       .values({
@@ -3237,6 +3248,9 @@ export class AppRepository {
     linkId?: string;
   }>): PrintJobPartRow[] {
     if (!parts.length) return [];
+    for (const profileId of new Set(parts.map((part) => part.profileId))) {
+      this.requireProfile(profileId);
+    }
     const inserted = this.db
       .insert(this.schema.printJobParts)
       .values(parts.map((p) => ({
@@ -3299,6 +3313,7 @@ export class AppRepository {
   }
 
   listPrintJobParts(profileId: number): PrintJobPartRow[] {
+    this.requireProfile(profileId);
     return this.db
       .select()
       .from(this.schema.printJobParts)
