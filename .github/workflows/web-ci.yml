@@ -1,25 +1,38 @@
 name: Web CI
 
 on:
+  workflow_call:
   push:
     branches: [main, master]
     paths:
       - "web/**"
+      - "Dockerfile"
+      - "docker-entrypoint.sh"
+      - "docker-compose*.yml"
+      - "pp-compose.yml"
+      - "slicer-sidecar/**"
       - ".github/workflows/web-ci.yml"
   pull_request:
     paths:
       - "web/**"
+      - "Dockerfile"
+      - "docker-entrypoint.sh"
+      - "docker-compose*.yml"
+      - "pp-compose.yml"
+      - "slicer-sidecar/**"
       - ".github/workflows/web-ci.yml"
 
-defaults:
-  run:
-    working-directory: web
+permissions:
+  contents: read
 
 jobs:
-  web:
+  quality:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -27,9 +40,58 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Install
         run: npm ci
-      - name: Lint
-        run: npm run lint
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Test
-        run: npm run test
+      - name: Audit high-severity vulnerabilities
+        run: npm audit --audit-level=high
+      - name: Full quality suite
+        env:
+          PLAYWRIGHT_CHROMIUM_EXECUTABLE: /usr/bin/google-chrome
+        run: npm run quality
+
+  docker:
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose definitions
+        run: |
+          docker compose config
+          docker compose -f docker-compose.saas.yml config
+          docker compose -f docker-compose.yml -f pp-compose.yml config
+      - name: Build production image
+        run: docker build --tag print-partner:ci .
+      - name: Create local smoke source
+        run: |
+          mkdir -p "${RUNNER_TEMP}/smoke-source"
+          cat > "${RUNNER_TEMP}/smoke-source/cube.stl" <<'STL'
+          solid cube
+            facet normal 0 0 1
+              outer loop
+                vertex 0 0 0
+                vertex 1 0 0
+                vertex 0 1 0
+              endloop
+            endfacet
+          endsolid cube
+          STL
+      - name: Start production container
+        run: |
+          docker run --detach --name print-partner-ci \
+            --publish 127.0.0.1:8080:8080 \
+            --volume "${RUNNER_TEMP}/smoke-source:/smoke-source:ro" \
+            --env PRINT_PARTNER_API_KEY=ci-smoke-key \
+            print-partner:ci
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs print-partner-ci
+          exit 1
+      - name: Run workflow smoke test
+        env:
+          BASE: http://127.0.0.1:8080
+          PRINT_PARTNER_API_KEY: ci-smoke-key
+          SOURCE_KIND: local
+          SOURCE_URL: /smoke-source
+        run: ./web/scripts/workflow-smoke.sh
