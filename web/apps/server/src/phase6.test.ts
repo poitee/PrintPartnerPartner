@@ -96,7 +96,7 @@ describe("Phase 6 tenant isolation", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
       expect(repo.getPartRow(partId)?.included).toBe(true);
       expect(repo.getPartAssembled(partId).assembled_units).toEqual([true]);
-      expect(repo.listParts(profileId).parts[0]?.print_units).toEqual([true]);
+      expect(repo.getCheckoff(profileId).parts[0]?.print_units).toEqual([true]);
     });
 
     sqlite.close();
