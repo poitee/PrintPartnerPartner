@@ -98,7 +98,7 @@ Web typecheck:
 
 Repository lint:
 
-`npm run lint`
+`npm run lint` (cwd: `/workspace/web`)
 
 - Exit 0; no ESLint diagnostics.
 
@@ -126,3 +126,82 @@ Diff hygiene:
   exercising browser interactions.
 - CodeRabbit CLI `0.7.3` is installed but reports `not_authenticated`, so no
   external CodeRabbit review result is available.
+
+## Review blocker follow-up
+
+Implementation HEAD before this report update: `603f774fa540fd89a91f0f49a32d4300f8d0fb95`
+
+### Changes
+
+- Added a shared engine-state decision that distinguishes the initial health
+  request from an explicit `ok: false` response. Library, Welcome, Plan, Plans,
+  Parts, Progress, Export, Printers, Help, and Settings now use it.
+- Added primary-resource decisions that keep cached plans and review/settings
+  data visible during background loading or failure while surfacing a
+  non-blocking refresh error.
+- Split source-category requests from Library and Plan primary data requests;
+  category failure now leaves source/layer data usable and appears inline.
+- Replaced Settings' aggregate request/readiness gate with endpoint-scoped
+  loading, error, and readiness. Printer, slicer, source-category, STL naming,
+  integration, build-tracking, and Data & System tools no longer depend on the
+  five unrelated inline settings requests. Dialog dismissal remains available
+  during engine loss, card copy reflects loading/error/empty states, and
+  duplicated readiness checks/chrome were removed.
+- Progress tracks auxiliary errors by request key and clears only the recovered
+  request's error after success. Cached phase/review data survives refetch
+  failures, and unreachable duplicate offline/loading branches were removed.
+- Slicer handoff now loads the printer fleet first, stops with specific
+  no-printer guidance, and only then requests the active plan's printer ids.
+- Removed all six Task 3 source-regex test files. Behavioral tests now exercise
+  pure health/resource, settings gate, auxiliary-error, optimistic-cache,
+  profile-reconciliation, and handoff-sequencing decisions.
+
+### Red evidence
+
+`npm run test -w @print-partner/web -- workflowState auxiliaryErrors reviewCache slicerHandoff profileSelection`
+
+- Exit 1 before implementation.
+- 14 intended assertion failures covered unhealthy-vs-loading health,
+  cached-data preservation, independent settings/recovery gates, per-request
+  auxiliary recovery, included/excluded review cache selection and rollback,
+  successful-list-only profile reconciliation, and printer-before-plan
+  handoff sequencing.
+
+### Green and final verification
+
+Focused behavioral suite:
+
+`npm run test -w @print-partner/web -- workflowState auxiliaryErrors reviewCache slicerHandoff profileSelection`
+
+- Exit 0; 5 files and 26 tests passed.
+
+Complete web suite:
+
+`npm run test -w @print-partner/web`
+
+- Exit 0; 61 files and 319 tests passed.
+
+Web typecheck:
+
+`npm run typecheck -w @print-partner/web`
+
+- Exit 0; no TypeScript diagnostics.
+
+Repository lint:
+
+`npm run lint` (cwd: `/workspace/web`)
+
+- Exit 0; no ESLint diagnostics.
+
+Diff hygiene:
+
+`git diff --check aa91be5..603f774`
+
+- Exit 0.
+
+### Follow-up concerns
+
+- The web test project still has no DOM renderer, so the replacement tests
+  validate the state/cache decisions as executable pure behavior while
+  TypeScript and ESLint validate their React wiring. There is no browser-level
+  assertion of the rendered cards or dialogs.
