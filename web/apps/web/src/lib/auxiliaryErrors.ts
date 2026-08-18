@@ -2,19 +2,22 @@ export type AuxiliaryErrors = Record<string, string>;
 
 export function setAuxiliaryError(
   errors: AuxiliaryErrors,
-  _key: string,
-  _message: string,
+  key: string,
+  message: string,
 ): AuxiliaryErrors {
-  return errors;
+  return { ...errors, [key]: message };
 }
 
 export function clearAuxiliaryError(
   errors: AuxiliaryErrors,
-  _key: string,
+  key: string,
 ): AuxiliaryErrors {
-  return errors;
+  if (!(key in errors)) return errors;
+  const next = { ...errors };
+  delete next[key];
+  return next;
 }
 
-export function currentAuxiliaryError(_errors: AuxiliaryErrors): string | null {
-  return null;
+export function currentAuxiliaryError(errors: AuxiliaryErrors): string | null {
+  return Object.values(errors).at(-1) ?? null;
 }

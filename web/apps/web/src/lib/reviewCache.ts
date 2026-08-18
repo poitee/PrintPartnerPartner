@@ -1,14 +1,14 @@
 export function optimisticReviewCacheKey(
-  _profileId: number,
-  _includeExcluded: boolean,
-): readonly unknown[] {
-  return [];
+  profileId: number,
+  includeExcluded: boolean,
+) {
+  return ["planReview", profileId, includeExcluded] as const;
 }
 
 export type OptimisticRollback<T> =
   | { kind: "restore"; previous: T }
   | { kind: "remove" };
 
-export function rollbackOptimisticCache<T>(_previous: T | undefined): OptimisticRollback<T> {
-  return { kind: "remove" };
+export function rollbackOptimisticCache<T>(previous: T | undefined): OptimisticRollback<T> {
+  return previous === undefined ? { kind: "remove" } : { kind: "restore", previous };
 }

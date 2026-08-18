@@ -17,9 +17,9 @@ import {
 import { useEngineHealth } from "../../hooks/useEngineHealth";
 import { useJobRunner } from "../../hooks/useJobRunner";
 import { useProfileSelection } from "../../context/ProfileContext";
-import { resolveEnabledPrinterIds } from "../../lib/enabledPrinters";
 import { handleExport3mfJobDone } from "../../lib/export3mfJobResult";
 import { settingsRoute } from "../../lib/routes";
+import { loadHandoffPrinterSelection } from "../../lib/slicerHandoff";
 import { Button } from "../ui/button";
 import {
   Card,
@@ -74,20 +74,17 @@ export default function SlicerHandoffPanel() {
   }, [health?.ok]);
 
   const fetchEnabledPrinterIds = async (profileId: number) => {
-    const [printers, plan] = await Promise.all([
-      fetchPrinters(),
-      fetchPrintPlan(profileId),
-    ]);
-    if (!printers.length) {
+    const selection = await loadHandoffPrinterSelection(profileId, {
+      fetchPrinterIds: async () => (await fetchPrinters()).map((printer) => printer.id),
+      fetchEnabledPrinterIds: async (id) => (await fetchPrintPlan(id)).enabled_printer_ids,
+    });
+    if (selection.kind === "no-printers") {
       toast.error("No printers configured", {
         description: "Add a printer in Settings before exporting 3MF.",
       });
       return null;
     }
-    return resolveEnabledPrinterIds(
-      printers.map((printer) => printer.id),
-      plan.enabled_printer_ids,
-    );
+    return selection.printerIds;
   };
 
   const onDownload = async () => {

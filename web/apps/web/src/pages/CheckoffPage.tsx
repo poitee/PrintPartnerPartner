@@ -97,6 +97,17 @@ import { useJobRunner } from "../hooks/useJobRunner";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { cn } from "../lib/utils";
 import { waitForSheetThumbnails } from "../lib/waitForSheetThumbnails";
+import {
+  clearAuxiliaryError,
+  currentAuxiliaryError,
+  setAuxiliaryError,
+  type AuxiliaryErrors,
+} from "../lib/auxiliaryErrors";
+import {
+  getBackgroundError,
+  resolveEngineState,
+  resolveResourceState,
+} from "../lib/workflowState";
 import PwaInstallBanner from "../components/pwa/PwaInstallBanner";
 import { useSyncComplete } from "../lib/useSyncComplete";
 
@@ -184,7 +195,7 @@ const FILTER_MODES: { mode: CheckoffFilterMode; label: string }[] = [
 
 export default function CheckoffPage() {
   const navigate = useNavigate();
-  const { health, error: engineError } = useEngineHealth();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const {
     selectedProfileId,
     profiles,
@@ -261,22 +272,51 @@ export default function CheckoffPage() {
   const [awaitingLinks, setAwaitingLinks] = useState<PrinterCheckoffLink[]>([]);
   const [phaseManifest, setPhaseManifest] = useState<PlanPhaseManifestResponse | null>(null);
   const [queueSuggestions, setQueueSuggestions] = useState<PrinterQueueSuggestion[]>([]);
-  const [auxiliaryError, setAuxiliaryError] = useState<string | null>(null);
+  const [auxiliaryErrors, setAuxiliaryErrors] = useState<AuxiliaryErrors>({});
+  const auxiliaryError = currentAuxiliaryError(auxiliaryErrors);
   const location = useLocation();
   const copilot = useCopilotUiOptional();
   const [pendingPreviewId, setPendingPreviewId] = useState<number | null>(null);
   const appliedIntentSeqRef = useRef(0);
+  const reportAuxiliaryError = useCallback((key: string, message: string) => {
+    setAuxiliaryErrors((errors) => setAuxiliaryError(errors, key, message));
+  }, []);
+  const markAuxiliarySuccess = useCallback((key: string) => {
+    setAuxiliaryErrors((errors) => clearAuxiliaryError(errors, key));
+  }, []);
+  const refreshUnattributedPrints = useCallback(async () => {
+    try {
+      setUnattributedPrints(await fetchUnattributedPrints());
+      markAuxiliarySuccess("printer-activity");
+    } catch (e) {
+      reportAuxiliaryError(
+        "printer-activity",
+        `Could not refresh printer activity: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+  }, [markAuxiliarySuccess, reportAuxiliaryError]);
 
   useEffect(() => {
-    if (!buildTrackingError) return;
-    setAuxiliaryError(
-      `Could not load assembly tracking settings: ${
-        buildTrackingError instanceof Error
-          ? buildTrackingError.message
-          : String(buildTrackingError)
-      }`,
-    );
-  }, [buildTrackingError]);
+    if (buildTrackingError) {
+      reportAuxiliaryError(
+        "assembly-tracking",
+        `Could not load assembly tracking settings: ${
+          buildTrackingError instanceof Error
+            ? buildTrackingError.message
+            : String(buildTrackingError)
+        }`,
+      );
+    } else if (buildTrackingSettings) {
+      markAuxiliarySuccess("assembly-tracking");
+    }
+  }, [
+    buildTrackingError,
+    buildTrackingSettings,
+    markAuxiliarySuccess,
+    reportAuxiliaryError,
+  ]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -288,17 +328,26 @@ export default function CheckoffPage() {
     const ids = liveStrip.idleIntegrationIds;
     if (!ids.length) {
       setQueueSuggestions([]);
+      markAuxiliarySuccess("printer-suggestions");
       return;
     }
     void fetchPrinterQueueSuggestions({ idle_integration_ids: ids })
-      .then(({ suggestions }) => setQueueSuggestions(suggestions))
+      .then(({ suggestions }) => {
+        setQueueSuggestions(suggestions);
+        markAuxiliarySuccess("printer-suggestions");
+      })
       .catch((e) => {
         setQueueSuggestions([]);
-        setAuxiliaryError(
+        reportAuxiliaryError(
+          "printer-suggestions",
           `Could not refresh printer suggestions: ${e instanceof Error ? e.message : String(e)}`,
         );
       });
-  }, [liveStrip.idleIntegrationIds]);
+  }, [
+    liveStrip.idleIntegrationIds,
+    markAuxiliarySuccess,
+    reportAuxiliaryError,
+  ]);
 
   useEffect(() => {
     const state = location.state as { previewPartId?: number } | null;
@@ -369,14 +418,8 @@ export default function CheckoffPage() {
 
   useEffect(() => {
     if (!health?.ok) return;
-    void fetchUnattributedPrints()
-      .then(setUnattributedPrints)
-      .catch((e) =>
-        setAuxiliaryError(
-          `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
-        ),
-      );
-  }, [health?.ok]);
+    void refreshUnattributedPrints();
+  }, [health?.ok, refreshUnattributedPrints]);
 
   // Load phase manifest whenever the selected plan changes
   useEffect(() => {
@@ -385,14 +428,23 @@ export default function CheckoffPage() {
       return;
     }
     void fetchPlanPhaseManifest(selectedProfileId)
-      .then((manifest) => setPhaseManifest(manifest))
+      .then((manifest) => {
+        setPhaseManifest(manifest);
+        markAuxiliarySuccess("phase-progress");
+      })
       .catch((e) => {
         setPhaseManifest(null);
-        setAuxiliaryError(
+        reportAuxiliaryError(
+          "phase-progress",
           `Could not load phase progress: ${e instanceof Error ? e.message : String(e)}`,
         );
       });
-  }, [health?.ok, selectedProfileId]);
+  }, [
+    health?.ok,
+    selectedProfileId,
+    markAuxiliarySuccess,
+    reportAuxiliaryError,
+  ]);
 
   const refreshWatchingLinks = useCallback(() => {
     if (!health?.ok) return;
@@ -400,9 +452,13 @@ export default function CheckoffPage() {
       state: "watching",
       profile_id: selectedProfileId ?? undefined,
     })
-      .then((res) => setWatchingLinks(res.links ?? []))
+      .then((res) => {
+        setWatchingLinks(res.links ?? []);
+        markAuxiliarySuccess("watching-links");
+      })
       .catch((e) =>
-        setAuxiliaryError(
+        reportAuxiliaryError(
+          "watching-links",
           `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
         ),
       );
@@ -410,13 +466,22 @@ export default function CheckoffPage() {
       state: "awaiting_verify",
       profile_id: selectedProfileId ?? undefined,
     })
-      .then((res) => setAwaitingLinks(res.links ?? []))
+      .then((res) => {
+        setAwaitingLinks(res.links ?? []);
+        markAuxiliarySuccess("awaiting-links");
+      })
       .catch((e) =>
-        setAuxiliaryError(
+        reportAuxiliaryError(
+          "awaiting-links",
           `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
         ),
       );
-  }, [health?.ok, selectedProfileId]);
+  }, [
+    health?.ok,
+    selectedProfileId,
+    markAuxiliarySuccess,
+    reportAuxiliaryError,
+  ]);
 
   useEffect(() => {
     refreshWatchingLinks();
@@ -424,7 +489,7 @@ export default function CheckoffPage() {
 
   useEffect(() => {
     setVerifyQueue({ awaitingCount: 0, watchingCount: 0, primaryHostName: null });
-    setAuxiliaryError(null);
+    setAuxiliaryErrors({});
   }, [selectedProfileId]);
 
   useEffect(() => {
@@ -656,8 +721,27 @@ export default function CheckoffPage() {
   }, [phaseManifest, includedParts]);
   const totals = useMemo(() => checkoffUnitTotals(includedParts), [includedParts]);
   const printedLine = useMemo(() => formatPrintedUnitsLine(includedParts), [includedParts]);
-  const loadError = workspaceError;
   const toggleBusy = busyPartId != null;
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const profilesState = resolveResourceState({
+    loading: profilesLoading,
+    error: profilesError,
+    hasData: profiles.length > 0,
+  });
+  const reviewState = resolveResourceState({
+    loading,
+    error: workspaceError,
+    hasData: review != null,
+  });
+  const profilesBackgroundError = getBackgroundError(
+    profilesError,
+    profiles.length > 0,
+  );
+  const reviewBackgroundError = getBackgroundError(workspaceError, review != null);
 
   const suppressIntegrationIds = useMemo(
     () => new Set(liveStrip.activeIntegrationIds),
@@ -789,27 +873,25 @@ export default function CheckoffPage() {
   };
 
   if (
-    !health?.ok ||
-    profilesLoading ||
-    profilesError ||
+    engineState !== "ready" ||
+    profilesState !== "ready" ||
     selectedProfileId == null ||
-    (loading && !review) ||
-    workspaceError
+    reviewState !== "ready"
   ) {
     let stateContent;
-    if (!health?.ok) {
+    if (engineState !== "ready") {
       stateContent = (
         <Card className="no-print border-border shadow-sm">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
-              {engineError
+              {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to use Progress."
                 : "Connecting to the engine…"}
             </p>
           </CardContent>
         </Card>
       );
-    } else if (profilesError) {
+    } else if (profilesState === "error") {
       stateContent = (
         <Card className="no-print border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
@@ -822,7 +904,7 @@ export default function CheckoffPage() {
           </CardContent>
         </Card>
       );
-    } else if (profilesLoading || (loading && !review)) {
+    } else if (profilesState === "loading" || reviewState === "loading") {
       stateContent = (
         <Card className="no-print border-border shadow-sm">
           <CardContent className="flex items-center gap-2 pt-6">
@@ -831,7 +913,7 @@ export default function CheckoffPage() {
           </CardContent>
         </Card>
       );
-    } else if (workspaceError) {
+    } else if (reviewState === "error") {
       stateContent = (
         <Card className="no-print border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
@@ -960,15 +1042,7 @@ export default function CheckoffPage() {
                 }
                 refreshWatchingLinks();
               }}
-              onUnattributedUpdate={() => {
-                void fetchUnattributedPrints()
-                  .then(setUnattributedPrints)
-                  .catch((e) =>
-                    setAuxiliaryError(
-                      `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
-                    ),
-                  );
-              }}
+              onUnattributedUpdate={() => void refreshUnattributedPrints()}
             />
           </Suspense>
           {unattributedPrints.length > 0 && (
@@ -978,24 +1052,10 @@ export default function CheckoffPage() {
                   key={print.id}
                   print={print}
                   onClaimed={() => {
-                    void fetchUnattributedPrints()
-                      .then(setUnattributedPrints)
-                      .catch((e) =>
-                        setAuxiliaryError(
-                          `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
-                        ),
-                      );
+                    void refreshUnattributedPrints();
                     setVerifyRefreshKey((k) => k + 1);
                   }}
-                  onDismissed={() => {
-                    void fetchUnattributedPrints()
-                      .then(setUnattributedPrints)
-                      .catch((e) =>
-                        setAuxiliaryError(
-                          `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
-                        ),
-                      );
-                  }}
+                  onDismissed={() => void refreshUnattributedPrints()}
                 />
               ))}
             </div>
@@ -1075,7 +1135,16 @@ export default function CheckoffPage() {
         </div>
 
         <div>
-          {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+          {profilesBackgroundError && (
+            <p className="text-sm text-destructive" role="alert">
+              Could not refresh plans: {profilesBackgroundError}
+            </p>
+          )}
+          {reviewBackgroundError && (
+            <p className="text-sm text-destructive" role="alert">
+              Could not refresh Progress: {reviewBackgroundError}
+            </p>
+          )}
           {auxiliaryError && (
             <p className="text-sm text-destructive" role="alert">
               {auxiliaryError}
@@ -1084,47 +1153,20 @@ export default function CheckoffPage() {
         </div>
       </div>
 
-      {!health ? (
-        <Card className="no-print">
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">
-              {engineError
-                ? "Engine offline — start the print-partner engine to use Progress."
-                : "Connecting to the engine…"}
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          {/*
-            GRE-223 / GRE-226: Add bag/sort stays visible whenever a plan is selected —
-            including while review is still loading. Not gated on health strip or filter.
-          */}
-          {selectedProfileId != null ? (
-            <div className="no-print">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="mb-2 h-9 px-3"
-                disabled={toggleBusy}
-                onClick={onAddBagBar}
-              >
-                Add bag/sort
-              </Button>
-            </div>
-          ) : null}
+      <div className="no-print">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="mb-2 h-9 px-3"
+          disabled={toggleBusy}
+          onClick={onAddBagBar}
+        >
+          Add bag/sort
+        </Button>
+      </div>
 
-          {loading && !review ? (
-            <Card className="no-print">
-              <CardContent className="flex items-center gap-2 pt-6">
-                <Spinner className="size-4" />
-                <p className="text-sm text-muted-foreground">Loading progress…</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-          {phaseProgress ? (
+      {phaseProgress ? (
             <PhaseProgressView
               phases={phaseProgress}
               busyPartId={busyPartId}
@@ -1191,17 +1233,13 @@ export default function CheckoffPage() {
                           if (selectedProfileId == null) return;
                           void claimUnattributedPrint(printId, selectedProfileId)
                             .then(() => {
-                              void fetchUnattributedPrints()
-                                .then(setUnattributedPrints)
-                                .catch((e) =>
-                                  setAuxiliaryError(
-                                    `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
-                                  ),
-                                );
+                              markAuxiliarySuccess("claim-printer-activity");
+                              void refreshUnattributedPrints();
                               refreshWatchingLinks();
                             })
                             .catch((e) =>
-                              setAuxiliaryError(
+                              reportAuxiliaryError(
+                                "claim-printer-activity",
                                 `Could not claim printer activity: ${e instanceof Error ? e.message : String(e)}`,
                               ),
                             );
@@ -1276,10 +1314,6 @@ export default function CheckoffPage() {
               ))}
             </article>
           ) : null}
-            </>
-          )}
-        </>
-      )}
 
       {review && (
         <div className="no-print flex flex-col gap-2 sm:flex-row sm:flex-wrap">

@@ -34,6 +34,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { buildRoute, exportRoute, reviewRoute, sourcesRoute } from "../lib/routes";
+import { resolveEngineState } from "../lib/workflowState";
 
 type LegalTab = "summary" | "license" | "attribution" | "third-party";
 
@@ -100,8 +101,14 @@ function HelpLoadingSkeleton() {
 }
 
 export default function HelpPage() {
-  const { health } = useEngineHealth();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const { selectedProfileId } = useProfileSelection();
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const engineReady = engineState === "ready";
   const [legalTab, setLegalTab] = useState<LegalTab>("summary");
   const [legalText, setLegalText] = useState("");
   const [workflowText, setWorkflowText] = useState("");
@@ -124,11 +131,15 @@ export default function HelpPage() {
   });
 
   useEffect(() => {
+    if (!engineReady) {
+      setDataDir(null);
+      return;
+    }
     void fetchHealth()
       .then((h) => setDataDir(h.data_dir))
       .catch(() => setDataDir(null));
     void engineBaseUrl().then(setEngineUrl);
-  }, [health]);
+  }, [engineReady]);
 
   const loadWorkflow = useCallback(async () => {
     setWorkflowError(null);
@@ -159,17 +170,17 @@ export default function HelpPage() {
   }, []);
 
   useEffect(() => {
-    if (!health) return;
+    if (!engineReady) return;
     void loadWorkflow();
-  }, [health, loadWorkflow]);
+  }, [engineReady, loadWorkflow]);
 
   useEffect(() => {
-    if (!health) return;
+    if (!engineReady) return;
     void loadLegal(legalTab);
-  }, [health, legalTab, loadLegal]);
+  }, [engineReady, legalTab, loadLegal]);
 
   useEffect(() => {
-    if (!health) return;
+    if (!engineReady) return;
     setRegistryError(null);
     setRegistryLoading(true);
     void fetchManifestRegistry()
@@ -179,7 +190,7 @@ export default function HelpPage() {
         setRegistryEntries([]);
       })
       .finally(() => setRegistryLoading(false));
-  }, [health]);
+  }, [engineReady]);
 
   return (
     <div className="space-y-4">
@@ -298,12 +309,14 @@ export default function HelpPage() {
         </CardHeader>
         <CardContent>
           {workflowError && <p className="text-sm text-destructive">{workflowError}</p>}
-          {!health && (
+          {!engineReady && (
             <p className="text-sm text-muted-foreground">
-              Connect to the engine to load the workflow guide.
+              {engineState === "offline"
+                ? "Start the engine to load the workflow guide."
+                : "Connecting to the engine…"}
             </p>
           )}
-          {workflowLoading && health && !workflowText && <HelpLoadingSkeleton />}
+          {workflowLoading && engineReady && !workflowText && <HelpLoadingSkeleton />}
           {workflowText ? (
             <div
               className="help-prose text-sm leading-relaxed [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-3 [&_h3]:text-sm [&_h3]:font-semibold [&_li]:ml-4 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:space-y-1"
@@ -331,18 +344,20 @@ export default function HelpPage() {
         </CardHeader>
         <CardContent>
           {registryError && <p className="text-sm text-destructive">{registryError}</p>}
-          {!health && (
+          {!engineReady && (
             <p className="text-sm text-muted-foreground">
-              Connect to the engine to browse approved manifests.
+              {engineState === "offline"
+                ? "Start the engine to browse approved manifests."
+                : "Connecting to the engine…"}
             </p>
           )}
-          {registryLoading && health && (
+          {registryLoading && engineReady && (
             <div className="space-y-2">
               <Skeleton className="h-4 w-full" />
               <Skeleton className="h-4 w-3/4" />
             </div>
           )}
-          {health && registryEntries.length === 0 && !registryError && !registryLoading && (
+          {engineReady && registryEntries.length === 0 && !registryError && !registryLoading && (
             <p className="text-sm text-muted-foreground">No approved community manifests yet.</p>
           )}
           {registryEntries.length > 0 && (
@@ -432,16 +447,18 @@ export default function HelpPage() {
             {LEGAL_TABS.map((t) => (
               <TabsContent key={t.id} value={t.id}>
                 {legalError && <p className="text-sm text-destructive">{legalError}</p>}
-                {!health && (
+                {!engineReady && (
                   <p className="text-sm text-muted-foreground">
-                    Connect to the engine to load license text.
+                    {engineState === "offline"
+                      ? "Start the engine to load license text."
+                      : "Connecting to the engine…"}
                   </p>
                 )}
-                {legalLoading && health && !legalText ? (
+                {legalLoading && engineReady && !legalText ? (
                   <HelpLoadingSkeleton />
                 ) : (
                   <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/20 p-3 text-xs leading-relaxed">
-                    {legalText || (health ? "" : "")}
+                    {legalText}
                   </pre>
                 )}
               </TabsContent>

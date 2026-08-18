@@ -76,6 +76,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
+import {
+  canUseRecoveryTools,
+  canUseSettingsResource,
+  resolveEngineState,
+} from "../lib/workflowState";
 
 const UPDATE_INTERVAL_OPTIONS = [
   { value: "0", label: "Off (manual only)" },
@@ -84,6 +89,33 @@ const UPDATE_INTERVAL_OPTIONS = [
   { value: "24", label: "Every 24 hours" },
   { value: "168", label: "Weekly" },
 ] as const;
+
+type SettingsResource =
+  | "filaments"
+  | "githubPat"
+  | "sourceUpdates"
+  | "autoRecompute"
+  | "discord";
+
+type SettingsResourceLoad = {
+  loading: boolean;
+  loaded: boolean;
+  error: string | null;
+};
+
+const INITIAL_RESOURCE_LOAD: SettingsResourceLoad = {
+  loading: false,
+  loaded: false,
+  error: null,
+};
+
+const INITIAL_SETTINGS_LOADS: Record<SettingsResource, SettingsResourceLoad> = {
+  filaments: INITIAL_RESOURCE_LOAD,
+  githubPat: INITIAL_RESOURCE_LOAD,
+  sourceUpdates: INITIAL_RESOURCE_LOAD,
+  autoRecompute: INITIAL_RESOURCE_LOAD,
+  discord: INITIAL_RESOURCE_LOAD,
+};
 
 function SettingsSection({
   id,
@@ -106,8 +138,13 @@ function SettingsSection({
 
 export default function SettingsPage() {
   const location = useLocation();
-  const { health, error: engineError } = useEngineHealth();
-  const engineReady = Boolean(health?.ok);
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const engineReady = engineState === "ready";
   const { user, multiUser } = useAuth();
   const { format: dateFormat, setFormat: setDateFormat } = useDateFormat();
   const { updateCheck, refresh: refreshUpdateCheck } = useAppUpdateCheck(engineReady);
@@ -132,47 +169,79 @@ export default function SettingsPage() {
   const [discordWebhookError, setDiscordWebhookError] = useState<string | null>(null);
   const [discordSaving, setDiscordSaving] = useState(false);
   const [discordTestStatus, setDiscordTestStatus] = useState<string | null>(null);
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
-  const settingsReady = engineReady && settingsLoaded && !settingsLoadError;
-  const { data: buildTrackingSettings } = useBuildTrackingSettingsQuery(engineReady);
+  const [resourceLoads, setResourceLoads] = useState(INITIAL_SETTINGS_LOADS);
+  const {
+    data: buildTrackingSettings,
+    isLoading: buildTrackingLoading,
+    error: buildTrackingError,
+  } = useBuildTrackingSettingsQuery(engineReady);
   const saveBuildTrackingMutation = useSaveBuildTrackingSettingsMutation();
   const buildTrackingSaving = saveBuildTrackingMutation.isPending;
 
+  const loadResource = useCallback(
+    async (resource: SettingsResource, request: () => Promise<void>) => {
+      setResourceLoads((loads) => ({
+        ...loads,
+        [resource]: { ...loads[resource], loading: true, error: null },
+      }));
+      try {
+        await request();
+        setResourceLoads((loads) => ({
+          ...loads,
+          [resource]: { loading: false, loaded: true, error: null },
+        }));
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        setResourceLoads((loads) => ({
+          ...loads,
+          [resource]: { ...loads[resource], loading: false, error: message },
+        }));
+      }
+    },
+    [],
+  );
+
   const refresh = useCallback(async () => {
-    if (!health?.ok) {
-      setSettingsLoaded(false);
-      return;
-    }
+    if (!engineReady) return;
     setLoadError(null);
-    setSettingsLoadError(null);
-    setSettingsLoaded(false);
-    try {
-      const [filamentRows, patSettings, updateSettings, autoRecomputeSettings, discordNotifySettings] = await Promise.all([
-        fetchCustomFilaments(),
-        fetchGitHubPatSettings(),
-        fetchSourceUpdateCheckSettings(),
-        fetchAutoRecomputeSettings(),
-        fetchDiscordNotifySettings(),
-      ]);
-      setFilaments(filamentRows);
-      setGithubPat(patSettings);
-      setUpdateIntervalHours(String(updateSettings.interval_hours));
-      setAutoRecompute(autoRecomputeSettings.enabled);
-      setDiscordSettings(discordNotifySettings);
-      setDiscordWebhookInput(discordNotifySettings.webhook_url ?? "");
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      setLoadError(message);
-      setSettingsLoadError(message);
-    } finally {
-      setSettingsLoaded(true);
-    }
-  }, [health?.ok]);
+    await Promise.all([
+      loadResource("filaments", async () => {
+        setFilaments(await fetchCustomFilaments());
+      }),
+      loadResource("githubPat", async () => {
+        setGithubPat(await fetchGitHubPatSettings());
+      }),
+      loadResource("sourceUpdates", async () => {
+        const settings = await fetchSourceUpdateCheckSettings();
+        setUpdateIntervalHours(String(settings.interval_hours));
+      }),
+      loadResource("autoRecompute", async () => {
+        setAutoRecompute((await fetchAutoRecomputeSettings()).enabled);
+      }),
+      loadResource("discord", async () => {
+        const settings = await fetchDiscordNotifySettings();
+        setDiscordSettings(settings);
+        setDiscordWebhookInput(settings.webhook_url ?? "");
+      }),
+    ]);
+  }, [engineReady, loadResource]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const resourceReady = (resource: SettingsResource) =>
+    canUseSettingsResource(engineState, {
+      loading: resourceLoads[resource].loading,
+      error: resourceLoads[resource].error,
+      hasData: resourceLoads[resource].loaded,
+    });
+  const filamentsReady = resourceReady("filaments");
+  const githubPatReady = resourceReady("githubPat");
+  const sourceUpdatesReady = resourceReady("sourceUpdates");
+  const autoRecomputeReady = resourceReady("autoRecompute");
+  const discordReady = resourceReady("discord");
+  const recoveryToolsReady = canUseRecoveryTools(engineState);
 
   // Scroll to hash targets (e.g. /settings#printers) after layout.
   useEffect(() => {
@@ -281,37 +350,17 @@ export default function SettingsPage() {
         }
       />
 
-      {!engineReady && (
+      {engineState !== "ready" && (
         <Card className="border-border shadow-sm">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
-              {engineError
+              {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to change engine settings."
                 : "Connecting to the engine…"}
             </p>
           </CardContent>
         </Card>
       )}
-      {engineReady && !settingsLoaded && (
-        <Card className="border-border shadow-sm">
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Loading settings…</p>
-          </CardContent>
-        </Card>
-      )}
-      {engineReady && settingsLoadError && (
-        <Card className="border-destructive/40 bg-destructive/5 shadow-none">
-          <CardContent className="space-y-3 pt-6">
-            <p className="text-sm text-destructive">
-              Could not load settings: {settingsLoadError}
-            </p>
-            <Button size="sm" variant="secondary" onClick={() => void refresh()}>
-              Retry
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
       {patMessage && <p className="text-sm text-muted-foreground">{patMessage}</p>}
       {updateMessage && <p className="text-sm text-muted-foreground">{updateMessage}</p>}
@@ -323,19 +372,19 @@ export default function SettingsPage() {
       />
 
       <SettingsSection id="printers" title="Printers">
-        <PrintersSettingsCard engineReady={settingsReady} />
+        <PrintersSettingsCard engineReady={engineReady} />
       </SettingsSection>
 
       <SettingsSection id="slicers" title="Slicers">
-        <SlicersSettingsCard engineReady={settingsReady} />
+        <SlicersSettingsCard engineReady={engineReady} />
       </SettingsSection>
 
       <SettingsSection title="Library">
         <div id="source-categories">
-          <SourceCategoryManager engineReady={settingsReady} />
+          <SourceCategoryManager engineReady={engineReady} />
         </div>
 
-        <StlNamingSettingsCard engineReady={settingsReady} />
+        <StlNamingSettingsCard engineReady={engineReady} />
 
         <Card className="shadow-none">
           <CardHeader>
@@ -345,8 +394,15 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {!settingsLoaded ? (
+            {!resourceLoads.filaments.loaded && resourceLoads.filaments.loading ? (
               <p className="text-sm text-muted-foreground">Loading custom filaments…</p>
+            ) : !resourceLoads.filaments.loaded && resourceLoads.filaments.error ? (
+              <div className="space-y-2 text-sm text-destructive" role="alert">
+                <p>Could not load custom filaments: {resourceLoads.filaments.error}</p>
+                <Button size="sm" variant="secondary" onClick={() => void refresh()}>
+                  Retry
+                </Button>
+              </div>
             ) : filaments.length === 0 ? (
               <p className="text-sm text-muted-foreground">No custom filaments yet.</p>
             ) : (
@@ -366,7 +422,7 @@ export default function SettingsPage() {
                       variant="ghost"
                       size="sm"
                       className="ml-auto"
-                    disabled={!engineReady || !settingsReady}
+                      disabled={!filamentsReady}
                       onClick={() => setDeleteFilamentId(f.id)}
                     >
                       Delete
@@ -379,30 +435,35 @@ export default function SettingsPage() {
               <input
                 className={inputClass}
                 placeholder="Name"
-                disabled={!engineReady || !settingsReady}
+                disabled={!filamentsReady}
                 value={newFilamentName}
                 onChange={(e) => setNewFilamentName(e.target.value)}
               />
               <input
                 type="color"
-                disabled={!engineReady || !settingsReady}
+                disabled={!filamentsReady}
                 value={newFilamentHex}
                 onChange={(e) => setNewFilamentHex(e.target.value)}
                 title="Color"
               />
               <input
                 className={`hex-input ${inputClass}`}
-                disabled={!engineReady || !settingsReady}
+                disabled={!filamentsReady}
                 value={newFilamentHex}
                 onChange={(e) => setNewFilamentHex(e.target.value)}
               />
               <Button
-                disabled={!engineReady || !settingsReady}
+                disabled={!filamentsReady}
                 onClick={() => void onAddFilament()}
               >
                 Add filament
               </Button>
             </div>
+            {resourceLoads.filaments.loaded && resourceLoads.filaments.error && (
+              <p className="text-sm text-destructive" role="alert">
+                Could not refresh custom filaments: {resourceLoads.filaments.error}
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -422,12 +483,26 @@ export default function SettingsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
+            {!resourceLoads.sourceUpdates.loaded && (
+              <p
+                className={
+                  resourceLoads.sourceUpdates.error
+                    ? "text-sm text-destructive"
+                    : "text-sm text-muted-foreground"
+                }
+                role={resourceLoads.sourceUpdates.error ? "alert" : undefined}
+              >
+                {resourceLoads.sourceUpdates.error
+                  ? `Could not load source update settings: ${resourceLoads.sourceUpdates.error}`
+                  : "Loading source update settings…"}
+              </p>
+            )}
             <label className="block text-sm">
               <span className="mb-1 block text-muted-foreground">Check interval</span>
               <Select
                 value={updateIntervalHours}
                 onValueChange={(v) => void onUpdateIntervalChange(v)}
-                disabled={!settingsReady || updateIntervalSaving || updateBusy}
+                disabled={!sourceUpdatesReady || updateIntervalSaving || updateBusy}
               >
                 <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-xs">
                   <SelectValue />
@@ -445,10 +520,15 @@ export default function SettingsPage() {
               variant="secondary"
               className="min-h-10 w-full sm:w-auto"
               onClick={onCheckSourceUpdatesNow}
-              disabled={!settingsReady || updateBusy || updateIntervalSaving}
+              disabled={!sourceUpdatesReady || updateBusy || updateIntervalSaving}
             >
               {updateBusy ? "Checking…" : "Check now"}
             </Button>
+            {resourceLoads.sourceUpdates.loaded && resourceLoads.sourceUpdates.error && (
+              <p className="text-sm text-destructive" role="alert">
+                Could not refresh source update settings: {resourceLoads.sourceUpdates.error}
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -460,12 +540,26 @@ export default function SettingsPage() {
               file picks or colors change (when the stale banner appears on Build).
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
+            {!resourceLoads.autoRecompute.loaded && (
+              <p
+                className={
+                  resourceLoads.autoRecompute.error
+                    ? "text-sm text-destructive"
+                    : "text-sm text-muted-foreground"
+                }
+                role={resourceLoads.autoRecompute.error ? "alert" : undefined}
+              >
+                {resourceLoads.autoRecompute.error
+                  ? `Could not load auto-recompute settings: ${resourceLoads.autoRecompute.error}`
+                  : "Loading auto-recompute settings…"}
+              </p>
+            )}
             <label className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
               <span className="text-sm font-medium">Auto-recompute stale builds</span>
               <Switch
                 checked={autoRecompute}
-                disabled={!settingsReady || autoRecomputeSaving}
+                disabled={!autoRecomputeReady || autoRecomputeSaving}
                 onCheckedChange={(checked) => {
                   setAutoRecomputeSaving(true);
                   void saveAutoRecomputeSettings(checked)
@@ -478,6 +572,11 @@ export default function SettingsPage() {
                 aria-label="Auto-recompute stale builds"
               />
             </label>
+            {resourceLoads.autoRecompute.loaded && resourceLoads.autoRecompute.error && (
+              <p className="text-sm text-destructive" role="alert">
+                Could not refresh auto-recompute settings: {resourceLoads.autoRecompute.error}
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -497,10 +596,25 @@ export default function SettingsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
-            {githubPat?.configured && githubPat.masked && (
+            {!resourceLoads.githubPat.loaded ? (
+              <p
+                className={
+                  resourceLoads.githubPat.error
+                    ? "text-sm text-destructive"
+                    : "text-sm text-muted-foreground"
+                }
+                role={resourceLoads.githubPat.error ? "alert" : undefined}
+              >
+                {resourceLoads.githubPat.error
+                  ? `Could not load token status: ${resourceLoads.githubPat.error}`
+                  : "Loading token status…"}
+              </p>
+            ) : githubPat?.configured && githubPat.masked ? (
               <p className="text-sm text-muted-foreground">
                 Configured: <code className="font-mono text-xs">{githubPat.masked}</code>
               </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">No GitHub PAT configured.</p>
             )}
             <label className="block text-sm">
               <span className="mb-1 block text-muted-foreground">Token</span>
@@ -508,7 +622,7 @@ export default function SettingsPage() {
                 type="password"
                 className={`${inputClass} w-full max-w-md`}
                 autoComplete="off"
-                disabled={!engineReady || !settingsReady}
+                disabled={!githubPatReady}
                 placeholder={githubPat?.configured ? "Enter new token to replace" : "ghp_…"}
                 value={patInput}
                 onChange={(e) => setPatInput(e.target.value)}
@@ -516,7 +630,7 @@ export default function SettingsPage() {
             </label>
             <div className="flex flex-wrap gap-2">
               <Button
-                disabled={!engineReady || !settingsReady}
+                disabled={!githubPatReady}
                 onClick={() => void onSaveGitHubPat()}
               >
                 Save token
@@ -524,11 +638,16 @@ export default function SettingsPage() {
               <Button
                 variant="secondary"
                 onClick={() => void onClearGitHubPat()}
-                disabled={!settingsReady || !githubPat?.configured}
+                disabled={!githubPatReady || !githubPat?.configured}
               >
                 Clear token
               </Button>
             </div>
+            {resourceLoads.githubPat.loaded && resourceLoads.githubPat.error && (
+              <p className="text-sm text-destructive" role="alert">
+                Could not refresh token status: {resourceLoads.githubPat.error}
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -540,6 +659,20 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {!resourceLoads.discord.loaded && (
+              <p
+                className={
+                  resourceLoads.discord.error
+                    ? "text-sm text-destructive"
+                    : "text-sm text-muted-foreground"
+                }
+                role={resourceLoads.discord.error ? "alert" : undefined}
+              >
+                {resourceLoads.discord.error
+                  ? `Could not load Discord settings: ${resourceLoads.discord.error}`
+                  : "Loading Discord settings…"}
+              </p>
+            )}
             <label className="block text-sm">
               <span className="mb-1 block text-muted-foreground">Webhook URL</span>
               <input
@@ -547,7 +680,7 @@ export default function SettingsPage() {
                 className={`${inputClass} w-full max-w-md`}
                 placeholder="https://discord.com/api/webhooks/..."
                 autoComplete="off"
-                disabled={!settingsReady || discordSaving}
+                disabled={!discordReady || discordSaving}
                 value={discordWebhookInput}
                 onChange={(e) => {
                   const value = e.target.value;
@@ -563,7 +696,7 @@ export default function SettingsPage() {
             </label>
             <Button
               disabled={
-                !settingsReady ||
+                !discordReady ||
                 discordSaving ||
                 Boolean(discordWebhookError)
               }
@@ -591,15 +724,14 @@ export default function SettingsPage() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    disabled={!settingsReady || discordSaving}
+                    disabled={!discordReady || discordSaving}
                     checked={discordSettings.notify_on_update}
                     onChange={async (e) => {
                       try {
                         const saved = await saveDiscordNotifySettings({ notify_on_update: e.target.checked });
                         setDiscordSettings(saved);
-                      } catch {
-                        // Intentionally ignored: checkbox reverts to prior value if save fails;
-                        // no separate error surface for this inline toggle.
+                      } catch (e) {
+                        setLoadError(e instanceof Error ? e.message : String(e));
                       }
                     }}
                   />
@@ -608,15 +740,14 @@ export default function SettingsPage() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    disabled={!settingsReady || discordSaving}
+                    disabled={!discordReady || discordSaving}
                     checked={discordSettings.auto_sync_updates}
                     onChange={async (e) => {
                       try {
                         const saved = await saveDiscordNotifySettings({ auto_sync_updates: e.target.checked });
                         setDiscordSettings(saved);
-                      } catch {
-                        // Intentionally ignored: checkbox reverts to prior value if save fails;
-                        // no separate error surface for this inline toggle.
+                      } catch (e) {
+                        setLoadError(e instanceof Error ? e.message : String(e));
                       }
                     }}
                   />
@@ -625,15 +756,14 @@ export default function SettingsPage() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    disabled={!settingsReady || discordSaving}
+                    disabled={!discordReady || discordSaving}
                     checked={discordSettings.notify_on_sync}
                     onChange={async (e) => {
                       try {
                         const saved = await saveDiscordNotifySettings({ notify_on_sync: e.target.checked });
                         setDiscordSettings(saved);
-                      } catch {
-                        // Intentionally ignored: checkbox reverts to prior value if save fails;
-                        // no separate error surface for this inline toggle.
+                      } catch (e) {
+                        setLoadError(e instanceof Error ? e.message : String(e));
                       }
                     }}
                   />
@@ -642,7 +772,7 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-3 pt-1">
                   <Button
                     variant="secondary"
-                    disabled={!settingsReady || discordSaving}
+                    disabled={!discordReady || discordSaving}
                     onClick={async () => {
                       setDiscordTestStatus(null);
                       try {
@@ -661,10 +791,15 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
+            {resourceLoads.discord.loaded && resourceLoads.discord.error && (
+              <p className="text-sm text-destructive" role="alert">
+                Could not refresh Discord settings: {resourceLoads.discord.error}
+              </p>
+            )}
           </CardContent>
         </Card>
 
-        <IntegrationsSettingsCard engineReady={settingsReady} />
+        <IntegrationsSettingsCard engineReady={engineReady} />
       </SettingsSection>
 
       <SettingsSection id="build-tracking" title="Build Tracking">
@@ -677,12 +812,35 @@ export default function SettingsPage() {
               printed-but-not-yet-installed state for complex builds like Voron.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
+            {!buildTrackingSettings && (
+              <p
+                className={
+                  buildTrackingError
+                    ? "text-sm text-destructive"
+                    : "text-sm text-muted-foreground"
+                }
+                role={buildTrackingError ? "alert" : undefined}
+              >
+                {buildTrackingError
+                  ? `Could not load assembly tracking settings: ${
+                      buildTrackingError instanceof Error
+                        ? buildTrackingError.message
+                        : String(buildTrackingError)
+                    }`
+                  : "Loading assembly tracking settings…"}
+              </p>
+            )}
             <label className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
               <span className="text-sm font-medium">Enable assembly tracking</span>
               <Switch
                 checked={buildTrackingSettings?.assembly_tracking ?? false}
-                disabled={!settingsReady || buildTrackingSaving}
+                disabled={
+                  !engineReady ||
+                  buildTrackingLoading ||
+                  !buildTrackingSettings ||
+                  buildTrackingSaving
+                }
                 onCheckedChange={(checked) => {
                   saveBuildTrackingMutation.mutate(
                     { assembly_tracking: checked },
@@ -762,7 +920,7 @@ export default function SettingsPage() {
         </SettingsSection>
       ) : null}
 
-      {settingsReady && (
+      {recoveryToolsReady && (
         <SettingsSection id="data" title="Data & System">
           <BackupManagementCard />
           <ApiKeyManagementCard />
@@ -788,7 +946,7 @@ export default function SettingsPage() {
           <div className="flex justify-end gap-2">
             <Button
               variant="secondary"
-              disabled={!settingsReady || deleting}
+              disabled={deleting}
               onClick={() => setDeleteFilamentId(null)}
             >
               Cancel
@@ -796,7 +954,7 @@ export default function SettingsPage() {
             <Button
               variant="ghost"
               disabled={
-                !settingsReady ||
+                !filamentsReady ||
                 deleting ||
                 deleteFilamentId == null
               }

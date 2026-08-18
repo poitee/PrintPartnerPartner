@@ -45,6 +45,7 @@ import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useStlAutoSync } from "../context/StlAutoSyncContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
+import { resolveEngineState } from "../lib/workflowState";
 
 function hintRoute(hint: string | null | undefined, profileId: number | null) {
   if (hint === "sources") return libraryRoute();
@@ -57,7 +58,7 @@ function hintRoute(hint: string | null | undefined, profileId: number | null) {
  * Heavy export actions live on `/export`; Progress owns checkoff.
  */
 export default function PartsPage() {
-  const { health, error: engineError } = useEngineHealth();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const { selectedProfileId, profiles } = useProfileSelection();
   const {
     review,
@@ -73,6 +74,12 @@ export default function PartsPage() {
   const syncJob = useJobRunner("sync");
   const sheetRef = useRef<ReviewPartsSheetHandle>(null);
   const [folderRules, setFolderRules] = useState<StlNamingFolderRule[]>([]);
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const engineReady = engineState === "ready";
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
 
@@ -226,11 +233,11 @@ export default function PartsPage() {
 
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
 
-      {!health ? (
+      {engineState !== "ready" ? (
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
-              {engineError
+              {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to review this plan."
                 : "Connecting to the engine…"}
             </p>
@@ -389,7 +396,7 @@ export default function PartsPage() {
             ref={sheetRef}
             review={review}
             planName={planName}
-            disabled={!health || loading}
+            disabled={!engineReady || loading}
             folderRules={folderRules}
           />
 

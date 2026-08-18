@@ -11,7 +11,10 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import type { ProfileSummary } from "../api/engine";
 import { useEngineHealth } from "../hooks/useEngineHealth";
-import { reconcileSelectedProfileId } from "../hooks/profileSelection";
+import {
+  reconcileSelectedProfileId,
+  shouldReconcileProfileSelection,
+} from "../hooks/profileSelection";
 import { queryKeys } from "../queries/keys";
 import { useProfilesQuery } from "../queries/profiles";
 
@@ -86,7 +89,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!isSuccess) return;
+    if (!shouldReconcileProfileSelection(isSuccess)) return;
 
     const previousIds = previousProfileIdsRef.current;
     const nextIds = profiles.map((p) => p.id);

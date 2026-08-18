@@ -113,6 +113,7 @@ import {
 } from "../lib/persistedSourcesUi";
 import { toastJobResult } from "../lib/jobToasts";
 import { cn } from "../lib/utils";
+import { resolveEngineState } from "../lib/workflowState";
 
 type PendingOpenSource = {
   sourceName?: string;
@@ -171,7 +172,7 @@ export default function SourcesPage() {
   const location = useLocation();
   const copilot = useCopilotUiOptional();
   const { formatDate } = useDateFormat();
-  const { health, error: healthError } = useEngineHealth();
+  const { health, error: healthError, loading: healthLoading } = useEngineHealth();
   const { busy, runJob } = useJobRunner("sync");
   const { busy: updateBusy, runJob: runUpdateJob } = useJobRunner("source-updates");
   const { activeJobs } = useJobContext();
@@ -182,6 +183,7 @@ export default function SourcesPage() {
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<WizardForm>(emptyForm([]));
@@ -216,7 +218,12 @@ export default function SourcesPage() {
   const appliedIntentSeqRef = useRef(0);
   const openMissToastAtRef = useRef(0);
   const [pendingOpenTick, setPendingOpenTick] = useState(0);
-  const engineReady = Boolean(health?.ok);
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: healthError,
+  });
+  const engineReady = engineState === "ready";
 
   const queueOpenSource = useCallback((pending: PendingOpenSource) => {
     pendingOpenRef.current = pending;
@@ -355,21 +362,22 @@ export default function SourcesPage() {
   }, [search, viewMode, categoryFilter, syncFilter, platformFilter]);
 
   const refresh = useCallback(async () => {
-    if (!health?.ok) return;
+    if (!engineReady) return;
     setLoadError(null);
-    try {
-      const [rows, cats] = await Promise.all([
-        fetchSources(),
-        fetchSourceCategories(),
-      ]);
-      setSources(rows);
-      setCategories(cats);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSourcesLoaded(true);
-    }
-  }, [health?.ok]);
+    setCategoryError(null);
+    const sourcesRequest = fetchSources()
+      .then(setSources)
+      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSourcesLoaded(true));
+    const categoriesRequest = fetchSourceCategories()
+      .then(setCategories)
+      .catch((e) =>
+        setCategoryError(
+          `Could not load source categories: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
+    await Promise.allSettled([sourcesRequest, categoriesRequest]);
+  }, [engineReady]);
 
   useEffect(() => {
     void refresh();
@@ -459,7 +467,7 @@ export default function SourcesPage() {
   const hasSyncedSources = sources.some((s) => Boolean(s.local_path));
 
   // Skeletons until the first fetch resolves; bail out if the engine is offline.
-  const sourcesLoading = !sourcesLoaded && !healthError;
+  const sourcesLoading = !sourcesLoaded;
 
   const selectedPlan = profiles.find((p) => p.id === selectedProfileId) ?? null;
   const attachedIds = useMemo(() => attachedSourceIds(review), [review]);
@@ -954,7 +962,7 @@ export default function SourcesPage() {
         <Card className="border-border shadow-sm">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
-              {healthError
+              {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to use Library."
                 : "Connecting to the engine…"}
             </p>
@@ -1089,7 +1097,7 @@ export default function SourcesPage() {
           <div className="flex flex-1 flex-col gap-3 overflow-auto p-3.5 sm:px-5 sm:py-3.5">
             {(stlSearchExpanded || stlSearchFocus || stlInitialQuery) && (
               <GlobalStlSearch
-                engineReady={Boolean(health)}
+                engineReady={engineReady}
                 hasSyncedSources={hasSyncedSources}
                 onSelectHit={onStlHit}
                 autoFocus={stlSearchFocus}
@@ -1164,9 +1172,10 @@ export default function SourcesPage() {
               hideCategoryPills
             />
 
-            {(loadError || reposImportNote || reposImportSyncNote) && (
+            {(loadError || categoryError || reposImportNote || reposImportSyncNote) && (
               <div className="space-y-1 text-sm">
                 {loadError && <p className="text-destructive">{loadError}</p>}
+                {categoryError && <p className="text-destructive">{categoryError}</p>}
                 {reposImportNote && <p className="text-muted-foreground">{reposImportNote}</p>}
                 {reposImportSyncNote && (
                   <p className="text-muted-foreground">{reposImportSyncNote}</p>
@@ -1569,7 +1578,7 @@ export default function SourcesPage() {
       <SourceCategorySheet
         open={categoriesSheetOpen}
         onOpenChange={setCategoriesSheetOpen}
-        engineReady={Boolean(health)}
+        engineReady={engineReady}
         onCategoriesChanged={(cats) => {
           setCategories(cats);
         }}

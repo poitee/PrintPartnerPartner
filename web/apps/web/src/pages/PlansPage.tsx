@@ -31,11 +31,16 @@ import {
 } from "../lib/plansList";
 import { plansRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
+import {
+  getBackgroundError,
+  resolveEngineState,
+  resolveResourceState,
+} from "../lib/workflowState";
 import { useTouchProfileLastUsedMutation } from "../queries/profiles";
 
 /** Dedicated Plans list — not a spine desk-loop step (GRE-228). */
 export default function PlansPage() {
-  const { health, error: engineError } = useEngineHealth();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const {
     profiles,
     selectedProfileId,
@@ -54,6 +59,20 @@ export default function PlansPage() {
   const touchMutation = useTouchProfileLastUsedMutation();
 
   const [filter, setFilter] = useState<PlansListFilter>("active");
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const profilesState = resolveResourceState({
+    loading,
+    error: profilesError,
+    hasData: profiles.length > 0,
+  });
+  const profilesBackgroundError = getBackgroundError(
+    profilesError,
+    profiles.length > 0,
+  );
 
   const rows = useMemo(
     () => filterPlansList(profiles, filter),
@@ -67,8 +86,8 @@ export default function PlansPage() {
   };
 
   // Profiles query is disabled until health.ok; treat that as not-yet-loaded, not empty.
-  const emptyAll = Boolean(health?.ok) && !loading && profiles.length === 0;
-  const emptyFilter = !loading && profiles.length > 0 && rows.length === 0;
+  const emptyAll = engineState === "ready" && profilesState === "ready" && profiles.length === 0;
+  const emptyFilter = profilesState === "ready" && profiles.length > 0 && rows.length === 0;
 
   return (
     <div className="space-y-4">
@@ -80,12 +99,12 @@ export default function PlansPage() {
         accent
         title="Plans"
         description="Switch the spine plan, or manage templates. Picker stays the quick switcher."
-        actions={health?.ok && !loading && !profilesError && profiles.length > 0 ? (
+        actions={engineState === "ready" && profilesState === "ready" && profiles.length > 0 ? (
           <PageHeaderActions>
             <Button
               className="min-h-10 w-full sm:w-auto"
               onClick={openCreatePlan}
-              disabled={!health?.ok || loading || Boolean(profilesError)}
+              disabled={engineState !== "ready" || profilesState !== "ready"}
             >
               Create plan
             </Button>
@@ -93,17 +112,23 @@ export default function PlansPage() {
         ) : undefined}
       />
 
-      {!health?.ok ? (
+      {profilesBackgroundError && (
+        <p className="text-sm text-destructive" role="alert">
+          Could not refresh plans: {profilesBackgroundError}
+        </p>
+      )}
+
+      {engineState !== "ready" ? (
         <Card className="border-border shadow-sm">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
-              {engineError
+              {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to manage plans."
                 : "Connecting to the engine…"}
             </p>
           </CardContent>
         </Card>
-      ) : profilesError ? (
+      ) : profilesState === "error" ? (
         <Card className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-destructive">
@@ -114,7 +139,7 @@ export default function PlansPage() {
             </Button>
           </CardContent>
         </Card>
-      ) : loading ? (
+      ) : profilesState === "loading" ? (
         <Card className="border-border shadow-sm">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Loading plans…</p>
@@ -182,7 +207,7 @@ export default function PlansPage() {
                               selected && "text-primary",
                             )}
                             onClick={() => selectPlan(plan.id)}
-                            disabled={!health}
+                            disabled={engineState !== "ready"}
                           >
                             {plan.name}
                           </button>
@@ -211,7 +236,7 @@ export default function PlansPage() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8"
-                                disabled={!health}
+                                disabled={engineState !== "ready"}
                                 aria-label={`Actions for ${plan.name}`}
                                 onClick={(e) => e.stopPropagation()}
                               >

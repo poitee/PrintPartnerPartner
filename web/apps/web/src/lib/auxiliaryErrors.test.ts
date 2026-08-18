@@ -9,6 +9,8 @@ import {
 describe("auxiliary error lifecycle", () => {
   it("clears a fetch error after that fetch succeeds", () => {
     const failed = setAuxiliaryError({}, "printer-activity", "Could not refresh printer activity");
+    expect(currentAuxiliaryError(failed)).toBe("Could not refresh printer activity");
+
     const recovered = clearAuxiliaryError(failed, "printer-activity");
 
     expect(currentAuxiliaryError(recovered)).toBeNull();

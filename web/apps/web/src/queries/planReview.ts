@@ -6,6 +6,10 @@ import {
   patchPartProgress,
   type PlanReview,
 } from "../api/engine";
+import {
+  optimisticReviewCacheKey,
+  rollbackOptimisticCache,
+} from "../lib/reviewCache";
 import { mergeAssembledIntoReview, mergeProgressIntoReview } from "../lib/reviewParts";
 import { queryKeys } from "./keys";
 import { invalidateProfiles } from "./profiles";
@@ -69,10 +73,9 @@ export function usePatchPartProgressMutation(
     }) => patchPartProgress(partId, unitIndex, completed),
     onMutate: async ({ partId, unitIndex, completed, optimisticReview }) => {
       if (profileId == null || !optimisticReview) return undefined;
-      const key = queryKeys.planReview(profileId, includeExcluded);
+      const key = optimisticReviewCacheKey(profileId, includeExcluded);
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<PlanReview>(key);
-      const hadPrevious = previous !== undefined;
       const part = optimisticReview.part_groups
         .flatMap((g) => g.parts)
         .find((p) => p.id === partId);
@@ -90,12 +93,13 @@ export function usePatchPartProgressMutation(
           }),
         );
       }
-      return { previous, key, hadPrevious };
+      return { previous, key };
     },
     onError: (_err, _vars, ctx) => {
       if (!ctx?.key) return;
-      if (ctx.hadPrevious) {
-        qc.setQueryData(ctx.key, ctx.previous);
+      const rollback = rollbackOptimisticCache(ctx.previous);
+      if (rollback.kind === "restore") {
+        qc.setQueryData(ctx.key, rollback.previous);
       } else {
         qc.removeQueries({ queryKey: ctx.key, exact: true });
       }
@@ -138,10 +142,9 @@ export function usePatchPartAssembledMutation(
     }) => patchPartAssembled(partId, unitIndex, assembled),
     onMutate: async ({ partId, unitIndex, assembled, optimisticReview }) => {
       if (profileId == null || !optimisticReview) return undefined;
-      const key = queryKeys.planReview(profileId, includeExcluded);
+      const key = optimisticReviewCacheKey(profileId, includeExcluded);
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<PlanReview>(key);
-      const hadPrevious = previous !== undefined;
       const part = optimisticReview.part_groups
         .flatMap((g) => g.parts)
         .find((p) => p.id === partId);
@@ -157,12 +160,13 @@ export function usePatchPartAssembledMutation(
           }),
         );
       }
-      return { previous, key, hadPrevious };
+      return { previous, key };
     },
     onError: (_err, _vars, ctx) => {
       if (!ctx?.key) return;
-      if (ctx.hadPrevious) {
-        qc.setQueryData(ctx.key, ctx.previous);
+      const rollback = rollbackOptimisticCache(ctx.previous);
+      if (rollback.kind === "restore") {
+        qc.setQueryData(ctx.key, rollback.previous);
       } else {
         qc.removeQueries({ queryKey: ctx.key, exact: true });
       }

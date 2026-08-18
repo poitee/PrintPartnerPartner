@@ -1,3 +1,5 @@
+import { resolveEnabledPrinterIds } from "./enabledPrinters";
+
 type HandoffDependencies = {
   fetchPrinterIds: () => Promise<readonly string[]>;
   fetchEnabledPrinterIds: (profileId: number) => Promise<readonly string[] | null | undefined>;
@@ -8,8 +10,15 @@ export type HandoffPrinterSelection =
   | { kind: "ready"; printerIds: string[] };
 
 export async function loadHandoffPrinterSelection(
-  _profileId: number,
-  _dependencies: HandoffDependencies,
+  profileId: number,
+  dependencies: HandoffDependencies,
 ): Promise<HandoffPrinterSelection> {
-  return { kind: "no-printers" };
+  const fleetIds = [...(await dependencies.fetchPrinterIds())];
+  if (fleetIds.length === 0) return { kind: "no-printers" };
+
+  const enabledIds = await dependencies.fetchEnabledPrinterIds(profileId);
+  return {
+    kind: "ready",
+    printerIds: resolveEnabledPrinterIds(fleetIds, enabledIds),
+  };
 }

@@ -28,6 +28,12 @@ import { deskNextStepLine } from "../lib/deskNextStep";
 import { flattenReviewParts } from "../lib/reviewParts";
 import { partsRoute, planRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
+import {
+  getBackgroundError,
+  resolveEngineState,
+  resolveResourceState,
+  shouldMountPlanTools,
+} from "../lib/workflowState";
 
 /**
  * Export — printer Send panel binds to the active spine plan (GRE-232).
@@ -35,7 +41,7 @@ import { cn } from "../lib/utils";
  * Farm-queue verbs (Send ready / Send now / Remove) live on Progress, not here.
  */
 export default function ExportPage() {
-  const { health, error: engineError } = useEngineHealth();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const {
     selectedProfileId,
     profiles,
@@ -49,6 +55,22 @@ export default function ExportPage() {
   const { activeJobs } = useJobContext();
   const [shareOpen, setShareOpen] = useState(false);
   const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
+  const [roleFilamentError, setRoleFilamentError] = useState<string | null>(null);
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const profilesState = resolveResourceState({
+    loading: profilesLoading,
+    error: profilesError,
+    hasData: profiles.length > 0,
+  });
+  const profilesBackgroundError = getBackgroundError(
+    profilesError,
+    profiles.length > 0,
+  );
+  const planToolsReady = shouldMountPlanTools(engineState, selectedProfileId);
 
   const showRecent = hasExportJobs(activeJobs);
 
@@ -71,15 +93,23 @@ export default function ExportPage() {
   useEffect(() => {
     if (!health?.ok || selectedProfileId == null) {
       setRoleFilaments([]);
+      setRoleFilamentError(null);
       return;
     }
+    setRoleFilamentError(null);
     let cancelled = false;
     void fetchRoleFilaments(selectedProfileId)
       .then((rows) => {
         if (!cancelled) setRoleFilaments(rows);
       })
-      .catch(() => {
-        if (!cancelled) setRoleFilaments([]);
+      .catch((e) => {
+        if (!cancelled) {
+          setRoleFilamentError(
+            `Could not refresh filament assignments: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          );
+        }
       });
     return () => {
       cancelled = true;
@@ -115,17 +145,27 @@ export default function ExportPage() {
       />
       <DeskNextStep>{exportNextStep}</DeskNextStep>
 
-      {!health ? (
+      {(profilesBackgroundError || roleFilamentError || (planError && review)) && (
+        <div className="space-y-1 text-sm text-destructive" role="alert">
+          {profilesBackgroundError && (
+            <p>Could not refresh plans: {profilesBackgroundError}</p>
+          )}
+          {roleFilamentError && <p>{roleFilamentError}</p>}
+          {planError && review && <p>Could not refresh this plan: {planError}</p>}
+        </div>
+      )}
+
+      {engineState !== "ready" ? (
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
-              {engineError
+              {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to export."
                 : "Connecting to the engine…"}
             </p>
           </CardContent>
         </Card>
-      ) : profilesError ? (
+      ) : profilesState === "error" ? (
         <Card className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-destructive">
@@ -136,13 +176,13 @@ export default function ExportPage() {
             </Button>
           </CardContent>
         </Card>
-      ) : profilesLoading ? (
+      ) : profilesState === "loading" ? (
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Loading plans…</p>
           </CardContent>
         </Card>
-      ) : selectedProfileId == null ? (
+      ) : !planToolsReady ? (
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">

@@ -83,6 +83,11 @@ import { layersEqual } from "../lib/planDataStable";
 import { meshColorForStlPath } from "../lib/rolePreviewColor";
 import { checkoffUnitTotals } from "../lib/checkoffProgress";
 import { canArchivePlan } from "../lib/planPickerGroups";
+import {
+  getBackgroundError,
+  resolveEngineState,
+  resolveResourceState,
+} from "../lib/workflowState";
 
 type BuildLocationState = {
   kitImport?: KitImportJobResult;
@@ -108,7 +113,7 @@ export default function BuildPage() {
 
 function BuildPageContent() {
   const location = useLocation();
-  const { health, error: engineError } = useEngineHealth();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const {
     selectedProfileId,
     reloadProfiles,
@@ -133,6 +138,7 @@ function BuildPageContent() {
   const [layers, setLayers] = useState<ProfileLayer[]>([]);
   const [sources, setSources] = useState<SourceSummary[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [addonSourceId, setAddonSourceId] = useState("");
   const [pendingBaseSourceId, setPendingBaseSourceId] = useState("");
   const [kitImportSetup, setKitImportSetup] = useState<KitImportJobResult | null>(null);
@@ -145,7 +151,13 @@ function BuildPageContent() {
   const [kitFocus, setKitFocus] = useState<KitFocusState | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const [profileDataLoading, setProfileDataLoading] = useState(false);
-  const engineReady = Boolean(health?.ok);
+  const [loadedProfileId, setLoadedProfileId] = useState<number | null>(null);
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const engineReady = engineState === "ready";
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
   const buildStale = selectedProfile?.build_stale ?? false;
@@ -257,18 +269,29 @@ function BuildPageContent() {
 
   const loadProfileData = useCallback(async (profileId: number) => {
     setLoadError(null);
+    setCategoryError(null);
+    setProfileDataLoading(true);
+    const categoriesRequest = fetchSourceCategories()
+      .then(setCategories)
+      .catch((e) =>
+        setCategoryError(
+          `Could not load source categories: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
     try {
-      const [layerRows, sourceRows, categoryRows] = await Promise.all([
+      const [layerRows, sourceRows] = await Promise.all([
         fetchPlanLayers(profileId),
         fetchSources(),
-        fetchSourceCategories(),
       ]);
       setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
       setSources(sourceRows);
-      setCategories(categoryRows);
+      setLoadedProfileId(profileId);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProfileDataLoading(false);
     }
+    await categoriesRequest;
   }, []);
 
   const assignSourceCategory = useCallback(
@@ -300,6 +323,7 @@ function BuildPageContent() {
 
     if (selectedProfileId == null) {
       setProfileDataLoading(false);
+      setLoadedProfileId(null);
       setLayers([]);
       setAddonSourceId("");
       setPendingBaseSourceId("");
@@ -310,6 +334,7 @@ function BuildPageContent() {
     // Reset kit/layer UI only when the profile id actually changes (not on first mount),
     // so nav/intent kitFocus set earlier in the same commit is preserved.
     if (profileChanged) {
+      setLoadedProfileId(null);
       setLayers([]);
       setAddonSourceId("");
       setPendingBaseSourceId("");
@@ -321,16 +346,30 @@ function BuildPageContent() {
     let cancelled = false;
     setProfileDataLoading(true);
     void (async () => {
+      setLoadError(null);
+      setCategoryError(null);
+      const categoriesRequest = fetchSourceCategories()
+        .then((rows) => {
+          if (!cancelled) setCategories(rows);
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            setCategoryError(
+              `Could not load source categories: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            );
+          }
+        });
       try {
-        const [layerRows, sourceRows, categoryRows] = await Promise.all([
+        const [layerRows, sourceRows] = await Promise.all([
           fetchPlanLayers(selectedProfileId),
           fetchSources(),
-          fetchSourceCategories(),
         ]);
         if (cancelled) return;
         setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
         setSources(sourceRows);
-        setCategories(categoryRows);
+        setLoadedProfileId(selectedProfileId);
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : String(e));
@@ -338,6 +377,7 @@ function BuildPageContent() {
       } finally {
         if (!cancelled) setProfileDataLoading(false);
       }
+      await categoriesRequest;
     })();
     return () => {
       cancelled = true;
@@ -485,14 +525,28 @@ function BuildPageContent() {
     sourceCount: sourceCardLayers.length,
     partCount,
   });
+  const profilesState = resolveResourceState({
+    loading: profilesLoading,
+    error: profilesError,
+    hasData: profiles.length > 0,
+  });
+  const hasProfileData = loadedProfileId === selectedProfileId;
+  const profileDataState = resolveResourceState({
+    loading: profileDataLoading,
+    error: loadError,
+    hasData: hasProfileData,
+  });
+  const profilesBackgroundError = getBackgroundError(
+    profilesError,
+    profiles.length > 0,
+  );
+  const profileDataBackgroundError = getBackgroundError(loadError, hasProfileData);
   const workspaceReady =
     engineReady &&
-    !profilesLoading &&
-    !profilesError &&
+    profilesState === "ready" &&
     profiles.length > 0 &&
     selectedProfileId != null &&
-    !profileDataLoading &&
-    !loadError;
+    profileDataState === "ready";
 
   const onUpdateBuild = async () => {
     if (selectedProfileId == null) return;
@@ -635,6 +689,18 @@ function BuildPageContent() {
 
       <DeskNextStep>{planNextStep}</DeskNextStep>
 
+      {(profilesBackgroundError || profileDataBackgroundError || categoryError) && (
+        <div className="space-y-1 text-sm text-destructive" role="alert">
+          {profilesBackgroundError && (
+            <p>Could not refresh plans: {profilesBackgroundError}</p>
+          )}
+          {profileDataBackgroundError && (
+            <p>Could not refresh plan: {profileDataBackgroundError}</p>
+          )}
+          {categoryError && <p>{categoryError}</p>}
+        </div>
+      )}
+
       {workspaceReady && selectedProfileId != null && (
         <PlanSpecialRequestField
           profileId={selectedProfileId}
@@ -667,17 +733,17 @@ function BuildPageContent() {
         />
       )}
 
-      {!health?.ok ? (
+      {engineState !== "ready" ? (
         <Card className="border-border shadow-sm">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
-              {engineError
+              {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to edit a plan."
                 : "Connecting to the engine…"}
             </p>
           </CardContent>
         </Card>
-      ) : profilesError ? (
+      ) : profilesState === "error" ? (
         <Card className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-destructive">
@@ -688,7 +754,7 @@ function BuildPageContent() {
             </Button>
           </CardContent>
         </Card>
-      ) : profilesLoading ? (
+      ) : profilesState === "loading" ? (
         <Card className="border-border shadow-sm">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Loading plans…</p>
@@ -710,13 +776,13 @@ function BuildPageContent() {
           title="Select a plan"
           description="Choose a plan in the sidebar plan picker (or the mobile plan switcher in the header)."
         />
-      ) : profileDataLoading ? (
+      ) : profileDataState === "loading" ? (
         <Card className="border-border shadow-sm">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Loading plan…</p>
           </CardContent>
         </Card>
-      ) : loadError ? (
+      ) : profileDataState === "error" ? (
         <Card className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-destructive">

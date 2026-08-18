@@ -14,31 +14,35 @@ type ResourceStateInput = {
 };
 
 export function resolveEngineState(_input: EngineStateInput): EngineState {
+  if (_input.health?.ok) return "ready";
+  if (_input.health || _input.error || !_input.loading) return "offline";
   return "loading";
 }
 
 export function resolveResourceState(_input: ResourceStateInput): ResourceState {
-  return "loading";
+  if (_input.hasData) return "ready";
+  if (_input.error) return "error";
+  return _input.loading ? "loading" : "ready";
 }
 
 export function getBackgroundError(_error: string | null, _hasData: boolean): string | null {
-  return null;
+  return _hasData ? _error : null;
 }
 
 export function canUseSettingsResource(
   _engineState: EngineState,
   _resource: ResourceStateInput,
 ): boolean {
-  return false;
+  return _engineState === "ready" && resolveResourceState(_resource) === "ready";
 }
 
 export function canUseRecoveryTools(_engineState: EngineState): boolean {
-  return false;
+  return _engineState === "ready";
 }
 
 export function shouldMountPlanTools(
   _engineState: EngineState,
   _selectedProfileId: number | null,
 ): boolean {
-  return false;
+  return _engineState === "ready" && _selectedProfileId != null;
 }
