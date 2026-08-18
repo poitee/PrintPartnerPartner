@@ -56,6 +56,7 @@ class ManifestValidatorTests(unittest.TestCase):
             self.assertTrue(any("example.yaml" in error for error in errors), errors)
 
             embedded_manifest.write_bytes(canonical_manifest.read_bytes())
+            embedded_registry.write_bytes(canonical_registry.read_bytes())
             self.assertEqual(check_embedded_copy_drift(root), [])
 
     def test_repository_embedded_copies_match_canonical_sources(self) -> None:
