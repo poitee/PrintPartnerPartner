@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import type { PrinterSendQueueItem } from "@print-partner/contracts";
+import type { AppRepository } from "../db/repository.js";
 import {
   assertPrinterUploadArtifactPath,
+  enqueuePrinterSend,
+  loadPrinterSendQueue,
+  migratePrinterSendQueueArtifactPaths,
   trimPrinterSendQueue,
 } from "./printer-send-queue-store.js";
 
@@ -67,3 +73,45 @@ describe("trimPrinterSendQueue", () => {
     expect(trimmed.at(-1)?.id).toBe("t59");
   });
 });
+
+describe("migratePrinterSendQueueArtifactPaths", () => {
+  it("does not migrate a queue path to a symlink that escapes the tenant export root", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-queue-migration-"));
+    try {
+      const legacyRoot = join(dir, "exports");
+      const tenantRoot = join(legacyRoot, "tenant-default");
+      const legacyArtifact = join(legacyRoot, "printer-uploads", "queued", "plate.gcode");
+      const targetDir = join(tenantRoot, "printer-uploads", "queued");
+      const targetArtifact = join(targetDir, "plate.gcode");
+      const outside = join(dir, "outside.gcode");
+      mkdirSync(targetDir, { recursive: true });
+      writeFileSync(outside, "outside");
+      symlinkSync(outside, targetArtifact);
+      const repo = fakeRepo();
+      enqueuePrinterSend(repo, {
+        filename: "plate.gcode",
+        artifact_path: legacyArtifact,
+        printer_id: "p1",
+        start: false,
+      });
+
+      expect(
+        migratePrinterSendQueueArtifactPaths(repo, legacyRoot, tenantRoot),
+      ).toBe(0);
+      expect(loadPrinterSendQueue(repo)[0]?.artifact_path).toBe(legacyArtifact);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+function fakeRepo(): AppRepository {
+  const settings = new Map<string, string>();
+  return {
+    getSetting: (key: string) => settings.get(key) ?? null,
+    setSetting: (key: string, value: string) => {
+      settings.set(key, value);
+    },
+    transaction: <T>(fn: () => T) => fn(),
+  } as unknown as AppRepository;
+}

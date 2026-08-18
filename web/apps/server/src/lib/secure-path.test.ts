@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -47,6 +47,18 @@ describe("secure-path", () => {
     expect(resolvedFileUnderRoot(root, "/etc/passwd")).toBeNull();
   });
 
+  it("resolvedFileUnderRoot rejects symlinks that escape root", () => {
+    const parent = tempDir();
+    const root = join(parent, "exports");
+    mkdirSync(root);
+    const secret = join(parent, "secret.txt");
+    const link = join(root, "artifact.3mf");
+    writeFileSync(secret, "secret");
+    symlinkSync(secret, link);
+
+    expect(resolvedFileUnderRoot(root, link)).toBeNull();
+  });
+
   it("createReadStreamUnderRoot only opens files under root", () => {
     const root = tempDir();
     mkdirSync(join(root, "exports"), { recursive: true });
@@ -76,6 +88,15 @@ describe("secure-path", () => {
     writeFileSync(inside, "x");
     expect(safeDataDirPath(dataDir, inside)).toBe(inside);
     expect(safeDataDirPath(dataDir, "/tmp/outside")).toBeNull();
+  });
+
+  it("safeDataDirPath rejects existing paths reached through an escaping symlink", () => {
+    const dataDir = tempDir();
+    const outside = tempDir();
+    const link = join(dataDir, "linked");
+    symlinkSync(outside, link);
+
+    expect(safeDataDirPath(dataDir, join(link, "kit.print-partner-kit"))).toBeNull();
   });
 
   it("uses lowercase collision-safe export directories for mixed-case tenant ids", () => {
