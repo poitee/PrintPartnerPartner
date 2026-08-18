@@ -16,23 +16,23 @@ if [[ -n "${PRINT_PARTNER_API_KEY:-}" ]]; then
   AUTH_ARGS=(-H "Authorization: Bearer ${PRINT_PARTNER_API_KEY}")
 fi
 
-request() { curl "${AUTH_ARGS[@]}" "$@"; }
+request() { curl --fail-with-body --show-error "${AUTH_ARGS[@]}" "$@"; }
 body_only() { sed '$d'; }
 http_code() { tail -1 | sed 's/HTTP://'; }
 
 wait_job() {
   local job_id=$1
-  local i status
-  for i in $(seq 1 90); do
+  local attempt status
+  for ((attempt = 1; attempt <= 90; attempt++)); do
     status=$(request -s "$BASE/jobs/$job_id" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))")
     echo "    job $job_id: $status"
     case "$status" in
       done)
-        request -s "$BASE/jobs/$job_id" | python3 -m json.tool | head -20
+        request -s "$BASE/jobs/$job_id" | python3 -m json.tool | sed -n '1,20p'
         return 0
         ;;
       error|cancelled)
-        request -s "$BASE/jobs/$job_id" | python3 -m json.tool | head -20
+        request -s "$BASE/jobs/$job_id" | python3 -m json.tool | sed -n '1,20p'
         return 1
         ;;
     esac
@@ -61,7 +61,7 @@ SOURCE_ID=$(echo "$SRC_RESP" | body_only | python3 -c "import sys,json; print(js
 
 if [[ -n "$SOURCE_UPLOAD_FILE" ]]; then
   echo "== 1b. POST /sources/$SOURCE_ID/upload-files =="
-  request --fail --silent --show-error -X POST "$BASE/sources/$SOURCE_ID/upload-files" \
+  request --silent -X POST "$BASE/sources/$SOURCE_ID/upload-files" \
     -F "files=@${SOURCE_UPLOAD_FILE}" \
     -F 'relative_paths=["cube.stl"]' \
     | python3 -m json.tool
@@ -108,23 +108,22 @@ echo "== 6. GET /plans/$PLAN_ID/parts =="
 PARTS_RESP=$(request -s -w "\nHTTP:%{http_code}" "$BASE/plans/$PLAN_ID/parts?limit=3")
 echo "$PARTS_RESP" | body_only | python3 -m json.tool
 echo "HTTP:$(echo "$PARTS_RESP" | http_code)"
+PART_ID=$(
+  echo "$PARTS_RESP" | body_only | python3 -c \
+    "import sys,json; parts=json.load(sys.stdin)['parts']; not parts and sys.exit('workflow produced zero parts'); print(parts[0]['id'])"
+)
 
 echo "== 7. GET /plans/$PLAN_ID/checkoff =="
 CHECK_RESP=$(request -s -w "\nHTTP:%{http_code}" "$BASE/plans/$PLAN_ID/checkoff")
-echo "$CHECK_RESP" | body_only | python3 -m json.tool | head -25
+echo "$CHECK_RESP" | body_only | python3 -m json.tool | sed -n '1,25p'
 echo "HTTP:$(echo "$CHECK_RESP" | http_code)"
 
 echo "== 8. PATCH /parts/{id}/progress =="
-PART_ID=$(echo "$PARTS_RESP" | body_only | python3 -c "import sys,json; p=json.load(sys.stdin)['parts']; print(p[0]['id'] if p else '')")
-if [[ -n "$PART_ID" ]]; then
-  PROG_RESP=$(request -s -w "\nHTTP:%{http_code}" -X PATCH "$BASE/parts/$PART_ID/progress" \
-    -H 'Content-Type: application/json' \
-    -d '{"unit_index":0,"completed":true}')
-  echo "$PROG_RESP" | body_only
-  echo "HTTP:$(echo "$PROG_RESP" | http_code)"
-else
-  echo "SKIP (no parts)"
-fi
+PROG_RESP=$(request -s -w "\nHTTP:%{http_code}" -X PATCH "$BASE/parts/$PART_ID/progress" \
+  -H 'Content-Type: application/json' \
+  -d '{"unit_index":0,"completed":true}')
+echo "$PROG_RESP" | body_only
+echo "HTTP:$(echo "$PROG_RESP" | http_code)"
 
 echo "== 9. POST /jobs/export-stl-pack =="
 EXP_RESP=$(request -s -w "\nHTTP:%{http_code}" -X POST "$BASE/jobs/export-stl-pack" \
@@ -134,11 +133,18 @@ echo "$EXP_RESP" | body_only
 echo "HTTP:$(echo "$EXP_RESP" | http_code)"
 EXP_JOB=$(echo "$EXP_RESP" | body_only | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
 wait_job "$EXP_JOB"
+request -s "$BASE/jobs/$EXP_JOB" | python3 -c \
+  "import sys,json; result=json.load(sys.stdin).get('result') or {}; result.get('file_total', 0) < 1 and sys.exit('workflow exported zero files')"
 
 echo "== 10. Static assets =="
 request -s -o /dev/null -w "GET / HTTP:%{http_code}\n" "$BASE/"
-request -s "$BASE/" | grep -oE 'assets/[^"]+' | head -3 | while read -r p; do
+ASSETS=$(request -s "$BASE/" | grep -oE 'assets/[^"]+' | sed -n '1,3p')
+if [[ -z "$ASSETS" ]]; then
+  echo "production page did not reference any static assets" >&2
+  exit 1
+fi
+while IFS= read -r p; do
   request -s -o /dev/null -w "GET /$p HTTP:%{http_code}\n" "$BASE/$p"
-done
+done <<< "$ASSETS"
 
 echo "Smoke workflow complete."

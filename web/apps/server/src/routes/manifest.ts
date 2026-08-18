@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
+import * as yaml from "js-yaml";
 import { importRulesForProject, scanRepo } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
 import { safePathUnderRoot } from "../lib/secure-path.js";
@@ -13,27 +14,37 @@ const DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), "../data/manifest
 
 type RouteDeps = { repo: AppRepository };
 
+const REGISTRY_STRING_FIELDS = ["slug", "target_repo", "title", "manifest_file"] as const;
+
+export function parseRegistryIndex(raw: string): { entries: Array<Record<string, unknown>> } {
+  const document = yaml.load(raw);
+  if (!document || typeof document !== "object") {
+    throw new Error("Manifest registry must be a YAML mapping");
+  }
+  const entries = (document as Record<string, unknown>).entries;
+  if (!Array.isArray(entries)) {
+    throw new Error("Manifest registry must contain an entries array");
+  }
+  return {
+    entries: entries.map((entry, index) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new Error(`Manifest registry entries[${index}] must be a mapping`);
+      }
+      const row = entry as Record<string, unknown>;
+      for (const field of REGISTRY_STRING_FIELDS) {
+        if (typeof row[field] !== "string" || !row[field].trim()) {
+          throw new Error(`Manifest registry entries[${index}].${field} must be a string`);
+        }
+      }
+      return { ...row };
+    }),
+  };
+}
+
 function loadRegistryIndex(): { entries: Array<Record<string, unknown>> } {
   try {
     const raw = readFileSync(join(DATA_DIR, "registry-index.yaml"), "utf8");
-    const entries: Array<Record<string, unknown>> = [];
-    let slug = "";
-    for (const line of raw.split("\n")) {
-      const slugMatch = line.match(/^\s+slug:\s*(.+)/);
-      if (slugMatch) slug = slugMatch[1].trim();
-      const repoMatch = line.match(/^\s+target_repo:\s*(.+)/);
-      const titleMatch = line.match(/^\s+title:\s*(.+)/);
-      const fileMatch = line.match(/^\s+manifest_file:\s*(.+)/);
-      if (slug && repoMatch && titleMatch && fileMatch) {
-        entries.push({
-          slug,
-          target_repo: repoMatch[1].trim(),
-          title: titleMatch[1].trim(),
-          manifest_file: fileMatch[1].trim(),
-        });
-      }
-    }
-    return { entries };
+    return parseRegistryIndex(raw);
   } catch {
     return { entries: [] };
   }

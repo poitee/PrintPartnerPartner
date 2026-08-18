@@ -63,7 +63,9 @@ describe("SourcesPage route state", () => {
     const search = await screen.findByRole("textbox", {
       name: "Search all repos for a part",
     });
-    await waitFor(() => expect(search).toHaveFocus());
-    await waitFor(() => expect(screen.getByTestId("location-state")).toHaveTextContent("null"));
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    await waitFor(() =>
+      expect(screen.getByTestId("location-state").textContent).toBe("null"),
+    );
   });
 });

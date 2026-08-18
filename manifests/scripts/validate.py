@@ -10,6 +10,7 @@ import sys
 from typing import Any
 
 from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 import yaml
 
 
@@ -41,7 +42,10 @@ def validate_manifest(path: Path, schema_dir: Path = SCHEMA_DIR) -> list[str]:
     schema_path = schema_dir / f"print-partner-manifest-v{version}.json"
     try:
         schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
         validator = Draft202012Validator(schema)
+    except SchemaError as error:
+        return [f"{schema_path}: schema is invalid: {error.message}"]
     except (OSError, UnicodeError, yaml.YAMLError) as error:
         return [f"{schema_path}: schema load failed: {error}"]
 

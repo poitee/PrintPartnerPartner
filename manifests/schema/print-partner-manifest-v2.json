@@ -48,6 +48,21 @@
     "choice_tree": {
       "type": "array",
       "items": { "type": "object" }
+    },
+    "variant_dimensions": {
+      "type": "object",
+      "propertyNames": { "minLength": 1 },
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "number" }
+          ]
+        }
+      }
     }
   },
   "additionalProperties": false,

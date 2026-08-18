@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronDown, FolderGit2, MoreHorizontal, Search } from "lucide-react";
 import {
@@ -110,6 +111,7 @@ import { cn } from "../lib/utils";
 import { resolveEngineState } from "../lib/workflowState";
 
 type SourceDetailTab = "docs" | "rules" | "naming";
+type SourcesLocationState = { stlSearch?: boolean };
 
 type WizardForm = {
   name: string;
@@ -157,6 +159,8 @@ function matchesFilters(
 }
 
 export default function SourcesPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { formatDate } = useDateFormat();
   const { health, error: healthError, loading: healthLoading } = useEngineHealth();
   const { busy, runJob } = useJobRunner("sync");
@@ -204,6 +208,21 @@ export default function SourcesPage() {
     error: healthError,
   });
   const engineReady = engineState === "ready";
+
+  useEffect(() => {
+    const state = location.state as SourcesLocationState | null;
+    if (state?.stlSearch !== true) return;
+    setStlSearchExpanded(true);
+    setStlSearchFocus(true);
+    void navigate(
+      {
+        pathname: location.pathname,
+        search: location.search,
+        hash: location.hash,
+      },
+      { replace: true, state: null },
+    );
+  }, [location.hash, location.pathname, location.search, location.state, navigate]);
 
   useEffect(() => {
     savePersistedSourcesUi({
