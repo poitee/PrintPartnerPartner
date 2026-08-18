@@ -22,7 +22,7 @@ Release images are published to GitHub Container Registry:
 |-------|------|-----------|
 | `ghcr.io/poitee/print-partner` | `latest`, `X.Y.Z` (one per release, e.g. `3.0.0`) | `linux/amd64`, `linux/arm64` |
 
-Each image bakes the release version into `PP_VERSION` (e.g. `3.0.0-web`), which `GET /health` reports and the in-app update checker compares against GitHub releases. The compose files keep a `build:` section as a fallback, so `docker compose up --build` always works without the registry.
+Each image bakes the release version into `PP_VERSION` (e.g. `3.0.0-web`), which `GET /health` reports and the in-app update checker compares against GitHub releases. Compose defaults to the audited `3.0.0` image tag; set `PRINT_PARTNER_VERSION` to another release explicitly. The compose files keep a `build:` section as a fallback, so `docker compose up --build` always works without the registry.
 
 **Pull failures:** GHCR packages are private by default until visibility is set. The release workflow sets `ghcr.io/poitee/print-partner` to **public** after each tagged push. If `docker compose pull` returns `denied` or `unauthorized`, use `docker compose up --build` instead, or `docker login ghcr.io` with a token that has `read:packages`. See [docs/INSTALL.md](../docs/INSTALL.md#denied-or-unauthorized-when-pulling-the-image).
 
@@ -113,7 +113,16 @@ git tag v3.1.0
 git push origin v3.1.0
 ```
 
-The `release.yml` workflow builds the multi-arch image (`linux/amd64` + `linux/arm64`), pushes `ghcr.io/poitee/print-partner:latest` and `:3.1.0` with `PP_VERSION=3.1.0-web` baked in, sets the GHCR package visibility to **public**, and creates a GitHub Release with auto-generated notes. Before tagging, move the `[Unreleased]` CHANGELOG entries under the new version and bump `web/package.json` plus the `PP_VERSION` defaults in `web/apps/server/src/config.ts` and the `Dockerfile`.
+The `release.yml` workflow first requires the complete web quality suite,
+high-severity dependency audit, production Docker smoke test, and manifest
+schema/drift validation. It then builds the multi-arch image (`linux/amd64` +
+`linux/arm64`), pushes `ghcr.io/poitee/print-partner:latest` and `:3.1.0` with
+`PP_VERSION=3.1.0-web` baked in, sets the GHCR package visibility to **public**,
+and creates a GitHub Release with auto-generated notes. Before tagging, move the
+`[Unreleased]` CHANGELOG entries under the new version and bump
+`web/package.json`, the `PP_VERSION` defaults in
+`web/apps/server/src/config.ts` and `Dockerfile`, and the audited default image
+tag in `docker-compose.yml`.
 
 ### Local development
 
@@ -141,6 +150,11 @@ docker compose -f docker-compose.saas.yml up --build
 
 Includes Postgres 16, [RustFS](https://rustfs.com) (S3-compatible), and the app with `SAAS_ALLOW_ANONYMOUS=1` for easy dev. The compose file creates the `print-partner` bucket on first start.
 
+The Compose credentials are explicitly development-only defaults. Before using
+the stack on any shared network, set strong values for
+`PP_DEV_POSTGRES_PASSWORD`, `PP_DEV_S3_ACCESS_KEY`, and
+`PP_DEV_S3_SECRET_KEY`; do not expose ports 5432, 9000, or 9001 publicly.
+
 **Migrating from MinIO:** remove the old `pp-minio` volume (`docker volume rm <project>_pp-minio`) — RustFS uses a different on-disk format. Blob data in the old volume is not portable; re-upload or re-sync sources after switching.
 
 ### SaaS environment variables
@@ -153,7 +167,7 @@ Includes Postgres 16, [RustFS](https://rustfs.com) (S3-compatible), and the app 
 | `POSTGRES_EXPERIMENTAL` | With production Postgres | Set `1` to acknowledge that the sync bridge is experimental and lacks native repository transactions |
 | `S3_BUCKET` | Optional | Tenant-prefixed S3 blobs |
 | `S3_REGION` / `AWS_REGION` | With S3 | AWS region |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | With S3 | S3 credentials (RustFS dev stack: `rustfsadmin` / `rustfsadmin`) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | With S3 | S3 credentials (the RustFS development stack reads `PP_DEV_S3_ACCESS_KEY` / `PP_DEV_S3_SECRET_KEY`) |
 | `S3_ENDPOINT` | S3-compatible dev | Custom S3 endpoint URL (e.g. `http://rustfs:9000`) |
 | `S3_FORCE_PATH_STYLE` | S3-compatible dev | Set `1` for path-style URLs (RustFS, MinIO, Garage, etc.) |
 | `MULTI_USER` | Optional | `1` enables login (self-host or saas); first registered user claims existing data |

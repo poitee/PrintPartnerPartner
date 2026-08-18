@@ -15,7 +15,7 @@ TypeScript monorepo for the browser-hosted Print Partner.
 
 ```bash
 cd web
-npm install
+npm ci
 npm run dev
 ```
 
@@ -27,9 +27,13 @@ npm run dev
 | Mode | App DB | Files | Auth |
 |------|--------|-------|------|
 | **self-host** | SQLite under `PRINT_PARTNER_DATA_DIR` | Local disk | Optional Basic |
-| **saas** + `DATABASE_URL` | Postgres (tenant-scoped) | `SAAS_DATA_DIR` or S3 | OAuth / Basic / dev anonymous |
+| **saas** + `DATABASE_URL` | Experimental Postgres sync bridge (tenant-scoped) | `SAAS_DATA_DIR` or S3 | OAuth / Basic / dev anonymous |
 
-See [DEPLOY.md](./DEPLOY.md) for Docker Compose and env vars.
+Postgres is not production-ready because the synchronous compatibility bridge
+does not provide native repository transactions. Production startup requires
+`POSTGRES_EXPERIMENTAL=1`; SQLite remains the supported database. See
+[DEPLOY.md](./DEPLOY.md) for Docker Compose, credentials, and environment
+variables.
 
 ## Tests
 
@@ -42,4 +46,4 @@ See [scripts/SMOKE_CHECKLIST.md](./scripts/SMOKE_CHECKLIST.md) for manual QA.
 
 ## Changelog
 
-See [CHANGELOG.md](./CHANGELOG.md).
+See the repository [CHANGELOG.md](../CHANGELOG.md).

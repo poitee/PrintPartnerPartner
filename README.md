@@ -44,7 +44,7 @@
     Ships as a single Docker container — <strong>Fastify</strong> API + <strong>React</strong> SPA on port <strong>8080</strong>.
     Brand theme with <strong>light</strong>, <strong>dark</strong>, or <strong>system</strong> preference. Data stays in a volume you control.
     Attach <strong>Cursor / Grok / Claude</strong> over HTTP MCP (kit brain; confirm-to-apply — no in-app Kit Advisor).
-    Multi-tenant <strong>SaaS</strong> mode (Postgres + S3 + OAuth) is available for hosted deployments.
+    Multi-tenant <strong>SaaS</strong> mode includes S3 + OAuth; its Postgres compatibility bridge remains experimental.
   </sub>
 </p>
 
@@ -152,7 +152,10 @@ docker compose pull && docker compose up -d
 
 Open [http://localhost:8080](http://localhost:8080). Data persists in the `print-partner-data` volume, mounted at `/data` inside the container (SQLite database, synced repos, exports, and thumbnails).
 
-Images are published to **`ghcr.io/poitee/print-partner`** (`latest` plus a tag per release, e.g. `3.0.0`). To build from source instead:
+Images are published to **`ghcr.io/poitee/print-partner`** (`latest` plus a tag
+per release, e.g. `3.0.0`). Compose defaults to the audited `3.0.0` tag; set
+`PRINT_PARTNER_VERSION` to another release explicitly. To build from source
+instead:
 
 ```bash
 docker compose up --build

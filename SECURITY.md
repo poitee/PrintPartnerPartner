@@ -66,7 +66,7 @@ All outbound HTTP requests validate target addresses:
 
 **Use case:** Printer integrations (Bambu, Moonraker) on private IPs use `allowPrivate: true`
 
-Implementation: `lib/outbound-url.ts`
+Implementation: `web/apps/server/src/lib/outbound-url.ts`
 
 ### Webhook Validation
 
@@ -160,9 +160,14 @@ sudo chown 1000:1000 /data/primary.db
 sudo chmod 640 /data/primary.db  # ppuser can read/write
 ```
 
-### PostgreSQL (SaaS/Multi-user)
+### PostgreSQL (SaaS/Multi-user, experimental)
 
-For multi-user or high-concurrency deployments:
+The current Postgres repository uses a synchronous compatibility bridge without
+native repository transaction semantics. It is not production-ready. SQLite
+remains the supported database; production startup with Postgres requires an
+explicit `POSTGRES_EXPERIMENTAL=1` acknowledgement.
+
+For isolated development:
 ```bash
 export DATABASE_URL=postgresql://user:pass@postgres:5432/print_partner
 docker compose -f docker-compose.saas.yml up
@@ -338,19 +343,24 @@ When adding features, check for:
 
 - [ ] **Tests passing** before merge
   ```bash
-  npm test  # Must pass all 427 tests
+  cd web
+  npm run quality
   ```
 
 ### Security Dependencies
 
 Keep dependencies updated:
 ```bash
-npm audit          # Check for vulnerabilities
-npm update         # Update to latest safe versions
-npm install        # Lock new versions
+cd web
+npm ci
+npm audit --audit-level=high
+npm update
 git add package-lock.json
 git commit -m "chore: security updates"
 ```
+
+GitHub Actions enforces the high-severity npm audit gate. No Snyk organization
+or Snyk CI check is configured for this repository.
 
 ## Compliance Considerations
 
