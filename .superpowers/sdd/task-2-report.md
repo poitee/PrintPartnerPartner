@@ -311,3 +311,121 @@ Diff hygiene:
 - Files generated before this remediation remain in the legacy shared
   `exports/` root and are intentionally not served by the tenant-scoped route.
   New export jobs regenerate them in the tenant directory.
+
+## Final approved Minor closure
+
+Status: DONE
+
+Implementation HEAD before this report update:
+`4ca86fc2674807c0b343fd61e28c6e414432053a`
+
+This section supersedes the legacy-export concern immediately above. Self-host
+startup now migrates non-tenant legacy exports into `tenant-default` and
+rewrites queued printer artifact paths only when the old path was moved and the
+new path exists.
+
+### Findings closed
+
+- Owned-part progress replacement removes all stale rows for the globally
+  unique part id after one tenant ownership check, preventing the old
+  `(part_id, unit_index)` unique row from blocking repair.
+- Empty tenant ids use a symbol sentinel for per-tenant retention, and a
+  separate 10,000-terminal global ceiling bounds aggregate memory across
+  tenant buckets. Active jobs remain outside both caps.
+- Self-host startup recursively migrates legacy export files without following
+  symlinks or overwriting existing tenant files. Successfully moved queued
+  printer artifacts get updated paths; colliding queued artifacts remain at
+  their legacy paths and are not redirected to unrelated target contents.
+- Progress/review/checkoff operations reuse already-owned part rows instead of
+  repeating profile/part ownership queries.
+- Non-default tenant directory names use lowercase injective UTF-8 hex, so ids
+  differing only by case remain distinct on case-insensitive filesystems.
+  `default` remains the stable `tenant-default` migration target.
+- Tenant-filtered decision, snapshot, and print-history list methods again
+  return `[]` for missing positive plan ids. Their write/delete counterparts
+  retain explicit ownership assertions.
+- Synthetic local and SaaS anonymous identities now share
+  `isSyntheticAnonymousSession`; API-key and admin bypass behavior remains
+  fail-closed.
+
+### Red evidence
+
+`npm run test -w @print-partner/server -- phase6 jobs-tenant secure-path exports-route`
+
+- Exit 1 before implementation.
+- Six intended behavior failures:
+  - stale cross-tenant progress caused a SQLite unique constraint error;
+  - missing positive plan history threw instead of returning empty lists;
+  - empty-tenant jobs bypassed the per-tenant cap;
+  - aggregate terminal jobs exceeded the requested global ceiling;
+  - mixed-case tenant directories retained uppercase and could collide;
+  - legacy exports and queued paths were not migrated.
+
+`npm run test -w @print-partner/server -- exports-route`
+
+- Exit 1 for the collision follow-up added during self-review.
+- A queued legacy artifact whose target path already existed was incorrectly
+  redirected to the target. The migration now leaves both the legacy file and
+  queue path unchanged in that case.
+
+### Green and final verification
+
+Focused suite:
+
+`npm run test -w @print-partner/server -- phase6 jobs-tenant secure-path exports-route api-key printer-send-queue-store`
+
+- Exit 0; 7 files and 38 tests passed.
+
+Complete server suite:
+
+`npm run test -w @print-partner/server`
+
+- Exit 0; 114 files passed, 1 skipped; 736 tests passed, 2 skipped.
+
+Server typecheck:
+
+`npm run typecheck -w @print-partner/server`
+
+- Exit 0; no TypeScript diagnostics.
+
+Lint:
+
+`npm run lint`
+
+- Exit 0; no ESLint diagnostics.
+
+Diff hygiene:
+
+`git diff --check 5915f9e..HEAD`
+
+- Exit 0.
+
+### Final Minor files
+
+- `.superpowers/sdd/task-2-report.md`
+- `web/apps/server/src/app.ts`
+- `web/apps/server/src/db/repository.ts`
+- `web/apps/server/src/lib/secure-path.test.ts`
+- `web/apps/server/src/lib/secure-path.ts`
+- `web/apps/server/src/middleware/api-key.ts`
+- `web/apps/server/src/phase6.test.ts`
+- `web/apps/server/src/routes/auth-types.ts`
+- `web/apps/server/src/routes/exports-route.test.ts`
+- `web/apps/server/src/routes/jobs-tenant.test.ts`
+- `web/apps/server/src/routes/jobs.ts`
+- `web/apps/server/src/services/legacy-export-migration.ts`
+- `web/apps/server/src/services/printer-send-queue-store.ts`
+
+### Final Minor commits
+
+- `70a4ef4` — `test: expose final Task 2 minor findings`
+- `da74f09` — `fix: resolve final Task 2 minor findings`
+- `20b9aef` — `test: preserve colliding queued legacy artifacts`
+- `4ca86fc` — `fix: make export migration collision-safe`
+
+### Remaining concerns
+
+- Legacy files that collide with an existing `tenant-default` destination are
+  deliberately left in place for manual reconciliation rather than
+  overwritten.
+- Postgres remains behind the documented experimental production gate.
