@@ -117,6 +117,18 @@ Settings → Slicers registers GUI URLs and profile watch paths (schema v15). St
 
 `kind`: `orca` \| `prusa` \| `bambu` \| `custom`. `dialect`: `orca_json` \| `bambu_json` \| `prusa_ini`. Custom + enabled requires `watch_path`. Docker lifecycle fields are stored for a later plan but unused here.
 
+### Docker lifecycle (self-host)
+
+Containers must carry label `printpartner.slicer_instance_id=<instance id>`. SaaS returns **403**.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/slicer-instances/:id/docker-status` | Refresh + persist `status_cache` |
+| `POST` | `/slicer-instances/:id/docker-pull` | Pull image |
+| `POST` | `/slicer-instances/:id/docker-start` | Create/start labeled container |
+| `POST` | `/slicer-instances/:id/docker-stop` | Stop labeled container |
+| `GET` | `/slicer-instances/:id/docker-logs?tail=200` | Bounded log tail |
+
 ## Integrations (v1 only)
 
 | Method | Path | Description |

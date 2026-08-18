@@ -6,8 +6,21 @@ import type {
 } from "../services/slicer-instances.js";
 import { validateSlicerGuiUrl } from "../services/slicer-instances.js";
 import { reloadManagedProfileSync } from "../services/profile-sync-manager.js";
+import {
+  createDockerAdapterForSpec,
+  createFakeDockerAdapter,
+  specFromInstanceRow,
+  type SlicerDockerAdapter,
+  type SlicerDockerStatus,
+} from "../services/slicer-docker.js";
+import { dockerPresetsForKind } from "../services/slicer-docker-presets.js";
 
-type RouteDeps = { repo: AppRepository };
+type RouteDeps = {
+  repo: AppRepository;
+  deployMode?: "self-host" | "saas";
+  /** Injected for tests; production resolves per instance target. */
+  docker?: SlicerDockerAdapter;
+};
 
 const KINDS: ReadonlySet<string> = new Set(["orca", "prusa", "bambu", "custom"]);
 const DIALECTS: ReadonlySet<string> = new Set(["orca_json", "bambu_json", "prusa_ini"]);
@@ -25,6 +38,9 @@ function asInstanceJson(row: SlicerInstanceRow) {
     compose_service: row.composeService,
     image: row.image,
     container_name: row.containerName,
+    ports_json: row.portsJson,
+    volumes_json: row.volumesJson,
+    env_json: row.envJson,
     status_cache: row.statusCache,
     status_message: row.statusMessage,
     enabled: row.enabled,
@@ -76,10 +92,50 @@ function afterWatcherAffectingChange(): void {
   reloadManagedProfileSync();
 }
 
+function resolveDocker(deps: RouteDeps, row: SlicerInstanceRow): SlicerDockerAdapter {
+  if (deps.docker) return deps.docker;
+  return createDockerAdapterForSpec(specFromInstanceRow(row));
+}
+
+function persistStatus(repo: AppRepository, row: SlicerInstanceRow, status: SlicerDockerStatus) {
+  return repo.upsertSlicerInstance({
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    dialect: row.dialect,
+    guiUrl: row.guiUrl,
+    watchPath: row.watchPath,
+    enabled: row.enabled,
+    image: row.image,
+    containerName: row.containerName,
+    composeService: row.composeService,
+    dockerTarget: row.dockerTarget,
+    dockerHost: row.dockerHost,
+    portsJson: row.portsJson,
+    volumesJson: row.volumesJson,
+    envJson: row.envJson,
+    statusCache: status.state,
+    statusMessage: status.message,
+  });
+}
+
+function asStatusJson(row: SlicerInstanceRow, status: SlicerDockerStatus) {
+  return {
+    instance: asInstanceJson(row),
+    status: {
+      state: status.state,
+      message: status.message,
+      container_id: status.containerId,
+    },
+  };
+}
+
 export async function registerSlicerInstanceRoutes(
   app: FastifyInstance,
   deps: RouteDeps,
 ): Promise<void> {
+  const deployMode = deps.deployMode ?? "self-host";
+
   app.get("/slicer-instances", async () => ({
     instances: deps.repo.listSlicerInstances().map(asInstanceJson),
   }));
@@ -117,6 +173,8 @@ export async function registerSlicerInstanceRoutes(
     const err = validateWritable({ kind, dialect, watchPath, enabled });
     if (err) return reply.status(400).send({ detail: err });
 
+    const dockerDefaults = kind === "custom" ? null : dockerPresetsForKind(kind);
+
     const row = deps.repo.upsertSlicerInstance({
       name,
       kind,
@@ -124,6 +182,30 @@ export async function registerSlicerInstanceRoutes(
       guiUrl,
       watchPath,
       enabled,
+      image:
+        typeof body.image === "string"
+          ? body.image.trim() || null
+          : (dockerDefaults?.image || null),
+      containerName:
+        typeof body.container_name === "string"
+          ? body.container_name.trim() || null
+          : (dockerDefaults?.container_name ?? null),
+      composeService:
+        typeof body.compose_service === "string"
+          ? body.compose_service.trim() || null
+          : (dockerDefaults?.compose_service ?? null),
+      dockerTarget:
+        typeof body.docker_target === "string"
+          ? body.docker_target
+          : (dockerDefaults ? "pp_compose" : "local"),
+      dockerHost: typeof body.docker_host === "string" ? body.docker_host.trim() || null : null,
+      portsJson:
+        typeof body.ports_json === "string" ? body.ports_json : (dockerDefaults?.ports_json ?? "[]"),
+      volumesJson:
+        typeof body.volumes_json === "string"
+          ? body.volumes_json
+          : (dockerDefaults?.volumes_json ?? "[]"),
+      envJson: typeof body.env_json === "string" ? body.env_json : (dockerDefaults?.env_json ?? "{}"),
     });
     afterWatcherAffectingChange();
     return reply.status(201).send(asInstanceJson(row));
@@ -173,6 +255,25 @@ export async function registerSlicerInstanceRoutes(
       guiUrl,
       watchPath,
       enabled,
+      image: typeof body.image === "string" ? body.image.trim() || null : existing.image,
+      containerName:
+        typeof body.container_name === "string"
+          ? body.container_name.trim() || null
+          : existing.containerName,
+      composeService:
+        typeof body.compose_service === "string"
+          ? body.compose_service.trim() || null
+          : existing.composeService,
+      dockerTarget:
+        typeof body.docker_target === "string" ? body.docker_target : existing.dockerTarget,
+      dockerHost:
+        typeof body.docker_host === "string"
+          ? body.docker_host.trim() || null
+          : existing.dockerHost,
+      portsJson: typeof body.ports_json === "string" ? body.ports_json : existing.portsJson,
+      volumesJson:
+        typeof body.volumes_json === "string" ? body.volumes_json : existing.volumesJson,
+      envJson: typeof body.env_json === "string" ? body.env_json : existing.envJson,
     });
     afterWatcherAffectingChange();
     return asInstanceJson(row);
@@ -186,4 +287,77 @@ export async function registerSlicerInstanceRoutes(
     afterWatcherAffectingChange();
     return reply.status(204).send();
   });
+
+  function assertDockerAllowed(reply: {
+    status: (code: number) => { send: (body: unknown) => unknown };
+  }): boolean {
+    if (deployMode !== "saas") return true;
+    reply.status(403).send({ detail: "Docker management disabled in saas mode" });
+    return false;
+  }
+
+  app.get("/slicer-instances/:id/docker-status", async (request, reply) => {
+    if (!assertDockerAllowed(reply)) return;
+    const { id } = request.params as { id: string };
+    const existing = deps.repo.getSlicerInstance(id);
+    if (!existing) return reply.status(404).send({ detail: "Slicer instance not found" });
+    const status = await resolveDocker(deps, existing).refreshStatus(specFromInstanceRow(existing));
+    const row = persistStatus(deps.repo, existing, status);
+    return asStatusJson(row, status);
+  });
+
+  app.post("/slicer-instances/:id/docker-pull", async (request, reply) => {
+    if (!assertDockerAllowed(reply)) return;
+    const { id } = request.params as { id: string };
+    const existing = deps.repo.getSlicerInstance(id);
+    if (!existing) return reply.status(404).send({ detail: "Slicer instance not found" });
+    if (!existing.image?.trim()) {
+      return reply.status(400).send({ detail: "image is required before pull" });
+    }
+    const status = await resolveDocker(deps, existing).pull(specFromInstanceRow(existing));
+    const row = persistStatus(deps.repo, existing, status);
+    return asStatusJson(row, status);
+  });
+
+  app.post("/slicer-instances/:id/docker-start", async (request, reply) => {
+    if (!assertDockerAllowed(reply)) return;
+    const { id } = request.params as { id: string };
+    const existing = deps.repo.getSlicerInstance(id);
+    if (!existing) return reply.status(404).send({ detail: "Slicer instance not found" });
+    if (!existing.image?.trim()) {
+      return reply.status(400).send({ detail: "image is required before start" });
+    }
+    if (existing.dockerTarget === "pp_compose" && !existing.composeService?.trim()) {
+      return reply.status(400).send({ detail: "compose_service is required for pp_compose" });
+    }
+    const status = await resolveDocker(deps, existing).start(specFromInstanceRow(existing));
+    const row = persistStatus(deps.repo, existing, status);
+    return asStatusJson(row, status);
+  });
+
+  app.post("/slicer-instances/:id/docker-stop", async (request, reply) => {
+    if (!assertDockerAllowed(reply)) return;
+    const { id } = request.params as { id: string };
+    const existing = deps.repo.getSlicerInstance(id);
+    if (!existing) return reply.status(404).send({ detail: "Slicer instance not found" });
+    const status = await resolveDocker(deps, existing).stop(specFromInstanceRow(existing));
+    const row = persistStatus(deps.repo, existing, status);
+    return asStatusJson(row, status);
+  });
+
+  app.get("/slicer-instances/:id/docker-logs", async (request, reply) => {
+    if (!assertDockerAllowed(reply)) return;
+    const { id } = request.params as { id: string };
+    const existing = deps.repo.getSlicerInstance(id);
+    if (!existing) return reply.status(404).send({ detail: "Slicer instance not found" });
+    const query = request.query as { tail?: string };
+    const tail = Number(query.tail ?? 200);
+    const { lines } = await resolveDocker(deps, existing).logs(specFromInstanceRow(existing), {
+      tail: Number.isFinite(tail) ? tail : 200,
+    });
+    return { lines };
+  });
 }
+
+/** Test helper re-export. */
+export { createFakeDockerAdapter };
