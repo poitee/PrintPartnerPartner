@@ -1,52 +1,35 @@
 name: Validate manifests
 
 on:
+  workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - "manifests/**"
+      - "web/apps/server/src/data/manifests/**"
+      - ".github/workflows/validate-manifests.yml"
   pull_request:
     paths:
       - "manifests/**"
+      - "web/apps/server/src/data/manifests/**"
       - ".github/workflows/validate-manifests.yml"
 
+permissions:
+  contents: read
+
 jobs:
-  yaml:
+  schema:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: pip install PyYAML
-      - name: Parse manifest YAML files
-        run: |
-          python3 <<'PY'
-          import sys
-          from pathlib import Path
-          import yaml
-
-          root = Path("manifests")
-          errors = []
-          for path in sorted(root.rglob("*.yaml")) + sorted(root.rglob("*.yml")):
-              if path.name == "index.yaml" and "registry" in path.parts:
-                  data = yaml.safe_load(path.read_text(encoding="utf-8"))
-                  if data is None:
-                      continue
-                  if not isinstance(data, dict):
-                      errors.append(f"{path}: expected mapping")
-                  continue
-              try:
-                  data = yaml.safe_load(path.read_text(encoding="utf-8"))
-              except yaml.YAMLError as exc:
-                  errors.append(f"{path}: {exc}")
-                  continue
-              if data is None:
-                  continue
-              if not isinstance(data, dict):
-                  errors.append(f"{path}: expected mapping")
-                  continue
-              fmt = data.get("format")
-              if fmt and fmt != "print-partner-manifest":
-                  errors.append(f"{path}: unknown format {fmt!r}")
-          if errors:
-              print("\n".join(errors))
-              sys.exit(1)
-          print("OK:", len(list(root.rglob('*.yaml'))), "yaml files checked")
-          PY
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: manifests/requirements.txt
+      - name: Install validator dependencies
+        run: python -m pip install -r manifests/requirements.txt
+      - name: Test validator fixtures
+        run: python -m unittest manifests.tests.test_validate
+      - name: Validate schemas and embedded-copy drift
+        run: python manifests/scripts/validate.py

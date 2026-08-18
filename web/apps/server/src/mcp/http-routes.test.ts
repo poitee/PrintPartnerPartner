@@ -127,6 +127,49 @@ describe("HTTP MCP /api/v1/mcp", () => {
     await app.close();
     await ports.db.close();
   });
+
+  it("accepts a settings-created API key with timing-safe shared validation", async () => {
+    delete process.env.PRINT_PARTNER_API_KEY;
+    process.env.HOST = "0.0.0.0";
+    const config = loadConfig();
+    const ports = createPorts(config);
+    await ports.db.connect();
+    const app = await buildApp(config, ports);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/settings/api-keys",
+      remoteAddress: "127.0.0.1",
+    });
+    expect(created.statusCode).toBe(201);
+    const { key } = created.json() as { key: string };
+
+    const accepted = await app.inject({
+      method: "POST",
+      url: "/api/v1/mcp",
+      remoteAddress: "203.0.113.10",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        authorization: `Bearer ${key}`,
+      },
+      payload: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "test", version: "0.0.1" },
+        },
+      },
+    });
+
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.headers["mcp-session-id"]).toBeTypeOf("string");
+    await app.close();
+    await ports.db.close();
+  });
 });
 
 describe("pruneMcpSessions", () => {

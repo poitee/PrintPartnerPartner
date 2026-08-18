@@ -532,7 +532,7 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
             <Printer className="h-4 w-4" aria-hidden />
           </span>
           <div>
-            <CardTitle className="text-base">Printers</CardTitle>
+            <CardTitle level={3} className="text-base">Printers</CardTitle>
             <CardDescription>
               Add a Klipper, Prusa, or Bambu printer once — connection and bed size together.
               Live status on the Printers page; Send from Export for Klipper and Prusa.

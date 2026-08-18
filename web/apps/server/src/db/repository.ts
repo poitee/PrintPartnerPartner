@@ -310,17 +310,32 @@ export class AppRepository {
     return getRequestTenantId(this.defaultTenantId);
   }
 
+  private requireProfile(profileId: number): void {
+    const visible = this.db
+      .select({ id: this.schema.buildProfiles.id })
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, profileId),
+        ),
+      )
+      .get();
+    if (!visible) throw new Error("Profile not found");
+  }
+
+  private requirePart(partId: number): PartDbRow {
+    const part = this.getPartRow(partId);
+    if (!part) throw new Error("Part not found");
+    return part;
+  }
+
   async ping(): Promise<boolean> {
-    const db = this.db as DrizzleDb & {
-      execute?: (query: ReturnType<typeof sql>) => { run: () => void };
-    };
-    if (typeof db.run === "function") {
-      db.run(sql`SELECT 1`);
-    } else if (typeof db.execute === "function") {
-      db.execute(sql`SELECT 1`).run();
-    } else {
-      throw new Error("Database driver does not support ping");
-    }
+    this.db
+      .select({ key: this.schema.appSettings.key })
+      .from(this.schema.appSettings)
+      .limit(1)
+      .all();
     return true;
   }
 
@@ -1580,6 +1595,7 @@ export class AppRepository {
   }
 
   getProfileLayers(profileId: number) {
+    this.requireProfile(profileId);
     const layers = this.db
       .select()
       .from(this.schema.profileLayers)
@@ -1604,6 +1620,7 @@ export class AppRepository {
   }
 
   setBaseLayer(profileId: number, projectId: number): void {
+    this.requireProfile(profileId);
     const project = this.getProjectRow(projectId);
     if (!project) throw new Error("Project not found");
     const existing = this.db
@@ -1633,6 +1650,7 @@ export class AppRepository {
   }
 
   addAddonLayer(profileId: number, projectId: number): void {
+    this.requireProfile(profileId);
     const project = this.getProjectRow(projectId);
     if (!project) throw new Error("Project not found");
     const duplicate = this.db
@@ -1670,6 +1688,7 @@ export class AppRepository {
     parts: PartRow[];
     total: number;
   } {
+    this.requireProfile(profileId);
     const total = this.db
       .select({ c: count() })
       .from(this.schema.parts)
@@ -1716,6 +1735,7 @@ export class AppRepository {
     manifest_applied?: number;
     manifest_warnings?: Array<Record<string, unknown>>;
   } {
+    this.requireProfile(profileId);
     const layers = this.db
       .select()
       .from(this.schema.profileLayers)
@@ -1786,87 +1806,89 @@ export class AppRepository {
         throw new MergeWouldWipeProfileError("Scan found no STL files.");
       }
 
-      const newKeys = new Set(result.parts.map((p) => p.matchKey));
-      for (const row of existingRows) {
-        if (!newKeys.has(row.matchKey)) {
-          this.db.delete(this.schema.printProgress).where(eq(this.schema.printProgress.partId, row.id)).run();
-          this.db.delete(this.schema.parts).where(eq(this.schema.parts.id, row.id)).run();
+      return this.transaction(() => {
+        const newKeys = new Set(result.parts.map((p) => p.matchKey));
+        for (const row of existingRows) {
+          if (!newKeys.has(row.matchKey)) {
+            this.db.delete(this.schema.printProgress).where(eq(this.schema.printProgress.partId, row.id)).run();
+            this.db.delete(this.schema.parts).where(eq(this.schema.parts.id, row.id)).run();
+          }
         }
-      }
 
-      for (const mp of result.parts) {
-        const prior = existingRows.find((r) => r.matchKey === mp.matchKey);
-        const qty =
-          mp.quantityOverride != null ? mp.quantityOverride : mp.quantityAuto;
-        if (prior) {
-          const roleDefault =
-            loadRoleFilamentDefaults(this, profileId)[normalizePartRole(mp.role)];
-          this.db
-            .update(this.schema.parts)
-            .set({
-              relativePath: mp.relativePath,
-              filename: mp.filename,
-              sourceLayer: mp.sourceLayer,
-              status: mp.status,
-              quantityAuto: mp.quantityAuto,
-              quantityEffective: qty,
-              quantityOverride: mp.quantityOverride,
-              included: mp.included,
-              notes: mp.notes,
-              geometrySame: mp.geometrySame,
-              role: mp.role,
-              filamentColorId: prior.filamentColorId ?? roleDefault?.filament_color_id ?? null,
-              filamentCustomHex: prior.filamentCustomHex ?? roleDefault?.filament_custom_hex ?? null,
-              spoolmanSpoolId: prior.spoolmanSpoolId ?? roleDefault?.spoolman_spool_id ?? null,
-            })
-            .where(eq(this.schema.parts.id, prior.id))
-            .run();
-        } else {
-          const role = normalizePartRole(mp.role);
-          const roleDefault = loadRoleFilamentDefaults(this, profileId)[role];
-          this.db
-            .insert(this.schema.parts)
-            .values({
-              tenantId: this.tenantId,
-              profileId,
-              matchKey: mp.matchKey,
-              relativePath: mp.relativePath,
-              filename: mp.filename,
-              sourceLayer: mp.sourceLayer,
-              status: mp.status,
-              role: mp.role,
-              quantityAuto: mp.quantityAuto,
-              quantityOverride: mp.quantityOverride,
-              quantityEffective: qty,
-              included: mp.included,
-              notes: mp.notes,
-              geometrySame: mp.geometrySame,
-              filamentColorId: roleDefault?.filament_color_id ?? null,
-              filamentCustomHex: roleDefault?.filament_custom_hex ?? null,
-              spoolmanSpoolId: roleDefault?.spoolman_spool_id ?? null,
-            })
-            .run();
+        for (const mp of result.parts) {
+          const prior = existingRows.find((r) => r.matchKey === mp.matchKey);
+          const qty =
+            mp.quantityOverride != null ? mp.quantityOverride : mp.quantityAuto;
+          if (prior) {
+            const roleDefault =
+              loadRoleFilamentDefaults(this, profileId)[normalizePartRole(mp.role)];
+            this.db
+              .update(this.schema.parts)
+              .set({
+                relativePath: mp.relativePath,
+                filename: mp.filename,
+                sourceLayer: mp.sourceLayer,
+                status: mp.status,
+                quantityAuto: mp.quantityAuto,
+                quantityEffective: qty,
+                quantityOverride: mp.quantityOverride,
+                included: mp.included,
+                notes: mp.notes,
+                geometrySame: mp.geometrySame,
+                role: mp.role,
+                filamentColorId: prior.filamentColorId ?? roleDefault?.filament_color_id ?? null,
+                filamentCustomHex: prior.filamentCustomHex ?? roleDefault?.filament_custom_hex ?? null,
+                spoolmanSpoolId: prior.spoolmanSpoolId ?? roleDefault?.spoolman_spool_id ?? null,
+              })
+              .where(eq(this.schema.parts.id, prior.id))
+              .run();
+          } else {
+            const role = normalizePartRole(mp.role);
+            const roleDefault = loadRoleFilamentDefaults(this, profileId)[role];
+            this.db
+              .insert(this.schema.parts)
+              .values({
+                tenantId: this.tenantId,
+                profileId,
+                matchKey: mp.matchKey,
+                relativePath: mp.relativePath,
+                filename: mp.filename,
+                sourceLayer: mp.sourceLayer,
+                status: mp.status,
+                role: mp.role,
+                quantityAuto: mp.quantityAuto,
+                quantityOverride: mp.quantityOverride,
+                quantityEffective: qty,
+                included: mp.included,
+                notes: mp.notes,
+                geometrySame: mp.geometrySame,
+                filamentColorId: roleDefault?.filament_color_id ?? null,
+                filamentCustomHex: roleDefault?.filament_custom_hex ?? null,
+                spoolmanSpoolId: roleDefault?.spoolman_spool_id ?? null,
+              })
+              .run();
+          }
         }
-      }
 
-      const out: {
-        merged: boolean;
-        part_count: number;
-        layer_debug: Array<Record<string, unknown>>;
-        manifest_applied?: number;
-        manifest_warnings?: Array<Record<string, unknown>>;
-      } = {
-        merged: true,
-        part_count: result.parts.length,
-        layer_debug: layerDebug,
-      };
-      if (options?.apply_manifest) {
-        const manifestResult = applyManifestToProfile(this, profileId, true);
-        out.manifest_applied = manifestResult.applied_rules;
-        out.manifest_warnings = manifestResult.warnings;
-      }
-      this.touchLastRecomputed(profileId);
-      return out;
+        const out: {
+          merged: boolean;
+          part_count: number;
+          layer_debug: Array<Record<string, unknown>>;
+          manifest_applied?: number;
+          manifest_warnings?: Array<Record<string, unknown>>;
+        } = {
+          merged: true,
+          part_count: result.parts.length,
+          layer_debug: layerDebug,
+        };
+        if (options?.apply_manifest) {
+          const manifestResult = applyManifestToProfile(this, profileId, true);
+          out.manifest_applied = manifestResult.applied_rules;
+          out.manifest_warnings = manifestResult.warnings;
+        }
+        this.touchLastRecomputed(profileId);
+        return out;
+      });
     } catch (e) {
       if (e instanceof MergeWouldWipeProfileError) {
         return {
@@ -1949,6 +1971,7 @@ export class AppRepository {
   }
 
   private listPartRows(profileId: number): PartDbRow[] {
+    this.requireProfile(profileId);
     return this.db
       .select()
       .from(this.schema.parts)
@@ -1961,7 +1984,12 @@ export class AppRepository {
     return this.db
       .select()
       .from(this.schema.printProgress)
-      .where(eq(this.schema.printProgress.partId, partId))
+      .where(
+        and(
+          eq(this.schema.printProgress.tenantId, this.tenantId),
+          eq(this.schema.printProgress.partId, partId),
+        ),
+      )
       .all()
       .map((r) => ({
         id: r.id,
@@ -1972,8 +2000,12 @@ export class AppRepository {
       }));
   }
 
-  private saveProgressRows(partId: number, rows: ProgressRow[]): void {
-    this.db.delete(this.schema.printProgress).where(eq(this.schema.printProgress.partId, partId)).run();
+  /** Replace progress only after the caller has proved the part belongs to this tenant. */
+  private saveProgressRowsForOwnedPart(partId: number, rows: ProgressRow[]): void {
+    this.db
+      .delete(this.schema.printProgress)
+      .where(eq(this.schema.printProgress.partId, partId))
+      .run();
     for (const row of rows) {
       const vals: Record<string, unknown> = {
         tenantId: this.tenantId,
@@ -1992,22 +2024,36 @@ export class AppRepository {
     }
   }
 
-  ensureProgressForPart(part: PartDbRow): void {
+  private ensureProgressForOwnedPart(part: PartDbRow): void {
     const rows = this.progressRowsForPart(part.id);
     const qty = Math.max(1, part.quantityEffective);
     const ensured = ensureProgressRows(rows, part.id, qty);
-    this.saveProgressRows(part.id, ensured);
+    this.saveProgressRowsForOwnedPart(part.id, ensured);
+  }
+
+  ensureProgressForPart(part: PartDbRow): void {
+    this.requirePart(part.id);
+    this.ensureProgressForOwnedPart(part);
   }
 
   printUnitsByPartId(profileId: number): Map<number, boolean[]> {
     const partRows = this.listPartRows(profileId);
+    return this.printUnitsForPartRows(partRows);
+  }
+
+  private printUnitsForPartRows(partRows: PartDbRow[]): Map<number, boolean[]> {
     const partIds = partRows.map((p) => p.id);
     if (!partIds.length) return new Map();
 
     const allProgress = this.db
       .select()
       .from(this.schema.printProgress)
-      .where(inArray(this.schema.printProgress.partId, partIds))
+      .where(
+        and(
+          eq(this.schema.printProgress.tenantId, this.tenantId),
+          inArray(this.schema.printProgress.partId, partIds),
+        ),
+      )
       .all();
 
     const byPart = new Map<number, ProgressRow[]>();
@@ -2032,15 +2078,19 @@ export class AppRepository {
   }
 
   /** Like printUnitsByPartId but returns raw ProgressRow arrays for access to assembled field. */
-  private progressRowsByPartId(profileId: number): Map<number, ProgressRow[]> {
-    const partRows = this.listPartRows(profileId);
+  private progressRowsByPartId(partRows: PartDbRow[]): Map<number, ProgressRow[]> {
     const partIds = partRows.map((p) => p.id);
     if (!partIds.length) return new Map();
 
     const allProgress = this.db
       .select()
       .from(this.schema.printProgress)
-      .where(inArray(this.schema.printProgress.partId, partIds))
+      .where(
+        and(
+          eq(this.schema.printProgress.tenantId, this.tenantId),
+          inArray(this.schema.printProgress.partId, partIds),
+        ),
+      )
       .all();
 
     const byPart = new Map<number, ProgressRow[]>();
@@ -2066,10 +2116,10 @@ export class AppRepository {
   ) {
     const partRows = this.listPartRows(profileId);
     for (const part of partRows) {
-      this.ensureProgressForPart(part);
+      this.ensureProgressForOwnedPart(part);
     }
-    const unitsById = this.printUnitsByPartId(profileId);
-    const progressRowsById = this.progressRowsByPartId(profileId);
+    const unitsById = this.printUnitsForPartRows(partRows);
+    const progressRowsById = this.progressRowsByPartId(partRows);
     const rows = partRows.filter((p) => includeExcluded || p.included);
     return rows.map((p) => {
       const units = unitsById.get(p.id) ?? [];
@@ -2105,9 +2155,9 @@ export class AppRepository {
   getCheckoff(profileId: number, ctx?: FilamentResolveContext) {
     const partRows = this.listPartRows(profileId);
     for (const part of partRows) {
-      this.ensureProgressForPart(part);
+      this.ensureProgressForOwnedPart(part);
     }
-    const unitsById = this.printUnitsByPartId(profileId);
+    const unitsById = this.printUnitsForPartRows(partRows);
     const displayRows = partRows.map((p) => {
       const units = unitsById.get(p.id) ?? [];
       const printedCount = units.filter(Boolean).length;
@@ -2147,15 +2197,14 @@ export class AppRepository {
   }
 
   patchPartProgress(partId: number, unitIndex: number, completed: boolean) {
-    const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
-    if (!part) throw new Error("Part not found");
+    const part = this.requirePart(partId);
     const qty = Math.max(1, part.quantityEffective);
     if (unitIndex >= qty) throw new Error("unit_index out of range");
-    this.ensureProgressForPart(part);
+    this.ensureProgressForOwnedPart(part);
     const rows = this.progressRowsForPart(partId);
     const updated = toggleCheckoffUnit(rows, partId, qty, unitIndex, completed);
     const partRowsOnly = updated.filter((r) => r.partId === partId);
-    this.saveProgressRows(partId, partRowsOnly);
+    this.saveProgressRowsForOwnedPart(partId, partRowsOnly);
     const units = getPrintUnits(partRowsOnly, qty);
     const printedCount = units.filter(Boolean).length;
     return {
@@ -2172,17 +2221,16 @@ export class AppRepository {
   }
 
   patchPartAssembled(partId: number, unitIndex: number, assembled: boolean) {
-    const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
-    if (!part) throw new Error("Part not found");
+    const part = this.requirePart(partId);
     const qty = Math.max(1, part.quantityEffective);
     if (unitIndex < 0 || unitIndex >= qty) throw new Error("unit_index out of range");
-    this.ensureProgressForPart(part);
+    this.ensureProgressForOwnedPart(part);
     const rows = this.progressRowsForPart(partId);
     // Domain owns the rule that an unprinted unit can't be assembled.
     const updated = setAssembledUnit(rows, partId, qty, unitIndex, assembled).filter(
       (r) => r.partId === partId,
     );
-    this.saveProgressRows(partId, updated);
+    this.saveProgressRowsForOwnedPart(partId, updated);
     const assembledUnits = getAssembledUnits(updated, qty);
     const assembledCount = assembledUnits.filter(Boolean).length;
     return {
@@ -2194,10 +2242,9 @@ export class AppRepository {
 
   /** Read accessor: the assembled state of every unit of a single part. */
   getPartAssembled(partId: number) {
-    const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
-    if (!part) throw new Error("Part not found");
+    const part = this.requirePart(partId);
     const qty = Math.max(1, part.quantityEffective);
-    this.ensureProgressForPart(part);
+    this.ensureProgressForOwnedPart(part);
     const rows = this.progressRowsForPart(partId);
     const assembledUnits = getAssembledUnits(rows, qty);
     return {
@@ -2219,8 +2266,7 @@ export class AppRepository {
       manifest_source?: string | null;
     },
   ): PartRow {
-    const part = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get();
-    if (!part) throw new Error("Part not found");
+    const part = this.requirePart(partId);
     const updates: Partial<typeof this.schema.parts.$inferInsert> = {};
     if (patch.included != null) updates.included = patch.included;
     if (patch.filament_color_id !== undefined) {
@@ -2233,15 +2279,24 @@ export class AppRepository {
     if (patch.quantity_override != null) {
       updates.quantityOverride = patch.quantity_override;
       updates.quantityEffective = patch.quantity_override;
-      this.ensureProgressForPart({ ...part, quantityEffective: patch.quantity_override });
+      this.ensureProgressForOwnedPart({ ...part, quantityEffective: patch.quantity_override });
     }
     if (patch.requirement !== undefined) updates.requirement = patch.requirement;
     if (patch.option_group_id !== undefined) updates.optionGroupId = patch.option_group_id;
     if (patch.manifest_source !== undefined) updates.manifestSource = patch.manifest_source;
     if (Object.keys(updates).length) {
-      this.db.update(this.schema.parts).set(updates).where(eq(this.schema.parts.id, partId)).run();
+      this.db
+        .update(this.schema.parts)
+        .set(updates)
+        .where(
+          and(
+            eq(this.schema.parts.tenantId, this.tenantId),
+            eq(this.schema.parts.id, partId),
+          ),
+        )
+        .run();
     }
-    const updated = this.db.select().from(this.schema.parts).where(eq(this.schema.parts.id, partId)).get()!;
+    const updated = this.requirePart(partId);
     const row = partRow(updated);
     const color = updated.filamentColorId ? getColorById(updated.filamentColorId) : null;
     row.filament_display = color?.combo_label ?? "";
@@ -2255,7 +2310,16 @@ export class AppRepository {
     parts: MergePart[];
     completedByMatchKey: Record<string, boolean[]>;
   } {
-    const profile = this.db.select().from(this.schema.buildProfiles).where(eq(this.schema.buildProfiles.id, profileId)).get();
+    const profile = this.db
+      .select()
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, profileId),
+        ),
+      )
+      .get();
     if (!profile) throw new Error("Profile not found");
     const partRows = this.listPartRows(profileId);
     const unitsById = this.printUnitsByPartId(profileId);
@@ -2415,6 +2479,7 @@ export class AppRepository {
     customHex?: string | null,
     spoolRef?: string | null,
   ): number {
+    this.requireProfile(profileId);
     const targetRole = normalizePartRole(role);
     const defaultPatch: Partial<RoleFilamentDefault> = {
       filament_color_id: colorId,
@@ -2659,7 +2724,7 @@ export class AppRepository {
             unitIndex,
             completed: Boolean(completed),
           }));
-          this.saveProgressRows(inserted.id, rows);
+          this.saveProgressRowsForOwnedPart(inserted.id, rows);
         }
       }
     }
@@ -2797,6 +2862,7 @@ export class AppRepository {
 
   listSourceNotes(projectId: number, profileId?: number | null): SourceNoteSummary[] {
     if (!this.schema.sourceNotes) return [];
+    if (profileId != null) this.requireProfile(profileId);
     const rows = this.db
       .select()
       .from(this.schema.sourceNotes)
@@ -2859,6 +2925,7 @@ export class AppRepository {
     authorUserId?: string | null;
   }): SourceNoteSummary {
     if (!this.schema.sourceNotes) throw new Error("source_notes table unavailable");
+    if (input.profileId != null) this.requireProfile(input.profileId);
     const now = new Date().toISOString();
     const inserted = this.db
       .insert(this.schema.sourceNotes)
@@ -2885,6 +2952,7 @@ export class AppRepository {
     if (!this.schema.sourceNotes) throw new Error("source_notes table unavailable");
     const existing = this.getSourceNote(noteId);
     if (!existing) throw new Error("Note not found");
+    if (patch.profileId != null) this.requireProfile(patch.profileId);
     const updates: Partial<typeof this.schema.sourceNotes.$inferInsert> = {
       updatedAt: new Date().toISOString(),
     };
@@ -2990,6 +3058,7 @@ export class AppRepository {
     result?: Record<string, unknown> | null;
   }): PlanDecision {
     if (!this.schema.planDecisions) throw new Error("plan_decisions table unavailable");
+    this.requireProfile(input.planId);
     const now = new Date().toISOString();
     const inserted = this.db
       .insert(this.schema.planDecisions)
@@ -3015,6 +3084,7 @@ export class AppRepository {
   deletePlanDecisionsForPlan(planId: number): number {
     if (!this.schema.planDecisions) return 0;
     if (!planId || planId <= 0) return 0;
+    this.requireProfile(planId);
     const before = this.listPlanDecisions(planId, 10_000).length;
     if (before === 0) return 0;
     this.db
@@ -3093,6 +3163,7 @@ export class AppRepository {
     payload: Record<string, unknown>;
   }): PlanSnapshot {
     if (!this.schema.planSnapshots) throw new Error("plan_snapshots table unavailable");
+    this.requireProfile(input.planId);
     const now = new Date().toISOString();
     const inserted = this.db
       .insert(this.schema.planSnapshots)
@@ -3143,6 +3214,7 @@ export class AppRepository {
     completedAt?: string;
     linkId?: string;
   }): PrintJobRow {
+    this.requireProfile(job.profileId);
     const inserted = this.db
       .insert(this.schema.printJobs)
       .values({
@@ -3206,6 +3278,9 @@ export class AppRepository {
     linkId?: string;
   }>): PrintJobPartRow[] {
     if (!parts.length) return [];
+    for (const profileId of new Set(parts.map((part) => part.profileId))) {
+      this.requireProfile(profileId);
+    }
     const inserted = this.db
       .insert(this.schema.printJobParts)
       .values(parts.map((p) => ({

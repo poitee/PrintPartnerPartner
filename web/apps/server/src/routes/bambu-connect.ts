@@ -102,7 +102,7 @@ export async function registerBambuConnectRoutes(
       let handoffId = "";
       let profileId: number | undefined;
       let checkoffUnitsRaw: string | undefined;
-      const exportsDir = deps.jobs.getExportsDir();
+      const exportsDir = deps.jobs.getExportsDir(request.tenantId);
 
       const reject = (status: number, title: string, detail: string) => {
         discardHandoff(exportsDir, handoffId);
@@ -277,7 +277,8 @@ export async function registerBambuConnectRoutes(
     if (!id || !/^[0-9a-f-]{36}$/i.test(id)) {
       return sendProblem(reply, 400, "Bad Request", "Invalid handoff id");
     }
-    const dir = join(deps.jobs.getExportsDir(), "bambu-connect", id);
+    const exportsDir = deps.jobs.getExportsDir(request.tenantId);
+    const dir = join(exportsDir, "bambu-connect", id);
     let entries: string[];
     try {
       entries = readdirSync(dir);
@@ -290,7 +291,7 @@ export async function registerBambuConnectRoutes(
     }
     let path: string;
     try {
-      path = assertHandoffArtifactPath(deps.jobs.getExportsDir(), join(dir, file));
+      path = assertHandoffArtifactPath(exportsDir, join(dir, file));
     } catch {
       return sendProblem(reply, 400, "Bad Request", "Invalid artifact path");
     }

@@ -26,13 +26,14 @@ async function makeApp() {
   const config = loadConfig();
   const ports = createSelfHostPorts(dir);
   await ports.db.connect();
+  const profileId = ports.repository!.createProfile("Auto-slice route plan").id;
   const app = await buildApp(config, ports);
   cleanup.push(() => {
     void app.close();
     void ports.db.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  return app;
+  return { app, profileId };
 }
 
 /**
@@ -41,7 +42,10 @@ async function makeApp() {
  * unhandled "Database not connected" rejection; settling first keeps the test
  * output clean and makes the assertions deterministic.
  */
-async function settle(app: Awaited<ReturnType<typeof makeApp>>, jobId: string) {
+async function settle(
+  app: Awaited<ReturnType<typeof makeApp>>["app"],
+  jobId: string,
+) {
   for (let i = 0; i < 100; i++) {
     const res = await app.inject({ method: "GET", url: `/jobs/${jobId}` });
     const body = res.json() as { status?: string; kind?: string };
@@ -55,11 +59,11 @@ async function settle(app: Awaited<ReturnType<typeof makeApp>>, jobId: string) {
 
 describe("POST /jobs/auto-slice", () => {
   it("accepts a slice request and returns a job id", async () => {
-    const app = await makeApp();
+    const { app, profileId } = await makeApp();
     const res = await app.inject({
       method: "POST",
       url: "/jobs/auto-slice",
-      payload: { profile_id: 1, enabled_printer_ids: ["p1"] },
+      payload: { profile_id: profileId, enabled_printer_ids: ["p1"] },
     });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { job_id?: string };
@@ -69,11 +73,11 @@ describe("POST /jobs/auto-slice", () => {
   });
 
   it("exposes the job through the job snapshot API as kind=auto-slice", async () => {
-    const app = await makeApp();
+    const { app, profileId } = await makeApp();
     const start = await app.inject({
       method: "POST",
       url: "/jobs/auto-slice",
-      payload: { profile_id: 1 },
+      payload: { profile_id: profileId },
     });
     const { job_id: jobId } = start.json() as { job_id: string };
 

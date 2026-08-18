@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -433,8 +433,9 @@ describe("packCopiesGrouped dispatch", () => {
 });
 
 describe("plate height variance warning", () => {
-  it("warns when a plate's height variance exceeds 2x the shortest part", () => {
+  it("returns a structured warning without writing to the console", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-variance-"));
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       const printer = makePrinter();
       // shortest = 10mm, tallest = 100mm -> variance 90mm > 2*10=20mm -> should warn.
@@ -444,7 +445,9 @@ describe("plate height variance warning", () => {
       ];
       const [, warnings] = packCopiesOnPrinter(printer, copies);
       expect(warnings.some((w) => w.includes("height variance"))).toBe(true);
+      expect(consoleWarn).not.toHaveBeenCalled();
     } finally {
+      consoleWarn.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }
   });

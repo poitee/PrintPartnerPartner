@@ -16,6 +16,10 @@ import { loadKitPrintPlan, saveKitPrintPlan } from "../services/print-plan-store
 
 type RouteDeps = { repo: AppRepository };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export async function registerPrintPlanRoutes(
   app: FastifyInstance,
   deps: RouteDeps,
@@ -23,13 +27,16 @@ export async function registerPrintPlanRoutes(
   app.get("/plans/:id/print-plan", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
-    const plan = loadKitPrintPlan(deps.repo, id);
+    const plan = loadKitPrintPlan(deps.repo, id, (message, error) => {
+      request.log.warn({ err: error, profileId: id }, message);
+    });
     return {
       profile_id: id,
       plan: {
         enabled_printer_ids: plan.enabled_printer_ids,
         group_assignments: plan.group_assignments,
         plate_layout: plan.plate_layout ? kitPrintPlanToDict(plan).plate_layout : null,
+        grouping_strategy: plan.grouping_strategy,
       },
     };
   });
@@ -37,14 +44,31 @@ export async function registerPrintPlanRoutes(
   app.put("/plans/:id/print-plan", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
-    const body = request.body as Record<string, unknown>;
-    const existing = loadKitPrintPlan(deps.repo, id);
-    const merged = kitPrintPlanToDict(existing) as Record<string, unknown>;
-    if (body.group_assignments && Object.keys(body.group_assignments as object).length === 0) {
-      if (Object.keys(existing.group_assignments).length) delete body.group_assignments;
+    if (!isRecord(request.body)) {
+      return reply.status(400).send({ detail: "Print plan body must be an object" });
     }
-    Object.assign(merged, body);
-    const plan = kitPrintPlanFromDict(merged);
+    const body = request.body;
+    const existing = loadKitPrintPlan(deps.repo, id, (message, error) => {
+      request.log.warn({ err: error, profileId: id }, message);
+    });
+    const merged = kitPrintPlanToDict(existing) as Record<string, unknown>;
+    const updates = { ...body };
+    if (
+      isRecord(updates.group_assignments) &&
+      Object.keys(updates.group_assignments).length === 0 &&
+      Object.keys(existing.group_assignments).length
+    ) {
+      delete updates.group_assignments;
+    }
+    Object.assign(merged, updates);
+    let plan: ReturnType<typeof kitPrintPlanFromDict>;
+    try {
+      plan = kitPrintPlanFromDict(merged);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      request.log.warn({ err: error, profileId: id }, "Rejected malformed print-plan input");
+      return reply.status(400).send({ detail: message });
+    }
     saveKitPrintPlan(deps.repo, id, plan);
     return { profile_id: id, plan: kitPrintPlanToDict(plan) };
   });

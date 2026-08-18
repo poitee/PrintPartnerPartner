@@ -80,7 +80,7 @@ export default function PlateApprovalCard({
       ) : null}
 
       <CardHeader className="pb-2 pt-3">
-        <CardTitle className="flex flex-wrap items-center gap-2 text-[13.5px] font-semibold leading-snug">
+        <CardTitle level={3} className="flex flex-wrap items-center gap-2 text-[13.5px] font-semibold leading-snug">
           <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1 truncate">{printerName}</span>
           <Badge variant="muted" className="shrink-0 font-mono text-[10.5px] font-normal">

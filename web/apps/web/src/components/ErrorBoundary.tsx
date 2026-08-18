@@ -40,9 +40,11 @@ export default class ErrorBoundary extends Component<Props, State> {
       <div className="mx-auto flex max-w-lg justify-center py-12">
         <Card className="w-full">
           <CardHeader accent>
-            <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-destructive" aria-hidden />
-              Something went wrong
+            <CardTitle asChild>
+              <h1 className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-destructive" aria-hidden />
+                Something went wrong
+              </h1>
             </CardTitle>
             <CardDescription>
               This page hit an unexpected error. Your data is safe — reloading

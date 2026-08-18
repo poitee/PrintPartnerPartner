@@ -11,7 +11,7 @@ export async function registerExportRoutes(app: FastifyInstance, deps: RouteDeps
     if (!key || key.includes("..")) {
       return reply.status(400).send({ detail: "Invalid export path" });
     }
-    const stream = openExportFileStream(deps.dataDir, key);
+    const stream = openExportFileStream(deps.dataDir, request.tenantId, key);
     if (!stream) {
       return reply.status(404).send({ detail: "Export file not found" });
     }

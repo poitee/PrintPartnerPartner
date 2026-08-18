@@ -30,9 +30,9 @@ export interface AuthProvider {
 export type JobKind = string;
 
 export interface JobRunner {
-  start(kind: JobKind, payload: Record<string, unknown>): Promise<string>;
-  get(jobId: string): Promise<JobSnapshot | null>;
-  cancel(jobId: string): Promise<boolean>;
+  start(kind: JobKind, payload: Record<string, unknown>, tenantId?: string): Promise<string>;
+  get(jobId: string, tenantId: string): Promise<JobSnapshot | null>;
+  cancel(jobId: string, tenantId: string): Promise<boolean>;
 }
 
 export type { AssistantPort } from "../assistant/types.js";

@@ -1,17 +1,27 @@
-import { readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
-/** Ensure an absolute path resolves to a regular file under root. */
+/**
+ * Resolve an existing regular file to its canonical path under root.
+ *
+ * Symlinks are canonicalized with realpath: links whose final target remains
+ * under root are accepted, while links escaping root are rejected. The
+ * returned canonical path may differ from the input on systems with aliased
+ * temporary roots (for example, macOS `/tmp` → `/private/tmp`).
+ */
 export function resolvedFileUnderRoot(root: string, absolutePath: string): string | null {
-  const base = resolve(root);
-  const candidate = resolve(absolutePath);
-  if (candidate !== base && !candidate.startsWith(`${base}/`)) return null;
   try {
+    const base = realpathSync(resolve(root));
+    const candidate = realpathSync(resolve(absolutePath));
+    const relativePath = relative(base, candidate);
+    if (relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+      return null;
+    }
     if (!statSync(candidate).isFile()) return null;
+    return candidate;
   } catch {
     return null;
   }
-  return candidate;
 }
 
 export function readFileUnderRoot(root: string, absolutePath: string, encoding?: BufferEncoding): string {

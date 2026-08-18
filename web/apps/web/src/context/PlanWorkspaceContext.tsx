@@ -69,8 +69,14 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
   });
 
   const patchPartMutation = usePatchPartMutation(selectedProfileId);
-  const patchProgressMutation = usePatchPartProgressMutation(selectedProfileId);
-  const patchAssembledMutation = usePatchPartAssembledMutation(selectedProfileId);
+  const patchProgressMutation = usePatchPartProgressMutation(
+    selectedProfileId,
+    includeExcluded,
+  );
+  const patchAssembledMutation = usePatchPartAssembledMutation(
+    selectedProfileId,
+    includeExcluded,
+  );
 
   const invalidate = useCallback(async () => {
     setRevision((r) => r + 1);

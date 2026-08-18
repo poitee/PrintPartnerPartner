@@ -9,17 +9,10 @@
 # Local DNS: add to /etc/hosts (or your router/pihole):
 #   127.0.0.1  orca.home prusa.home
 #
-# IMAGE TAG NOTES — verify these before deploying:
-#   OrcaSlicer:  lscr.io/linuxserver/orcaslicer "version-X.Y.Z" tags do not
-#                currently resolve (checked Aug 2026 — 404s). The deployed
-#                orcaslicer container actually runs :latest (v2.3.2 internally
-#                per its /opt/orcaslicer/bin/orca-slicer --help banner, despite
-#                the version-2.2.0 label baked into the image at pull time).
-#                Use :latest and re-pin by digest once you've verified the
-#                version you land on: https://hub.docker.com/r/linuxserver/orcaslicer/tags
-#   PrusaSlicer: mikeah/prusaslicer-novnc has no semantic version tags currently
-#                published (only :latest as of Aug 2026). Verify before pinning:
-#                https://hub.docker.com/r/mikeah/prusaslicer-novnc/tags
+# IMAGE TAG NOTES:
+#   OrcaSlicer is pinned to LinuxServer's v2.4.2-ls35 build.
+#   PrusaSlicer has date-based rather than semantic tags and is pinned to the
+#   newest published build available during the August 2026 audit.
 #   BambuStudio: sodiumhydrogen publishes NO Bambu Studio image (checked Aug 2026 —
 #                only orcaslicer-*/superslicer-*/prusaslicer-* tags exist under
 #                sodiumhydrogen/slicers-novnc). There is currently no known
@@ -35,7 +28,7 @@ services:
   # OrcaSlicer — Selkies WebRTC remote desktop, port 3000
   # -----------------------------------------------------------------------
   orcaslicer:
-    image: lscr.io/linuxserver/orcaslicer:latest  # version-X.Y.Z tags don't resolve; see notes above
+    image: lscr.io/linuxserver/orcaslicer:v2.4.2-ls35
     container_name: orcaslicer
     environment:
       PUID: "1000"
@@ -55,7 +48,7 @@ services:
   # PrusaSlicer — noVNC remote desktop, port 8080
   # -----------------------------------------------------------------------
   prusaslicer:
-    image: mikeah/prusaslicer-novnc:latest  # no semver tags published upstream; VERIFY on deploy
+    image: mikeah/prusaslicer-novnc:2024.09.13.005624
     container_name: prusaslicer
     ports:
       - "3013:8080"                # host:container (3011 taken by orcaslicer's HTTPS port)

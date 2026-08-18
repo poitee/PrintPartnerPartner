@@ -11,7 +11,8 @@ Project maintainers should add **`print-partner.manifest.yaml`** at the **root**
 1. Fork [PrintPartnerPartner](https://github.com/poitee/PrintPartnerPartner).
 2. Add `manifests/community/{slug}/manifest.yaml` and `meta.yaml` (submitter, `repo_url`, branch).
 3. Add an entry to `manifests/registry/index.yaml` with `status: proposed`.
-4. Open a **pull request** — CI validates YAML against `manifests/schema/print-partner-manifest-v1.json`.
+4. Open a **pull request** — CI reads `version` and validates against the matching
+   v1 or v2 JSON Schema.
 5. A linked **GitHub Issue** is used for discussion; use 👍 / 👎 reactions or maintainer checklist for consensus.
 6. When approved, maintainers set `status: approved` in the index.
 
@@ -44,6 +45,19 @@ selections:
 ```
 
 See `docs/kit-catalog.yaml` → `stack_presets` for reference preset ids.
+
+## Validation and embedded copies
+
+Files under `manifests/community/` and `manifests/registry/` are authoritative.
+The server copies under `web/apps/server/src/data/manifests/` are generated
+runtime assets; CI rejects drift.
+
+```bash
+python -m pip install -r manifests/requirements.txt
+python manifests/scripts/validate.py
+# After changing a canonical registry or manifest:
+python manifests/scripts/validate.py --sync-embedded
+```
 
 ## Canonical paths for community manifests
 

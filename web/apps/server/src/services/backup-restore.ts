@@ -1,9 +1,17 @@
-import { createWriteStream, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { createReadStream, promises as fs } from "node:fs";
-import { createGzip, createGunzip } from "node:zlib";
-import { pipeline } from "node:stream/promises";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { randomUUID } from "node:crypto";
+import { basename, dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { promises as fs } from "node:fs";
 import * as tar from "tar";
+import type { Stats } from "node:fs";
+import type { ReadEntry } from "tar";
+import Database from "better-sqlite3";
 import type { SqliteDatabase } from "../db/client.js";
 
 export type BackupMetadata = {
@@ -15,6 +23,219 @@ export type BackupMetadata = {
 
 const BACKUP_FORMAT_VERSION = 1;
 const BACKUP_METADATA_FILE = "backup-metadata.json";
+const BACKUP_DATABASE_FILE = "print-partner.db";
+const BACKUP_WAL_FILE = "print-partner.db-wal";
+const BACKUP_DIRECTORIES = ["repos", "sources", "exports", "thumbs", "covers"] as const;
+const BACKUP_ROOT_FILES = new Set([
+  BACKUP_METADATA_FILE,
+  BACKUP_DATABASE_FILE,
+  BACKUP_WAL_FILE,
+]);
+const SQLITE_HEADER = Buffer.from("SQLite format 3\0", "binary");
+const MAX_METADATA_BYTES = 64 * 1024;
+const DEFAULT_MAX_BACKUP_ENTRIES = 100_000;
+const DEFAULT_MAX_BACKUP_TOTAL_BYTES = 20 * 1024 * 1024 * 1024;
+const DEFAULT_MAX_BACKUP_ENTRY_BYTES = 8 * 1024 * 1024 * 1024;
+const DEFAULT_MAX_DECOMPRESSION_RATIO = 200;
+
+export type BackupValidationLimits = {
+  maxEntries?: number;
+  maxTotalBytes?: number;
+  maxEntryBytes?: number;
+  maxDecompressionRatio?: number;
+};
+
+type ResolvedBackupLimits = Required<BackupValidationLimits>;
+
+type ArchiveGuardState = {
+  entries: number;
+  totalBytes: number;
+  seen: Set<string>;
+  error: Error | null;
+};
+
+function positiveLimit(value: number | undefined, fallback: number): number {
+  return value == null || !Number.isFinite(value) || value < 0 ? fallback : value;
+}
+
+function resolveBackupLimits(limits: BackupValidationLimits = {}): ResolvedBackupLimits {
+  return {
+    maxEntries: positiveLimit(limits.maxEntries, DEFAULT_MAX_BACKUP_ENTRIES),
+    maxTotalBytes: positiveLimit(limits.maxTotalBytes, DEFAULT_MAX_BACKUP_TOTAL_BYTES),
+    maxEntryBytes: positiveLimit(limits.maxEntryBytes, DEFAULT_MAX_BACKUP_ENTRY_BYTES),
+    maxDecompressionRatio: positiveLimit(
+      limits.maxDecompressionRatio,
+      DEFAULT_MAX_DECOMPRESSION_RATIO,
+    ),
+  };
+}
+
+function normalizedArchivePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+function archiveEntryError(entry: ReadEntry, seen: Set<string>): Error | null {
+  if (entry.meta) return null;
+  const rawPath = entry.path;
+  const path = normalizedArchivePath(rawPath);
+  const parts = path.split("/");
+  if (
+    !path ||
+    rawPath.includes("\\") ||
+    rawPath.includes("\0") ||
+    rawPath.startsWith("/") ||
+    /^[A-Za-z]:/.test(rawPath) ||
+    parts.some((part) => part === "" || part === "." || part === "..")
+  ) {
+    return new Error(`Unsafe backup entry path: ${rawPath}`);
+  }
+  if (BACKUP_ROOT_FILES.has(path)) {
+    if (entry.type !== "File" && entry.type !== "OldFile") {
+      return new Error(`Backup root entry must be a regular file: ${rawPath}`);
+    }
+    if (path === BACKUP_METADATA_FILE && entry.size > MAX_METADATA_BYTES) {
+      return new Error(`Backup metadata exceeds ${MAX_METADATA_BYTES} byte limit`);
+    }
+  } else {
+    const directory = BACKUP_DIRECTORIES.find(
+      (candidate) => path === candidate || path.startsWith(`${candidate}/`),
+    );
+    if (!directory) return new Error(`Unexpected backup entry: ${rawPath}`);
+    if (
+      entry.type !== "File" &&
+      entry.type !== "OldFile" &&
+      entry.type !== "Directory"
+    ) {
+      return new Error(`Unsupported backup entry type for ${rawPath}: ${entry.type}`);
+    }
+    if (path === directory && entry.type !== "Directory") {
+      return new Error(`Backup directory root has invalid type: ${rawPath}`);
+    }
+  }
+  if (seen.has(path)) return new Error(`Duplicate backup entry: ${rawPath}`);
+  seen.add(path);
+  return null;
+}
+
+function guardArchiveEntry(
+  entry: ReadEntry,
+  state: ArchiveGuardState,
+  limits: ResolvedBackupLimits,
+): boolean {
+  if (state.error) return false;
+  state.entries += 1;
+  if (state.entries > limits.maxEntries) {
+    state.error = new Error(`Backup archive entry limit exceeded (${limits.maxEntries})`);
+    return false;
+  }
+  if (!Number.isSafeInteger(entry.size) || entry.size < 0) {
+    state.error = new Error(`Backup entry has invalid size: ${entry.path}`);
+    return false;
+  }
+  if (entry.size > limits.maxEntryBytes) {
+    state.error = new Error(`Backup entry exceeds decompressed size limit: ${entry.path}`);
+    return false;
+  }
+  state.totalBytes += entry.size;
+  if (!Number.isSafeInteger(state.totalBytes) || state.totalBytes > limits.maxTotalBytes) {
+    state.error = new Error(
+      `Backup archive decompressed byte limit exceeded (${limits.maxTotalBytes})`,
+    );
+    return false;
+  }
+  state.error = archiveEntryError(entry, state.seen);
+  return state.error === null;
+}
+
+function assertRequiredArchiveEntries(seen: Set<string>): void {
+  if (!seen.has(BACKUP_METADATA_FILE)) {
+    throw new Error(`Backup archive is missing ${BACKUP_METADATA_FILE}`);
+  }
+  if (!seen.has(BACKUP_DATABASE_FILE)) {
+    throw new Error(`Backup archive is missing ${BACKUP_DATABASE_FILE}`);
+  }
+}
+
+function readValidatedMetadata(tempDir: string): BackupMetadata {
+  const metadataContent = readFileSync(join(tempDir, BACKUP_METADATA_FILE), "utf-8");
+  const metadata = JSON.parse(metadataContent) as Partial<BackupMetadata> | null;
+  if (
+    !metadata ||
+    typeof metadata !== "object" ||
+    typeof metadata.version !== "string" ||
+    typeof metadata.createdAt !== "string" ||
+    Number.isNaN(Date.parse(metadata.createdAt)) ||
+    typeof metadata.appVersion !== "string" ||
+    !Number.isInteger(metadata.formatVersion) ||
+    (metadata.formatVersion as number) < 1
+  ) {
+    throw new Error("Invalid backup metadata: missing or invalid required fields");
+  }
+  if ((metadata.formatVersion as number) > BACKUP_FORMAT_VERSION) {
+    throw new Error(
+      `Backup format version ${metadata.formatVersion} is newer than supported ${BACKUP_FORMAT_VERSION}`,
+    );
+  }
+  if (metadata.version !== String(metadata.formatVersion)) {
+    throw new Error("Invalid backup metadata: version fields do not match");
+  }
+  const database = readFileSync(join(tempDir, BACKUP_DATABASE_FILE));
+  if (
+    database.length < SQLITE_HEADER.length ||
+    !database.subarray(0, SQLITE_HEADER.length).equals(SQLITE_HEADER)
+  ) {
+    throw new Error("Backup contains an invalid SQLite database");
+  }
+  let sqlite: Database.Database | null = null;
+  try {
+    sqlite = new Database(join(tempDir, BACKUP_DATABASE_FILE), { fileMustExist: true });
+    sqlite.pragma("query_only = ON");
+    const result = sqlite.pragma("integrity_check", { simple: true });
+    if (result !== "ok") {
+      throw new Error(`SQLite integrity_check returned: ${String(result)}`);
+    }
+  } catch (error) {
+    throw new Error(
+      `Backup SQLite integrity_check failed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  } finally {
+    sqlite?.close();
+  }
+  return metadata as BackupMetadata;
+}
+
+async function extractValidatedBackup(
+  backupPath: string,
+  tempDir: string,
+  extractDataDirectories: boolean,
+  configuredLimits: BackupValidationLimits = {},
+): Promise<BackupMetadata> {
+  const limits = resolveBackupLimits(configuredLimits);
+  const state: ArchiveGuardState = {
+    entries: 0,
+    totalBytes: 0,
+    seen: new Set(),
+    error: null,
+  };
+  await tar.x({
+    file: backupPath,
+    gzip: true,
+    strict: true,
+    cwd: tempDir,
+    maxDecompressionRatio: limits.maxDecompressionRatio,
+    filter: (_path, entry) => {
+      const readEntry = entry as ReadEntry;
+      const safe = guardArchiveEntry(readEntry, state, limits);
+      if (!safe || readEntry.meta) return false;
+      const path = normalizedArchivePath(readEntry.path);
+      return extractDataDirectories || BACKUP_ROOT_FILES.has(path);
+    },
+  });
+  if (state.error) throw state.error;
+  assertRequiredArchiveEntries(state.seen);
+  return readValidatedMetadata(tempDir);
+}
 
 /**
  * Creates an application-consistent backup of the SQLite database and critical directories.
@@ -42,120 +263,98 @@ export async function createBackup(
     formatVersion: BACKUP_FORMAT_VERSION,
   };
 
-  // Create temporary directory for backup staging
-  const tempDir = join(dataDir, ".backup-tmp");
-  mkdirSync(tempDir, { recursive: true });
+  mkdirSync(dataDir, { recursive: true });
+  const outputDir = dirname(resolve(outputPath));
+  mkdirSync(outputDir, { recursive: true });
+  const workDir = mkdtempSync(join(dataDir, ".backup-work-"));
+  const temporaryArchivePath = join(
+    outputDir,
+    `.${basename(outputPath)}.tmp-${randomUUID()}`,
+  );
 
   try {
-    // Step 1: Create backup of SQLite database
-    const backupDbPath = join(tempDir, "print-partner.db");
-    const backupDbWalPath = join(tempDir, "print-partner.db-wal");
-
-    // Use backup methods to get consistent snapshots
-    const mainDbContent = sqlite.backupFileContent();
-    writeFileSync(backupDbPath, mainDbContent);
-
-    const walContent = sqlite.backupWalFileContent();
-    if (walContent) {
-      writeFileSync(backupDbWalPath, walContent);
-    }
-
-    // Step 2: Write metadata
+    const backupDbPath = join(workDir, BACKUP_DATABASE_FILE);
+    await sqlite.backupToFile(backupDbPath);
     writeFileSync(
-      join(tempDir, BACKUP_METADATA_FILE),
+      join(workDir, BACKUP_METADATA_FILE),
       JSON.stringify(metadata, null, 2),
     );
 
-    // Step 3: Build list of files to backup
-    // Critical: database and metadata
-    const filesToBackup = [
-      { path: backupDbPath, name: "print-partner.db" },
-      { path: backupDbWalPath, name: "print-partner.db-wal" },
-      { path: join(tempDir, BACKUP_METADATA_FILE), name: BACKUP_METADATA_FILE },
-    ];
-
-    // Check what files actually exist
-    const existingFiles: Array<{ path: string; name: string }> = [];
-    for (const file of filesToBackup) {
+    const archiveEntries: string[] = [];
+    for (const directory of BACKUP_DIRECTORIES) {
+      const source = join(dataDir, directory);
       try {
-        await fs.stat(file.path);
-        existingFiles.push(file);
-      } catch {
-        // File doesn't exist; skip it
+        const stats = await fs.lstat(source);
+        if (!stats.isDirectory() || stats.isSymbolicLink()) continue;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
       }
+      archiveEntries.push(directory);
     }
 
-    if (existingFiles.length === 0) {
-      throw new Error("No data found to backup");
-    }
-
-    // Create tar archive with just the database and metadata
-    // Large directories (repos, sources) can be added later via settings UI if needed
-    const output = createWriteStream(outputPath);
-    const gzip = createGzip();
-
-    await pipeline(
-      tar.c(
-        {
-          gzip: false,
-          cwd: tempDir,
+    const snapshotRelativePath = join(
+      basename(workDir),
+      BACKUP_DATABASE_FILE,
+    ).replace(/\\/g, "/");
+    const metadataRelativePath = join(
+      basename(workDir),
+      BACKUP_METADATA_FILE,
+    ).replace(/\\/g, "/");
+    await tar.c(
+      {
+        file: temporaryArchivePath,
+        gzip: true,
+        cwd: dataDir,
+        strict: true,
+        portable: true,
+        filter: (_path, value) => {
+          const stats = value as Stats;
+          return !stats.isSymbolicLink() && (stats.isFile() || stats.isDirectory());
         },
-        existingFiles
-          .filter((f) => f.path.startsWith(tempDir))
-          .map((f) => f.name),
-      ),
-      gzip,
-      output,
+        onWriteEntry: (entry) => {
+          if (entry.path === snapshotRelativePath) entry.path = BACKUP_DATABASE_FILE;
+          else if (entry.path === metadataRelativePath) entry.path = BACKUP_METADATA_FILE;
+        },
+      },
+      [snapshotRelativePath, metadataRelativePath, ...archiveEntries],
     );
-  } finally {
-    // Clean up temporary directory
+    const archiveHandle = await fs.open(temporaryArchivePath, "r");
     try {
-      await fs.rm(tempDir, { recursive: true, force: true });
+      await archiveHandle.sync();
+    } finally {
+      await archiveHandle.close();
+    }
+    await fs.rename(temporaryArchivePath, resolve(outputPath));
+  } finally {
+    try {
+      await fs.rm(temporaryArchivePath, { force: true });
     } catch {
-      // Ignore cleanup errors
+      // Ignore cleanup errors.
+    }
+    try {
+      await fs.rm(workDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors.
     }
   }
 }
 
 /**
- * Validates a backup archive without extracting it.
- * Checks metadata and structural integrity.
+ * Validates archive entries, metadata, and SQLite integrity in an isolated
+ * temporary directory without mutating live application data.
  */
-export async function validateBackup(backupPath: string): Promise<BackupMetadata> {
-  const tempDir = join(resolve(backupPath), "..", ".validate-tmp");
-  mkdirSync(tempDir, { recursive: true });
+export async function validateBackup(
+  backupPath: string,
+  limits: BackupValidationLimits = {},
+): Promise<BackupMetadata> {
+  const absoluteBackupPath = resolve(backupPath);
+  const tempDir = mkdtempSync(join(tmpdir(), "pp-backup-validate-"));
 
   try {
-    // Extract metadata only
-    const metadataPath = join(tempDir, BACKUP_METADATA_FILE);
-
-    const gunzip = createGunzip();
-    const input = createReadStream(backupPath);
-
-    await pipeline(
-      input,
-      gunzip,
-      tar.x({
-        cwd: tempDir,
-        filter: (p: string) => p === BACKUP_METADATA_FILE,
-      }),
-    );
-
-    const metadataContent = readFileSync(metadataPath, "utf-8");
-    const metadata: BackupMetadata = JSON.parse(metadataContent);
-
-    // Validate metadata structure
-    if (!metadata.version || !metadata.createdAt || !metadata.formatVersion) {
-      throw new Error("Invalid backup metadata: missing required fields");
-    }
-
-    if (metadata.formatVersion > BACKUP_FORMAT_VERSION) {
-      throw new Error(
-        `Backup format version ${metadata.formatVersion} is newer than supported ${BACKUP_FORMAT_VERSION}`,
-      );
-    }
-
-    return metadata;
+    // Validation writes only metadata/database files. All other entries are
+    // parsed and bounded, but not extracted.
+    return await extractValidatedBackup(absoluteBackupPath, tempDir, false, limits);
   } finally {
     try {
       await fs.rm(tempDir, { recursive: true, force: true });
@@ -178,34 +377,23 @@ export async function restoreBackup(
     throw new Error("SQLite database not available; restore requires self-host mode");
   }
 
-  // Validate backup before proceeding
-  const metadata = await validateBackup(backupPath);
-
-  // Close the database to ensure exclusive access to files
-  sqlite.close();
-
-  const tempDir = join(dataDir, ".restore-tmp");
-  mkdirSync(tempDir, { recursive: true });
+  mkdirSync(dataDir, { recursive: true });
+  const tempDir = mkdtempSync(join(dataDir, ".restore-tmp-"));
+  let databaseClosed = false;
 
   try {
-    // Extract backup contents
-    const gunzip = createGunzip();
-    const input = createReadStream(backupPath);
+    // Parse, validate, and safely extract every entry before mutating live data.
+    const metadata = await extractValidatedBackup(resolve(backupPath), tempDir, true);
 
-    await pipeline(
-      input,
-      gunzip,
-      tar.x({
-        cwd: tempDir,
-      }),
-    );
+    // Close the database only after the complete archive has passed validation.
+    sqlite.close();
+    databaseClosed = true;
 
     // Backup current data (safety measure)
     const currentBackupDir = join(dataDir, ".pre-restore-backup");
     mkdirSync(currentBackupDir, { recursive: true });
 
-    const dirsToBackup = ["repos", "sources", "exports", "thumbs", "covers"];
-    for (const dir of dirsToBackup) {
+    for (const dir of BACKUP_DIRECTORIES) {
       const currentPath = join(dataDir, dir);
       const backupPath = join(currentBackupDir, dir);
       try {
@@ -224,7 +412,7 @@ export async function restoreBackup(
     }
 
     // Restore files
-    for (const dir of dirsToBackup) {
+    for (const dir of BACKUP_DIRECTORIES) {
       const restoredPath = join(tempDir, dir);
       const targetPath = join(dataDir, dir);
 
@@ -240,13 +428,17 @@ export async function restoreBackup(
     }
 
     // Restore database
-    const restoredDb = join(tempDir, "print-partner.db");
+    const restoredDb = join(tempDir, BACKUP_DATABASE_FILE);
     try {
       const dbContent = readFileSync(restoredDb);
       writeFileSync(sqlite.dbPath, dbContent);
 
-      // Also restore WAL if it exists
-      const restoredWal = join(tempDir, "print-partner.db-wal");
+      // Never retain journal state from the database being replaced.
+      await fs.rm(sqlite.dbPath + "-wal", { force: true });
+      await fs.rm(sqlite.dbPath + "-shm", { force: true });
+
+      // Restore the matching WAL when the backup includes one.
+      const restoredWal = join(tempDir, BACKUP_WAL_FILE);
       try {
         const walContent = readFileSync(restoredWal);
         writeFileSync(sqlite.dbPath + "-wal", walContent);
@@ -265,11 +457,13 @@ export async function restoreBackup(
   } catch (e) {
     const capturedError = e instanceof Error ? e : new Error(String(e));
     // Try to reconnect to the database even if restore failed
-    try {
-      sqlite.connect();
-    } catch (reconnectErr) {
-      // Reconnect failed; database state is unknown
-      console.error("[backup-restore] Failed to reconnect after restore error:", reconnectErr);
+    if (databaseClosed) {
+      try {
+        sqlite.connect();
+      } catch (reconnectErr) {
+        // Reconnect failed; database state is unknown
+        console.error("[backup-restore] Failed to reconnect after restore error:", reconnectErr);
+      }
     }
     // eslint-disable-next-line preserve-caught-error
     throw new Error(`Restore failed: ${capturedError.message}`, { cause: capturedError });

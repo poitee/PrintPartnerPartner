@@ -40,7 +40,7 @@ export default function PlateGroupCard({
   return (
     <Card className={cn("border-border shadow-sm", className)}>
       <CardHeader className="gap-1.5 pb-2 pt-3">
-        <CardTitle className="flex flex-wrap items-center gap-2 text-[13.5px] font-semibold leading-snug">
+        <CardTitle level={4} className="flex flex-wrap items-center gap-2 text-[13.5px] font-semibold leading-snug">
           <Layers className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
           <span className="min-w-0 flex-1 truncate">
             Plate {plate.index}

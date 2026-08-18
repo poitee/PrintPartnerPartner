@@ -1,6 +1,6 @@
 services:
   print-partner:
-    image: ghcr.io/poitee/print-partner:latest
+    image: ghcr.io/poitee/print-partner:${PRINT_PARTNER_VERSION:-3.1.0}
     # Fallback for building from source: docker compose up --build
     build:
       context: .
@@ -23,9 +23,11 @@ services:
       # PRINT_PARTNER_API_KEY: "change-me-to-a-long-random-secret"
       # Optional: expose Swagger UI at /api/v1/docs in production (useful for integrations and MCP tool testing)
       # OPENAPI_UI: "1"
-      # When Ollama runs on the host (not in Compose), set in Settings or here:
-      # AI_PROVIDER: ollama
-      # OLLAMA_URL: http://host.docker.internal:11434
+      # Optional server-side Ollama runtime (the former in-app advisor UI is removed).
+      # AI_ENABLED: "1"
+      # AI_PROVIDER: "ollama"
+      # AI_MODEL: "llama3.1:latest"
+      # OLLAMA_URL: "http://host.docker.internal:11434"
     volumes:
       - print-partner-data:/data
     # Entrypoint starts as root, chowns /data for named volumes, then drops to ppuser.

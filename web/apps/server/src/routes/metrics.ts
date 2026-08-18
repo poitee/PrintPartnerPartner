@@ -2,10 +2,17 @@ import type { FastifyInstance } from "fastify";
 import type { AppRepository } from "../db/repository.js";
 import { loadFleet } from "../services/printer-fleet.js";
 import type { IntegrationPort } from "../integrations/store.js";
+import {
+  extractApiKey,
+  type ApiKeyValidator,
+} from "../middleware/api-key.js";
 
-type MetricsDeps = {
+export type MetricsDeps = {
   repo: AppRepository;
   integrations?: IntegrationPort;
+  validateApiKey: ApiKeyValidator;
+  authRequired?: boolean;
+  version: string;
 };
 
 /**
@@ -26,7 +33,7 @@ type MetricsDeps = {
  */
 export async function registerMetricsRoutes(
   app: FastifyInstance,
-  deps?: MetricsDeps,
+  deps: MetricsDeps,
 ): Promise<void> {
   // In-memory HTTP metrics store
   const httpMetrics = {
@@ -60,16 +67,12 @@ export async function registerMetricsRoutes(
    * In multi-user mode, requires a valid session or API key.
    */
   app.get("/metrics", async (request, reply) => {
-    const authHeader = request.headers["authorization"];
-    const apiKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sessionUser = (request as any).sessionUser;
-    if (!sessionUser && !apiKey) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { config } = app as any;
-      if (config?.authRequired) {
-        return reply.status(401).send({ detail: "Authentication required" });
-      }
+    const apiKey = extractApiKey(request);
+    if (apiKey && !deps.validateApiKey(apiKey)) {
+      return reply.status(401).send({ detail: "Valid API key required" });
+    }
+    if (!request.sessionUser && !apiKey && deps.authRequired) {
+      return reply.status(401).send({ detail: "Authentication required" });
     }
 
     reply.header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
@@ -109,12 +112,12 @@ export async function registerMetricsRoutes(
       "",
       "# HELP app_info Application version and build info",
       "# TYPE app_info gauge",
-      `app_info{version="3.0.0",node="${process.version}"} 1`,
+      `app_info{version="${escape(deps.version)}",node="${escape(process.version)}"} 1`,
       "",
     );
 
     // ─── Print-job counters and gauges ────────────────────────────────────────
-    if (deps?.repo) {
+    if (deps.repo) {
       const repo = deps.repo;
 
       // Query print_jobs table for counter metrics (grouped by printer_id, material, status)

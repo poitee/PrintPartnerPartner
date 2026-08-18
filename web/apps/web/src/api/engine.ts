@@ -601,6 +601,16 @@ export type IncomingShare = {
   created_at: string;
 };
 
+class EngineHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "EngineHttpError";
+  }
+}
+
 async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body && !headers.has("Content-Type")) {
@@ -613,7 +623,10 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const detail = await res.json().catch(() => null) as { detail?: string } | null;
-    throw new Error(detail?.detail ?? `Engine ${path} failed: ${res.status}`);
+    throw new EngineHttpError(
+      detail?.detail ?? `Engine ${path} failed: ${res.status}`,
+      res.status,
+    );
   }
   if (res.status === 204) {
     return undefined as T;
@@ -3321,9 +3334,20 @@ export type PlanPhaseManifestResponse = {
 export async function fetchPlanPhaseManifest(
   profileId: number,
 ): Promise<PlanPhaseManifestResponse> {
-  return engineFetch<PlanPhaseManifestResponse>(
-    `/plans/${profileId}/phase-manifest`,
-  );
+  try {
+    return await engineFetch<PlanPhaseManifestResponse>(
+      `/plans/${profileId}/phase-manifest`,
+    );
+  } catch (error) {
+    if (error instanceof EngineHttpError && error.status === 404) {
+      return {
+        profile_id: profileId,
+        has_phases: false,
+        phases: [],
+      };
+    }
+    throw error;
+  }
 }
 
 export type PlanVariantDimensionsResponse = {

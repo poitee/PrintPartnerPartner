@@ -44,7 +44,7 @@
     Ships as a single Docker container — <strong>Fastify</strong> API + <strong>React</strong> SPA on port <strong>8080</strong>.
     Brand theme with <strong>light</strong>, <strong>dark</strong>, or <strong>system</strong> preference. Data stays in a volume you control.
     Attach <strong>Cursor / Grok / Claude</strong> over HTTP MCP (kit brain; confirm-to-apply — no in-app Kit Advisor).
-    Multi-tenant <strong>SaaS</strong> mode (Postgres + S3 + OAuth) is available for hosted deployments.
+    Multi-tenant <strong>SaaS</strong> mode includes S3 + OAuth; its Postgres compatibility bridge remains experimental.
   </sub>
 </p>
 
@@ -152,7 +152,10 @@ docker compose pull && docker compose up -d
 
 Open [http://localhost:8080](http://localhost:8080). Data persists in the `print-partner-data` volume, mounted at `/data` inside the container (SQLite database, synced repos, exports, and thumbnails).
 
-Images are published to **`ghcr.io/poitee/print-partner`** (`latest` plus a tag per release, e.g. `3.0.0`). To build from source instead:
+Images are published to **`ghcr.io/poitee/print-partner`** (`latest` plus a tag
+per release, e.g. `3.1.0`). Compose defaults to the audited `3.1.0` tag; set
+`PRINT_PARTNER_VERSION` to another release explicitly. To build from source
+instead:
 
 ```bash
 docker compose up --build
@@ -191,7 +194,7 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `CORS_ORIGIN` / `ALLOWED_ORIGINS` | `true` | Allowed CORS origin(s); comma-separated list for multiple (`ALLOWED_ORIGINS` takes precedence) |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload / request body limit (512 MiB) |
-| `PP_VERSION` | `3.0.0-web` (baked into release images) | Version reported by `GET /health` |
+| `PP_VERSION` | `3.1.0-web` (baked into release images) | Version reported by `GET /health` |
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped: compare against this version instead of GitHub |
@@ -236,7 +239,7 @@ Open [http://localhost:8080](http://localhost:8080).
 
 ## SaaS mode
 
-Set `DEPLOY_MODE=saas` to enable multi-tenant hosting: Postgres for app data (when `DATABASE_URL` is set), S3-compatible blob storage (when `S3_BUCKET` is set), and GitHub OAuth. A ready-to-run stack with Postgres 16 and RustFS (S3-compatible) is provided:
+Set `DEPLOY_MODE=saas` to enable the multi-tenant adapter, S3-compatible blob storage (when `S3_BUCKET` is set), and GitHub OAuth. The Postgres repository path is currently experimental because its synchronous compatibility bridge does not provide native transaction semantics; production startup requires the explicit `POSTGRES_EXPERIMENTAL=1` acknowledgement. SQLite remains the supported database. A development stack with Postgres 16 and RustFS (S3-compatible) is provided:
 
 ```bash
 docker compose -f docker-compose.saas.yml up --build

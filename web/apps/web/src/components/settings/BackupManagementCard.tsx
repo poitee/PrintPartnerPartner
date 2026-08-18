@@ -23,8 +23,8 @@ import {
 } from "../ui/select";
 
 interface Backup {
-  id: string;
-  timestamp: string;
+  name: string;
+  createdAt: string;
   size: number;
 }
 
@@ -42,8 +42,8 @@ export default function BackupManagementCard() {
     try {
       const response = await fetch("/backups");
       if (!response.ok) throw new Error("Failed to load backups");
-      const data = (await response.json()) as { backups: Backup[] };
-      setBackups(data.backups || []);
+      const data = (await response.json()) as Backup[];
+      setBackups(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -137,7 +137,7 @@ export default function BackupManagementCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Backup & Restore</CardTitle>
+        <CardTitle level={3}>Backup & Restore</CardTitle>
         <CardDescription>
           Create and manage database backups with automatic rollback protection
         </CardDescription>
@@ -178,18 +178,18 @@ export default function BackupManagementCard() {
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {backups.map((backup) => (
                 <div
-                  key={backup.id}
+                  key={backup.name}
                   className="flex items-center justify-between rounded-lg border p-3"
                 >
                   <div>
-                    <p className="text-sm font-medium">{backup.id}</p>
+                    <p className="text-sm font-medium">{backup.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {formatDate(backup.timestamp)} • {formatSize(backup.size)}
+                      {formatDate(backup.createdAt)} • {formatSize(backup.size)}
                     </p>
                   </div>
                   <div className="flex gap-2">
                     <Button
-                      onClick={() => handleDownload(backup.id)}
+                      onClick={() => handleDownload(backup.name)}
                       size="sm"
                       variant="outline"
                     >
@@ -197,7 +197,7 @@ export default function BackupManagementCard() {
                     </Button>
                     <Button
                       onClick={() => {
-                        setSelectedBackup(backup.id);
+                        setSelectedBackup(backup.name);
                         setShowRestoreDialog(true);
                       }}
                       size="sm"
@@ -206,7 +206,7 @@ export default function BackupManagementCard() {
                       Restore
                     </Button>
                     <Button
-                      onClick={() => handleDelete(backup.id)}
+                      onClick={() => handleDelete(backup.name)}
                       size="sm"
                       variant="outline"
                       className="text-red-600 hover:text-red-700"
@@ -237,8 +237,8 @@ export default function BackupManagementCard() {
                 </SelectTrigger>
                 <SelectContent>
                   {backups.map((backup) => (
-                    <SelectItem key={backup.id} value={backup.id}>
-                      {backup.id} ({formatDate(backup.timestamp)})
+                    <SelectItem key={backup.name} value={backup.name}>
+                      {backup.name} ({formatDate(backup.createdAt)})
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -381,7 +381,7 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
         {cards.map((card) => (
           <Card key={card.key} className="flex flex-col border-border shadow-sm">
             <CardHeader className="space-y-2 pb-2">
-              <CardTitle className="text-[13.5px] font-semibold leading-snug">
+              <CardTitle level={3} className="text-[13.5px] font-semibold leading-snug">
                 {card.title}
               </CardTitle>
               <CardDescription className="text-[12.5px] leading-relaxed">

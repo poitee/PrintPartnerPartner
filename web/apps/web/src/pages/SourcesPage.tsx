@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronDown, FolderGit2, MoreHorizontal, Search } from "lucide-react";
 import {
@@ -28,11 +28,6 @@ import { useDateFormat } from "../context/DateFormatContext";
 import { useJobContext } from "../context/JobContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../context/ProfileContext";
-import {
-  mapCopilotSourceTab,
-  useCopilotUiOptional,
-  type CopilotSourceTab,
-} from "../context/CopilotUiContext";
 import EmptyState from "../components/layout/EmptyState";
 import DeskNextStep from "../components/layout/DeskNextStep";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
@@ -54,6 +49,7 @@ import { kindLabel, type SourceKind } from "../components/sources/sourceLabels";
 import { UNCategorized_FILTER } from "../components/sources/sourceLabels";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import { useImportSharedBuild } from "../hooks/useImportSharedBuild";
 import {
@@ -112,14 +108,10 @@ import {
 } from "../lib/persistedSourcesUi";
 import { toastJobResult } from "../lib/jobToasts";
 import { cn } from "../lib/utils";
+import { resolveEngineState } from "../lib/workflowState";
 
-type PendingOpenSource = {
-  sourceName?: string;
-  sourceId?: number;
-  tab: CopilotSourceTab;
-  path?: string | null;
-  query?: string;
-};
+type SourceDetailTab = "docs" | "rules" | "naming";
+type SourcesLocationState = { stlSearch?: boolean };
 
 type WizardForm = {
   name: string;
@@ -168,9 +160,9 @@ function matchesFilters(
 
 export default function SourcesPage() {
   const location = useLocation();
-  const copilot = useCopilotUiOptional();
+  const navigate = useNavigate();
   const { formatDate } = useDateFormat();
-  const { health, error: healthError } = useEngineHealth();
+  const { health, error: healthError, loading: healthLoading } = useEngineHealth();
   const { busy, runJob } = useJobRunner("sync");
   const { busy: updateBusy, runJob: runUpdateJob } = useJobRunner("source-updates");
   const { activeJobs } = useJobContext();
@@ -181,13 +173,13 @@ export default function SourcesPage() {
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<WizardForm>(emptyForm([]));
   const [detailSource, setDetailSource] = useState<SourceSummary | null>(null);
-  const [detailTab, setDetailTab] = useState<CopilotSourceTab>("docs");
+  const [detailTab, setDetailTab] = useState<SourceDetailTab>("docs");
   const [highlightPath, setHighlightPath] = useState<string | null>(null);
-  const [docsQuery, setDocsQuery] = useState<string | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<SourceSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [reposImportNote, setReposImportNote] = useState<string | null>(null);
@@ -203,7 +195,6 @@ export default function SourcesPage() {
   const [viewMode, setViewMode] = useState<SourceViewMode>(persistedUi.viewMode);
   const searchSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stlSearchFocus, setStlSearchFocus] = useState(false);
-  const [stlInitialQuery, setStlInitialQuery] = useState("");
   const [stlSearchExpanded, setStlSearchExpanded] = useState(false);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
   const [syncingSourceIds, setSyncingSourceIds] = useState<number[] | "all" | null>(null);
@@ -211,121 +202,27 @@ export default function SourcesPage() {
   const selectionAnchorRef = useRef<number | null>(null);
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const importSharedBuild = useImportSharedBuild();
-  const pendingOpenRef = useRef<PendingOpenSource | null>(null);
-  const appliedIntentSeqRef = useRef(0);
-  const openMissToastAtRef = useRef(0);
-  const [pendingOpenTick, setPendingOpenTick] = useState(0);
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: healthError,
+  });
+  const engineReady = engineState === "ready";
 
-  const queueOpenSource = useCallback((pending: PendingOpenSource) => {
-    pendingOpenRef.current = pending;
-    setPendingOpenTick((n) => n + 1);
-  }, []);
-
-  // Bootstrap from navigate state (one-shot).
   useEffect(() => {
-    const state = location.state as {
-      stlSearch?: boolean;
-      stlQuery?: string;
-      openSource?: {
-        sourceName?: string;
-        sourceId?: number;
-        tab?: string;
-        path?: string | null;
-        query?: string;
-      };
-    } | null;
-    if (state?.stlSearch) {
-      setStlSearchFocus(true);
-      setStlSearchExpanded(true);
-      if (state.stlQuery) setStlInitialQuery(state.stlQuery);
-      window.history.replaceState({}, document.title);
-    }
-    if (state?.openSource) {
-      queueOpenSource({
-        sourceName: state.openSource.sourceName,
-        sourceId: state.openSource.sourceId,
-        tab: mapCopilotSourceTab(state.openSource.tab),
-        path: state.openSource.path,
-        query: state.openSource.query,
-      });
-      // Clear route state only after we queue — apply when sources are ready.
-      window.history.replaceState({}, document.title);
-    }
-  }, [location.state, queueOpenSource]);
-
-  // Same-route re-opens via intentSeq (survives late-loaded sources).
-  useEffect(() => {
-    if (!copilot || copilot.intentSeq === 0) return;
-    if (copilot.intentSeq === appliedIntentSeqRef.current) return;
-    const intent = copilot.lastIntent;
-    if (!intent) return;
-    if (intent.kind === "open_source") {
-      appliedIntentSeqRef.current = copilot.intentSeq;
-      queueOpenSource({
-        sourceName: intent.sourceName,
-        sourceId: intent.sourceId,
-        tab: mapCopilotSourceTab(intent.tab),
-        path: intent.path,
-        query: intent.query,
-      });
-    } else if (intent.kind === "focus_stl_search") {
-      appliedIntentSeqRef.current = copilot.intentSeq;
-      setStlSearchFocus(true);
-      setStlSearchExpanded(true);
-      if (intent.query) setStlInitialQuery(intent.query);
-    }
-  }, [copilot, copilot?.intentSeq, queueOpenSource]);
-
-  // Apply pending open once the source list can resolve the target.
-  useEffect(() => {
-    const pending = pendingOpenRef.current;
-    if (!pending || sources.length === 0) return;
-    const source =
-      (pending.sourceId != null
-        ? sources.find((s) => s.id === pending.sourceId)
-        : undefined) ??
-      (pending.sourceName
-        ? sources.find(
-            (s) =>
-              s.name === pending.sourceName ||
-              s.name.toLowerCase() === pending.sourceName!.toLowerCase(),
-          )
-        : undefined);
-    if (!source) {
-      const now = Date.now();
-      if (now - openMissToastAtRef.current > 4000) {
-        openMissToastAtRef.current = now;
-        toast.message(
-          pending.sourceName
-            ? `Source “${pending.sourceName}” not found yet`
-            : "Source not found yet",
-        );
-      }
-      return;
-    }
-    pendingOpenRef.current = null;
-    setDetailSource(source);
-    setDetailTab(pending.tab);
-    setHighlightPath(pending.path ?? null);
-    setDocsQuery(pending.query);
-  }, [sources, pendingOpenTick]);
-
-  // Hard timeout if the source name never resolves (clear leftover pending).
-  useEffect(() => {
-    if (pendingOpenTick === 0) return;
-    if (!pendingOpenRef.current) return;
-    const timer = window.setTimeout(() => {
-      const leftover = pendingOpenRef.current;
-      if (!leftover) return;
-      pendingOpenRef.current = null;
-      toast.message(
-        leftover.sourceName
-          ? `Source “${leftover.sourceName}” not found — check the name or add/sync it on Sources.`
-          : "Source not found — check the name or add/sync it on Sources.",
-      );
-    }, 8000);
-    return () => window.clearTimeout(timer);
-  }, [pendingOpenTick]);
+    const state = location.state as SourcesLocationState | null;
+    if (state?.stlSearch !== true) return;
+    setStlSearchExpanded(true);
+    setStlSearchFocus(true);
+    void navigate(
+      {
+        pathname: location.pathname,
+        search: location.search,
+        hash: location.hash,
+      },
+      { replace: true, state: null },
+    );
+  }, [location.hash, location.pathname, location.search, location.state, navigate]);
 
   useEffect(() => {
     savePersistedSourcesUi({
@@ -353,21 +250,22 @@ export default function SourcesPage() {
   }, [search, viewMode, categoryFilter, syncFilter, platformFilter]);
 
   const refresh = useCallback(async () => {
-    if (!health) return;
+    if (!engineReady) return;
     setLoadError(null);
-    try {
-      const [rows, cats] = await Promise.all([
-        fetchSources(),
-        fetchSourceCategories(),
-      ]);
-      setSources(rows);
-      setCategories(cats);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSourcesLoaded(true);
-    }
-  }, [health]);
+    setCategoryError(null);
+    const sourcesRequest = fetchSources()
+      .then(setSources)
+      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSourcesLoaded(true));
+    const categoriesRequest = fetchSourceCategories()
+      .then(setCategories)
+      .catch((e) =>
+        setCategoryError(
+          `Could not load source categories: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
+    await Promise.allSettled([sourcesRequest, categoriesRequest]);
+  }, [engineReady]);
 
   useEffect(() => {
     void refresh();
@@ -457,7 +355,7 @@ export default function SourcesPage() {
   const hasSyncedSources = sources.some((s) => Boolean(s.local_path));
 
   // Skeletons until the first fetch resolves; bail out if the engine is offline.
-  const sourcesLoading = !sourcesLoaded && !healthError;
+  const sourcesLoading = !sourcesLoaded;
 
   const selectedPlan = profiles.find((p) => p.id === selectedProfileId) ?? null;
   const attachedIds = useMemo(() => attachedSourceIds(review), [review]);
@@ -499,13 +397,12 @@ export default function SourcesPage() {
 
   const openDetail = (
     source: SourceSummary,
-    tab: CopilotSourceTab = "docs",
+    tab: SourceDetailTab = "docs",
     path: string | null = null,
   ) => {
     setDetailSource(source);
     setDetailTab(tab);
     setHighlightPath(path);
-    setDocsQuery(undefined);
   };
 
   const onStlHit = (hit: StlSearchHit) => {
@@ -945,6 +842,23 @@ export default function SourcesPage() {
     );
   };
 
+  if (!engineReady) {
+    return (
+      <div className="space-y-4">
+        <RouteBreadcrumbs items={[{ label: "Library" }]} />
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">
+              {engineState === "offline"
+                ? "Engine offline — start the print-partner engine to use Library."
+                : "Connecting to the engine…"}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className={detailSource != null ? "lg:pl-[min(42rem,100%)]" : undefined}>
       <RouteBreadcrumbs items={[{ label: "Library" }]} />
@@ -991,7 +905,7 @@ export default function SourcesPage() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button className="min-h-9" disabled={!health}>
+                  <Button className="min-h-9" disabled={!engineReady}>
                     Add source
                     <ChevronDown className="ml-1.5 h-3.5 w-3.5 opacity-80" aria-hidden />
                   </Button>
@@ -1024,7 +938,7 @@ export default function SourcesPage() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="min-h-9" disabled={!health}>
+                  <Button variant="ghost" className="min-h-9" disabled={!engineReady}>
                     More
                   </Button>
                 </DropdownMenuTrigger>
@@ -1068,13 +982,12 @@ export default function SourcesPage() {
           </header>
 
           <div className="flex flex-1 flex-col gap-3 overflow-auto p-3.5 sm:px-5 sm:py-3.5">
-            {(stlSearchExpanded || stlSearchFocus || stlInitialQuery) && (
+            {(stlSearchExpanded || stlSearchFocus) && (
               <GlobalStlSearch
-                engineReady={Boolean(health)}
+                engineReady={engineReady}
                 hasSyncedSources={hasSyncedSources}
                 onSelectHit={onStlHit}
                 autoFocus={stlSearchFocus}
-                initialQuery={stlInitialQuery}
               />
             )}
 
@@ -1145,9 +1058,10 @@ export default function SourcesPage() {
               hideCategoryPills
             />
 
-            {(loadError || reposImportNote || reposImportSyncNote) && (
+            {(loadError || categoryError || reposImportNote || reposImportSyncNote) && (
               <div className="space-y-1 text-sm">
                 {loadError && <p className="text-destructive">{loadError}</p>}
+                {categoryError && <p className="text-destructive">{categoryError}</p>}
                 {reposImportNote && <p className="text-muted-foreground">{reposImportNote}</p>}
                 {reposImportSyncNote && (
                   <p className="text-muted-foreground">{reposImportSyncNote}</p>
@@ -1189,6 +1103,17 @@ export default function SourcesPage() {
                   ))}
                 </div>
               )
+            ) : loadError && sources.length === 0 ? (
+              <Card className="border-destructive/40 bg-destructive/5 shadow-none">
+                <CardContent className="space-y-3 pt-6">
+                  <p className="text-sm text-destructive">
+                    Could not load Library: {loadError}
+                  </p>
+                  <Button size="sm" variant="secondary" onClick={() => void refresh()}>
+                    Retry
+                  </Button>
+                </CardContent>
+              </Card>
             ) : sources.length === 0 ? (
               <EmptyState
                 icon={FolderGit2}
@@ -1539,7 +1464,7 @@ export default function SourcesPage() {
       <SourceCategorySheet
         open={categoriesSheetOpen}
         onOpenChange={setCategoriesSheetOpen}
-        engineReady={Boolean(health)}
+        engineReady={engineReady}
         onCategoriesChanged={(cats) => {
           setCategories(cats);
         }}
@@ -1552,12 +1477,10 @@ export default function SourcesPage() {
           if (!open) {
             setDetailSource(null);
             setHighlightPath(null);
-            setDocsQuery(undefined);
           }
         }}
         initialTab={detailTab}
         highlightPath={highlightPath}
-        docsQuery={docsQuery}
         busy={busy}
         categories={categories}
         onEdit={openEditWizard}

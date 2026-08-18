@@ -3,8 +3,8 @@
  * empty or unknown-only IDs mean "use the whole fleet".
  */
 export function resolveEnabledPrinterIds(
-  fleetIds: string[],
-  enabledIds: string[] | null | undefined,
+  fleetIds: readonly string[],
+  enabledIds: readonly string[] | null | undefined,
 ): string[] {
   const ids = enabledIds ?? [];
   if (!ids.length) return [...fleetIds];

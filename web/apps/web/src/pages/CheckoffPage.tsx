@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   DndContext,
   KeyboardSensor,
@@ -89,7 +89,6 @@ import {
   type ProgressRowRef,
 } from "../lib/progressListOrder";
 import { flattenReviewParts } from "../lib/reviewParts";
-import { useCopilotUiOptional } from "../context/CopilotUiContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
@@ -97,6 +96,17 @@ import { useJobRunner } from "../hooks/useJobRunner";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { cn } from "../lib/utils";
 import { waitForSheetThumbnails } from "../lib/waitForSheetThumbnails";
+import {
+  clearAuxiliaryError,
+  currentAuxiliaryError,
+  setAuxiliaryError,
+  type AuxiliaryErrors,
+} from "../lib/auxiliaryErrors";
+import {
+  getBackgroundError,
+  resolveEngineState,
+  resolveResourceState,
+} from "../lib/workflowState";
 import PwaInstallBanner from "../components/pwa/PwaInstallBanner";
 import { useSyncComplete } from "../lib/useSyncComplete";
 
@@ -184,8 +194,14 @@ const FILTER_MODES: { mode: CheckoffFilterMode; label: string }[] = [
 
 export default function CheckoffPage() {
   const navigate = useNavigate();
-  const { health, error: engineError } = useEngineHealth();
-  const { selectedProfileId, profiles } = useProfileSelection();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
+  const {
+    selectedProfileId,
+    profiles,
+    loading: profilesLoading,
+    error: profilesError,
+    reloadProfiles,
+  } = useProfileSelection();
   const {
     review,
     loading,
@@ -199,7 +215,10 @@ export default function CheckoffPage() {
   } = usePlanWorkspace();
   const recomputeJob = useJobRunner("recompute");
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
-  const { data: buildTrackingSettings } = useBuildTrackingSettingsQuery(Boolean(health?.ok));
+  const {
+    data: buildTrackingSettings,
+    error: buildTrackingError,
+  } = useBuildTrackingSettingsQuery(Boolean(health?.ok));
   const assemblyTrackingEnabled = buildTrackingSettings?.assembly_tracking ?? false;
 
   // Re-fetch when the service worker flushes its offline checkoff queue
@@ -252,10 +271,47 @@ export default function CheckoffPage() {
   const [awaitingLinks, setAwaitingLinks] = useState<PrinterCheckoffLink[]>([]);
   const [phaseManifest, setPhaseManifest] = useState<PlanPhaseManifestResponse | null>(null);
   const [queueSuggestions, setQueueSuggestions] = useState<PrinterQueueSuggestion[]>([]);
-  const location = useLocation();
-  const copilot = useCopilotUiOptional();
-  const [pendingPreviewId, setPendingPreviewId] = useState<number | null>(null);
-  const appliedIntentSeqRef = useRef(0);
+  const [auxiliaryErrors, setAuxiliaryErrors] = useState<AuxiliaryErrors>({});
+  const auxiliaryError = currentAuxiliaryError(auxiliaryErrors);
+  const reportAuxiliaryError = useCallback((key: string, message: string) => {
+    setAuxiliaryErrors((errors) => setAuxiliaryError(errors, key, message));
+  }, []);
+  const markAuxiliarySuccess = useCallback((key: string) => {
+    setAuxiliaryErrors((errors) => clearAuxiliaryError(errors, key));
+  }, []);
+  const refreshUnattributedPrints = useCallback(async () => {
+    try {
+      setUnattributedPrints(await fetchUnattributedPrints());
+      markAuxiliarySuccess("printer-activity");
+    } catch (e) {
+      reportAuxiliaryError(
+        "printer-activity",
+        `Could not refresh printer activity: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+  }, [markAuxiliarySuccess, reportAuxiliaryError]);
+
+  useEffect(() => {
+    if (buildTrackingError) {
+      reportAuxiliaryError(
+        "assembly-tracking",
+        `Could not load assembly tracking settings: ${
+          buildTrackingError instanceof Error
+            ? buildTrackingError.message
+            : String(buildTrackingError)
+        }`,
+      );
+    } else if (buildTrackingSettings) {
+      markAuxiliarySuccess("assembly-tracking");
+    }
+  }, [
+    buildTrackingError,
+    buildTrackingSettings,
+    markAuxiliarySuccess,
+    reportAuxiliaryError,
+  ]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -267,47 +323,26 @@ export default function CheckoffPage() {
     const ids = liveStrip.idleIntegrationIds;
     if (!ids.length) {
       setQueueSuggestions([]);
+      markAuxiliarySuccess("printer-suggestions");
       return;
     }
     void fetchPrinterQueueSuggestions({ idle_integration_ids: ids })
-      .then(({ suggestions }) => setQueueSuggestions(suggestions))
-      .catch(() => setQueueSuggestions([]));
-  }, [liveStrip.idleIntegrationIds]);
-
-  useEffect(() => {
-    const state = location.state as { previewPartId?: number } | null;
-    const partId = state?.previewPartId;
-    if (partId == null) return;
-    setPendingPreviewId(partId);
-  }, [location.state]);
-
-  useEffect(() => {
-    if (!copilot || copilot.intentSeq === 0) return;
-    if (copilot.intentSeq === appliedIntentSeqRef.current) return;
-    const intent = copilot.lastIntent;
-    if (intent?.kind !== "highlight_part" || intent.surface !== "checkoff") return;
-    if (selectedProfileId != null && intent.planId !== selectedProfileId) return;
-    appliedIntentSeqRef.current = copilot.intentSeq;
-    setPendingPreviewId(intent.partId);
-  }, [copilot, copilot?.intentSeq, selectedProfileId]);
-
-  useEffect(() => {
-    if (pendingPreviewId == null || !review) return;
-    const part = flattenReviewParts(review.part_groups).find((p) => p.id === pendingPreviewId);
-    if (!part) return;
-    setPreviewPart(part);
-    setPendingPreviewId(null);
-    window.history.replaceState({}, document.title);
-  }, [pendingPreviewId, review]);
-
-  useEffect(() => {
-    if (pendingPreviewId == null) return;
-    const timer = window.setTimeout(() => {
-      setPendingPreviewId(null);
-      window.history.replaceState({}, document.title);
-    }, 8000);
-    return () => window.clearTimeout(timer);
-  }, [pendingPreviewId]);
+      .then(({ suggestions }) => {
+        setQueueSuggestions(suggestions);
+        markAuxiliarySuccess("printer-suggestions");
+      })
+      .catch((e) => {
+        setQueueSuggestions([]);
+        reportAuxiliaryError(
+          "printer-suggestions",
+          `Could not refresh printer suggestions: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+  }, [
+    liveStrip.idleIntegrationIds,
+    markAuxiliarySuccess,
+    reportAuxiliaryError,
+  ]);
 
   useEffect(() => {
     const onBeforePrint = () => setPrintPrep(true);
@@ -343,10 +378,8 @@ export default function CheckoffPage() {
 
   useEffect(() => {
     if (!health?.ok) return;
-    void fetchUnattributedPrints()
-      .then(setUnattributedPrints)
-      .catch(() => {/* ignore */});
-  }, [health?.ok]);
+    void refreshUnattributedPrints();
+  }, [health?.ok, refreshUnattributedPrints]);
 
   // Load phase manifest whenever the selected plan changes
   useEffect(() => {
@@ -355,9 +388,22 @@ export default function CheckoffPage() {
       return;
     }
     void fetchPlanPhaseManifest(selectedProfileId)
-      .then((manifest) => setPhaseManifest(manifest))
-      .catch(() => setPhaseManifest(null));
-  }, [health?.ok, selectedProfileId]);
+      .then((manifest) => {
+        setPhaseManifest(manifest);
+        markAuxiliarySuccess("phase-progress");
+      })
+      .catch((e) => {
+        reportAuxiliaryError(
+          "phase-progress",
+          `Could not load phase progress: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+  }, [
+    health?.ok,
+    selectedProfileId,
+    markAuxiliarySuccess,
+    reportAuxiliaryError,
+  ]);
 
   const refreshWatchingLinks = useCallback(() => {
     if (!health?.ok) return;
@@ -365,15 +411,36 @@ export default function CheckoffPage() {
       state: "watching",
       profile_id: selectedProfileId ?? undefined,
     })
-      .then((res) => setWatchingLinks(res.links ?? []))
-      .catch(() => {/* ignore */});
+      .then((res) => {
+        setWatchingLinks(res.links ?? []);
+        markAuxiliarySuccess("watching-links");
+      })
+      .catch((e) =>
+        reportAuxiliaryError(
+          "watching-links",
+          `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
     void fetchPrinterCheckoffLinks({
       state: "awaiting_verify",
       profile_id: selectedProfileId ?? undefined,
     })
-      .then((res) => setAwaitingLinks(res.links ?? []))
-      .catch(() => {/* ignore */});
-  }, [health?.ok, selectedProfileId]);
+      .then((res) => {
+        setAwaitingLinks(res.links ?? []);
+        markAuxiliarySuccess("awaiting-links");
+      })
+      .catch((e) =>
+        reportAuxiliaryError(
+          "awaiting-links",
+          `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
+  }, [
+    health?.ok,
+    selectedProfileId,
+    markAuxiliarySuccess,
+    reportAuxiliaryError,
+  ]);
 
   useEffect(() => {
     refreshWatchingLinks();
@@ -381,6 +448,7 @@ export default function CheckoffPage() {
 
   useEffect(() => {
     setVerifyQueue({ awaitingCount: 0, watchingCount: 0, primaryHostName: null });
+    setAuxiliaryErrors({});
   }, [selectedProfileId]);
 
   useEffect(() => {
@@ -612,8 +680,27 @@ export default function CheckoffPage() {
   }, [phaseManifest, includedParts]);
   const totals = useMemo(() => checkoffUnitTotals(includedParts), [includedParts]);
   const printedLine = useMemo(() => formatPrintedUnitsLine(includedParts), [includedParts]);
-  const loadError = workspaceError;
   const toggleBusy = busyPartId != null;
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const profilesState = resolveResourceState({
+    loading: profilesLoading,
+    error: profilesError,
+    hasData: profiles.length > 0,
+  });
+  const reviewState = resolveResourceState({
+    loading,
+    error: workspaceError,
+    hasData: review != null,
+  });
+  const profilesBackgroundError = getBackgroundError(
+    profilesError,
+    profiles.length > 0,
+  );
+  const reviewBackgroundError = getBackgroundError(workspaceError, review != null);
 
   const suppressIntegrationIds = useMemo(
     () => new Set(liveStrip.activeIntegrationIds),
@@ -652,7 +739,11 @@ export default function CheckoffPage() {
   const onToggleUnit = useCallback(
     (part: ReviewPart, unitIndex: number) => {
       const next = !part.print_units[unitIndex];
-      void toggleUnit(part.id, unitIndex, next);
+      void toggleUnit(part.id, unitIndex, next).catch((e) => {
+        toast.error("Could not update print progress", {
+          description: e instanceof Error ? e.message : String(e),
+        });
+      });
     },
     [toggleUnit],
   );
@@ -660,7 +751,11 @@ export default function CheckoffPage() {
   const onToggleAssembled = useCallback(
     (part: ReviewPart, unitIndex: number) => {
       const next = !(part.assembled_units?.[unitIndex] ?? false);
-      void toggleAssembled(part.id, unitIndex, next);
+      void toggleAssembled(part.id, unitIndex, next).catch((e) => {
+        toast.error("Could not update assembly progress", {
+          description: e instanceof Error ? e.message : String(e),
+        });
+      });
     },
     [toggleAssembled],
   );
@@ -668,7 +763,13 @@ export default function CheckoffPage() {
   const onIncrement = useCallback(
     (part: ReviewPart) => {
       const idx = nextUnitToComplete(part.print_units);
-      if (idx >= 0) void toggleUnit(part.id, idx, true);
+      if (idx >= 0) {
+        void toggleUnit(part.id, idx, true).catch((e) => {
+          toast.error("Could not update print progress", {
+            description: e instanceof Error ? e.message : String(e),
+          });
+        });
+      }
     },
     [toggleUnit],
   );
@@ -676,7 +777,13 @@ export default function CheckoffPage() {
   const onDecrement = useCallback(
     (part: ReviewPart) => {
       const idx = lastCompletedUnit(part.print_units);
-      if (idx >= 0) void toggleUnit(part.id, idx, false);
+      if (idx >= 0) {
+        void toggleUnit(part.id, idx, false).catch((e) => {
+          toast.error("Could not update print progress", {
+            description: e instanceof Error ? e.message : String(e),
+          });
+        });
+      }
     },
     [toggleUnit],
   );
@@ -723,6 +830,101 @@ export default function CheckoffPage() {
       />
     );
   };
+
+  if (
+    engineState !== "ready" ||
+    profilesState !== "ready" ||
+    selectedProfileId == null ||
+    reviewState !== "ready"
+  ) {
+    let stateContent;
+    if (engineState !== "ready") {
+      stateContent = (
+        <Card className="no-print">
+          <CardContent className="pt-6">
+            <p
+              className="text-sm text-muted-foreground"
+              role={engineState === "loading" ? "status" : undefined}
+              aria-live={engineState === "loading" ? "polite" : undefined}
+              aria-atomic={engineState === "loading" ? "true" : undefined}
+            >
+              {engineState === "offline"
+                ? "Engine offline — start the print-partner engine to use Progress."
+                : "Connecting to the engine…"}
+            </p>
+          </CardContent>
+        </Card>
+      );
+    } else if (profilesState === "error") {
+      stateContent = (
+        <Card className="no-print border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive" role="alert">
+              Could not load plans: {profilesError}
+            </p>
+            <Button size="sm" variant="secondary" onClick={() => void reloadProfiles()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    } else if (profilesState === "loading" || reviewState === "loading") {
+      stateContent = (
+        <Card className="no-print border-border shadow-sm">
+          <CardContent
+            className="flex items-center gap-2 pt-6"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <Spinner className="size-4" aria-hidden="true" />
+            <p className="text-sm text-muted-foreground">Loading progress…</p>
+          </CardContent>
+        </Card>
+      );
+    } else if (reviewState === "error") {
+      stateContent = (
+        <Card className="no-print border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive" role="alert">
+              Could not load Progress: {workspaceError}
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (selectedProfileId != null) void reload(selectedProfileId);
+              }}
+            >
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    } else {
+      stateContent = <div className="no-print">{renderEmpty()}</div>;
+    }
+
+    return (
+      <div className="space-y-4">
+        <RouteBreadcrumbs
+          items={[
+            { label: "Plan", to: planRoute(selectedProfileId) },
+            { label: "Parts", to: partsRoute(selectedProfileId) },
+            { label: "Progress" },
+          ]}
+        />
+        <PageHeader
+          icon={CheckSquare}
+          accent
+          eyebrow={progressEyebrow}
+          title="Progress"
+          description={progressDescription}
+        />
+        {stateContent}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -809,11 +1011,7 @@ export default function CheckoffPage() {
                 }
                 refreshWatchingLinks();
               }}
-              onUnattributedUpdate={() => {
-                void fetchUnattributedPrints()
-                  .then(setUnattributedPrints)
-                  .catch(() => {/* ignore */});
-              }}
+              onUnattributedUpdate={() => void refreshUnattributedPrints()}
             />
           </Suspense>
           {unattributedPrints.length > 0 && (
@@ -823,16 +1021,10 @@ export default function CheckoffPage() {
                   key={print.id}
                   print={print}
                   onClaimed={() => {
-                    void fetchUnattributedPrints()
-                      .then(setUnattributedPrints)
-                      .catch(() => {/* ignore */});
+                    void refreshUnattributedPrints();
                     setVerifyRefreshKey((k) => k + 1);
                   }}
-                  onDismissed={() => {
-                    void fetchUnattributedPrints()
-                      .then(setUnattributedPrints)
-                      .catch(() => {/* ignore */});
-                  }}
+                  onDismissed={() => void refreshUnattributedPrints()}
                 />
               ))}
             </div>
@@ -866,6 +1058,7 @@ export default function CheckoffPage() {
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
           <input
             type="search"
+            aria-label="Search progress parts"
             className="checkoff-search w-full min-w-0 rounded-md border border-input bg-background px-3 py-2.5 text-base sm:flex-1 sm:py-1.5 sm:text-sm"
             placeholder="Search parts…"
             value={search}
@@ -912,51 +1105,38 @@ export default function CheckoffPage() {
         </div>
 
         <div>
-          {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+          {profilesBackgroundError && (
+            <p className="text-sm text-destructive" role="alert">
+              Could not refresh plans: {profilesBackgroundError}
+            </p>
+          )}
+          {reviewBackgroundError && (
+            <p className="text-sm text-destructive" role="alert">
+              Could not refresh Progress: {reviewBackgroundError}
+            </p>
+          )}
+          {auxiliaryError && (
+            <p className="text-sm text-destructive" role="alert">
+              {auxiliaryError}
+            </p>
+          )}
         </div>
       </div>
 
-      {!health ? (
-        <Card className="no-print">
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">
-              {engineError
-                ? "Engine offline — start the print-partner engine to use Progress."
-                : "Connecting to the engine…"}
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          {/*
-            GRE-223 / GRE-226: Add bag/sort stays visible whenever a plan is selected —
-            including while review is still loading. Not gated on health strip or filter.
-          */}
-          {selectedProfileId != null ? (
-            <div className="no-print">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="mb-2 h-9 px-3"
-                disabled={toggleBusy}
-                onClick={onAddBagBar}
-              >
-                Add bag/sort
-              </Button>
-            </div>
-          ) : null}
+      <div className="no-print">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="mb-2 h-9 px-3"
+          disabled={toggleBusy}
+          onClick={onAddBagBar}
+        >
+          Add bag/sort
+        </Button>
+      </div>
 
-          {loading && !review ? (
-            <Card className="no-print">
-              <CardContent className="flex items-center gap-2 pt-6">
-                <Spinner className="size-4" />
-                <p className="text-sm text-muted-foreground">Loading progress…</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-          {phaseProgress ? (
+      {phaseProgress ? (
             <PhaseProgressView
               phases={phaseProgress}
               busyPartId={busyPartId}
@@ -1023,12 +1203,16 @@ export default function CheckoffPage() {
                           if (selectedProfileId == null) return;
                           void claimUnattributedPrint(printId, selectedProfileId)
                             .then(() => {
-                              void fetchUnattributedPrints()
-                                .then(setUnattributedPrints)
-                                .catch(() => {});
+                              markAuxiliarySuccess("claim-printer-activity");
+                              void refreshUnattributedPrints();
                               refreshWatchingLinks();
                             })
-                            .catch(() => {});
+                            .catch((e) =>
+                              reportAuxiliaryError(
+                                "claim-printer-activity",
+                                `Could not claim printer activity: ${e instanceof Error ? e.message : String(e)}`,
+                              ),
+                            );
                         }}
                       />
                     );
@@ -1054,7 +1238,7 @@ export default function CheckoffPage() {
               )}
             >
               <header className="sheet-header">
-                <h1 className="sheet-title">{planName}</h1>
+                <h2 className="sheet-title">{planName}</h2>
                 <p className="sheet-subtitle">
                   {filtered.length} part{filtered.length === 1 ? "" : "s"} · {printedLine}
                 </p>
@@ -1062,13 +1246,13 @@ export default function CheckoffPage() {
 
               {grouped.map((repo) => (
                 <section key={repo.repoLayer} className="sheet-repo">
-                  <h2 className="sheet-repo-title">
+                  <h3 className="sheet-repo-title">
                     {repo.repoLabel}
                     <span className="sheet-repo-count">{repo.partCount}</span>
-                  </h2>
+                  </h3>
                   {repo.folders.map((group) => (
                     <div key={group.folder} className="sheet-folder">
-                      <h3 className="sheet-folder-title">{group.folder}</h3>
+                      <h4 className="sheet-folder-title">{group.folder}</h4>
                       <div className="sheet-table-wrap">
                         <table className="sheet-table">
                           <thead>
@@ -1100,10 +1284,6 @@ export default function CheckoffPage() {
               ))}
             </article>
           ) : null}
-            </>
-          )}
-        </>
-      )}
 
       {review && (
         <div className="no-print flex flex-col gap-2 sm:flex-row sm:flex-wrap">

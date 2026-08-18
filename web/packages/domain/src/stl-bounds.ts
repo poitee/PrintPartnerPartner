@@ -53,10 +53,14 @@ function parseAsciiStlBounds(text: string): StlBounds | null {
   let match: RegExpExecArray | null;
   let count = 0;
   while ((match = vertexRe.exec(text)) !== null) {
-    updateBounds(bounds, Number(match[1]), Number(match[2]), Number(match[3]));
+    const x = Number(match[1]);
+    const y = Number(match[2]);
+    const z = Number(match[3]);
+    if (![x, y, z].every(Number.isFinite)) return null;
+    updateBounds(bounds, x, y, z);
     count += 1;
   }
-  if (count === 0) return null;
+  if (count === 0 || count % 3 !== 0) return null;
   return finalizeBounds(bounds);
 }
 
@@ -73,6 +77,7 @@ function parseBinaryStlBounds(buf: Buffer): StlBounds | null {
       const x = buf.readFloatLE(offset);
       const y = buf.readFloatLE(offset + 4);
       const z = buf.readFloatLE(offset + 8);
+      if (![x, y, z].every(Number.isFinite)) return null;
       updateBounds(bounds, x, y, z);
       offset += 12;
     }

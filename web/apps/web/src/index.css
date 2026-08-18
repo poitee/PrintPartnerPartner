@@ -300,6 +300,45 @@
     padding-left: 0.25rem;
     padding-right: 0.25rem;
   }
+
+  /*
+   * Keep the skip target in the tab order without relying on utility
+   * interactions that can leave the element clipped after focus.
+   */
+  .skip-link {
+    position: fixed;
+    top: 0.75rem;
+    left: 0.75rem;
+    z-index: 100;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .skip-link:focus,
+  .skip-link:focus-visible {
+    width: auto;
+    height: auto;
+    padding: 0.5rem 0.75rem;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+    white-space: normal;
+    color: var(--foreground);
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    box-shadow: var(--shadow-lg);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

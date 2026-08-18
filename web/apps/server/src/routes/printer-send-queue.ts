@@ -101,7 +101,7 @@ export async function registerPrinterSendQueueRoutes(
 
       try {
         const parsed = await parsePrinterUploadMultipart(request, {
-          exportsDir: deps.jobs.getExportsDir(),
+          exportsDir: deps.jobs.getExportsDir(request.tenantId),
           allowQueueFields: true,
         });
         if (!parsed.ok) {
@@ -202,7 +202,7 @@ export async function registerPrinterSendQueueRoutes(
       if (!id) return sendProblem(reply, 400, "Bad Request", "id is required");
       const result = await dispatchPrinterSendQueueItem(
         deps.repo,
-        deps.jobs.getExportsDir(),
+        deps.jobs.getExportsDir(request.tenantId),
         id,
         {
           startJob: makeStartJob(request.tenantId ?? "default"),
@@ -232,10 +232,14 @@ export async function registerPrinterSendQueueRoutes(
     "/printer-send-queue/drain",
     { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
     async (request) => {
-      const results = await drainPrinterSendQueue(deps.repo, deps.jobs.getExportsDir(), {
-        startJob: makeStartJob(request.tenantId ?? "default"),
-        getStatus,
-      });
+      const results = await drainPrinterSendQueue(
+        deps.repo,
+        deps.jobs.getExportsDir(request.tenantId),
+        {
+          startJob: makeStartJob(request.tenantId ?? "default"),
+          getStatus,
+        },
+      );
       return { results };
     },
   );

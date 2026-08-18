@@ -129,7 +129,7 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
       if (kind === "github" || kind === "git") {
         try {
           if (deps.jobs) {
-            void deps.jobs.start("sync", { project_ids: [newSource.id] }, "default");
+            void deps.jobs.start("sync", { project_ids: [newSource.id] }, request.tenantId);
           }
         } catch { /* best effort */ }
       }

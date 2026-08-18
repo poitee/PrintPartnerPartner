@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   ClipboardCheck,
   FolderGit2,
@@ -13,6 +13,7 @@ import { useProfileSelection } from "../context/ProfileContext";
 import { useSourcesQuery } from "../queries/sources";
 import { buildRoute, helpRoute, sourcesRoute } from "../lib/routes";
 import { useEngineHealth } from "../hooks/useEngineHealth";
+import { resolveEngineState } from "../lib/workflowState";
 
 const STEPS = [
   {
@@ -44,25 +45,47 @@ const STEPS = [
 ] as const;
 
 export default function WelcomePage() {
-  const { health } = useEngineHealth();
+  const navigate = useNavigate();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const { profiles } = useProfileSelection();
   const { data: sources = [] } = useSourcesQuery(Boolean(health?.ok));
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
 
   const doneSources = sources.length > 0;
   const donePlan = profiles.length > 0;
 
+  if (engineState !== "ready") {
+    return (
+      <div className="mx-auto max-w-lg space-y-4 py-8">
+        <h1 className="sr-only">Welcome to Print Partner</h1>
+        <EmptyState
+          icon={Hammer}
+          title={engineState === "offline" ? "Engine offline" : "Connecting to the engine…"}
+          description={
+            engineState === "offline"
+              ? "Start the print-partner engine to continue setup."
+              : "Setup will appear when the engine is ready."
+          }
+        />
+      </div>
+    );
+  }
+
   if (doneSources && donePlan) {
     return (
       <div className="mx-auto max-w-lg space-y-4 py-8">
+        <h1 className="sr-only">Welcome to Print Partner</h1>
         <EmptyState
           icon={Hammer}
           title="You're set up"
           description="Continue on Plan to pick files and update your kit."
           action={{
             label: "Open Plan",
-            onClick: () => {
-              window.location.href = buildRoute(profiles[0]?.id ?? null);
-            },
+            onClick: () => navigate(buildRoute(profiles[0]?.id ?? null)),
           }}
         />
       </div>

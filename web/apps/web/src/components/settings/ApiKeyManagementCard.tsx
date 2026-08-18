@@ -121,7 +121,7 @@ export default function ApiKeyManagementCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>API Keys</CardTitle>
+        <CardTitle level={3}>API Keys</CardTitle>
         <CardDescription>
           Generate and manage API keys for automation and integrations
         </CardDescription>

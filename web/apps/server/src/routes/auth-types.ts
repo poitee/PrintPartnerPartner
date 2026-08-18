@@ -19,6 +19,16 @@ export type PublicUser = {
   is_admin: boolean;
 };
 
+export function isSyntheticAnonymousSession(
+  user: SessionUser | null | undefined,
+): boolean {
+  if (!user || user.provider !== "anonymous") return false;
+  return (
+    user.user_id === "local" ||
+    (user.user_id === "anonymous" && user.tenant_id === "anonymous")
+  );
+}
+
 export function toPublicUser(user: SessionUser): PublicUser {
   return {
     user_id: user.user_id,

@@ -1,10 +1,24 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Fastify from "fastify";
 import { buildApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
+import {
+  enqueuePrinterSend,
+  loadPrinterSendQueue,
+} from "../services/printer-send-queue-store.js";
+import { tenantExportDirectory } from "../lib/secure-path.js";
+import { registerExportRoutes } from "./exports.js";
 
 /**
  * GET /exports/* serves the files export jobs produce. Auto-slice writes a
@@ -43,9 +57,120 @@ const PNG = Buffer.from(
 );
 
 describe("GET /exports/*", () => {
+  it("migrates legacy self-host exports and queued artifact paths without overwriting", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-exports-legacy-migration-"));
+    process.env.PRINT_PARTNER_DATA_DIR = dir;
+    delete process.env.PRINT_PARTNER_API_KEY;
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const legacyRoot = join(dir, "exports");
+    const legacyArtifact = join(legacyRoot, "printer-uploads", "queued", "plate.gcode");
+    const collidingArtifact = join(
+      legacyRoot,
+      "printer-uploads",
+      "colliding",
+      "plate.gcode",
+    );
+    const tenantRoot = join(legacyRoot, "tenant-default");
+    const targetArtifact = join(tenantRoot, "printer-uploads", "queued", "plate.gcode");
+    const collidingTarget = join(
+      tenantRoot,
+      "printer-uploads",
+      "colliding",
+      "plate.gcode",
+    );
+    mkdirSync(join(legacyRoot, "printer-uploads", "queued"), { recursive: true });
+    mkdirSync(join(legacyRoot, "printer-uploads", "colliding"), { recursive: true });
+    mkdirSync(join(tenantRoot, "printer-uploads", "colliding"), { recursive: true });
+    mkdirSync(join(legacyRoot, "tenant-other"), { recursive: true });
+    writeFileSync(legacyArtifact, "G28\n");
+    writeFileSync(collidingArtifact, "legacy queue artifact");
+    writeFileSync(collidingTarget, "current queue artifact");
+    writeFileSync(join(legacyRoot, "collision.txt"), "legacy");
+    writeFileSync(join(tenantRoot, "collision.txt"), "current");
+    writeFileSync(join(legacyRoot, "tenant-other", "secret.txt"), "other");
+    enqueuePrinterSend(ports.repository, {
+      filename: "plate.gcode",
+      artifact_path: legacyArtifact,
+      printer_id: "printer-1",
+      start: false,
+    });
+    enqueuePrinterSend(ports.repository, {
+      filename: "plate.gcode",
+      artifact_path: collidingArtifact,
+      printer_id: "printer-1",
+      start: false,
+    });
+
+    const app = await buildApp(loadConfig(), ports);
+    cleanup.push(() => {
+      void app.close();
+      void ports.db.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    expect(readFileSync(targetArtifact, "utf8")).toBe("G28\n");
+    expect(existsSync(legacyArtifact)).toBe(false);
+    expect(loadPrinterSendQueue(ports.repository)[0]?.artifact_path).toBe(targetArtifact);
+    expect(loadPrinterSendQueue(ports.repository)[1]?.artifact_path).toBe(collidingArtifact);
+    expect(readFileSync(collidingArtifact, "utf8")).toBe("legacy queue artifact");
+    expect(readFileSync(collidingTarget, "utf8")).toBe("current queue artifact");
+    expect(readFileSync(join(tenantRoot, "collision.txt"), "utf8")).toBe("current");
+    expect(readFileSync(join(legacyRoot, "collision.txt"), "utf8")).toBe("legacy");
+    expect(readFileSync(join(legacyRoot, "tenant-other", "secret.txt"), "utf8")).toBe("other");
+  });
+
+  it("serves same-named artifacts only from the authenticated tenant directory", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-exports-tenant-route-"));
+    const app = Fastify();
+    app.decorateRequest("tenantId", "default");
+    app.addHook("onRequest", async (request) => {
+      request.tenantId = String(request.headers["x-test-tenant"] ?? "default");
+    });
+    await registerExportRoutes(app, { dataDir: dir });
+    cleanup.push(() => {
+      void app.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+    const tenantA = join(
+      tenantExportDirectory(join(dir, "exports"), "tenant-a"),
+      "same",
+    );
+    const tenantB = join(
+      tenantExportDirectory(join(dir, "exports"), "tenant-b"),
+      "same",
+    );
+    mkdirSync(tenantA, { recursive: true });
+    mkdirSync(tenantB, { recursive: true });
+    writeFileSync(join(tenantA, "plate.gcode"), "TENANT-A\n");
+    writeFileSync(join(tenantB, "plate.gcode"), "TENANT-B\n");
+
+    const a = await app.inject({
+      method: "GET",
+      url: "/exports/same/plate.gcode",
+      headers: { "x-test-tenant": "tenant-a" },
+    });
+    const b = await app.inject({
+      method: "GET",
+      url: "/exports/same/plate.gcode",
+      headers: { "x-test-tenant": "tenant-b" },
+    });
+    const crossTenant = await app.inject({
+      method: "GET",
+      url: "/exports/tenant-tenant-a/same/plate.gcode",
+      headers: { "x-test-tenant": "tenant-b" },
+    });
+
+    expect(a.statusCode).toBe(200);
+    expect(a.body).toBe("TENANT-A\n");
+    expect(b.statusCode).toBe(200);
+    expect(b.body).toBe("TENANT-B\n");
+    expect(crossTenant.statusCode).toBe(404);
+  });
+
   it("serves an auto-slice plate thumbnail inline as image/png", async () => {
     const { app, dir } = await makeApp();
-    const thumbDir = join(dir, "exports", "my_plan", "gcode", "thumbnails");
+    const thumbDir = join(dir, "exports", "tenant-default", "my_plan", "gcode", "thumbnails");
     mkdirSync(thumbDir, { recursive: true });
     writeFileSync(join(thumbDir, "plate_01.png"), PNG);
 
@@ -62,7 +187,7 @@ describe("GET /exports/*", () => {
 
   it("still serves gcode as a downloadable attachment", async () => {
     const { app, dir } = await makeApp();
-    const gcodeDir = join(dir, "exports", "my_plan", "gcode");
+    const gcodeDir = join(dir, "exports", "tenant-default", "my_plan", "gcode");
     mkdirSync(gcodeDir, { recursive: true });
     writeFileSync(join(gcodeDir, "my_plan_voron_plate_01.gcode"), "G28\n");
 

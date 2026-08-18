@@ -21,12 +21,16 @@ export type ServerConfig = {
   host: string;
   port: number;
   dataDir: string;
+  /** Trust proxy forwarding headers. Disables unauthenticated loopback bypasses. */
+  trustProxy: boolean;
   /** Shared slicer exchange volume root (host path). Empty disables managed open. */
   exchangeDir: string;
   version: string;
   corsOrigin: string | boolean | string[];
   staticDir: string | null;
   databaseUrl: string | null;
+  /** Explicit opt-in for the sync-bridge Postgres backend, which is not production-ready. */
+  postgresExperimental: boolean;
   /** When true, require user login (self-host or saas). Default off in self-host. */
   multiUser: boolean;
   discordClientId: string | null;
@@ -148,6 +152,15 @@ export function validateProductionConfig(config: ServerConfig): void {
   if (config.deployMode === "saas" && config.authRequired && !config.sessionSecret && !config.saasBasicAuth) {
     throw new Error("SESSION_SECRET or SAAS_BASIC_AUTH is required when SaaS auth is enabled");
   }
+  if (
+    config.deployMode === "saas" &&
+    config.databaseUrl &&
+    !config.postgresExperimental
+  ) {
+    throw new Error(
+      "Postgres support is experimental; set POSTGRES_EXPERIMENTAL=1 to acknowledge the sync-bridge limitations",
+    );
+  }
 }
 
 function parseCorsOrigin(raw: string | undefined): string | boolean | string[] {
@@ -266,11 +279,13 @@ export function loadConfig(): ServerConfig {
     host,
     port,
     dataDir,
+    trustProxy: process.env.TRUST_PROXY === "1",
     exchangeDir: (process.env.PP_EXCHANGE_DIR ?? "").trim() || "/exchange",
-    version: process.env.PP_VERSION ?? "3.0.0-web",
+    version: process.env.PP_VERSION ?? "3.1.0-web",
     corsOrigin: parseCorsOrigin(process.env.ALLOWED_ORIGINS ?? process.env.CORS_ORIGIN),
     staticDir: process.env.STATIC_DIR ?? null,
     databaseUrl: process.env.DATABASE_URL ?? null,
+    postgresExperimental: process.env.POSTGRES_EXPERIMENTAL === "1",
     multiUser,
     discordClientId,
     discordClientSecret,

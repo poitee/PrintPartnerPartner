@@ -75,7 +75,7 @@ export default function PlatePreviewPanel({ profileId, engineReady }: Props) {
       <CardHeader className="gap-2 pb-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            <CardTitle className="flex items-center gap-2 text-[13.5px] font-semibold leading-snug">
+            <CardTitle level={3} className="flex items-center gap-2 text-[13.5px] font-semibold leading-snug">
               <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
               Plates
               {data ? (

@@ -40,12 +40,6 @@ type Props = {
   expandedExtra?: ReactNode;
   /** Resolve mesh color from the selected STL path (role filament defaults). */
   meshColorForPath?: (relativePath: string) => string | undefined;
-  /** Force expand (copilot deep-link). */
-  forceExpanded?: boolean;
-  /** STL tree filter from copilot. */
-  stlFilter?: string | null;
-  /** Bump when copilot re-applies filter/focus. */
-  stlFilterFocusSeq?: number;
   /** Assign this source to a category (Plan compose). */
   onAssignCategory?: (category: string | null) => void;
 };
@@ -95,9 +89,6 @@ export default function SourceFilePickerCard({
   onRemove,
   expandedExtra,
   meshColorForPath,
-  forceExpanded = false,
-  stlFilter = null,
-  stlFilterFocusSeq = 0,
   onAssignCategory,
 }: Props) {
   const { formatDate } = useDateFormat();
@@ -220,10 +211,6 @@ export default function SourceFilePickerCard({
   }, [expanded]);
 
   useEffect(() => {
-    if (forceExpanded) setExpanded(true);
-  }, [forceExpanded, stlFilterFocusSeq]);
-
-  useEffect(() => {
     try {
       sessionStorage.setItem(expandedKey, expanded ? "1" : "0");
     } catch {
@@ -291,7 +278,7 @@ export default function SourceFilePickerCard({
             <Badge variant={layerType} className="h-5 px-1.5 text-[10px]">
               {layerType}
             </Badge>
-            <span className="truncate text-[13px] font-semibold">{sourceName}</span>
+            <h2 className="truncate text-[13px] font-semibold">{sourceName}</h2>
             {source ? (
               <span className="truncate text-[11px] text-muted-foreground">
                 {source.category?.trim() || "Uncategorised"}
@@ -441,8 +428,6 @@ export default function SourceFilePickerCard({
                 selectedFilePath={selectedFilePath}
                 onFileSelect={setSelectedFilePath}
                 onRulesChange={onPendingRulesChange}
-                initialFilter={stlFilter}
-                filterFocusSeq={stlFilterFocusSeq}
                 enableFileCategoryDrag={Boolean(onAssignCategory)}
                 onSelectionStats={(selected, total, duplicates) => {
                   setSelectedCount(selected);
@@ -453,7 +438,7 @@ export default function SourceFilePickerCard({
             )}
             <aside className="relative rounded-md border border-border bg-muted/20 p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <h4 className="text-xs font-semibold text-muted-foreground">STL preview</h4>
+                <h3 className="text-xs font-semibold text-muted-foreground">STL preview</h3>
                 {selectedFilePath && (
                   <Button
                     type="button"
@@ -477,11 +462,9 @@ export default function SourceFilePickerCard({
                   filename={previewFilename}
                   meshColor={previewMeshColor}
                   className="min-h-[220px]"
+                  instructions="sr-only"
                 />
               </Suspense>
-              <p className="mt-2 text-xs text-muted-foreground">
-                Click a file row to preview. Drag to rotate.
-              </p>
             </aside>
           </div>
         </div>

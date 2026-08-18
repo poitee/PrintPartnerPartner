@@ -8,7 +8,7 @@
 # Waitress (not Flask's built-in werkzeug server) so health checks and
 # overlapping slice requests do not trip connection resets under Node's
 # undici keep-alive pool during long blocking CLI runs.
-FROM lscr.io/linuxserver/orcaslicer:latest
+FROM lscr.io/linuxserver/orcaslicer:v2.4.2-ls35
 
 RUN /lsiopy/bin/pip3 install --no-cache-dir flask==3.1.3 waitress==3.0.2
 

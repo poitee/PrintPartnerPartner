@@ -1,21 +1,33 @@
-import { defineConfig, type ProxyOptions } from "vite";
+import type { ProxyOptions } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import type { IncomingMessage } from "node:http";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const API_TARGET = process.env.VITE_DEV_API_TARGET ?? "http://127.0.0.1:18765";
+const SOURCE_DIR = fileURLToPath(new URL("./src", import.meta.url));
 
 /** Backend route prefixes proxied to the Fastify server during `npm run dev`. */
 const API_PREFIXES = [
   "api/v1",
+  "api",
+  "admin",
+  "assistant",
+  "backups",
+  "exports",
   "health",
+  "mcp",
+  "metrics",
   "plans",
+  "profile-library",
   "sources",
   "jobs",
   "parts",
   "printers",
   "printer-presets",
+  "slicer-profile-options",
   "slicer-instances",
   "slicer-handoff",
   "settings",
@@ -84,12 +96,12 @@ const proxy: Record<string, ProxyOptions> = Object.fromEntries(
 
 export default defineConfig({
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
   },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(SOURCE_DIR),
     },
   },
   server: {
@@ -101,5 +113,8 @@ export default defineConfig({
   build: {
     target: "es2022",
     outDir: "dist",
+    // Three.js is lazy-loaded and compresses to ~132 kB, but its single module
+    // is just over Vite's 500 kB raw warning threshold.
+    chunkSizeWarningLimit: 550,
   },
 });

@@ -45,6 +45,7 @@ import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useStlAutoSync } from "../context/StlAutoSyncContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
+import { resolveEngineState } from "../lib/workflowState";
 
 function hintRoute(hint: string | null | undefined, profileId: number | null) {
   if (hint === "sources") return libraryRoute();
@@ -57,7 +58,7 @@ function hintRoute(hint: string | null | undefined, profileId: number | null) {
  * Heavy export actions live on `/export`; Progress owns checkoff.
  */
 export default function PartsPage() {
-  const { health, error: engineError } = useEngineHealth();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const { selectedProfileId, profiles } = useProfileSelection();
   const {
     review,
@@ -73,6 +74,12 @@ export default function PartsPage() {
   const syncJob = useJobRunner("sync");
   const sheetRef = useRef<ReviewPartsSheetHandle>(null);
   const [folderRules, setFolderRules] = useState<StlNamingFolderRule[]>([]);
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const engineReady = engineState === "ready";
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
 
@@ -226,11 +233,11 @@ export default function PartsPage() {
 
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
 
-      {!health ? (
+      {engineState !== "ready" ? (
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
-              {engineError
+              {engineState === "offline"
                 ? "Engine offline — start the print-partner engine to review this plan."
                 : "Connecting to the engine…"}
             </p>
@@ -258,7 +265,7 @@ export default function PartsPage() {
 
           {(mergeConflicts.length > 0 || blockers.length > 0 || warnings.length > 0) && (
             <section className="section-card space-y-3">
-              <h3 className="text-sm font-semibold">Issues</h3>
+              <h2 className="text-sm font-semibold">Issues</h2>
               {mergeConflicts.length > 0 && (
                 <div
                   className="flex gap-2 rounded-md border border-warning bg-warning/15 px-3 py-2.5 text-sm"
@@ -360,7 +367,7 @@ export default function PartsPage() {
           )}
 
           <section className="section-card">
-            <h3 className="mb-2 text-sm font-semibold">Sources</h3>
+            <h2 className="mb-2 text-sm font-semibold">Sources</h2>
             <ul className="space-y-2 text-sm">
               {review.layers.map((layer) => (
                 <li key={layer.id} className="flex flex-wrap items-center gap-2">
@@ -389,7 +396,7 @@ export default function PartsPage() {
             ref={sheetRef}
             review={review}
             planName={planName}
-            disabled={!health || loading}
+            disabled={!engineReady || loading}
             folderRules={folderRules}
           />
 

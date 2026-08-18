@@ -75,7 +75,6 @@ import { usePlanActions } from "../context/PlanActionsContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
-import { useCopilotUiOptional } from "../context/CopilotUiContext";
 import { useAutoRecompute } from "../hooks/useAutoRecompute";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
@@ -83,23 +82,14 @@ import { layersEqual } from "../lib/planDataStable";
 import { meshColorForStlPath } from "../lib/rolePreviewColor";
 import { checkoffUnitTotals } from "../lib/checkoffProgress";
 import { canArchivePlan } from "../lib/planPickerGroups";
+import {
+  getBackgroundError,
+  resolveEngineState,
+  resolveResourceState,
+} from "../lib/workflowState";
 
 type BuildLocationState = {
   kitImport?: KitImportJobResult;
-  focusKit?: {
-    groupId?: string;
-    stlFilter?: string;
-    sourceName?: string;
-    sourceId?: number;
-  };
-};
-
-type KitFocusState = {
-  groupId?: string;
-  stlFilter?: string;
-  sourceName?: string;
-  sourceId?: number;
-  seq: number;
 };
 
 export default function BuildPage() {
@@ -108,8 +98,14 @@ export default function BuildPage() {
 
 function BuildPageContent() {
   const location = useLocation();
-  const { health } = useEngineHealth();
-  const { selectedProfileId, reloadProfiles, profiles } = useProfileSelection();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
+  const {
+    selectedProfileId,
+    reloadProfiles,
+    profiles,
+    loading: profilesLoading,
+    error: profilesError,
+  } = useProfileSelection();
   const {
     openCreatePlan,
     openRenamePlan,
@@ -119,14 +115,13 @@ function BuildPageContent() {
   } = usePlanActions();
   const { invalidate: bumpPlanRevision, review, invalidate: reloadReview } = usePlanWorkspace();
   const { busy, runJob } = useJobRunner("recompute");
-  const copilot = useCopilotUiOptional();
   const pendingConflictCheckRef = useRef(false);
-  const appliedIntentSeqRef = useRef(0);
   const previousSelectedProfileIdRef = useRef<number | null | undefined>(undefined);
 
   const [layers, setLayers] = useState<ProfileLayer[]>([]);
   const [sources, setSources] = useState<SourceSummary[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [addonSourceId, setAddonSourceId] = useState("");
   const [pendingBaseSourceId, setPendingBaseSourceId] = useState("");
   const [kitImportSetup, setKitImportSetup] = useState<KitImportJobResult | null>(null);
@@ -136,8 +131,15 @@ function BuildPageContent() {
   const [autoRecomputeEnabled, setAutoRecomputeEnabled] = useState(true);
   const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
   const [namingProfile, setNamingProfile] = useState<StlNamingProfile>(DEFAULT_STL_NAMING_PROFILE);
-  const [kitFocus, setKitFocus] = useState<KitFocusState | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [profileDataLoading, setProfileDataLoading] = useState(false);
+  const [loadedProfileId, setLoadedProfileId] = useState<number | null>(null);
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const engineReady = engineState === "ready";
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
   const buildStale = selectedProfile?.build_stale ?? false;
@@ -167,10 +169,18 @@ function BuildPageContent() {
     if (!health?.ok) return;
     void fetchAutoRecomputeSettings()
       .then((s) => setAutoRecomputeEnabled(s.enabled))
-      .catch(() => {});
+      .catch((e) =>
+        toast.error("Could not load auto-recompute settings", {
+          description: e instanceof Error ? e.message : String(e),
+        }),
+      );
     void fetchStlNaming()
       .then(setNamingProfile)
-      .catch(() => {});
+      .catch((e) =>
+        toast.error("Could not load STL naming settings", {
+          description: e instanceof Error ? e.message : String(e),
+        }),
+      );
   }, [health?.ok]);
 
   const resolvePreviewMeshColor = useCallback(
@@ -195,17 +205,6 @@ function BuildPageContent() {
       window.history.replaceState({}, document.title);
       return;
     }
-    if (state?.focusKit) {
-      setKitFocus({
-        groupId: state.focusKit.groupId,
-        stlFilter: state.focusKit.stlFilter,
-        sourceName: state.focusKit.sourceName,
-        sourceId: state.focusKit.sourceId,
-        seq: Date.now(),
-      });
-      window.history.replaceState({}, document.title);
-      return;
-    }
     // Fall back to the sessionStorage stash in case location.state was dropped
     // by an intervening navigation (e.g. ?profile= URL sync).
     if (selectedProfileId != null) {
@@ -214,45 +213,31 @@ function BuildPageContent() {
     }
   }, [location.state, selectedProfileId]);
 
-  // Same-route re-opens via intentSeq (survives late-loaded layers).
-  useEffect(() => {
-    if (!copilot || copilot.intentSeq === 0) return;
-    if (copilot.intentSeq === appliedIntentSeqRef.current) return;
-    const intent = copilot.lastIntent;
-    if (!intent || intent.kind !== "focus_kit_option") return;
-    appliedIntentSeqRef.current = copilot.intentSeq;
-    setKitFocus({
-      groupId: intent.groupId,
-      stlFilter: intent.stlFilter,
-      sourceName: intent.sourceName,
-      sourceId: intent.sourceId,
-      seq: copilot.intentSeq,
-    });
-  }, [copilot, copilot?.intentSeq]);
-
-  useEffect(() => {
-    if (!kitFocus) return;
-    const bits = [
-      kitFocus.groupId ? `option “${kitFocus.groupId}”` : null,
-      kitFocus.stlFilter ? `STL filter “${kitFocus.stlFilter}”` : null,
-    ].filter(Boolean);
-    if (bits.length) toast.message(`Build · ${bits.join(" · ")}`);
-  }, [kitFocus?.seq]); // eslint-disable-line react-hooks/exhaustive-deps -- toast once per focus seq
-
   const loadProfileData = useCallback(async (profileId: number) => {
     setLoadError(null);
+    setCategoryError(null);
+    setProfileDataLoading(true);
+    const categoriesRequest = fetchSourceCategories()
+      .then(setCategories)
+      .catch((e) =>
+        setCategoryError(
+          `Could not load source categories: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
     try {
-      const [layerRows, sourceRows, categoryRows] = await Promise.all([
+      const [layerRows, sourceRows] = await Promise.all([
         fetchPlanLayers(profileId),
         fetchSources(),
-        fetchSourceCategories().catch(() => [] as string[]),
       ]);
       setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
       setSources(sourceRows);
-      setCategories(categoryRows);
+      setLoadedProfileId(profileId);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProfileDataLoading(false);
     }
+    await categoriesRequest;
   }, []);
 
   const assignSourceCategory = useCallback(
@@ -283,41 +268,59 @@ function BuildPageContent() {
     previousSelectedProfileIdRef.current = selectedProfileId;
 
     if (selectedProfileId == null) {
+      setProfileDataLoading(false);
+      setLoadedProfileId(null);
       setLayers([]);
       setAddonSourceId("");
       setPendingBaseSourceId("");
-      setKitFocus(null);
       setRoleFilaments([]);
       return;
     }
-    // Reset kit/layer UI only when the profile id actually changes (not on first mount),
-    // so nav/intent kitFocus set earlier in the same commit is preserved.
+    // Reset kit/layer UI only when the profile id actually changes (not on first mount).
     if (profileChanged) {
+      setLoadedProfileId(null);
       setLayers([]);
       setAddonSourceId("");
       setPendingBaseSourceId("");
-      setKitFocus(null);
       setRoleFilaments([]);
       setLoadError(null);
     }
 
     let cancelled = false;
+    setProfileDataLoading(true);
     void (async () => {
+      setLoadError(null);
+      setCategoryError(null);
+      const categoriesRequest = fetchSourceCategories()
+        .then((rows) => {
+          if (!cancelled) setCategories(rows);
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            setCategoryError(
+              `Could not load source categories: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            );
+          }
+        });
       try {
-        const [layerRows, sourceRows, categoryRows] = await Promise.all([
+        const [layerRows, sourceRows] = await Promise.all([
           fetchPlanLayers(selectedProfileId),
           fetchSources(),
-          fetchSourceCategories().catch(() => [] as string[]),
         ]);
         if (cancelled) return;
         setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
         setSources(sourceRows);
-        setCategories(categoryRows);
+        setLoadedProfileId(selectedProfileId);
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : String(e));
         }
+      } finally {
+        if (!cancelled) setProfileDataLoading(false);
       }
+      await categoriesRequest;
     })();
     return () => {
       cancelled = true;
@@ -465,6 +468,28 @@ function BuildPageContent() {
     sourceCount: sourceCardLayers.length,
     partCount,
   });
+  const profilesState = resolveResourceState({
+    loading: profilesLoading,
+    error: profilesError,
+    hasData: profiles.length > 0,
+  });
+  const hasProfileData = loadedProfileId === selectedProfileId;
+  const profileDataState = resolveResourceState({
+    loading: profileDataLoading,
+    error: loadError,
+    hasData: hasProfileData,
+  });
+  const profilesBackgroundError = getBackgroundError(
+    profilesError,
+    profiles.length > 0,
+  );
+  const profileDataBackgroundError = getBackgroundError(loadError, hasProfileData);
+  const workspaceReady =
+    engineReady &&
+    profilesState === "ready" &&
+    profiles.length > 0 &&
+    selectedProfileId != null &&
+    profileDataState === "ready";
 
   const onUpdateBuild = async () => {
     if (selectedProfileId == null) return;
@@ -546,12 +571,12 @@ function BuildPageContent() {
         accent
         title="Plan"
         description={headerSubtitle}
-        actions={
+        actions={workspaceReady ? (
           <PageHeaderActions>
             <Button
               className="min-h-10 w-full sm:w-auto"
               onClick={() => void onUpdateBuild()}
-              disabled={selectedProfileId == null || busy || !health}
+              disabled={selectedProfileId == null || busy || !engineReady}
               loading={busy}
             >
               {busy ? "Rebuilding…" : "Rebuild plan"}
@@ -562,7 +587,7 @@ function BuildPageContent() {
                   variant="ghost"
                   size="icon"
                   className="min-h-10 w-10"
-                  disabled={selectedProfileId == null || !health}
+                  disabled={selectedProfileId == null || !engineReady}
                   aria-label="Plan actions"
                 >
                   <MoreHorizontal className="h-4 w-4" />
@@ -602,12 +627,24 @@ function BuildPageContent() {
               </DropdownMenuContent>
             </DropdownMenu>
           </PageHeaderActions>
-        }
+        ) : undefined}
       />
 
       <DeskNextStep>{planNextStep}</DeskNextStep>
 
-      {selectedProfileId != null && (
+      {(profilesBackgroundError || profileDataBackgroundError || categoryError) && (
+        <div className="space-y-1 text-sm text-destructive" role="alert">
+          {profilesBackgroundError && (
+            <p>Could not refresh plans: {profilesBackgroundError}</p>
+          )}
+          {profileDataBackgroundError && (
+            <p>Could not refresh plan: {profileDataBackgroundError}</p>
+          )}
+          {categoryError && <p>{categoryError}</p>}
+        </div>
+      )}
+
+      {workspaceReady && selectedProfileId != null && (
         <PlanSpecialRequestField
           profileId={selectedProfileId}
           value={selectedProfile?.special_request}
@@ -615,7 +652,7 @@ function BuildPageContent() {
         />
       )}
 
-      {selectedProfileId != null && (
+      {workspaceReady && selectedProfileId != null && (
         <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
           Export STLs and Share live on{" "}
           <Link
@@ -628,16 +665,45 @@ function BuildPageContent() {
         </p>
       )}
 
-      <StaleBuildBanner stale={buildStale} busy={busy} onUpdate={() => void onUpdateBuild()} />
+      {workspaceReady && (
+        <StaleBuildBanner stale={buildStale} busy={busy} onUpdate={() => void onUpdateBuild()} />
+      )}
 
-      {!buildStale && mergeConflicts.length > 0 && (
+      {workspaceReady && !buildStale && mergeConflicts.length > 0 && (
         <MergeConflictBanner
           conflictCount={mergeConflicts.length}
           groupedByFilename={mergeConflictGroups}
         />
       )}
 
-      {!health ? null : profiles.length === 0 ? (
+      {engineState !== "ready" ? (
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">
+              {engineState === "offline"
+                ? "Engine offline — start the print-partner engine to edit a plan."
+                : "Connecting to the engine…"}
+            </p>
+          </CardContent>
+        </Card>
+      ) : profilesState === "error" ? (
+        <Card className="border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive">
+              Could not load plans: {profilesError}
+            </p>
+            <Button size="sm" variant="secondary" onClick={() => void reloadProfiles()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      ) : profilesState === "loading" ? (
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Loading plans…</p>
+          </CardContent>
+        </Card>
+      ) : profiles.length === 0 ? (
         <EmptyState
           icon={Hammer}
           title="No plan yet"
@@ -653,9 +719,31 @@ function BuildPageContent() {
           title="Select a plan"
           description="Choose a plan in the sidebar plan picker (or the mobile plan switcher in the header)."
         />
+      ) : profileDataState === "loading" ? (
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Loading plan…</p>
+          </CardContent>
+        </Card>
+      ) : profileDataState === "error" ? (
+        <Card className="border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive">
+              Could not load plan: {loadError}
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void loadProfileData(selectedProfileId)}
+            >
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       ) : null}
 
-      {kitImportSetup &&
+      {workspaceReady &&
+        kitImportSetup &&
         ((kitImportSetup.unmatched_sources?.length ?? 0) > 0 ||
           (kitImportSetup.warnings?.length ?? 0) > 0) && (
           <ShareImportSetupPanel
@@ -669,14 +757,12 @@ function BuildPageContent() {
           />
         )}
 
-      {loadError && <p className="text-sm text-destructive">{loadError}</p>}
-
-      {selectedProfileId != null && (
+      {workspaceReady && selectedProfileId != null && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <PlanRolesCard
               profileId={selectedProfileId}
-              disabled={!health || busy}
+              disabled={!engineReady || busy}
               refreshKey={filamentRefreshKey}
               roleFilaments={roleFilaments}
               onRolesChange={setRoleFilaments}
@@ -695,7 +781,7 @@ function BuildPageContent() {
                   profileId={selectedProfileId}
                   layers={layers}
                   onLayersChange={setLayers}
-                  disabled={!health || busy}
+                  disabled={!engineReady || busy}
                 />
                 <Button
                   variant="ghost"
@@ -739,7 +825,7 @@ function BuildPageContent() {
                   <Combobox
                     value={pendingBaseSourceId || null}
                     onValueChange={setPendingBaseSourceId}
-                    disabled={!health || selectedProfileId == null}
+                    disabled={!engineReady || selectedProfileId == null}
                     placeholder="Choose base source…"
                     searchPlaceholder="Search sources…"
                     emptyText="No sources match."
@@ -748,7 +834,7 @@ function BuildPageContent() {
                   <Button
                     size="sm"
                     onClick={() => void onSetBaseSource()}
-                    disabled={!pendingBaseSourceId || selectedProfileId == null || !health}
+                    disabled={!pendingBaseSourceId || selectedProfileId == null || !engineReady}
                   >
                     Set base source
                   </Button>
@@ -763,16 +849,7 @@ function BuildPageContent() {
                   void assignSourceCategory(sourceId, category)
                 }
               />
-              {sourceCardLayers.map((row, index) => {
-                const focusMatchesSource =
-                  kitFocus != null &&
-                  ((kitFocus.sourceId != null && kitFocus.sourceId === row.sourceId) ||
-                    (kitFocus.sourceName != null &&
-                      kitFocus.sourceName.toLowerCase() === row.sourceName.toLowerCase()) ||
-                    (kitFocus.sourceId == null &&
-                      kitFocus.sourceName == null &&
-                      (Boolean(kitFocus.groupId) || Boolean(kitFocus.stlFilter)) &&
-                      row.layerType === "base"));
+              {sourceCardLayers.map((row) => {
                 return (
                   <SourceFilePickerCard
                     key={row.key}
@@ -781,11 +858,7 @@ function BuildPageContent() {
                     layerType={row.layerType}
                     source={sourceById.get(row.sourceId) ?? null}
                     allSources={sources}
-                    disabled={!health || busy}
-                    defaultExpanded={index === 0 && Boolean(kitFocus)}
-                    forceExpanded={focusMatchesSource}
-                    stlFilter={focusMatchesSource ? kitFocus?.stlFilter ?? null : null}
-                    stlFilterFocusSeq={focusMatchesSource ? kitFocus?.seq ?? 0 : 0}
+                    disabled={!engineReady || busy}
                     onChangeSource={(projectId) => void onChangeLayerProject(row.layer, projectId)}
                     onAssignCategory={(category) =>
                       void assignSourceCategory(row.sourceId, category)
@@ -801,10 +874,8 @@ function BuildPageContent() {
                           profileId={selectedProfileId}
                           baseSourceName={row.sourceName}
                           buildStale={buildStale}
-                          disabled={!health || busy}
+                          disabled={!engineReady || busy}
                           compact
-                          focusGroupId={kitFocus?.groupId ?? null}
-                          focusSeq={kitFocus?.seq ?? 0}
                         />
                       ) : undefined
                     }
@@ -820,7 +891,7 @@ function BuildPageContent() {
                   value={addonSourceId || null}
                   onValueChange={setAddonSourceId}
                   disabled={
-                    !health ||
+                    !engineReady ||
                     selectedProfileId == null ||
                     needsBaseSource ||
                     addonSourceOptions.length === 0
@@ -862,10 +933,14 @@ function BuildPageContent() {
           if (!open) {
             void fetchSourceCategories()
               .then(setCategories)
-              .catch(() => {});
+              .catch((e) =>
+                toast.error("Could not refresh source categories", {
+                  description: e instanceof Error ? e.message : String(e),
+                }),
+              );
           }
         }}
-        engineReady={Boolean(health)}
+        engineReady={engineReady}
       />
     </div>
   );

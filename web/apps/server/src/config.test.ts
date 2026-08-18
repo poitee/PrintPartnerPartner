@@ -1,13 +1,56 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "./config.js";
+import { loadConfig, validateProductionConfig } from "./config.js";
 
 describe("loadConfig", () => {
+  it("enables proxy trust only when explicitly configured", () => {
+    const previous = process.env.TRUST_PROXY;
+    delete process.env.TRUST_PROXY;
+    expect(loadConfig().trustProxy).toBe(false);
+
+    process.env.TRUST_PROXY = "1";
+    expect(loadConfig().trustProxy).toBe(true);
+
+    if (previous === undefined) delete process.env.TRUST_PROXY;
+    else process.env.TRUST_PROXY = previous;
+  });
+
   it("defaults to self-host deploy mode", () => {
     const prev = process.env.DEPLOY_MODE;
     delete process.env.DEPLOY_MODE;
     const config = loadConfig();
     expect(config.deployMode).toBe("self-host");
     if (prev !== undefined) process.env.DEPLOY_MODE = prev;
+  });
+
+  it("fails closed for production Postgres unless the experimental gate is explicit", () => {
+    const previous = {
+      NODE_ENV: process.env.NODE_ENV,
+      DEPLOY_MODE: process.env.DEPLOY_MODE,
+      DATABASE_URL: process.env.DATABASE_URL,
+      POSTGRES_EXPERIMENTAL: process.env.POSTGRES_EXPERIMENTAL,
+      MULTI_USER: process.env.MULTI_USER,
+      SAAS_ALLOW_ANONYMOUS: process.env.SAAS_ALLOW_ANONYMOUS,
+    };
+    process.env.NODE_ENV = "production";
+    process.env.DEPLOY_MODE = "saas";
+    process.env.DATABASE_URL = "postgresql://printpartner:printpartner@postgres/printpartner";
+    process.env.MULTI_USER = "0";
+    process.env.SAAS_ALLOW_ANONYMOUS = "1";
+    delete process.env.POSTGRES_EXPERIMENTAL;
+
+    const blocked = loadConfig();
+    expect(blocked.postgresExperimental).toBe(false);
+    expect(() => validateProductionConfig(blocked)).toThrow(/Postgres.*experimental/i);
+
+    process.env.POSTGRES_EXPERIMENTAL = "1";
+    const optedIn = loadConfig();
+    expect(optedIn.postgresExperimental).toBe(true);
+    expect(() => validateProductionConfig(optedIn)).not.toThrow();
+
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
 
   it("keeps AI disabled unless AI_ENABLED=1 with credentials", () => {

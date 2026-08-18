@@ -7,10 +7,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { useLocation } from "react-router-dom";
 import type { PlanReview, ReviewPart, RoleFilamentRow, SpoolmanSpoolRow, StlNamingFolderRule } from "../../api/engine";
 import { fetchRoleFilaments, fetchSpoolmanSpools } from "../../api/engine";
-import { useCopilotUiOptional } from "../../context/CopilotUiContext";
 import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
 import { useSpoolmanEnabled } from "../../hooks/useSpoolmanEnabled";
 import { groupCheckoffParts } from "../../lib/checkoffGroups";
@@ -324,10 +322,6 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
   const [printPrep, setPrintPrep] = useState(false);
   const sheetArticleRef = useRef<HTMLElement>(null);
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
-  const location = useLocation();
-  const copilot = useCopilotUiOptional();
-  const [pendingPreviewId, setPendingPreviewId] = useState<number | null>(null);
-  const appliedIntentSeqRef = useRef(0);
 
   useImperativeHandle(
     ref,
@@ -356,43 +350,6 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
       window.removeEventListener("afterprint", onAfterPrint);
     };
   }, []);
-
-  // Bootstrap from navigate state — keep pending until the part exists.
-  useEffect(() => {
-    const state = location.state as { previewPartId?: number } | null;
-    const partId = state?.previewPartId;
-    if (partId == null) return;
-    setPendingPreviewId(partId);
-  }, [location.state]);
-
-  useEffect(() => {
-    if (!copilot || copilot.intentSeq === 0) return;
-    if (copilot.intentSeq === appliedIntentSeqRef.current) return;
-    const intent = copilot.lastIntent;
-    if (intent?.kind !== "highlight_part") return;
-    if (intent.surface !== "review" && intent.surface !== "checkoff") return;
-    if (intent.planId !== review.profile_id) return;
-    appliedIntentSeqRef.current = copilot.intentSeq;
-    setPendingPreviewId(intent.partId);
-  }, [copilot, copilot?.intentSeq, review.profile_id]);
-
-  useEffect(() => {
-    if (pendingPreviewId == null) return;
-    const part = flattenReviewParts(review.part_groups).find((p) => p.id === pendingPreviewId);
-    if (!part) return;
-    setPreviewPart(part);
-    setPendingPreviewId(null);
-    window.history.replaceState({}, document.title);
-  }, [pendingPreviewId, review]);
-
-  useEffect(() => {
-    if (pendingPreviewId == null) return;
-    const timer = window.setTimeout(() => {
-      setPendingPreviewId(null);
-      window.history.replaceState({}, document.title);
-    }, 8000);
-    return () => window.clearTimeout(timer);
-  }, [pendingPreviewId]);
 
   useEffect(() => {
     savePersistedReviewPartsUi(ui);
@@ -694,6 +651,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
 
         <input
           type="search"
+          aria-label="Search review parts"
           className="checkoff-search w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm"
           placeholder="Search parts…"
           value={ui.search}

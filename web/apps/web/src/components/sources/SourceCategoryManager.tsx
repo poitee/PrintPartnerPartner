@@ -201,7 +201,7 @@ export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
   return (
     <Card className="shadow-none">
       <CardHeader>
-        <CardTitle className="text-base">Source categories</CardTitle>
+        <CardTitle level={3} className="text-base">Source categories</CardTitle>
         <CardDescription>
           Organize your library. Drag to reorder (flat list — nesting is not
           supported). Plans still use base vs addon layers separately.

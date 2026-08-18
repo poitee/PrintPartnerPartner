@@ -10,7 +10,14 @@ permissions:
   packages: write
 
 jobs:
+  quality:
+    uses: ./.github/workflows/web-ci.yml
+
+  manifests:
+    uses: ./.github/workflows/validate-manifests.yml
+
   release:
+    needs: [quality, manifests]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

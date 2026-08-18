@@ -49,8 +49,6 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   initialTab?: DetailTab;
   highlightPath?: string | null;
-  /** Optional keyword filter for Synced docs / Source notes lists (from copilot ui_open_docs). */
-  docsQuery?: string | null;
   busy?: boolean;
   categories?: string[];
   onEdit: (source: SourceSummary) => void;
@@ -71,7 +69,6 @@ export default function SourceDetailSheet({
   onOpenChange,
   initialTab = "docs",
   highlightPath = null,
-  docsQuery = null,
   busy = false,
   categories = [],
   onEdit,
@@ -253,22 +250,7 @@ export default function SourceDetailSheet({
 
   if (!source) return null;
 
-  const queryNorm = (docsQuery ?? "").trim().toLowerCase();
-  const filteredDocs = queryNorm
-    ? docs.filter(
-        (d) =>
-          d.title.toLowerCase().includes(queryNorm) ||
-          d.path.toLowerCase().includes(queryNorm),
-      )
-    : docs;
-  const filteredNotes = queryNorm
-    ? notes.filter(
-        (n) =>
-          n.title.toLowerCase().includes(queryNorm) ||
-          n.body_markdown.toLowerCase().includes(queryNorm),
-      )
-    : notes;
-  const activeNote = filteredNotes.find((n) => n.id === activeNoteId) ?? null;
+  const activeNote = notes.find((note) => note.id === activeNoteId) ?? null;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
@@ -372,15 +354,12 @@ export default function SourceDetailSheet({
             >
               <TabsList className="w-fit">
                 <TabsTrigger value="synced">
-                  Synced docs{filteredDocs.length > 0 ? ` (${filteredDocs.length})` : ""}
+                  Synced docs{docs.length > 0 ? ` (${docs.length})` : ""}
                 </TabsTrigger>
                 <TabsTrigger value="notes">
-                  Source notes{filteredNotes.length > 0 ? ` (${filteredNotes.length})` : ""}
+                  Source notes{notes.length > 0 ? ` (${notes.length})` : ""}
                 </TabsTrigger>
               </TabsList>
-              {queryNorm ? (
-                <p className="text-xs text-muted-foreground">Filtering docs by “{docsQuery}”</p>
-              ) : null}
               <TabsContent value="synced" className="mt-0 min-h-0 flex-1 overflow-hidden">
                 {docs.length === 0 ? (
                   <div className="space-y-2 rounded-md border border-border p-4 text-sm text-muted-foreground">
@@ -398,15 +377,11 @@ export default function SourceDetailSheet({
                       <p>No markdown or PDF docs found in the synced tree.</p>
                     )}
                   </div>
-                ) : filteredDocs.length === 0 ? (
-                  <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
-                    No synced docs match “{docsQuery}”.
-                  </p>
                 ) : (
                   <div className="grid h-full gap-4 md:grid-cols-[160px_1fr]">
                     <ScrollArea className="h-full rounded-md border border-border">
                       <ul className="p-2 text-sm">
-                        {filteredDocs.map((d) => (
+                        {docs.map((d) => (
                           <li key={d.path}>
                             <button
                               type="button"
@@ -440,15 +415,11 @@ export default function SourceDetailSheet({
                     No Source notes yet. Import a domain research pack (workflow / pitfalls /
                     quotes) or add Source notes.
                   </p>
-                ) : filteredNotes.length === 0 ? (
-                  <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
-                    No Source notes match “{docsQuery}”.
-                  </p>
                 ) : (
                   <div className="grid h-full gap-4 md:grid-cols-[160px_1fr]">
                     <ScrollArea className="h-full rounded-md border border-border">
                       <ul className="p-2 text-sm">
-                        {filteredNotes.map((n) => (
+                        {notes.map((n) => (
                           <li key={n.id}>
                             <button
                               type="button"
@@ -486,6 +457,7 @@ export default function SourceDetailSheet({
                     preferSource
                     filename={selectedFilePath.split("/").pop() ?? selectedFilePath}
                     className="h-full w-full"
+                    instructions="sr-only"
                   />
                 </Suspense>
               </div>

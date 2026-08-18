@@ -6,6 +6,10 @@ import {
   patchPartProgress,
   type PlanReview,
 } from "../api/engine";
+import {
+  optimisticReviewCacheKey,
+  rollbackOptimisticCache,
+} from "../lib/reviewCache";
 import { mergeAssembledIntoReview, mergeProgressIntoReview } from "../lib/reviewParts";
 import { queryKeys } from "./keys";
 import { invalidateProfiles } from "./profiles";
@@ -51,7 +55,10 @@ export function usePatchPartMutation(profileId: number | null) {
   });
 }
 
-export function usePatchPartProgressMutation(profileId: number | null) {
+export function usePatchPartProgressMutation(
+  profileId: number | null,
+  includeExcluded = false,
+) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -66,7 +73,7 @@ export function usePatchPartProgressMutation(profileId: number | null) {
     }) => patchPartProgress(partId, unitIndex, completed),
     onMutate: async ({ partId, unitIndex, completed, optimisticReview }) => {
       if (profileId == null || !optimisticReview) return undefined;
-      const key = queryKeys.planReview(profileId, false);
+      const key = optimisticReviewCacheKey(profileId, includeExcluded);
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<PlanReview>(key);
       const part = optimisticReview.part_groups
@@ -89,7 +96,13 @@ export function usePatchPartProgressMutation(profileId: number | null) {
       return { previous, key };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.previous && ctx.key) qc.setQueryData(ctx.key, ctx.previous);
+      if (!ctx?.key) return;
+      const rollback = rollbackOptimisticCache(ctx.previous);
+      if (rollback.kind === "restore") {
+        qc.setQueryData(ctx.key, rollback.previous);
+      } else {
+        qc.removeQueries({ queryKey: ctx.key, exact: true });
+      }
     },
     onSuccess: (progress, { partId }, ctx) => {
       if (profileId == null || !ctx?.key) return;
@@ -111,7 +124,10 @@ export function usePatchPartProgressMutation(profileId: number | null) {
   });
 }
 
-export function usePatchPartAssembledMutation(profileId: number | null) {
+export function usePatchPartAssembledMutation(
+  profileId: number | null,
+  includeExcluded = false,
+) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -126,7 +142,7 @@ export function usePatchPartAssembledMutation(profileId: number | null) {
     }) => patchPartAssembled(partId, unitIndex, assembled),
     onMutate: async ({ partId, unitIndex, assembled, optimisticReview }) => {
       if (profileId == null || !optimisticReview) return undefined;
-      const key = queryKeys.planReview(profileId, false);
+      const key = optimisticReviewCacheKey(profileId, includeExcluded);
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<PlanReview>(key);
       const part = optimisticReview.part_groups
@@ -147,7 +163,13 @@ export function usePatchPartAssembledMutation(profileId: number | null) {
       return { previous, key };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.previous && ctx.key) qc.setQueryData(ctx.key, ctx.previous);
+      if (!ctx?.key) return;
+      const rollback = rollbackOptimisticCache(ctx.previous);
+      if (rollback.kind === "restore") {
+        qc.setQueryData(ctx.key, rollback.previous);
+      } else {
+        qc.removeQueries({ queryKey: ctx.key, exact: true });
+      }
     },
     onSuccess: (progress, { partId }, ctx) => {
       if (profileId == null || !ctx?.key) return;

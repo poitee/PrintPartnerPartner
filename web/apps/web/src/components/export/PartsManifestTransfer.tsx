@@ -212,7 +212,7 @@ export default function PartsManifestTransfer({ review, sources, onApplied }: Pr
     <>
       <Card className="border-border">
         <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
+          <CardTitle level={3} className="flex items-center gap-2 text-base">
             <FileSpreadsheet className="h-4 w-4 text-primary" />
             Parts manifest (CSV / Excel / Drive)
           </CardTitle>

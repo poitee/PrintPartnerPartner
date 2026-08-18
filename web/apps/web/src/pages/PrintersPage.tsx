@@ -24,6 +24,7 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import { useEngineHealth } from "../hooks/useEngineHealth";
+import { resolveEngineState } from "../lib/workflowState";
 import { useProfileSelection } from "../context/ProfileContext";
 import {
   formatPrinterStatusPill,
@@ -67,9 +68,14 @@ function toneBadgeVariant(
 }
 
 export default function PrintersPage() {
-  const { health } = useEngineHealth();
+  const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const { profiles } = useProfileSelection();
-  const engineReady = Boolean(health);
+  const engineState = resolveEngineState({
+    health,
+    loading: healthLoading,
+    error: engineError,
+  });
+  const engineReady = engineState === "ready";
   const pollMs = usePrinterStatusPollMs();
   const [linked, setLinked] = useState<LinkedPrinter[]>([]);
   const [statusById, setStatusById] = useState<Record<string, PrinterHostStatus>>({});
@@ -213,7 +219,11 @@ export default function PrintersPage() {
       )}
 
       {!engineReady ? (
-        <p className="text-sm text-muted-foreground">Waiting for engine…</p>
+        <p className="text-sm text-muted-foreground">
+          {engineState === "offline"
+            ? "Engine offline — start the print-partner engine to view printers."
+            : "Connecting to the engine…"}
+        </p>
       ) : linked.length === 0 ? (
         <Card>
           <CardHeader>

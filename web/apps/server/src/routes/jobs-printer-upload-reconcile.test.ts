@@ -102,7 +102,7 @@ describe("printer-upload job failure reconcile", () => {
       { requireState: "queued" },
     );
 
-    runner.subscribe(jobId, (event) => {
+    runner.subscribe(jobId, "default", (event) => {
       if (event.status === "error") {
         throw new Error("subscriber boom during emit");
       }

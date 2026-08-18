@@ -64,7 +64,11 @@ describe("API v1", () => {
     await ports.db.connect();
     const app = await buildApp(config, ports);
 
-    const denied = await app.inject({ method: "GET", url: "/api/v1/plans" });
+    const denied = await app.inject({
+      method: "GET",
+      url: "/api/v1/plans",
+      remoteAddress: "203.0.113.10",
+    });
     expect(denied.statusCode).toBe(401);
 
     const ok = await app.inject({

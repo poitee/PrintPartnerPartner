@@ -21,7 +21,10 @@ import { registerApiKeyManagementRoutes } from "./routes/api-key-management.js";
 import { registerMetricsRoutes } from "./routes/metrics.js";
 import { registerApiV1Plugin, registerOpenApi, registerOpenApiJsonRoutes } from "./routes/api-v1.js";
 import { registerAuthRoutes, registerTenantMiddleware } from "./routes/auth.js";
-import { registerApiKeyAuth } from "./middleware/api-key.js";
+import {
+  createAdminPreHandler,
+  registerApiKeyAuth,
+} from "./middleware/api-key.js";
 import { registerRequestLoggingMiddleware } from "./middleware/request-logging.js";
 import { validateProductionConfig } from "./config.js";
 import { setRequestTenantId } from "./middleware/tenant-context.js";
@@ -34,6 +37,8 @@ import type { SelfHostDbStore } from "./adapters/self-host/index.js";
 import type { AppRepository } from "./db/repository.js";
 import { getDb } from "./db/client.js";
 import { createAuthStore, type AuthStore } from "./services/auth-store.js";
+import { validateApiKey } from "./services/api-key-manager.js";
+import { migrateLegacySelfHostExports } from "./services/legacy-export-migration.js";
 
 export type RuntimePorts = AppPorts & {
   repository?: AppRepository;
@@ -78,9 +83,30 @@ function resolveAuthStore(ports: RuntimePorts, config: ServerConfig): AuthStore 
   return null;
 }
 
+const ADMIN_ROUTE_PREFIXES = [
+  "/admin",
+  "/backups",
+  "/settings/api-keys",
+  "/settings/logging",
+  "/api/v1/integrations",
+  "/api/v1/webhooks",
+];
+
+function isAdministrativeRoute(url: string): boolean {
+  const path = url.split("?")[0] ?? url;
+  return ADMIN_ROUTE_PREFIXES.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+  );
+}
+
 export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
-  const app = Fastify({ logger: true, bodyLimit: config.uploadMaxBytes });
+  const app = Fastify({
+    logger: true,
+    bodyLimit: config.uploadMaxBytes,
+    trustProxy: config.trustProxy,
+  });
   const authStore = resolveAuthStore(ports, config);
+  const repository = resolveRepository(ports);
 
   // Register request logging middleware early
   await registerRequestLoggingMiddleware(app);
@@ -88,7 +114,11 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
   await app.register(cookie);
   registerTenantMiddleware(app, config, authStore);
   registerAuthRoutes(app, config, authStore);
-  registerApiKeyAuth(app, config);
+  const validateRequestApiKey = registerApiKeyAuth(
+    app,
+    config,
+    (rawKey) => repository !== null && validateApiKey(repository, rawKey) !== null,
+  );
 
   await app.register(cors, { origin: config.corsOrigin, credentials: true });
   // Register rate limiting with smart defaults
@@ -104,6 +134,13 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
   });
   await app.register(websocket);
   await app.register(multipart, { limits: { fileSize: config.uploadMaxBytes } });
+
+  const requireAdmin = createAdminPreHandler(config, validateRequestApiKey);
+  app.addHook("preHandler", async (request, reply) => {
+    if (isAdministrativeRoute(request.url)) {
+      return requireAdmin(request, reply);
+    }
+  });
 
   app.addHook("preHandler", async (request) => {
     setRequestTenantId(request.tenantId ?? "default");
@@ -123,8 +160,10 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
   await registerHealthRoutes(app, config, ports);
   await registerOpenApi(app, config);
 
-  const repository = resolveRepository(ports);
   if (repository) {
+    if (config.deployMode === "self-host") {
+      migrateLegacySelfHostExports(config.dataDir, repository);
+    }
     const thumbsDir = join(config.dataDir, "thumbs");
     const coversDir = join(config.dataDir, "covers");
     const getRepo = () => repository;
@@ -164,7 +203,9 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
         return { discordWebhookUrl: webhookUrl, notifyOnUpdate, notifyOnSync, autoSyncUpdates };
       },
     );
-    app.addHook("onClose", async () => { watcherHandle.stop(); });
+    app.addHook("onClose", async () => {
+      watcherHandle.stop();
+    });
 
     // Start background slicer profile-sync watcher (chokidar over shared config volumes)
     const { startManagedProfileSync } = await import("./services/profile-sync-manager.js");
@@ -178,27 +219,37 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
       broadcastProfileSync(event),
     );
     void profileSyncHandle.syncAll();
-    app.addHook("onClose", async () => { profileSyncHandle.stop(); });
-    
+    app.addHook("onClose", async () => {
+      profileSyncHandle.stop();
+    });
+
     // Register backup routes (available regardless of auth mode)
     await registerBackupRoutes(app, {
       dataDir: config.dataDir,
       sqlite,
       appVersion: config.version,
     });
-    
+
     // Register logging routes
     await registerLoggingRoutes(app);
-    
+
     // Register API key management routes
     await registerApiKeyManagementRoutes(app, { repo: repository });
-    
+
     // Register metrics endpoint
-    await registerMetricsRoutes(app, { repo: repository });
-    
-    await app.register(async (v1) => {
-      await registerApiV1Plugin(v1, coreDeps);
-    }, { prefix: "/api/v1" });
+    await registerMetricsRoutes(app, {
+      repo: repository,
+      validateApiKey: validateRequestApiKey,
+      authRequired: config.authRequired,
+      version: config.version,
+    });
+
+    await app.register(
+      async (v1) => {
+        await registerApiV1Plugin(v1, coreDeps, validateRequestApiKey);
+      },
+      { prefix: "/api/v1" },
+    );
 
     app.post(
       "/admin/import-kit-bundle",

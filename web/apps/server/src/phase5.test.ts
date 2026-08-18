@@ -227,9 +227,17 @@ describe("Phase 5", () => {
     const app = await buildApp(config, ports);
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as { ok: boolean; deploy_mode: string };
+    const body = res.json() as {
+      ok: boolean;
+      deploy_mode: string;
+      db: { driver: string; support_status: string };
+    };
     expect(body.ok).toBe(true);
     expect(body.deploy_mode).toBe("saas");
+    expect(body.db).toMatchObject({
+      driver: "sqlite",
+      support_status: "supported",
+    });
 
     await app.close();
     await ports.db.close();
