@@ -49,6 +49,8 @@ describe("WelcomePage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open Plan" }));
 
-    expect(screen.getByText("Plan destination ?profile=7")).toBeTruthy();
+    expect(screen.getByText("Plan destination ?profile=7").textContent).toBe(
+      "Plan destination ?profile=7",
+    );
   });
 });

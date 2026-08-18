@@ -53,6 +53,8 @@ describe("ReviewPartsSheet accessibility", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("searchbox", { name: "Search review parts" })).toBeTruthy();
+    expect(
+      screen.getByRole("searchbox", { name: "Search review parts" }).tagName,
+    ).toBe("INPUT");
   });
 });

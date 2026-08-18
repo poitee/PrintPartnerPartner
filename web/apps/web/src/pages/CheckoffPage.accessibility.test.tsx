@@ -106,13 +106,12 @@ vi.mock("../queries/buildTracking", () => ({
 vi.mock("../lib/useSyncComplete", () => ({ useSyncComplete: vi.fn() }));
 vi.mock("../api/engine", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/engine")>();
-  const pending = () => new Promise(() => {});
   return {
     ...actual,
-    fetchUnattributedPrints: pending,
-    fetchPrinterCheckoffLinks: pending,
-    fetchPlanPhaseManifest: pending,
-    fetchPrinterQueueSuggestions: pending,
+    fetchUnattributedPrints: vi.fn().mockResolvedValue([]),
+    fetchPrinterCheckoffLinks: vi.fn().mockResolvedValue({ links: [] }),
+    fetchPlanPhaseManifest: vi.fn().mockResolvedValue(null),
+    fetchPrinterQueueSuggestions: vi.fn().mockResolvedValue({ suggestions: [] }),
   };
 });
 vi.mock("../components/checkoff/PrinterLiveStrip", () => ({
@@ -183,7 +182,9 @@ describe("CheckoffPage accessibility", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("searchbox", { name: "Search progress parts" })).toBeTruthy();
+    expect(
+      screen.getByRole("searchbox", { name: "Search progress parts" }).tagName,
+    ).toBe("INPUT");
   });
 
   it("keeps the printable sheet hierarchy subordinate to the single page h1", () => {
