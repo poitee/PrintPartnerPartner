@@ -51,7 +51,10 @@ export function usePatchPartMutation(profileId: number | null) {
   });
 }
 
-export function usePatchPartProgressMutation(profileId: number | null) {
+export function usePatchPartProgressMutation(
+  profileId: number | null,
+  includeExcluded = false,
+) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -66,9 +69,10 @@ export function usePatchPartProgressMutation(profileId: number | null) {
     }) => patchPartProgress(partId, unitIndex, completed),
     onMutate: async ({ partId, unitIndex, completed, optimisticReview }) => {
       if (profileId == null || !optimisticReview) return undefined;
-      const key = queryKeys.planReview(profileId, false);
+      const key = queryKeys.planReview(profileId, includeExcluded);
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<PlanReview>(key);
+      const hadPrevious = previous !== undefined;
       const part = optimisticReview.part_groups
         .flatMap((g) => g.parts)
         .find((p) => p.id === partId);
@@ -86,10 +90,15 @@ export function usePatchPartProgressMutation(profileId: number | null) {
           }),
         );
       }
-      return { previous, key };
+      return { previous, key, hadPrevious };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.previous && ctx.key) qc.setQueryData(ctx.key, ctx.previous);
+      if (!ctx?.key) return;
+      if (ctx.hadPrevious) {
+        qc.setQueryData(ctx.key, ctx.previous);
+      } else {
+        qc.removeQueries({ queryKey: ctx.key, exact: true });
+      }
     },
     onSuccess: (progress, { partId }, ctx) => {
       if (profileId == null || !ctx?.key) return;
@@ -111,7 +120,10 @@ export function usePatchPartProgressMutation(profileId: number | null) {
   });
 }
 
-export function usePatchPartAssembledMutation(profileId: number | null) {
+export function usePatchPartAssembledMutation(
+  profileId: number | null,
+  includeExcluded = false,
+) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -126,9 +138,10 @@ export function usePatchPartAssembledMutation(profileId: number | null) {
     }) => patchPartAssembled(partId, unitIndex, assembled),
     onMutate: async ({ partId, unitIndex, assembled, optimisticReview }) => {
       if (profileId == null || !optimisticReview) return undefined;
-      const key = queryKeys.planReview(profileId, false);
+      const key = queryKeys.planReview(profileId, includeExcluded);
       await qc.cancelQueries({ queryKey: key });
       const previous = qc.getQueryData<PlanReview>(key);
+      const hadPrevious = previous !== undefined;
       const part = optimisticReview.part_groups
         .flatMap((g) => g.parts)
         .find((p) => p.id === partId);
@@ -144,10 +157,15 @@ export function usePatchPartAssembledMutation(profileId: number | null) {
           }),
         );
       }
-      return { previous, key };
+      return { previous, key, hadPrevious };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.previous && ctx.key) qc.setQueryData(ctx.key, ctx.previous);
+      if (!ctx?.key) return;
+      if (ctx.hadPrevious) {
+        qc.setQueryData(ctx.key, ctx.previous);
+      } else {
+        qc.removeQueries({ queryKey: ctx.key, exact: true });
+      }
     },
     onSuccess: (progress, { partId }, ctx) => {
       if (profileId == null || !ctx?.key) return;

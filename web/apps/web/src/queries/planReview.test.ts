@@ -18,11 +18,11 @@ describe("optimistic Progress cache selection", () => {
     expect(querySource).toMatch(
       /queryKeys\.planReview\(profileId, includeExcluded\)/,
     );
-    expect(contextSource).toContain(
-      "usePatchPartProgressMutation(selectedProfileId, includeExcluded)",
+    expect(contextSource).toMatch(
+      /usePatchPartProgressMutation\(\s*selectedProfileId,\s*includeExcluded,\s*\)/,
     );
-    expect(contextSource).toContain(
-      "usePatchPartAssembledMutation(selectedProfileId, includeExcluded)",
+    expect(contextSource).toMatch(
+      /usePatchPartAssembledMutation\(\s*selectedProfileId,\s*includeExcluded,\s*\)/,
     );
   });
 

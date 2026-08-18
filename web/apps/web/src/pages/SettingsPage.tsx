@@ -133,6 +133,8 @@ export default function SettingsPage() {
   const [discordSaving, setDiscordSaving] = useState(false);
   const [discordTestStatus, setDiscordTestStatus] = useState<string | null>(null);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [settingsLoadError, setSettingsLoadError] = useState<string | null>(null);
+  const settingsReady = engineReady && settingsLoaded && !settingsLoadError;
   const { data: buildTrackingSettings } = useBuildTrackingSettingsQuery(engineReady);
   const saveBuildTrackingMutation = useSaveBuildTrackingSettingsMutation();
   const buildTrackingSaving = saveBuildTrackingMutation.isPending;
@@ -143,6 +145,7 @@ export default function SettingsPage() {
       return;
     }
     setLoadError(null);
+    setSettingsLoadError(null);
     try {
       const [filamentRows, patSettings, updateSettings, autoRecomputeSettings, discordNotifySettings] = await Promise.all([
         fetchCustomFilaments(),
@@ -158,7 +161,9 @@ export default function SettingsPage() {
       setDiscordSettings(discordNotifySettings);
       setDiscordWebhookInput(discordNotifySettings.webhook_url ?? "");
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      setLoadError(message);
+      setSettingsLoadError(message);
     } finally {
       setSettingsLoaded(true);
     }
@@ -293,6 +298,18 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       )}
+      {engineReady && settingsLoadError && (
+        <Card className="border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive">
+              Could not load settings: {settingsLoadError}
+            </p>
+            <Button size="sm" variant="secondary" onClick={() => void refresh()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
       {patMessage && <p className="text-sm text-muted-foreground">{patMessage}</p>}
@@ -305,19 +322,19 @@ export default function SettingsPage() {
       />
 
       <SettingsSection id="printers" title="Printers">
-        <PrintersSettingsCard engineReady={engineReady && settingsLoaded} />
+        <PrintersSettingsCard engineReady={settingsReady} />
       </SettingsSection>
 
       <SettingsSection id="slicers" title="Slicers">
-        <SlicersSettingsCard engineReady={engineReady && settingsLoaded} />
+        <SlicersSettingsCard engineReady={settingsReady} />
       </SettingsSection>
 
       <SettingsSection title="Library">
         <div id="source-categories">
-          <SourceCategoryManager engineReady={engineReady && settingsLoaded} />
+          <SourceCategoryManager engineReady={settingsReady} />
         </div>
 
-        <StlNamingSettingsCard engineReady={engineReady && settingsLoaded} />
+        <StlNamingSettingsCard engineReady={settingsReady} />
 
         <Card className="shadow-none">
           <CardHeader>
@@ -348,7 +365,7 @@ export default function SettingsPage() {
                       variant="ghost"
                       size="sm"
                       className="ml-auto"
-                    disabled={!engineReady || !settingsLoaded}
+                    disabled={!engineReady || !settingsReady}
                       onClick={() => setDeleteFilamentId(f.id)}
                     >
                       Delete
@@ -361,25 +378,25 @@ export default function SettingsPage() {
               <input
                 className={inputClass}
                 placeholder="Name"
-                disabled={!engineReady || !settingsLoaded}
+                disabled={!engineReady || !settingsReady}
                 value={newFilamentName}
                 onChange={(e) => setNewFilamentName(e.target.value)}
               />
               <input
                 type="color"
-                disabled={!engineReady || !settingsLoaded}
+                disabled={!engineReady || !settingsReady}
                 value={newFilamentHex}
                 onChange={(e) => setNewFilamentHex(e.target.value)}
                 title="Color"
               />
               <input
                 className={`hex-input ${inputClass}`}
-                disabled={!engineReady || !settingsLoaded}
+                disabled={!engineReady || !settingsReady}
                 value={newFilamentHex}
                 onChange={(e) => setNewFilamentHex(e.target.value)}
               />
               <Button
-                disabled={!engineReady || !settingsLoaded}
+                disabled={!engineReady || !settingsReady}
                 onClick={() => void onAddFilament()}
               >
                 Add filament
@@ -409,7 +426,7 @@ export default function SettingsPage() {
               <Select
                 value={updateIntervalHours}
                 onValueChange={(v) => void onUpdateIntervalChange(v)}
-                disabled={!engineReady || !settingsLoaded || updateIntervalSaving || updateBusy}
+                disabled={!settingsReady || updateIntervalSaving || updateBusy}
               >
                 <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-xs">
                   <SelectValue />
@@ -427,7 +444,7 @@ export default function SettingsPage() {
               variant="secondary"
               className="min-h-10 w-full sm:w-auto"
               onClick={onCheckSourceUpdatesNow}
-              disabled={!engineReady || !settingsLoaded || updateBusy || updateIntervalSaving}
+              disabled={!settingsReady || updateBusy || updateIntervalSaving}
             >
               {updateBusy ? "Checking…" : "Check now"}
             </Button>
@@ -447,7 +464,7 @@ export default function SettingsPage() {
               <span className="text-sm font-medium">Auto-recompute stale builds</span>
               <Switch
                 checked={autoRecompute}
-                disabled={!engineReady || !settingsLoaded || autoRecomputeSaving}
+                disabled={!settingsReady || autoRecomputeSaving}
                 onCheckedChange={(checked) => {
                   setAutoRecomputeSaving(true);
                   void saveAutoRecomputeSettings(checked)
@@ -490,7 +507,7 @@ export default function SettingsPage() {
                 type="password"
                 className={`${inputClass} w-full max-w-md`}
                 autoComplete="off"
-                disabled={!engineReady || !settingsLoaded}
+                disabled={!engineReady || !settingsReady}
                 placeholder={githubPat?.configured ? "Enter new token to replace" : "ghp_…"}
                 value={patInput}
                 onChange={(e) => setPatInput(e.target.value)}
@@ -498,7 +515,7 @@ export default function SettingsPage() {
             </label>
             <div className="flex flex-wrap gap-2">
               <Button
-                disabled={!engineReady || !settingsLoaded}
+                disabled={!engineReady || !settingsReady}
                 onClick={() => void onSaveGitHubPat()}
               >
                 Save token
@@ -506,7 +523,7 @@ export default function SettingsPage() {
               <Button
                 variant="secondary"
                 onClick={() => void onClearGitHubPat()}
-                disabled={!engineReady || !settingsLoaded || !githubPat?.configured}
+                disabled={!settingsReady || !githubPat?.configured}
               >
                 Clear token
               </Button>
@@ -529,7 +546,7 @@ export default function SettingsPage() {
                 className={`${inputClass} w-full max-w-md`}
                 placeholder="https://discord.com/api/webhooks/..."
                 autoComplete="off"
-                disabled={!engineReady || !settingsLoaded || discordSaving}
+                disabled={!settingsReady || discordSaving}
                 value={discordWebhookInput}
                 onChange={(e) => {
                   const value = e.target.value;
@@ -545,8 +562,7 @@ export default function SettingsPage() {
             </label>
             <Button
               disabled={
-                !engineReady ||
-                !settingsLoaded ||
+                !settingsReady ||
                 discordSaving ||
                 Boolean(discordWebhookError)
               }
@@ -574,7 +590,7 @@ export default function SettingsPage() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    disabled={!engineReady || !settingsLoaded || discordSaving}
+                    disabled={!settingsReady || discordSaving}
                     checked={discordSettings.notify_on_update}
                     onChange={async (e) => {
                       try {
@@ -591,7 +607,7 @@ export default function SettingsPage() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    disabled={!engineReady || !settingsLoaded || discordSaving}
+                    disabled={!settingsReady || discordSaving}
                     checked={discordSettings.auto_sync_updates}
                     onChange={async (e) => {
                       try {
@@ -608,7 +624,7 @@ export default function SettingsPage() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    disabled={!engineReady || !settingsLoaded || discordSaving}
+                    disabled={!settingsReady || discordSaving}
                     checked={discordSettings.notify_on_sync}
                     onChange={async (e) => {
                       try {
@@ -625,7 +641,7 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-3 pt-1">
                   <Button
                     variant="secondary"
-                    disabled={!engineReady || !settingsLoaded || discordSaving}
+                    disabled={!settingsReady || discordSaving}
                     onClick={async () => {
                       setDiscordTestStatus(null);
                       try {
@@ -647,7 +663,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        <IntegrationsSettingsCard engineReady={engineReady && settingsLoaded} />
+        <IntegrationsSettingsCard engineReady={settingsReady} />
       </SettingsSection>
 
       <SettingsSection id="build-tracking" title="Build Tracking">
@@ -665,7 +681,7 @@ export default function SettingsPage() {
               <span className="text-sm font-medium">Enable assembly tracking</span>
               <Switch
                 checked={buildTrackingSettings?.assembly_tracking ?? false}
-                disabled={!engineReady || !settingsLoaded || buildTrackingSaving}
+                disabled={!settingsReady || buildTrackingSaving}
                 onCheckedChange={(checked) => {
                   saveBuildTrackingMutation.mutate(
                     { assembly_tracking: checked },
@@ -745,7 +761,7 @@ export default function SettingsPage() {
         </SettingsSection>
       ) : null}
 
-      {engineReady && settingsLoaded && (
+      {settingsReady && (
         <SettingsSection id="data" title="Data & System">
           <BackupManagementCard />
           <ApiKeyManagementCard />
@@ -771,7 +787,7 @@ export default function SettingsPage() {
           <div className="flex justify-end gap-2">
             <Button
               variant="secondary"
-              disabled={!engineReady || !settingsLoaded || deleting}
+              disabled={!settingsReady || deleting}
               onClick={() => setDeleteFilamentId(null)}
             >
               Cancel
@@ -779,8 +795,7 @@ export default function SettingsPage() {
             <Button
               variant="ghost"
               disabled={
-                !engineReady ||
-                !settingsLoaded ||
+                !settingsReady ||
                 deleting ||
                 deleteFilamentId == null
               }
