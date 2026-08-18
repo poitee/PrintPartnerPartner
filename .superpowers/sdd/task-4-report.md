@@ -151,3 +151,63 @@ Chromium skip-link computed-style regression: passed
   configured (`status: not_authenticated`). Deterministic tests, typecheck,
   lint, build, and direct diff inspection found no unresolved Task 4 issue.
 - The existing Vite native-loader and large-chunk warnings remain unchanged.
+
+## Remaining Minor follow-up
+
+### Status
+
+Complete, excluding CI wiring as requested (Task 6 owns CI).
+
+### Changes
+
+- Corrected Build hierarchy: direct Share import and source-card headings are
+  `h2`; compact kit titles and STL preview subsections are `h3`; kit option
+  groups remain subordinate `h4` headings.
+- Made `Preview3D` instructions contextual with a `visible`/`sr-only` display
+  contract. Compact Build and Source-detail thumbnails retain the keyboard
+  description through `aria-describedby` without persistent visible help.
+- Added the missing Export `h2` section label, assigned direct Slicer-input
+  cards to `h3`, and assigned nested plate cards to `h4` and approval cards to
+  `h3`. Top-level printer-send cards remain `h2`.
+- Strengthened the `CardTitle` level regression to request `h4`, so the prior
+  hard-coded `h3` implementation cannot satisfy it.
+- Kept Plans and 3D loading live-region nodes mounted across state changes,
+  while keeping visible loading copy separate to avoid duplicate
+  announcements.
+
+### TDD evidence
+
+The new tests were committed before production changes. Their initial run
+failed on every targeted missing behavior:
+
+```text
+Test Files 4 failed | 1 passed
+Tests 8 failed | 9 passed
+```
+
+After implementation:
+
+```text
+Focused remaining-Minor suite: 5 files, 17 tests passed
+```
+
+### Verification
+
+- Full web tests: 74 files, 352 tests passed.
+- Web typecheck: passed.
+- Workspace ESLint (`--quiet`): passed with zero errors.
+- Production web build: passed.
+- `git diff --check`: passed.
+
+### Commits
+
+- `6d64a46` — remaining-Minor regression tests
+- `4ff7aca` — Build/Export headings, contextual 3D help, and stable live regions
+
+### Concerns
+
+- CI wiring is intentionally deferred to Task 6.
+- The Suspense route fallback still necessarily unmounts when its route loads;
+  persistent live-region mounting was applied only where the owning component
+  remains mounted across state transitions.
+- Existing Vite native-loader and large-chunk warnings remain unchanged.
