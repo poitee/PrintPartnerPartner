@@ -68,7 +68,7 @@ export async function registerSlicerHandoffRoutes(
     if (!enabledIds.length) {
       return reply.status(400).send({ detail: "No printers enabled for export" });
     }
-    const exportsDir = tenantExportDirectory(deps.exportsDir, request.tenantId);
+    const exportsDir = tenantExportDirectory(deps.exportsDir, request.tenantId ?? "default");
 
     let result: ReturnType<typeof runExport3mfJob>;
     try {
