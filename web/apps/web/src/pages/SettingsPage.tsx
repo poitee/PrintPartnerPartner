@@ -224,7 +224,17 @@ export default function SettingsPage() {
         setDiscordWebhookInput(settings.webhook_url ?? "");
       }),
     ]);
-  }, [engineReady, loadResource]);
+  }, [
+    engineReady,
+    loadResource,
+    setAutoRecompute,
+    setDiscordSettings,
+    setDiscordWebhookInput,
+    setFilaments,
+    setGithubPat,
+    setLoadError,
+    setUpdateIntervalHours,
+  ]);
 
   useEffect(() => {
     void refresh();
