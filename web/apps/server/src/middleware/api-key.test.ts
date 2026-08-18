@@ -153,6 +153,36 @@ describe("/api/v1 API key authentication", () => {
     }
   });
 
+  it("does not treat the synthetic SaaS anonymous identity as an authenticated session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-api-key-saas-anonymous-"));
+    const config = {
+      ...loadConfig(),
+      dataDir: dir,
+      deployMode: "saas" as const,
+      integrationApiKey: "bootstrap-api-key",
+      multiUser: false,
+      authRequired: false,
+      saasAllowAnonymous: true,
+    };
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const app = await buildApp(config, ports);
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/plans",
+        remoteAddress: "203.0.113.10",
+      });
+
+      expect(response.statusCode).toBe(401);
+    } finally {
+      await app.close();
+      ports.db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("accepts a settings-created key until it is revoked", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-api-key-revoke-"));
     const { app, ports } = await makeApp(dir);
