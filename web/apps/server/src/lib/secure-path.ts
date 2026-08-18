@@ -1,6 +1,5 @@
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import type { ReadStream } from "node:fs";
-import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { resolveCaseInsensitiveRepoPath } from "../services/part-paths.js";
 import { globalPreviewPath, globalThumbnailPath } from "./thumbnails.js";
@@ -74,12 +73,10 @@ export function createReadStreamUnderRoot(root: string, relativePath: string): R
 }
 
 export function tenantExportDirectory(exportsRoot: string, tenantId: string): string {
-  const normalized = encodeURIComponent(tenantId).replace(/\./g, "%2e").toLowerCase();
-  const caseSuffix =
-    tenantId === tenantId.toLowerCase()
-      ? ""
-      : `-${createHash("sha256").update(tenantId).digest("hex").slice(0, 12)}`;
-  const segment = `tenant-${normalized}${caseSuffix}`;
+  const segment =
+    tenantId === "default"
+      ? "tenant-default"
+      : `tenant-x${Buffer.from(tenantId, "utf8").toString("hex")}`;
   return join(exportsRoot, segment);
 }
 

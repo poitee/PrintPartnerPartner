@@ -135,7 +135,7 @@ export function migratePrinterSendQueueArtifactPaths(
     }
     const target = resolve(tenantUploads, relativeArtifact);
     if (
-      resolve(tenantUploads, relativeArtifact) !== target ||
+      existsSync(current) ||
       !existsSync(target)
     ) {
       continue;

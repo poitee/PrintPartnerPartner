@@ -17,6 +17,7 @@ import {
   enqueuePrinterSend,
   loadPrinterSendQueue,
 } from "../services/printer-send-queue-store.js";
+import { tenantExportDirectory } from "../lib/secure-path.js";
 import { registerExportRoutes } from "./exports.js";
 
 /**
@@ -131,8 +132,14 @@ describe("GET /exports/*", () => {
       void app.close();
       rmSync(dir, { recursive: true, force: true });
     });
-    const tenantA = join(dir, "exports", "tenant-tenant-a", "same");
-    const tenantB = join(dir, "exports", "tenant-tenant-b", "same");
+    const tenantA = join(
+      tenantExportDirectory(join(dir, "exports"), "tenant-a"),
+      "same",
+    );
+    const tenantB = join(
+      tenantExportDirectory(join(dir, "exports"), "tenant-b"),
+      "same",
+    );
     mkdirSync(tenantA, { recursive: true });
     mkdirSync(tenantB, { recursive: true });
     writeFileSync(join(tenantA, "plate.gcode"), "TENANT-A\n");
