@@ -77,7 +77,12 @@ export function safePathUnderRoot(root: string, relativePath: string): string | 
   return candidate;
 }
 
-/** Ensure an absolute path resolves to a regular file under root. */
+/**
+ * Resolve an existing regular file to its canonical path under root.
+ * Symlinks are allowed only when their final realpath remains under root.
+ * The canonical return value may differ from the input (notably for macOS
+ * temporary-directory aliases).
+ */
 export function resolvedFileUnderRoot(root: string, absolutePath: string): string | null {
   try {
     const candidate = resolvedExistingPathUnderRoot(root, absolutePath);
