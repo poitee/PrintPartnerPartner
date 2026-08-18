@@ -16,7 +16,7 @@ RUN npm run build && \
 
 FROM node:22-bookworm-slim AS runtime
 # Baked in by the release workflow (vX.Y.Z tag -> X.Y.Z-web); reported by GET /health.
-ARG PP_VERSION=3.0.0-web
+ARG PP_VERSION=3.1.0-web
 
 # dumb-init: proper PID 1 signal handling. gosu: drop root after entrypoint chown.
 RUN apt-get update && apt-get install -y --no-install-recommends dumb-init gosu && \

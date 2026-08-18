@@ -391,4 +391,4 @@ aws s3 cp logs-*.jsonl s3://archive-bucket/print-partner/
 ---
 
 Last updated: August 15, 2026  
-Version: 3.0.0+main
+Version: 3.1.0+main

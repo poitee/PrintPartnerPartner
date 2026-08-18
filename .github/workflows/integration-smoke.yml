@@ -1,6 +1,15 @@
 name: Optional integration smoke
 
 on:
+  push:
+    branches: [main, master]
+    paths:
+      - "web/**"
+      - ".github/workflows/integration-smoke.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/integration-smoke.yml"
   workflow_dispatch:
     inputs:
       postgres:
@@ -17,7 +26,7 @@ permissions:
 
 jobs:
   postgres:
-    if: inputs.postgres
+    if: github.event_name != 'workflow_dispatch' || inputs.postgres
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -51,13 +60,15 @@ jobs:
           DEPLOY_MODE: saas
           POSTGRES_EXPERIMENTAL: "1"
           SAAS_ALLOW_ANONYMOUS: "1"
+          MULTI_USER: "0"
+          SESSION_SECRET: postgres-smoke-session-secret-not-for-production
           NODE_ENV: production
           HOST: 127.0.0.1
           PORT: "18765"
           STATIC_DIR: ${{ github.workspace }}/web/apps/web/dist
         run: |
           node apps/server/dist/index.js >"${RUNNER_TEMP}/postgres-server.log" 2>&1 &
-          for attempt in $(seq 1 60); do
+          for ((attempt = 1; attempt <= 60; attempt++)); do
             if curl --fail --silent http://127.0.0.1:18765/health \
               | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["db"]["driver"] == "postgres"; assert data["db"]["connected"] is True'
             then
@@ -69,7 +80,7 @@ jobs:
           exit 1
 
   slicer-sidecar:
-    if: inputs.slicer_sidecar
+    if: github.event_name == 'workflow_dispatch' && inputs.slicer_sidecar
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +91,7 @@ jobs:
           docker run --detach --name slicer-sidecar-smoke \
             --publish 127.0.0.1:2814:2814 \
             print-partner-slicer-sidecar:smoke
-          for attempt in $(seq 1 90); do
+          for ((attempt = 1; attempt <= 90; attempt++)); do
             if curl --fail --silent http://127.0.0.1:2814/health \
               | python3 -c 'import json,sys; data=json.load(sys.stdin); assert data["status"] == "ok"; assert data["exists"] is True'
             then

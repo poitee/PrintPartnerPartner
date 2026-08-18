@@ -1,7 +1,7 @@
 {
   "name": "print-partner-web",
   "private": true,
-  "version": "3.0.0",
+  "version": "3.1.0",
   "type": "module",
   "engines": {
     "node": "22.x",
@@ -17,9 +17,10 @@
     "build": "npm run build -w @print-partner/contracts && npm run build -w @print-partner/domain && npm run build -w @print-partner/server && npm run build -w @print-partner/web",
     "test": "npm run test -w @print-partner/contracts --if-present && npm run test -w @print-partner/domain --if-present && npm run test -w @print-partner/web --if-present && npm run test -w @print-partner/server --if-present",
     "test:browser": "npm run test:browser -w @print-partner/web",
+    "test:workflow-smoke": "python3 -m unittest scripts.test_workflow_smoke",
     "lint": "eslint .",
     "typecheck": "npm run build -w @print-partner/contracts && npm run build -w @print-partner/domain && npm run typecheck -w @print-partner/server && npm run typecheck -w @print-partner/web",
-    "quality": "npm run lint && npm run typecheck && npm test && npm run build && npm run test:browser",
+    "quality": "npm run lint && npm run typecheck && npm test && npm run test:workflow-smoke && npm run build && npm run test:browser",
     "db:migrate": "npm run db:migrate -w @print-partner/server"
   },
   "devDependencies": {
@@ -41,5 +42,5 @@
     "hono": "4.13.1",
     "postcss": "8.5.26"
   },
-  "description": "Print Partner monorepo \u2014 Fastify API + React SPA for layered STL kit desk workflow (Library \u2192 Plan \u2192 Parts \u2192 Progress \u2192 Export)."
+  "description": "Print Partner monorepo — Fastify API + React SPA for layered STL kit desk workflow (Library → Plan → Parts → Progress → Export)."
 }

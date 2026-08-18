@@ -281,7 +281,7 @@ export function loadConfig(): ServerConfig {
     dataDir,
     trustProxy: process.env.TRUST_PROXY === "1",
     exchangeDir: (process.env.PP_EXCHANGE_DIR ?? "").trim() || "/exchange",
-    version: process.env.PP_VERSION ?? "3.0.0-web",
+    version: process.env.PP_VERSION ?? "3.1.0-web",
     corsOrigin: parseCorsOrigin(process.env.ALLOWED_ORIGINS ?? process.env.CORS_ORIGIN),
     staticDir: process.env.STATIC_DIR ?? null,
     databaseUrl: process.env.DATABASE_URL ?? null,

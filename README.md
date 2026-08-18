@@ -153,7 +153,7 @@ docker compose pull && docker compose up -d
 Open [http://localhost:8080](http://localhost:8080). Data persists in the `print-partner-data` volume, mounted at `/data` inside the container (SQLite database, synced repos, exports, and thumbnails).
 
 Images are published to **`ghcr.io/poitee/print-partner`** (`latest` plus a tag
-per release, e.g. `3.0.0`). Compose defaults to the audited `3.0.0` tag; set
+per release, e.g. `3.1.0`). Compose defaults to the audited `3.1.0` tag; set
 `PRINT_PARTNER_VERSION` to another release explicitly. To build from source
 instead:
 
@@ -194,7 +194,7 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `CORS_ORIGIN` / `ALLOWED_ORIGINS` | `true` | Allowed CORS origin(s); comma-separated list for multiple (`ALLOWED_ORIGINS` takes precedence) |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload / request body limit (512 MiB) |
-| `PP_VERSION` | `3.0.0-web` (baked into release images) | Version reported by `GET /health` |
+| `PP_VERSION` | `3.1.0-web` (baked into release images) | Version reported by `GET /health` |
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped: compare against this version instead of GitHub |

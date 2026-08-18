@@ -75,10 +75,10 @@ curl http://localhost:8080/health | jq .
 # Expected response:
 # {
 #   "ok": true,
-#   "version": "3.0.0",
+#   "version": "3.1.0",
 #   "db": { "connected": true, "driver": "sqlite" },
 #   "capabilities": [...],
-#   "semver": "v3.0.0+abc1234"
+#   "semver": "v3.1.0+abc1234"
 # }
 ```
 
@@ -463,6 +463,6 @@ services:
 ---
 
 Last updated: August 15, 2026  
-Version: 3.0.0+main
+Version: 3.1.0+main
 
 For more info: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md)

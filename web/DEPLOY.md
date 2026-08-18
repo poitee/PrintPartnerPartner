@@ -20,9 +20,9 @@ Release images are published to GitHub Container Registry:
 
 | Image | Tags | Platforms |
 |-------|------|-----------|
-| `ghcr.io/poitee/print-partner` | `latest`, `X.Y.Z` (one per release, e.g. `3.0.0`) | `linux/amd64`, `linux/arm64` |
+| `ghcr.io/poitee/print-partner` | `latest`, `X.Y.Z` (one per release, e.g. `3.1.0`) | `linux/amd64`, `linux/arm64` |
 
-Each image bakes the release version into `PP_VERSION` (e.g. `3.0.0-web`), which `GET /health` reports and the in-app update checker compares against GitHub releases. Compose defaults to the audited `3.0.0` image tag; set `PRINT_PARTNER_VERSION` to another release explicitly. The compose files keep a `build:` section as a fallback, so `docker compose up --build` always works without the registry.
+Each image bakes the release version into `PP_VERSION` (e.g. `3.1.0-web`), which `GET /health` reports and the in-app update checker compares against GitHub releases. Compose defaults to the audited `3.1.0` image tag; set `PRINT_PARTNER_VERSION` to another release explicitly. The compose files keep a `build:` section as a fallback, so `docker compose up --build` always works without the registry.
 
 **Pull failures:** GHCR packages are private by default until visibility is set. The release workflow sets `ghcr.io/poitee/print-partner` to **public** after each tagged push. If `docker compose pull` returns `denied` or `unauthorized`, use `docker compose up --build` instead, or `docker login ghcr.io` with a token that has `read:packages`. See [docs/INSTALL.md](../docs/INSTALL.md#denied-or-unauthorized-when-pulling-the-image).
 
@@ -38,7 +38,7 @@ The app service has a healthcheck that polls `GET /health` every 30s using Node'
 | `STATIC_DIR` | unset | When set, serve built SPA from this directory |
 | `DEPLOY_MODE` | `self-host` | `self-host` or `saas` |
 | `CORS_ORIGIN` / `ALLOWED_ORIGINS` | `true` | CORS allowed origin(s); comma-separated list for multiple |
-| `PP_VERSION` | `3.0.0-web` (baked into release images) | Health payload version |
+| `PP_VERSION` | `3.1.0-web` (baked into release images) | Health payload version |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload limit (512 MiB) |
 | `SOURCE_DOCS_MAX_BYTES` | `1073741824` | Per-source budget for synced markdown/PDF docs (~1 GiB). Operator escape hatch only. |
@@ -148,12 +148,14 @@ File blobs (repos, exports, thumbs) stay on disk under `SAAS_DATA_DIR` unless `S
 docker compose -f docker-compose.saas.yml up --build
 ```
 
-Includes Postgres 16, [RustFS](https://rustfs.com) (S3-compatible), and the app with `SAAS_ALLOW_ANONYMOUS=1` for easy dev. The compose file creates the `print-partner` bucket on first start.
+Includes Postgres 16, [RustFS](https://rustfs.com) (S3-compatible), and the app with `SAAS_ALLOW_ANONYMOUS=1` and `MULTI_USER=0` for easy dev. The compose file creates the `print-partner` bucket on first start.
 
 The Compose credentials are explicitly development-only defaults. Before using
 the stack on any shared network, set strong values for
 `PP_DEV_POSTGRES_PASSWORD`, `PP_DEV_S3_ACCESS_KEY`, and
-`PP_DEV_S3_SECRET_KEY`; do not expose ports 5432, 9000, or 9001 publicly.
+`PP_DEV_S3_SECRET_KEY`, and `PP_DEV_SESSION_SECRET`. Ports bind to
+`127.0.0.1` by default; set `PP_BIND_ADDRESS` explicitly only when a firewall
+and authentication protect the shared interface.
 
 **Migrating from MinIO:** remove the old `pp-minio` volume (`docker volume rm <project>_pp-minio`) — RustFS uses a different on-disk format. Blob data in the old volume is not portable; re-upload or re-sync sources after switching.
 
@@ -172,6 +174,8 @@ the stack on any shared network, set strong values for
 | `S3_FORCE_PATH_STYLE` | S3-compatible dev | Set `1` for path-style URLs (RustFS, MinIO, Garage, etc.) |
 | `MULTI_USER` | Optional | `1` enables login (self-host or saas); first registered user claims existing data |
 | `SESSION_SECRET` | Multi-user / OAuth / prod | Required when `MULTI_USER=1` or OAuth in production |
+| `PP_BIND_ADDRESS` | Compose only | Host bind for app/Postgres/RustFS ports; defaults to loopback (`127.0.0.1`) |
+| `PP_DEV_MULTI_USER` / `PP_DEV_SESSION_SECRET` | Development Compose | Override the single-user mode and development-only session secret |
 | `ALLOWED_ORIGINS` | Prod | Comma-separated CORS origins (alias: `CORS_ORIGIN`) |
 | `SAAS_BASIC_AUTH` | Optional | `user:password` for HTTP Basic dev auth |
 | `GITHUB_CLIENT_ID` / `SECRET` / `GITHUB_CALLBACK_URL` | OAuth | GitHub OAuth app |

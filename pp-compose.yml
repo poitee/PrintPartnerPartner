@@ -10,7 +10,7 @@
 #   127.0.0.1  orca.home prusa.home
 #
 # IMAGE TAG NOTES:
-#   OrcaSlicer is pinned to LinuxServer's v2.4.2-ls32 build.
+#   OrcaSlicer is pinned to LinuxServer's v2.4.2-ls35 build.
 #   PrusaSlicer has date-based rather than semantic tags and is pinned to the
 #   newest published build available during the August 2026 audit.
 #   BambuStudio: sodiumhydrogen publishes NO Bambu Studio image (checked Aug 2026 —
@@ -28,7 +28,7 @@ services:
   # OrcaSlicer — Selkies WebRTC remote desktop, port 3000
   # -----------------------------------------------------------------------
   orcaslicer:
-    image: lscr.io/linuxserver/orcaslicer:v2.4.2-ls32
+    image: lscr.io/linuxserver/orcaslicer:v2.4.2-ls35
     container_name: orcaslicer
     environment:
       PUID: "1000"

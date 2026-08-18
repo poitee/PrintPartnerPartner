@@ -111,7 +111,7 @@ export async function registerMetricsRoutes(
       "",
       "# HELP app_info Application version and build info",
       "# TYPE app_info gauge",
-      `app_info{version="3.0.0",node="${process.version}"} 1`,
+      `app_info{version="3.1.0",node="${process.version}"} 1`,
       "",
     );
 

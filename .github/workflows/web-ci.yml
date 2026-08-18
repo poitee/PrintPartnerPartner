@@ -59,6 +59,8 @@ jobs:
           docker compose -f docker-compose.yml -f pp-compose.yml config
       - name: Build production image
         run: docker build --tag print-partner:ci .
+      - name: Build pinned OrcaSlicer sidecar
+        run: docker build --tag print-partner-slicer-sidecar:ci slicer-sidecar
       - name: Create local smoke source
         run: |
           mkdir -p "${RUNNER_TEMP}/smoke-source"
@@ -80,7 +82,7 @@ jobs:
             --volume "${RUNNER_TEMP}/smoke-source:/smoke-source:ro" \
             --env PRINT_PARTNER_API_KEY=ci-smoke-key \
             print-partner:ci
-          for attempt in $(seq 1 60); do
+          for ((attempt = 1; attempt <= 60; attempt++)); do
             if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then
               exit 0
             fi
