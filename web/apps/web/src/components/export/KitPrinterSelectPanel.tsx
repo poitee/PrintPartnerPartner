@@ -52,6 +52,10 @@ export default function KitPrinterSelectPanel({ profileId, engineReady }: Props)
     const next = nextChecked
       ? [...new Set([...current, printerId])]
       : current.filter((id) => id !== printerId);
+    if (!next.length) {
+      toast.error("Enable at least one printer");
+      return;
+    }
     mutation.mutate(next, {
       onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     });

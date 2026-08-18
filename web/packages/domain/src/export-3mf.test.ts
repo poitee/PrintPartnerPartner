@@ -289,4 +289,49 @@ describe("export 3mf", () => {
     expect(result.warnings.some((w) => /Single-plate export/.test(w))).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("writes one offset file and lists it in the manifest", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-3mf-offset-"));
+    const exportsDir = join(dir, "exports");
+    const stl = join(dir, "bracket.stl");
+    writeFileSync(stl, MINI_STL);
+    const printer: PrinterMachine = {
+      id: "p1",
+      name: "Test",
+      bed_width_mm: 200,
+      bed_depth_mm: 200,
+      bed_height_mm: 200,
+      margin_mm: 4,
+      max_filament_slots: 1,
+      loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+    };
+    const part: MergePartExport = {
+      matchKey: "bracket.stl",
+      relativePath: "bracket.stl",
+      filename: "bracket.stl",
+      sourceLayer: "base:repo",
+      status: "included",
+      role: "primary",
+      quantityAuto: 1,
+      partSlug: "bracket",
+      included: true,
+      quantityOverride: null,
+      notes: "",
+      geometrySame: null,
+      absolutePath: stl,
+      quantityEffective: 1,
+    };
+    const result = exportProfile3mf("Kit", [part], exportsDir, {
+      enabled_printers: [printer],
+      layout_mode: "single_offset",
+    });
+    expect(result.paths).toHaveLength(1);
+    expect(result.primary_path.endsWith("Kit.3mf")).toBe(true);
+    const outputDir = profileExportDir(exportsDir, "Kit", "3mf");
+    const manifest = JSON.parse(readFileSync(join(outputDir, "print_plan.json"), "utf8")) as {
+      printers: Array<{ plates: Array<{ file: string }> }>;
+    };
+    expect(manifest.printers[0].plates[0].file).toBe("Kit.3mf");
+    rmSync(dir, { recursive: true, force: true });
+  });
 });

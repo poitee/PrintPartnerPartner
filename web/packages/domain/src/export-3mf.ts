@@ -239,6 +239,18 @@ function itemsToObjects(
   return specs;
 }
 
+function plateFileName(
+  safeProfile: string,
+  printerName: string,
+  plate: PlateLayout,
+): string {
+  const slugPrinter = safePlanSlug(printerName);
+  const slugGroup = plate.group_label ? `_${safePlanSlug(plate.group_label).slice(0, 80)}` : "";
+  return plate.group_label
+    ? `${safeProfile}_${slugPrinter}${slugGroup}_p${String(plate.index).padStart(2, "0")}.3mf`
+    : `${safeProfile}_${slugPrinter}_plate_${String(plate.index).padStart(2, "0")}.3mf`;
+}
+
 function writePlateFile(path: string, items: PlacedItem[], xOffset = 0): number {
   const usedNames = new Set<string>();
   const materialByKey = new Map<string, { id: number; label: string; hex: string }>();
@@ -354,11 +366,7 @@ export function exportProfile3mf(
     }
   } else {
     for (const [printer, plate] of allPlates) {
-      const slugPrinter = safePlanSlug(printer.name);
-      const slugGroup = plate.group_label ? `_${safePlanSlug(plate.group_label).slice(0, 80)}` : "";
-      const fname = plate.group_label
-        ? `${safeProfile}_${slugPrinter}${slugGroup}_p${String(plate.index).padStart(2, "0")}.3mf`
-        : `${safeProfile}_${slugPrinter}_plate_${String(plate.index).padStart(2, "0")}.3mf`;
+      const fname = plateFileName(safeProfile, printer.name, plate);
       const outPath = join(outputDir, fname);
       const n = writePlateFile(outPath, plate.items);
       objectCount += n;
@@ -387,11 +395,10 @@ export function exportProfile3mf(
         if (label) filaments.add(label);
         parts.push(objectDisplayName(part.filename, item.copy.unit, usedNames));
       }
-      const slugPrinter = safePlanSlug(printer.name);
-      const slugGroup = plate.group_label ? `_${safePlanSlug(plate.group_label).slice(0, 80)}` : "";
-      const fname = plate.group_label
-        ? `${safeProfile}_${slugPrinter}${slugGroup}_p${String(plate.index).padStart(2, "0")}.3mf`
-        : `${safeProfile}_${slugPrinter}_plate_${String(plate.index).padStart(2, "0")}.3mf`;
+      const fname =
+        layoutMode === "single_offset"
+          ? `${safeProfile}.3mf`
+          : plateFileName(safeProfile, printer.name, plate);
       return { file: fname, filaments: [...filaments].sort(), parts };
     });
     manifestPrinters.push({
