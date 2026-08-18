@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronDown, FolderGit2, MoreHorizontal, Search } from "lucide-react";
 import {
@@ -28,11 +27,6 @@ import { useDateFormat } from "../context/DateFormatContext";
 import { useJobContext } from "../context/JobContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../context/ProfileContext";
-import {
-  mapCopilotSourceTab,
-  useCopilotUiOptional,
-  type CopilotSourceTab,
-} from "../context/CopilotUiContext";
 import EmptyState from "../components/layout/EmptyState";
 import DeskNextStep from "../components/layout/DeskNextStep";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
@@ -115,13 +109,7 @@ import { toastJobResult } from "../lib/jobToasts";
 import { cn } from "../lib/utils";
 import { resolveEngineState } from "../lib/workflowState";
 
-type PendingOpenSource = {
-  sourceName?: string;
-  sourceId?: number;
-  tab: CopilotSourceTab;
-  path?: string | null;
-  query?: string;
-};
+type SourceDetailTab = "docs" | "rules" | "naming";
 
 type WizardForm = {
   name: string;
@@ -169,8 +157,6 @@ function matchesFilters(
 }
 
 export default function SourcesPage() {
-  const location = useLocation();
-  const copilot = useCopilotUiOptional();
   const { formatDate } = useDateFormat();
   const { health, error: healthError, loading: healthLoading } = useEngineHealth();
   const { busy, runJob } = useJobRunner("sync");
@@ -188,9 +174,8 @@ export default function SourcesPage() {
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<WizardForm>(emptyForm([]));
   const [detailSource, setDetailSource] = useState<SourceSummary | null>(null);
-  const [detailTab, setDetailTab] = useState<CopilotSourceTab>("docs");
+  const [detailTab, setDetailTab] = useState<SourceDetailTab>("docs");
   const [highlightPath, setHighlightPath] = useState<string | null>(null);
-  const [docsQuery, setDocsQuery] = useState<string | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<SourceSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [reposImportNote, setReposImportNote] = useState<string | null>(null);
@@ -206,7 +191,6 @@ export default function SourcesPage() {
   const [viewMode, setViewMode] = useState<SourceViewMode>(persistedUi.viewMode);
   const searchSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [stlSearchFocus, setStlSearchFocus] = useState(false);
-  const [stlInitialQuery, setStlInitialQuery] = useState("");
   const [stlSearchExpanded, setStlSearchExpanded] = useState(false);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
   const [syncingSourceIds, setSyncingSourceIds] = useState<number[] | "all" | null>(null);
@@ -214,127 +198,12 @@ export default function SourcesPage() {
   const selectionAnchorRef = useRef<number | null>(null);
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const importSharedBuild = useImportSharedBuild();
-  const pendingOpenRef = useRef<PendingOpenSource | null>(null);
-  const appliedIntentSeqRef = useRef(0);
-  const openMissToastAtRef = useRef(0);
-  const [pendingOpenTick, setPendingOpenTick] = useState(0);
   const engineState = resolveEngineState({
     health,
     loading: healthLoading,
     error: healthError,
   });
   const engineReady = engineState === "ready";
-
-  const queueOpenSource = useCallback((pending: PendingOpenSource) => {
-    pendingOpenRef.current = pending;
-    setPendingOpenTick((n) => n + 1);
-  }, []);
-
-  // Bootstrap from navigate state (one-shot).
-  useEffect(() => {
-    const state = location.state as {
-      stlSearch?: boolean;
-      stlQuery?: string;
-      openSource?: {
-        sourceName?: string;
-        sourceId?: number;
-        tab?: string;
-        path?: string | null;
-        query?: string;
-      };
-    } | null;
-    if (state?.stlSearch) {
-      setStlSearchFocus(true);
-      setStlSearchExpanded(true);
-      if (state.stlQuery) setStlInitialQuery(state.stlQuery);
-      window.history.replaceState({}, document.title);
-    }
-    if (state?.openSource) {
-      queueOpenSource({
-        sourceName: state.openSource.sourceName,
-        sourceId: state.openSource.sourceId,
-        tab: mapCopilotSourceTab(state.openSource.tab),
-        path: state.openSource.path,
-        query: state.openSource.query,
-      });
-      // Clear route state only after we queue — apply when sources are ready.
-      window.history.replaceState({}, document.title);
-    }
-  }, [location.state, queueOpenSource]);
-
-  // Same-route re-opens via intentSeq (survives late-loaded sources).
-  useEffect(() => {
-    if (!copilot || copilot.intentSeq === 0) return;
-    if (copilot.intentSeq === appliedIntentSeqRef.current) return;
-    const intent = copilot.lastIntent;
-    if (!intent) return;
-    if (intent.kind === "open_source") {
-      appliedIntentSeqRef.current = copilot.intentSeq;
-      queueOpenSource({
-        sourceName: intent.sourceName,
-        sourceId: intent.sourceId,
-        tab: mapCopilotSourceTab(intent.tab),
-        path: intent.path,
-        query: intent.query,
-      });
-    } else if (intent.kind === "focus_stl_search") {
-      appliedIntentSeqRef.current = copilot.intentSeq;
-      setStlSearchFocus(true);
-      setStlSearchExpanded(true);
-      if (intent.query) setStlInitialQuery(intent.query);
-    }
-  }, [copilot, copilot?.intentSeq, queueOpenSource]);
-
-  // Apply pending open once the source list can resolve the target.
-  useEffect(() => {
-    const pending = pendingOpenRef.current;
-    if (!pending || sources.length === 0) return;
-    const source =
-      (pending.sourceId != null
-        ? sources.find((s) => s.id === pending.sourceId)
-        : undefined) ??
-      (pending.sourceName
-        ? sources.find(
-            (s) =>
-              s.name === pending.sourceName ||
-              s.name.toLowerCase() === pending.sourceName!.toLowerCase(),
-          )
-        : undefined);
-    if (!source) {
-      const now = Date.now();
-      if (now - openMissToastAtRef.current > 4000) {
-        openMissToastAtRef.current = now;
-        toast.message(
-          pending.sourceName
-            ? `Source “${pending.sourceName}” not found yet`
-            : "Source not found yet",
-        );
-      }
-      return;
-    }
-    pendingOpenRef.current = null;
-    setDetailSource(source);
-    setDetailTab(pending.tab);
-    setHighlightPath(pending.path ?? null);
-    setDocsQuery(pending.query);
-  }, [sources, pendingOpenTick]);
-
-  // Hard timeout if the source name never resolves (clear leftover pending).
-  useEffect(() => {
-    if (pendingOpenTick === 0) return;
-    if (!pendingOpenRef.current) return;
-    const timer = window.setTimeout(() => {
-      const leftover = pendingOpenRef.current;
-      if (!leftover) return;
-      pendingOpenRef.current = null;
-      toast.message(
-        leftover.sourceName
-          ? `Source “${leftover.sourceName}” not found — check the name or add/sync it on Sources.`
-          : "Source not found — check the name or add/sync it on Sources.",
-      );
-    }, 8000);
-    return () => window.clearTimeout(timer);
-  }, [pendingOpenTick]);
 
   useEffect(() => {
     savePersistedSourcesUi({
@@ -509,13 +378,12 @@ export default function SourcesPage() {
 
   const openDetail = (
     source: SourceSummary,
-    tab: CopilotSourceTab = "docs",
+    tab: SourceDetailTab = "docs",
     path: string | null = null,
   ) => {
     setDetailSource(source);
     setDetailTab(tab);
     setHighlightPath(path);
-    setDocsQuery(undefined);
   };
 
   const onStlHit = (hit: StlSearchHit) => {
@@ -1095,13 +963,12 @@ export default function SourcesPage() {
           </header>
 
           <div className="flex flex-1 flex-col gap-3 overflow-auto p-3.5 sm:px-5 sm:py-3.5">
-            {(stlSearchExpanded || stlSearchFocus || stlInitialQuery) && (
+            {(stlSearchExpanded || stlSearchFocus) && (
               <GlobalStlSearch
                 engineReady={engineReady}
                 hasSyncedSources={hasSyncedSources}
                 onSelectHit={onStlHit}
                 autoFocus={stlSearchFocus}
-                initialQuery={stlInitialQuery}
               />
             )}
 
@@ -1596,7 +1463,6 @@ export default function SourcesPage() {
         }}
         initialTab={detailTab}
         highlightPath={highlightPath}
-        docsQuery={docsQuery}
         busy={busy}
         categories={categories}
         onEdit={openEditWizard}

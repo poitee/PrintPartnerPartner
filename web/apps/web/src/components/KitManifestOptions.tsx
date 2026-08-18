@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   fetchPlanKitManifest,
@@ -24,10 +24,6 @@ type Props = {
   disabled?: boolean;
   /** Nested inside a source card — omit outer card chrome. */
   compact?: boolean;
-  /** Copilot: kit option group id to expand/scroll/highlight. */
-  focusGroupId?: string | null;
-  /** Bump when copilot re-applies focus. */
-  focusSeq?: number;
 };
 
 function groupLabel(groupId: string, group: RepoManifestOptionGroup): string {
@@ -44,8 +40,6 @@ export default function KitManifestOptions({
   buildStale = false,
   disabled = false,
   compact = false,
-  focusGroupId = null,
-  focusSeq = 0,
 }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -55,9 +49,6 @@ export default function KitManifestOptions({
   const [userEdited, setUserEdited] = useState(false);
   const [optionGroups, setOptionGroups] = useState<Record<string, RepoManifestOptionGroup>>({});
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [highlightGroupId, setHighlightGroupId] = useState<string | null>(null);
-  const appliedFocusSeqRef = useRef(0);
-  const groupRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const { registerFlush, unregisterFlush } = useKitManifestSaveRegistry();
 
@@ -148,26 +139,6 @@ export default function KitManifestOptions({
   const title = baseSourceName ? `${baseSourceName} kit variants` : "Kit variants";
   const TitleHeading = compact ? "h3" : "h2";
   const GroupHeading = compact ? "h4" : "h3";
-
-  useEffect(() => {
-    if (!focusSeq || focusSeq === appliedFocusSeqRef.current) return;
-    if (!focusGroupId || !loaded) return;
-    appliedFocusSeqRef.current = focusSeq;
-    const match = visibleGroups.find(
-      ([gid, group]) =>
-        gid === focusGroupId ||
-        gid.toLowerCase() === focusGroupId.toLowerCase() ||
-        groupLabel(gid, group).toLowerCase() === focusGroupId.toLowerCase(),
-    );
-    const targetId = match?.[0] ?? focusGroupId;
-    setDetailsOpen(true);
-    setHighlightGroupId(targetId);
-    requestAnimationFrame(() => {
-      groupRefs.current.get(targetId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
-    const t = window.setTimeout(() => setHighlightGroupId(null), 3500);
-    return () => window.clearTimeout(t);
-  }, [focusSeq, focusGroupId, loaded, visibleGroups]);
 
   const onPickVariant = (groupId: string, variantId: string) => {
     const next = { ...pendingSelections, [groupId]: variantId };
@@ -265,18 +236,10 @@ export default function KitManifestOptions({
       <div className="space-y-4">
         {visibleGroups.map(([groupId, group]) => {
           const selected = pendingSelections[groupId] ?? "";
-          const focused = highlightGroupId === groupId;
           return (
             <div
               key={groupId}
-              ref={(el) => {
-                if (el) groupRefs.current.set(groupId, el);
-                else groupRefs.current.delete(groupId);
-              }}
-              className={cn(
-                "option-group space-y-2 rounded-md transition-colors",
-                focused && "bg-info/10 ring-2 ring-info/40 ring-offset-2 ring-offset-background",
-              )}
+              className="option-group space-y-2 rounded-md"
               data-kit-group={groupId}
             >
               <div className="flex flex-wrap items-center gap-2">

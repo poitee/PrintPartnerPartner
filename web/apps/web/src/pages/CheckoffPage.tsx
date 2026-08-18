@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   DndContext,
   KeyboardSensor,
@@ -89,7 +89,6 @@ import {
   type ProgressRowRef,
 } from "../lib/progressListOrder";
 import { flattenReviewParts } from "../lib/reviewParts";
-import { useCopilotUiOptional } from "../context/CopilotUiContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
@@ -274,10 +273,6 @@ export default function CheckoffPage() {
   const [queueSuggestions, setQueueSuggestions] = useState<PrinterQueueSuggestion[]>([]);
   const [auxiliaryErrors, setAuxiliaryErrors] = useState<AuxiliaryErrors>({});
   const auxiliaryError = currentAuxiliaryError(auxiliaryErrors);
-  const location = useLocation();
-  const copilot = useCopilotUiOptional();
-  const [pendingPreviewId, setPendingPreviewId] = useState<number | null>(null);
-  const appliedIntentSeqRef = useRef(0);
   const reportAuxiliaryError = useCallback((key: string, message: string) => {
     setAuxiliaryErrors((errors) => setAuxiliaryError(errors, key, message));
   }, []);
@@ -348,41 +343,6 @@ export default function CheckoffPage() {
     markAuxiliarySuccess,
     reportAuxiliaryError,
   ]);
-
-  useEffect(() => {
-    const state = location.state as { previewPartId?: number } | null;
-    const partId = state?.previewPartId;
-    if (partId == null) return;
-    setPendingPreviewId(partId);
-  }, [location.state]);
-
-  useEffect(() => {
-    if (!copilot || copilot.intentSeq === 0) return;
-    if (copilot.intentSeq === appliedIntentSeqRef.current) return;
-    const intent = copilot.lastIntent;
-    if (intent?.kind !== "highlight_part" || intent.surface !== "checkoff") return;
-    if (selectedProfileId != null && intent.planId !== selectedProfileId) return;
-    appliedIntentSeqRef.current = copilot.intentSeq;
-    setPendingPreviewId(intent.partId);
-  }, [copilot, copilot?.intentSeq, selectedProfileId]);
-
-  useEffect(() => {
-    if (pendingPreviewId == null || !review) return;
-    const part = flattenReviewParts(review.part_groups).find((p) => p.id === pendingPreviewId);
-    if (!part) return;
-    setPreviewPart(part);
-    setPendingPreviewId(null);
-    window.history.replaceState({}, document.title);
-  }, [pendingPreviewId, review]);
-
-  useEffect(() => {
-    if (pendingPreviewId == null) return;
-    const timer = window.setTimeout(() => {
-      setPendingPreviewId(null);
-      window.history.replaceState({}, document.title);
-    }, 8000);
-    return () => window.clearTimeout(timer);
-  }, [pendingPreviewId]);
 
   useEffect(() => {
     const onBeforePrint = () => setPrintPrep(true);

@@ -40,12 +40,6 @@ type Props = {
   expandedExtra?: ReactNode;
   /** Resolve mesh color from the selected STL path (role filament defaults). */
   meshColorForPath?: (relativePath: string) => string | undefined;
-  /** Force expand (copilot deep-link). */
-  forceExpanded?: boolean;
-  /** STL tree filter from copilot. */
-  stlFilter?: string | null;
-  /** Bump when copilot re-applies filter/focus. */
-  stlFilterFocusSeq?: number;
   /** Assign this source to a category (Plan compose). */
   onAssignCategory?: (category: string | null) => void;
 };
@@ -95,9 +89,6 @@ export default function SourceFilePickerCard({
   onRemove,
   expandedExtra,
   meshColorForPath,
-  forceExpanded = false,
-  stlFilter = null,
-  stlFilterFocusSeq = 0,
   onAssignCategory,
 }: Props) {
   const { formatDate } = useDateFormat();
@@ -218,10 +209,6 @@ export default function SourceFilePickerCard({
   useEffect(() => {
     if (!expanded) setSelectedFilePath(null);
   }, [expanded]);
-
-  useEffect(() => {
-    if (forceExpanded) setExpanded(true);
-  }, [forceExpanded, stlFilterFocusSeq]);
 
   useEffect(() => {
     try {
@@ -441,8 +428,6 @@ export default function SourceFilePickerCard({
                 selectedFilePath={selectedFilePath}
                 onFileSelect={setSelectedFilePath}
                 onRulesChange={onPendingRulesChange}
-                initialFilter={stlFilter}
-                filterFocusSeq={stlFilterFocusSeq}
                 enableFileCategoryDrag={Boolean(onAssignCategory)}
                 onSelectionStats={(selected, total, duplicates) => {
                   setSelectedCount(selected);

@@ -20,9 +20,6 @@ vi.mock("../../context/PlanWorkspaceContext", () => ({
     loadedRevision: 0,
   }),
 }));
-vi.mock("../../context/CopilotUiContext", () => ({
-  useCopilotUiOptional: () => undefined,
-}));
 vi.mock("../../hooks/useSpoolmanEnabled", () => ({
   useSpoolmanEnabled: () => ({ configured: false, integrationId: null }),
 }));

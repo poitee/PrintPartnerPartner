@@ -88,9 +88,6 @@ vi.mock("../context/PlanWorkspaceContext", () => ({
     busyPartId: null,
   }),
 }));
-vi.mock("../context/CopilotUiContext", () => ({
-  useCopilotUiOptional: () => undefined,
-}));
 vi.mock("../hooks/useJobRunner", () => ({
   useJobRunner: () => ({ busy: false, runJob: vi.fn() }),
 }));
