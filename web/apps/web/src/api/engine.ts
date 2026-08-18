@@ -2729,6 +2729,38 @@ export async function startExport3mf(options: Export3mfOptions): Promise<string>
   return body.job_id;
 }
 
+export type SlicerOpenPlatesResult = {
+  gui_url: string;
+  inbox_dir: string;
+  staged: Array<{ filename: string; dest: string }>;
+  download_paths: string[];
+  object_count: number;
+  warnings: string[];
+  local_app: { scheme_attempt: string | null; note: string };
+};
+
+export async function openPlatesInSlicer(
+  instanceId: string,
+  options: Export3mfOptions,
+): Promise<SlicerOpenPlatesResult> {
+  return engineFetch<SlicerOpenPlatesResult>(
+    `/slicer-instances/${encodeURIComponent(instanceId)}/open-plates`,
+    {
+      method: "POST",
+      body: JSON.stringify(options),
+    },
+  );
+}
+
+export async function fetchSlicerExchangeStatus(): Promise<{
+  configured: boolean;
+  exchange_dir: string;
+  ready: boolean;
+  detail: string | null;
+}> {
+  return engineFetch("/slicer-handoff/exchange-status");
+}
+
 /** Export plates and slice each one on the sidecar matching its printer's slicer. */
 export async function startAutoSlice(options: AutoSliceOptions): Promise<string> {
   const body = await engineFetch<{ job_id: string }>("/jobs/auto-slice", {

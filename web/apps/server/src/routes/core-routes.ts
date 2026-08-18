@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { join } from "node:path";
 import type { ServerConfig } from "../config.js";
 import type { AppRepository } from "../db/repository.js";
 import { registerExportRoutes } from "./exports.js";
@@ -10,6 +11,7 @@ import { registerPlanRoutes } from "./plans.js";
 import { registerPrintPlanRoutes } from "./print-plan.js";
 import { registerPrinterRoutes } from "./printers.js";
 import { registerSlicerInstanceRoutes } from "./slicer-instances.js";
+import { registerSlicerHandoffRoutes } from "./slicer-handoff.js";
 import { registerProfileLibraryRoutes } from "./profile-library.js";
 import { registerRepoManifestRoutes } from "./repo-manifest.js";
 import { registerSourceDocsRoutes } from "./source-docs.js";
@@ -84,6 +86,11 @@ export async function registerCoreRoutes(
   await registerSlicerInstanceRoutes(app, {
     repo: deps.repo,
     deployMode: deps.config.deployMode,
+  });
+  await registerSlicerHandoffRoutes(app, {
+    repo: deps.repo,
+    config: deps.config,
+    exportsDir: join(deps.dataDir, "exports"),
   });
   await registerProfileLibraryRoutes(app, { repo: deps.repo });
   await registerPrintPlanRoutes(app, { repo: deps.repo });

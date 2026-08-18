@@ -21,6 +21,8 @@ export type ServerConfig = {
   host: string;
   port: number;
   dataDir: string;
+  /** Shared slicer exchange volume root (host path). Empty disables managed open. */
+  exchangeDir: string;
   version: string;
   corsOrigin: string | boolean | string[];
   staticDir: string | null;
@@ -264,6 +266,7 @@ export function loadConfig(): ServerConfig {
     host,
     port,
     dataDir,
+    exchangeDir: (process.env.PP_EXCHANGE_DIR ?? "").trim() || "/exchange",
     version: process.env.PP_VERSION ?? "3.0.0-web",
     corsOrigin: parseCorsOrigin(process.env.ALLOWED_ORIGINS ?? process.env.CORS_ORIGIN),
     staticDir: process.env.STATIC_DIR ?? null,

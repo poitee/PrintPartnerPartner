@@ -16,6 +16,8 @@ const API_PREFIXES = [
   "parts",
   "printers",
   "printer-presets",
+  "slicer-instances",
+  "slicer-handoff",
   "settings",
   "filaments",
   "integrations",
