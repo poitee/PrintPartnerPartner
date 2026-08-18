@@ -103,5 +103,8 @@ export default defineConfig({
   build: {
     target: "es2022",
     outDir: "dist",
+    // Three.js is lazy-loaded and compresses to ~132 kB, but its single module
+    // is just over Vite's 500 kB raw warning threshold.
+    chunkSizeWarningLimit: 550,
   },
 });
