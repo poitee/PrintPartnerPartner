@@ -242,11 +242,11 @@ export class InProcessJobRunner {
     let items = [...this.jobs.entries()]
       .filter(([jobId]) => this.isOwnedBy(jobId, tenantId))
       .map(([jobId, snap]) => {
-      const meta = this.jobMeta.get(jobId);
-      return {
-        ...snap,
-        updated_at: meta ? new Date(meta.updatedAt).toISOString() : undefined,
-      };
+        const meta = this.jobMeta.get(jobId);
+        return {
+          ...snap,
+          updated_at: meta ? new Date(meta.updatedAt).toISOString() : undefined,
+        };
       });
     if (filters.status) {
       items = items.filter((j) => j.status === filters.status);

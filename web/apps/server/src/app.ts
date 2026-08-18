@@ -199,7 +199,9 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
         return { discordWebhookUrl: webhookUrl, notifyOnUpdate, notifyOnSync, autoSyncUpdates };
       },
     );
-    app.addHook("onClose", async () => { watcherHandle.stop(); });
+    app.addHook("onClose", async () => {
+      watcherHandle.stop();
+    });
 
     // Start background slicer profile-sync watcher (chokidar over shared config volumes)
     const { startManagedProfileSync } = await import("./services/profile-sync-manager.js");
@@ -213,31 +215,36 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
       broadcastProfileSync(event),
     );
     void profileSyncHandle.syncAll();
-    app.addHook("onClose", async () => { profileSyncHandle.stop(); });
-    
+    app.addHook("onClose", async () => {
+      profileSyncHandle.stop();
+    });
+
     // Register backup routes (available regardless of auth mode)
     await registerBackupRoutes(app, {
       dataDir: config.dataDir,
       sqlite,
       appVersion: config.version,
     });
-    
+
     // Register logging routes
     await registerLoggingRoutes(app);
-    
+
     // Register API key management routes
     await registerApiKeyManagementRoutes(app, { repo: repository });
-    
+
     // Register metrics endpoint
     await registerMetricsRoutes(app, {
       repo: repository,
       validateApiKey: validateRequestApiKey,
       authRequired: config.authRequired,
     });
-    
-    await app.register(async (v1) => {
-      await registerApiV1Plugin(v1, coreDeps, validateRequestApiKey);
-    }, { prefix: "/api/v1" });
+
+    await app.register(
+      async (v1) => {
+        await registerApiV1Plugin(v1, coreDeps, validateRequestApiKey);
+      },
+      { prefix: "/api/v1" },
+    );
 
     app.post(
       "/admin/import-kit-bundle",

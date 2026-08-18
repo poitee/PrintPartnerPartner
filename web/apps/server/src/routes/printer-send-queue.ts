@@ -236,8 +236,8 @@ export async function registerPrinterSendQueueRoutes(
         deps.repo,
         deps.jobs.getExportsDir(request.tenantId),
         {
-        startJob: makeStartJob(request.tenantId ?? "default"),
-        getStatus,
+          startJob: makeStartJob(request.tenantId ?? "default"),
+          getStatus,
         },
       );
       return { results };
