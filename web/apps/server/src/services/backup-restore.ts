@@ -13,6 +13,7 @@ import { promises as fs } from "node:fs";
 import { createGzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import * as tar from "tar";
+import type { Stats } from "node:fs";
 import type { ReadEntry } from "tar";
 import Database from "better-sqlite3";
 import type { SqliteDatabase } from "../db/client.js";
@@ -228,9 +229,10 @@ async function extractValidatedBackup(
     cwd: tempDir,
     maxDecompressionRatio: limits.maxDecompressionRatio,
     filter: (_path, entry) => {
-      const safe = guardArchiveEntry(entry as ReadEntry, state, limits);
-      if (!safe || entry.meta) return false;
-      const path = normalizedArchivePath(entry.path);
+      const readEntry = entry as ReadEntry;
+      const safe = guardArchiveEntry(readEntry, state, limits);
+      if (!safe || readEntry.meta) return false;
+      const path = normalizedArchivePath(readEntry.path);
       return extractDataDirectories || BACKUP_ROOT_FILES.has(path);
     },
   });
@@ -307,7 +309,7 @@ export async function createBackup(
         {
           file: uncompressedTarPath,
           cwd: dataDir,
-          filter: (_path, stats) => !stats.isSymbolicLink(),
+          filter: (_path, stats) => !(stats as Stats).isSymbolicLink(),
           portable: true,
           strict: true,
         },

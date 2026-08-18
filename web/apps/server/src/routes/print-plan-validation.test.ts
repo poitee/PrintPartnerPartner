@@ -64,7 +64,8 @@ describe("print-plan HTTP validation", () => {
     const response = await app.inject({
       method: "PUT",
       url: "/plans/7/print-plan",
-      payload: null,
+      headers: { "content-type": "application/json" },
+      payload: "null",
     });
 
     expect(response.statusCode).toBe(400);
