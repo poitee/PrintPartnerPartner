@@ -54,6 +54,7 @@ import { kindLabel, type SourceKind } from "../components/sources/sourceLabels";
 import { UNCategorized_FILTER } from "../components/sources/sourceLabels";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
 import { useImportSharedBuild } from "../hooks/useImportSharedBuild";
 import {
@@ -215,6 +216,7 @@ export default function SourcesPage() {
   const appliedIntentSeqRef = useRef(0);
   const openMissToastAtRef = useRef(0);
   const [pendingOpenTick, setPendingOpenTick] = useState(0);
+  const engineReady = Boolean(health?.ok);
 
   const queueOpenSource = useCallback((pending: PendingOpenSource) => {
     pendingOpenRef.current = pending;
@@ -353,7 +355,7 @@ export default function SourcesPage() {
   }, [search, viewMode, categoryFilter, syncFilter, platformFilter]);
 
   const refresh = useCallback(async () => {
-    if (!health) return;
+    if (!health?.ok) return;
     setLoadError(null);
     try {
       const [rows, cats] = await Promise.all([
@@ -367,7 +369,7 @@ export default function SourcesPage() {
     } finally {
       setSourcesLoaded(true);
     }
-  }, [health]);
+  }, [health?.ok]);
 
   useEffect(() => {
     void refresh();
@@ -945,6 +947,23 @@ export default function SourcesPage() {
     );
   };
 
+  if (!engineReady) {
+    return (
+      <div className="space-y-4">
+        <RouteBreadcrumbs items={[{ label: "Library" }]} />
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">
+              {healthError
+                ? "Engine offline — start the print-partner engine to use Library."
+                : "Connecting to the engine…"}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className={detailSource != null ? "lg:pl-[min(42rem,100%)]" : undefined}>
       <RouteBreadcrumbs items={[{ label: "Library" }]} />
@@ -991,7 +1010,7 @@ export default function SourcesPage() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button className="min-h-9" disabled={!health}>
+                  <Button className="min-h-9" disabled={!engineReady}>
                     Add source
                     <ChevronDown className="ml-1.5 h-3.5 w-3.5 opacity-80" aria-hidden />
                   </Button>
@@ -1024,7 +1043,7 @@ export default function SourcesPage() {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="min-h-9" disabled={!health}>
+                  <Button variant="ghost" className="min-h-9" disabled={!engineReady}>
                     More
                   </Button>
                 </DropdownMenuTrigger>
@@ -1189,6 +1208,17 @@ export default function SourcesPage() {
                   ))}
                 </div>
               )
+            ) : loadError && sources.length === 0 ? (
+              <Card className="border-destructive/40 bg-destructive/5 shadow-none">
+                <CardContent className="space-y-3 pt-6">
+                  <p className="text-sm text-destructive">
+                    Could not load Library: {loadError}
+                  </p>
+                  <Button size="sm" variant="secondary" onClick={() => void refresh()}>
+                    Retry
+                  </Button>
+                </CardContent>
+              </Card>
             ) : sources.length === 0 ? (
               <EmptyState
                 icon={FolderGit2}

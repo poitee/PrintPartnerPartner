@@ -185,7 +185,13 @@ const FILTER_MODES: { mode: CheckoffFilterMode; label: string }[] = [
 export default function CheckoffPage() {
   const navigate = useNavigate();
   const { health, error: engineError } = useEngineHealth();
-  const { selectedProfileId, profiles } = useProfileSelection();
+  const {
+    selectedProfileId,
+    profiles,
+    loading: profilesLoading,
+    error: profilesError,
+    reloadProfiles,
+  } = useProfileSelection();
   const {
     review,
     loading,
@@ -199,7 +205,10 @@ export default function CheckoffPage() {
   } = usePlanWorkspace();
   const recomputeJob = useJobRunner("recompute");
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
-  const { data: buildTrackingSettings } = useBuildTrackingSettingsQuery(Boolean(health?.ok));
+  const {
+    data: buildTrackingSettings,
+    error: buildTrackingError,
+  } = useBuildTrackingSettingsQuery(Boolean(health?.ok));
   const assemblyTrackingEnabled = buildTrackingSettings?.assembly_tracking ?? false;
 
   // Re-fetch when the service worker flushes its offline checkoff queue
@@ -252,10 +261,22 @@ export default function CheckoffPage() {
   const [awaitingLinks, setAwaitingLinks] = useState<PrinterCheckoffLink[]>([]);
   const [phaseManifest, setPhaseManifest] = useState<PlanPhaseManifestResponse | null>(null);
   const [queueSuggestions, setQueueSuggestions] = useState<PrinterQueueSuggestion[]>([]);
+  const [auxiliaryError, setAuxiliaryError] = useState<string | null>(null);
   const location = useLocation();
   const copilot = useCopilotUiOptional();
   const [pendingPreviewId, setPendingPreviewId] = useState<number | null>(null);
   const appliedIntentSeqRef = useRef(0);
+
+  useEffect(() => {
+    if (!buildTrackingError) return;
+    setAuxiliaryError(
+      `Could not load assembly tracking settings: ${
+        buildTrackingError instanceof Error
+          ? buildTrackingError.message
+          : String(buildTrackingError)
+      }`,
+    );
+  }, [buildTrackingError]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -271,7 +292,12 @@ export default function CheckoffPage() {
     }
     void fetchPrinterQueueSuggestions({ idle_integration_ids: ids })
       .then(({ suggestions }) => setQueueSuggestions(suggestions))
-      .catch(() => setQueueSuggestions([]));
+      .catch((e) => {
+        setQueueSuggestions([]);
+        setAuxiliaryError(
+          `Could not refresh printer suggestions: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
   }, [liveStrip.idleIntegrationIds]);
 
   useEffect(() => {
@@ -345,7 +371,11 @@ export default function CheckoffPage() {
     if (!health?.ok) return;
     void fetchUnattributedPrints()
       .then(setUnattributedPrints)
-      .catch(() => {/* ignore */});
+      .catch((e) =>
+        setAuxiliaryError(
+          `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
   }, [health?.ok]);
 
   // Load phase manifest whenever the selected plan changes
@@ -356,7 +386,12 @@ export default function CheckoffPage() {
     }
     void fetchPlanPhaseManifest(selectedProfileId)
       .then((manifest) => setPhaseManifest(manifest))
-      .catch(() => setPhaseManifest(null));
+      .catch((e) => {
+        setPhaseManifest(null);
+        setAuxiliaryError(
+          `Could not load phase progress: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
   }, [health?.ok, selectedProfileId]);
 
   const refreshWatchingLinks = useCallback(() => {
@@ -366,13 +401,21 @@ export default function CheckoffPage() {
       profile_id: selectedProfileId ?? undefined,
     })
       .then((res) => setWatchingLinks(res.links ?? []))
-      .catch(() => {/* ignore */});
+      .catch((e) =>
+        setAuxiliaryError(
+          `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
     void fetchPrinterCheckoffLinks({
       state: "awaiting_verify",
       profile_id: selectedProfileId ?? undefined,
     })
       .then((res) => setAwaitingLinks(res.links ?? []))
-      .catch(() => {/* ignore */});
+      .catch((e) =>
+        setAuxiliaryError(
+          `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
   }, [health?.ok, selectedProfileId]);
 
   useEffect(() => {
@@ -381,6 +424,7 @@ export default function CheckoffPage() {
 
   useEffect(() => {
     setVerifyQueue({ awaitingCount: 0, watchingCount: 0, primaryHostName: null });
+    setAuxiliaryError(null);
   }, [selectedProfileId]);
 
   useEffect(() => {
@@ -652,7 +696,11 @@ export default function CheckoffPage() {
   const onToggleUnit = useCallback(
     (part: ReviewPart, unitIndex: number) => {
       const next = !part.print_units[unitIndex];
-      void toggleUnit(part.id, unitIndex, next);
+      void toggleUnit(part.id, unitIndex, next).catch((e) => {
+        toast.error("Could not update print progress", {
+          description: e instanceof Error ? e.message : String(e),
+        });
+      });
     },
     [toggleUnit],
   );
@@ -660,7 +708,11 @@ export default function CheckoffPage() {
   const onToggleAssembled = useCallback(
     (part: ReviewPart, unitIndex: number) => {
       const next = !(part.assembled_units?.[unitIndex] ?? false);
-      void toggleAssembled(part.id, unitIndex, next);
+      void toggleAssembled(part.id, unitIndex, next).catch((e) => {
+        toast.error("Could not update assembly progress", {
+          description: e instanceof Error ? e.message : String(e),
+        });
+      });
     },
     [toggleAssembled],
   );
@@ -668,7 +720,13 @@ export default function CheckoffPage() {
   const onIncrement = useCallback(
     (part: ReviewPart) => {
       const idx = nextUnitToComplete(part.print_units);
-      if (idx >= 0) void toggleUnit(part.id, idx, true);
+      if (idx >= 0) {
+        void toggleUnit(part.id, idx, true).catch((e) => {
+          toast.error("Could not update print progress", {
+            description: e instanceof Error ? e.message : String(e),
+          });
+        });
+      }
     },
     [toggleUnit],
   );
@@ -676,7 +734,13 @@ export default function CheckoffPage() {
   const onDecrement = useCallback(
     (part: ReviewPart) => {
       const idx = lastCompletedUnit(part.print_units);
-      if (idx >= 0) void toggleUnit(part.id, idx, false);
+      if (idx >= 0) {
+        void toggleUnit(part.id, idx, false).catch((e) => {
+          toast.error("Could not update print progress", {
+            description: e instanceof Error ? e.message : String(e),
+          });
+        });
+      }
     },
     [toggleUnit],
   );
@@ -723,6 +787,93 @@ export default function CheckoffPage() {
       />
     );
   };
+
+  if (
+    !health?.ok ||
+    profilesLoading ||
+    profilesError ||
+    selectedProfileId == null ||
+    (loading && !review) ||
+    workspaceError
+  ) {
+    let stateContent;
+    if (!health?.ok) {
+      stateContent = (
+        <Card className="no-print border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">
+              {engineError
+                ? "Engine offline — start the print-partner engine to use Progress."
+                : "Connecting to the engine…"}
+            </p>
+          </CardContent>
+        </Card>
+      );
+    } else if (profilesError) {
+      stateContent = (
+        <Card className="no-print border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive">
+              Could not load plans: {profilesError}
+            </p>
+            <Button size="sm" variant="secondary" onClick={() => void reloadProfiles()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    } else if (profilesLoading || (loading && !review)) {
+      stateContent = (
+        <Card className="no-print border-border shadow-sm">
+          <CardContent className="flex items-center gap-2 pt-6">
+            <Spinner className="size-4" />
+            <p className="text-sm text-muted-foreground">Loading progress…</p>
+          </CardContent>
+        </Card>
+      );
+    } else if (workspaceError) {
+      stateContent = (
+        <Card className="no-print border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive">
+              Could not load Progress: {workspaceError}
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                if (selectedProfileId != null) void reload(selectedProfileId);
+              }}
+            >
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    } else {
+      stateContent = <div className="no-print">{renderEmpty()}</div>;
+    }
+
+    return (
+      <div className="space-y-4">
+        <RouteBreadcrumbs
+          items={[
+            { label: "Plan", to: planRoute(selectedProfileId) },
+            { label: "Parts", to: partsRoute(selectedProfileId) },
+            { label: "Progress" },
+          ]}
+        />
+        <PageHeader
+          icon={CheckSquare}
+          accent
+          eyebrow={progressEyebrow}
+          title="Progress"
+          description={progressDescription}
+        />
+        {stateContent}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -812,7 +963,11 @@ export default function CheckoffPage() {
               onUnattributedUpdate={() => {
                 void fetchUnattributedPrints()
                   .then(setUnattributedPrints)
-                  .catch(() => {/* ignore */});
+                  .catch((e) =>
+                    setAuxiliaryError(
+                      `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
+                    ),
+                  );
               }}
             />
           </Suspense>
@@ -825,13 +980,21 @@ export default function CheckoffPage() {
                   onClaimed={() => {
                     void fetchUnattributedPrints()
                       .then(setUnattributedPrints)
-                      .catch(() => {/* ignore */});
+                      .catch((e) =>
+                        setAuxiliaryError(
+                          `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
+                        ),
+                      );
                     setVerifyRefreshKey((k) => k + 1);
                   }}
                   onDismissed={() => {
                     void fetchUnattributedPrints()
                       .then(setUnattributedPrints)
-                      .catch(() => {/* ignore */});
+                      .catch((e) =>
+                        setAuxiliaryError(
+                          `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
+                        ),
+                      );
                   }}
                 />
               ))}
@@ -913,6 +1076,11 @@ export default function CheckoffPage() {
 
         <div>
           {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+          {auxiliaryError && (
+            <p className="text-sm text-destructive" role="alert">
+              {auxiliaryError}
+            </p>
+          )}
         </div>
       </div>
 
@@ -1025,10 +1193,18 @@ export default function CheckoffPage() {
                             .then(() => {
                               void fetchUnattributedPrints()
                                 .then(setUnattributedPrints)
-                                .catch(() => {});
+                                .catch((e) =>
+                                  setAuxiliaryError(
+                                    `Could not refresh printer activity: ${e instanceof Error ? e.message : String(e)}`,
+                                  ),
+                                );
                               refreshWatchingLinks();
                             })
-                            .catch(() => {});
+                            .catch((e) =>
+                              setAuxiliaryError(
+                                `Could not claim printer activity: ${e instanceof Error ? e.message : String(e)}`,
+                              ),
+                            );
                         }}
                       />
                     );

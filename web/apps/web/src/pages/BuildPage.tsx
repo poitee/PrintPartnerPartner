@@ -108,8 +108,14 @@ export default function BuildPage() {
 
 function BuildPageContent() {
   const location = useLocation();
-  const { health } = useEngineHealth();
-  const { selectedProfileId, reloadProfiles, profiles } = useProfileSelection();
+  const { health, error: engineError } = useEngineHealth();
+  const {
+    selectedProfileId,
+    reloadProfiles,
+    profiles,
+    loading: profilesLoading,
+    error: profilesError,
+  } = useProfileSelection();
   const {
     openCreatePlan,
     openRenamePlan,
@@ -138,6 +144,8 @@ function BuildPageContent() {
   const [namingProfile, setNamingProfile] = useState<StlNamingProfile>(DEFAULT_STL_NAMING_PROFILE);
   const [kitFocus, setKitFocus] = useState<KitFocusState | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [profileDataLoading, setProfileDataLoading] = useState(false);
+  const engineReady = Boolean(health?.ok);
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
   const buildStale = selectedProfile?.build_stale ?? false;
@@ -167,10 +175,18 @@ function BuildPageContent() {
     if (!health?.ok) return;
     void fetchAutoRecomputeSettings()
       .then((s) => setAutoRecomputeEnabled(s.enabled))
-      .catch(() => {});
+      .catch((e) =>
+        toast.error("Could not load auto-recompute settings", {
+          description: e instanceof Error ? e.message : String(e),
+        }),
+      );
     void fetchStlNaming()
       .then(setNamingProfile)
-      .catch(() => {});
+      .catch((e) =>
+        toast.error("Could not load STL naming settings", {
+          description: e instanceof Error ? e.message : String(e),
+        }),
+      );
   }, [health?.ok]);
 
   const resolvePreviewMeshColor = useCallback(
@@ -245,7 +261,7 @@ function BuildPageContent() {
       const [layerRows, sourceRows, categoryRows] = await Promise.all([
         fetchPlanLayers(profileId),
         fetchSources(),
-        fetchSourceCategories().catch(() => [] as string[]),
+        fetchSourceCategories(),
       ]);
       setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
       setSources(sourceRows);
@@ -283,6 +299,7 @@ function BuildPageContent() {
     previousSelectedProfileIdRef.current = selectedProfileId;
 
     if (selectedProfileId == null) {
+      setProfileDataLoading(false);
       setLayers([]);
       setAddonSourceId("");
       setPendingBaseSourceId("");
@@ -302,12 +319,13 @@ function BuildPageContent() {
     }
 
     let cancelled = false;
+    setProfileDataLoading(true);
     void (async () => {
       try {
         const [layerRows, sourceRows, categoryRows] = await Promise.all([
           fetchPlanLayers(selectedProfileId),
           fetchSources(),
-          fetchSourceCategories().catch(() => [] as string[]),
+          fetchSourceCategories(),
         ]);
         if (cancelled) return;
         setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
@@ -317,6 +335,8 @@ function BuildPageContent() {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : String(e));
         }
+      } finally {
+        if (!cancelled) setProfileDataLoading(false);
       }
     })();
     return () => {
@@ -465,6 +485,14 @@ function BuildPageContent() {
     sourceCount: sourceCardLayers.length,
     partCount,
   });
+  const workspaceReady =
+    engineReady &&
+    !profilesLoading &&
+    !profilesError &&
+    profiles.length > 0 &&
+    selectedProfileId != null &&
+    !profileDataLoading &&
+    !loadError;
 
   const onUpdateBuild = async () => {
     if (selectedProfileId == null) return;
@@ -546,12 +574,12 @@ function BuildPageContent() {
         accent
         title="Plan"
         description={headerSubtitle}
-        actions={
+        actions={workspaceReady ? (
           <PageHeaderActions>
             <Button
               className="min-h-10 w-full sm:w-auto"
               onClick={() => void onUpdateBuild()}
-              disabled={selectedProfileId == null || busy || !health}
+              disabled={selectedProfileId == null || busy || !engineReady}
               loading={busy}
             >
               {busy ? "Rebuilding…" : "Rebuild plan"}
@@ -562,7 +590,7 @@ function BuildPageContent() {
                   variant="ghost"
                   size="icon"
                   className="min-h-10 w-10"
-                  disabled={selectedProfileId == null || !health}
+                  disabled={selectedProfileId == null || !engineReady}
                   aria-label="Plan actions"
                 >
                   <MoreHorizontal className="h-4 w-4" />
@@ -602,12 +630,12 @@ function BuildPageContent() {
               </DropdownMenuContent>
             </DropdownMenu>
           </PageHeaderActions>
-        }
+        ) : undefined}
       />
 
       <DeskNextStep>{planNextStep}</DeskNextStep>
 
-      {selectedProfileId != null && (
+      {workspaceReady && selectedProfileId != null && (
         <PlanSpecialRequestField
           profileId={selectedProfileId}
           value={selectedProfile?.special_request}
@@ -615,7 +643,7 @@ function BuildPageContent() {
         />
       )}
 
-      {selectedProfileId != null && (
+      {workspaceReady && selectedProfileId != null && (
         <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
           Export STLs and Share live on{" "}
           <Link
@@ -628,16 +656,45 @@ function BuildPageContent() {
         </p>
       )}
 
-      <StaleBuildBanner stale={buildStale} busy={busy} onUpdate={() => void onUpdateBuild()} />
+      {workspaceReady && (
+        <StaleBuildBanner stale={buildStale} busy={busy} onUpdate={() => void onUpdateBuild()} />
+      )}
 
-      {!buildStale && mergeConflicts.length > 0 && (
+      {workspaceReady && !buildStale && mergeConflicts.length > 0 && (
         <MergeConflictBanner
           conflictCount={mergeConflicts.length}
           groupedByFilename={mergeConflictGroups}
         />
       )}
 
-      {!health ? null : profiles.length === 0 ? (
+      {!health?.ok ? (
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">
+              {engineError
+                ? "Engine offline — start the print-partner engine to edit a plan."
+                : "Connecting to the engine…"}
+            </p>
+          </CardContent>
+        </Card>
+      ) : profilesError ? (
+        <Card className="border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive">
+              Could not load plans: {profilesError}
+            </p>
+            <Button size="sm" variant="secondary" onClick={() => void reloadProfiles()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      ) : profilesLoading ? (
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Loading plans…</p>
+          </CardContent>
+        </Card>
+      ) : profiles.length === 0 ? (
         <EmptyState
           icon={Hammer}
           title="No plan yet"
@@ -653,9 +710,31 @@ function BuildPageContent() {
           title="Select a plan"
           description="Choose a plan in the sidebar plan picker (or the mobile plan switcher in the header)."
         />
+      ) : profileDataLoading ? (
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Loading plan…</p>
+          </CardContent>
+        </Card>
+      ) : loadError ? (
+        <Card className="border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive">
+              Could not load plan: {loadError}
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void loadProfileData(selectedProfileId)}
+            >
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       ) : null}
 
-      {kitImportSetup &&
+      {workspaceReady &&
+        kitImportSetup &&
         ((kitImportSetup.unmatched_sources?.length ?? 0) > 0 ||
           (kitImportSetup.warnings?.length ?? 0) > 0) && (
           <ShareImportSetupPanel
@@ -669,14 +748,12 @@ function BuildPageContent() {
           />
         )}
 
-      {loadError && <p className="text-sm text-destructive">{loadError}</p>}
-
-      {selectedProfileId != null && (
+      {workspaceReady && selectedProfileId != null && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <PlanRolesCard
               profileId={selectedProfileId}
-              disabled={!health || busy}
+              disabled={!engineReady || busy}
               refreshKey={filamentRefreshKey}
               roleFilaments={roleFilaments}
               onRolesChange={setRoleFilaments}
@@ -695,7 +772,7 @@ function BuildPageContent() {
                   profileId={selectedProfileId}
                   layers={layers}
                   onLayersChange={setLayers}
-                  disabled={!health || busy}
+                  disabled={!engineReady || busy}
                 />
                 <Button
                   variant="ghost"
@@ -739,7 +816,7 @@ function BuildPageContent() {
                   <Combobox
                     value={pendingBaseSourceId || null}
                     onValueChange={setPendingBaseSourceId}
-                    disabled={!health || selectedProfileId == null}
+                    disabled={!engineReady || selectedProfileId == null}
                     placeholder="Choose base source…"
                     searchPlaceholder="Search sources…"
                     emptyText="No sources match."
@@ -748,7 +825,7 @@ function BuildPageContent() {
                   <Button
                     size="sm"
                     onClick={() => void onSetBaseSource()}
-                    disabled={!pendingBaseSourceId || selectedProfileId == null || !health}
+                    disabled={!pendingBaseSourceId || selectedProfileId == null || !engineReady}
                   >
                     Set base source
                   </Button>
@@ -781,7 +858,7 @@ function BuildPageContent() {
                     layerType={row.layerType}
                     source={sourceById.get(row.sourceId) ?? null}
                     allSources={sources}
-                    disabled={!health || busy}
+                    disabled={!engineReady || busy}
                     defaultExpanded={index === 0 && Boolean(kitFocus)}
                     forceExpanded={focusMatchesSource}
                     stlFilter={focusMatchesSource ? kitFocus?.stlFilter ?? null : null}
@@ -801,7 +878,7 @@ function BuildPageContent() {
                           profileId={selectedProfileId}
                           baseSourceName={row.sourceName}
                           buildStale={buildStale}
-                          disabled={!health || busy}
+                          disabled={!engineReady || busy}
                           compact
                           focusGroupId={kitFocus?.groupId ?? null}
                           focusSeq={kitFocus?.seq ?? 0}
@@ -820,7 +897,7 @@ function BuildPageContent() {
                   value={addonSourceId || null}
                   onValueChange={setAddonSourceId}
                   disabled={
-                    !health ||
+                    !engineReady ||
                     selectedProfileId == null ||
                     needsBaseSource ||
                     addonSourceOptions.length === 0
@@ -862,10 +939,14 @@ function BuildPageContent() {
           if (!open) {
             void fetchSourceCategories()
               .then(setCategories)
-              .catch(() => {});
+              .catch((e) =>
+                toast.error("Could not refresh source categories", {
+                  description: e instanceof Error ? e.message : String(e),
+                }),
+              );
           }
         }}
-        engineReady={Boolean(health)}
+        engineReady={engineReady}
       />
     </div>
   );

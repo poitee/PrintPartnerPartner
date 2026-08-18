@@ -12,6 +12,7 @@ import PageHeaderActions from "../components/layout/PageHeaderActions";
 import EmptyState from "../components/layout/EmptyState";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,9 +35,15 @@ import { useTouchProfileLastUsedMutation } from "../queries/profiles";
 
 /** Dedicated Plans list — not a spine desk-loop step (GRE-228). */
 export default function PlansPage() {
-  const { health } = useEngineHealth();
-  const { profiles, selectedProfileId, setSelectedProfileId, loading } =
-    useProfileSelection();
+  const { health, error: engineError } = useEngineHealth();
+  const {
+    profiles,
+    selectedProfileId,
+    setSelectedProfileId,
+    loading,
+    error: profilesError,
+    reloadProfiles,
+  } = useProfileSelection();
   const {
     openCreatePlan,
     openRenamePlan,
@@ -73,26 +80,53 @@ export default function PlansPage() {
         accent
         title="Plans"
         description="Switch the spine plan, or manage templates. Picker stays the quick switcher."
-        actions={
+        actions={health?.ok && !loading && !profilesError && profiles.length > 0 ? (
           <PageHeaderActions>
             <Button
               className="min-h-10 w-full sm:w-auto"
               onClick={openCreatePlan}
-              disabled={!health}
+              disabled={!health?.ok || loading || Boolean(profilesError)}
             >
               Create plan
             </Button>
           </PageHeaderActions>
-        }
+        ) : undefined}
       />
 
-      {emptyAll ? (
+      {!health?.ok ? (
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">
+              {engineError
+                ? "Engine offline — start the print-partner engine to manage plans."
+                : "Connecting to the engine…"}
+            </p>
+          </CardContent>
+        </Card>
+      ) : profilesError ? (
+        <Card className="border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive">
+              Could not load plans: {profilesError}
+            </p>
+            <Button size="sm" variant="secondary" onClick={() => void reloadProfiles()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      ) : loading ? (
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Loading plans…</p>
+          </CardContent>
+        </Card>
+      ) : emptyAll ? (
         <EmptyState
           icon={Layers}
           title="Create a plan to start the desk loop."
           action={{ label: "Create plan", onClick: openCreatePlan }}
         />
-      ) : !health?.ok && profiles.length === 0 ? null : (
+      ) : (
         <>
           <SegmentedControl
             aria-label="Plan status filter"

@@ -36,7 +36,13 @@ import { cn } from "../lib/utils";
  */
 export default function ExportPage() {
   const { health, error: engineError } = useEngineHealth();
-  const { selectedProfileId, profiles } = useProfileSelection();
+  const {
+    selectedProfileId,
+    profiles,
+    loading: profilesLoading,
+    error: profilesError,
+    reloadProfiles,
+  } = useProfileSelection();
   const { review, invalidate, loading, reload, revision, loadedRevision, error: planError } =
     usePlanWorkspace();
   const { data: sources = [] } = useSourcesQuery();
@@ -119,6 +125,31 @@ export default function ExportPage() {
             </p>
           </CardContent>
         </Card>
+      ) : profilesError ? (
+        <Card className="border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive">
+              Could not load plans: {profilesError}
+            </p>
+            <Button size="sm" variant="secondary" onClick={() => void reloadProfiles()}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      ) : profilesLoading ? (
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Loading plans…</p>
+          </CardContent>
+        </Card>
+      ) : selectedProfileId == null ? (
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">
+              Open a plan to send sliced files or export slicer input.
+            </p>
+          </CardContent>
+        </Card>
       ) : (
         <>
           <Suspense fallback={<div className="h-32 animate-pulse rounded-lg bg-muted" />}>
@@ -153,15 +184,7 @@ export default function ExportPage() {
               engineReady={Boolean(health.ok)}
             />
 
-            {selectedProfileId == null ? (
-              <Card>
-                <CardContent className="pt-6">
-                  <p className="text-sm text-muted-foreground">
-                    Open a plan to export STLs, a 3MF, a share bundle, or a parts manifest.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : loading && !review ? (
+            {loading && !review ? (
               <Card>
                 <CardContent className="pt-6">
                   <p className="text-sm text-muted-foreground">Loading plan…</p>

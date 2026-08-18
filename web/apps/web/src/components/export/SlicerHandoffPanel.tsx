@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  fetchPrintPlan,
   fetchPrinters,
   fetchSlicerExchangeStatus,
   fetchSlicerInstances,
@@ -16,6 +17,7 @@ import {
 import { useEngineHealth } from "../../hooks/useEngineHealth";
 import { useJobRunner } from "../../hooks/useJobRunner";
 import { useProfileSelection } from "../../context/ProfileContext";
+import { resolveEnabledPrinterIds } from "../../lib/enabledPrinters";
 import { handleExport3mfJobDone } from "../../lib/export3mfJobResult";
 import { settingsRoute } from "../../lib/routes";
 import { Button } from "../ui/button";
@@ -71,22 +73,34 @@ export default function SlicerHandoffPanel() {
     };
   }, [health?.ok]);
 
+  const fetchEnabledPrinterIds = async (profileId: number) => {
+    const [printers, plan] = await Promise.all([
+      fetchPrinters(),
+      fetchPrintPlan(profileId),
+    ]);
+    if (!printers.length) {
+      toast.error("No printers configured", {
+        description: "Add a printer in Settings before exporting 3MF.",
+      });
+      return null;
+    }
+    return resolveEnabledPrinterIds(
+      printers.map((printer) => printer.id),
+      plan.enabled_printer_ids,
+    );
+  };
+
   const onDownload = async () => {
     if (selectedProfileId == null) return;
     try {
-      const printers = await fetchPrinters();
-      if (!printers.length) {
-        toast.error("No printers configured", {
-          description: "Add a printer in Settings before exporting 3MF.",
-        });
-        return;
-      }
+      const enabledPrinterIds = await fetchEnabledPrinterIds(selectedProfileId);
+      if (!enabledPrinterIds) return;
       await export3mfJob.runJob(
         () =>
           startExport3mf({
             profile_id: selectedProfileId,
             layout_mode: "per_plate",
-            enabled_printer_ids: printers.map((p) => p.id),
+            enabled_printer_ids: enabledPrinterIds,
           }),
         (snap) => handleExport3mfJobDone("3MF export", snap),
       );
@@ -99,15 +113,12 @@ export default function SlicerHandoffPanel() {
     if (selectedProfileId == null || !instanceId) return;
     setBusy(true);
     try {
-      const printers = await fetchPrinters();
-      if (!printers.length) {
-        toast.error("No printers configured");
-        return;
-      }
+      const enabledPrinterIds = await fetchEnabledPrinterIds(selectedProfileId);
+      if (!enabledPrinterIds) return;
       const result = await openPlatesInSlicer(instanceId, {
         profile_id: selectedProfileId,
         layout_mode: "per_plate",
-        enabled_printer_ids: printers.map((p) => p.id),
+        enabled_printer_ids: enabledPrinterIds,
       });
       toast.success(`Staged ${result.staged.length} plate(s) for the slicer`, {
         description: `Open File → Open in the slicer GUI and pick files under the exchange inbox (${result.inbox_dir}).`,

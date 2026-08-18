@@ -106,10 +106,11 @@ function SettingsSection({
 
 export default function SettingsPage() {
   const location = useLocation();
-  const { health } = useEngineHealth();
+  const { health, error: engineError } = useEngineHealth();
+  const engineReady = Boolean(health?.ok);
   const { user, multiUser } = useAuth();
   const { format: dateFormat, setFormat: setDateFormat } = useDateFormat();
-  const { updateCheck, refresh: refreshUpdateCheck } = useAppUpdateCheck(Boolean(health));
+  const { updateCheck, refresh: refreshUpdateCheck } = useAppUpdateCheck(engineReady);
   const [updateCheckRefreshing, setUpdateCheckRefreshing] = useState(false);
   const { busy: updateBusy, message: updateMessage, runJob: runUpdateJob } =
     useJobRunner("source-updates");
@@ -131,12 +132,17 @@ export default function SettingsPage() {
   const [discordWebhookError, setDiscordWebhookError] = useState<string | null>(null);
   const [discordSaving, setDiscordSaving] = useState(false);
   const [discordTestStatus, setDiscordTestStatus] = useState<string | null>(null);
-  const { data: buildTrackingSettings } = useBuildTrackingSettingsQuery(Boolean(health));
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const { data: buildTrackingSettings } = useBuildTrackingSettingsQuery(engineReady);
   const saveBuildTrackingMutation = useSaveBuildTrackingSettingsMutation();
   const buildTrackingSaving = saveBuildTrackingMutation.isPending;
 
   const refresh = useCallback(async () => {
-    if (!health) return;
+    if (!health?.ok) {
+      setSettingsLoaded(false);
+      return;
+    }
+    setLoadError(null);
     try {
       const [filamentRows, patSettings, updateSettings, autoRecomputeSettings, discordNotifySettings] = await Promise.all([
         fetchCustomFilaments(),
@@ -153,8 +159,10 @@ export default function SettingsPage() {
       setDiscordWebhookInput(discordNotifySettings.webhook_url ?? "");
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSettingsLoaded(true);
     }
-  }, [health]);
+  }, [health?.ok]);
 
   useEffect(() => {
     void refresh();
@@ -267,6 +275,25 @@ export default function SettingsPage() {
         }
       />
 
+      {!engineReady && (
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">
+              {engineError
+                ? "Engine offline — start the print-partner engine to change engine settings."
+                : "Connecting to the engine…"}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+      {engineReady && !settingsLoaded && (
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Loading settings…</p>
+          </CardContent>
+        </Card>
+      )}
+
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
       {patMessage && <p className="text-sm text-muted-foreground">{patMessage}</p>}
       {updateMessage && <p className="text-sm text-muted-foreground">{updateMessage}</p>}
@@ -278,19 +305,19 @@ export default function SettingsPage() {
       />
 
       <SettingsSection id="printers" title="Printers">
-        <PrintersSettingsCard engineReady={Boolean(health)} />
+        <PrintersSettingsCard engineReady={engineReady && settingsLoaded} />
       </SettingsSection>
 
       <SettingsSection id="slicers" title="Slicers">
-        <SlicersSettingsCard engineReady={Boolean(health)} />
+        <SlicersSettingsCard engineReady={engineReady && settingsLoaded} />
       </SettingsSection>
 
       <SettingsSection title="Library">
         <div id="source-categories">
-          <SourceCategoryManager engineReady={Boolean(health)} />
+          <SourceCategoryManager engineReady={engineReady && settingsLoaded} />
         </div>
 
-        <StlNamingSettingsCard engineReady={Boolean(health)} />
+        <StlNamingSettingsCard engineReady={engineReady && settingsLoaded} />
 
         <Card className="shadow-none">
           <CardHeader>
@@ -300,7 +327,9 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {filaments.length === 0 ? (
+            {!settingsLoaded ? (
+              <p className="text-sm text-muted-foreground">Loading custom filaments…</p>
+            ) : filaments.length === 0 ? (
               <p className="text-sm text-muted-foreground">No custom filaments yet.</p>
             ) : (
               <ul className="filament-list space-y-2">
@@ -319,6 +348,7 @@ export default function SettingsPage() {
                       variant="ghost"
                       size="sm"
                       className="ml-auto"
+                    disabled={!engineReady || !settingsLoaded}
                       onClick={() => setDeleteFilamentId(f.id)}
                     >
                       Delete
@@ -331,21 +361,29 @@ export default function SettingsPage() {
               <input
                 className={inputClass}
                 placeholder="Name"
+                disabled={!engineReady || !settingsLoaded}
                 value={newFilamentName}
                 onChange={(e) => setNewFilamentName(e.target.value)}
               />
               <input
                 type="color"
+                disabled={!engineReady || !settingsLoaded}
                 value={newFilamentHex}
                 onChange={(e) => setNewFilamentHex(e.target.value)}
                 title="Color"
               />
               <input
                 className={`hex-input ${inputClass}`}
+                disabled={!engineReady || !settingsLoaded}
                 value={newFilamentHex}
                 onChange={(e) => setNewFilamentHex(e.target.value)}
               />
-              <Button onClick={() => void onAddFilament()}>Add filament</Button>
+              <Button
+                disabled={!engineReady || !settingsLoaded}
+                onClick={() => void onAddFilament()}
+              >
+                Add filament
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -371,7 +409,7 @@ export default function SettingsPage() {
               <Select
                 value={updateIntervalHours}
                 onValueChange={(v) => void onUpdateIntervalChange(v)}
-                disabled={!health || updateIntervalSaving || updateBusy}
+                disabled={!engineReady || !settingsLoaded || updateIntervalSaving || updateBusy}
               >
                 <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-xs">
                   <SelectValue />
@@ -389,7 +427,7 @@ export default function SettingsPage() {
               variant="secondary"
               className="min-h-10 w-full sm:w-auto"
               onClick={onCheckSourceUpdatesNow}
-              disabled={!health || updateBusy || updateIntervalSaving}
+              disabled={!engineReady || !settingsLoaded || updateBusy || updateIntervalSaving}
             >
               {updateBusy ? "Checking…" : "Check now"}
             </Button>
@@ -409,7 +447,7 @@ export default function SettingsPage() {
               <span className="text-sm font-medium">Auto-recompute stale builds</span>
               <Switch
                 checked={autoRecompute}
-                disabled={!health || autoRecomputeSaving}
+                disabled={!engineReady || !settingsLoaded || autoRecomputeSaving}
                 onCheckedChange={(checked) => {
                   setAutoRecomputeSaving(true);
                   void saveAutoRecomputeSettings(checked)
@@ -452,17 +490,23 @@ export default function SettingsPage() {
                 type="password"
                 className={`${inputClass} w-full max-w-md`}
                 autoComplete="off"
+                disabled={!engineReady || !settingsLoaded}
                 placeholder={githubPat?.configured ? "Enter new token to replace" : "ghp_…"}
                 value={patInput}
                 onChange={(e) => setPatInput(e.target.value)}
               />
             </label>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => void onSaveGitHubPat()}>Save token</Button>
+              <Button
+                disabled={!engineReady || !settingsLoaded}
+                onClick={() => void onSaveGitHubPat()}
+              >
+                Save token
+              </Button>
               <Button
                 variant="secondary"
                 onClick={() => void onClearGitHubPat()}
-                disabled={!githubPat?.configured}
+                disabled={!engineReady || !settingsLoaded || !githubPat?.configured}
               >
                 Clear token
               </Button>
@@ -485,6 +529,7 @@ export default function SettingsPage() {
                 className={`${inputClass} w-full max-w-md`}
                 placeholder="https://discord.com/api/webhooks/..."
                 autoComplete="off"
+                disabled={!engineReady || !settingsLoaded || discordSaving}
                 value={discordWebhookInput}
                 onChange={(e) => {
                   const value = e.target.value;
@@ -499,7 +544,12 @@ export default function SettingsPage() {
               )}
             </label>
             <Button
-              disabled={!health || discordSaving || Boolean(discordWebhookError)}
+              disabled={
+                !engineReady ||
+                !settingsLoaded ||
+                discordSaving ||
+                Boolean(discordWebhookError)
+              }
               onClick={async () => {
                 const trimmed = discordWebhookInput.trim();
                 const error = trimmed.length > 0 ? validateDiscordWebhookUrl(trimmed) : null;
@@ -524,6 +574,7 @@ export default function SettingsPage() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
+                    disabled={!engineReady || !settingsLoaded || discordSaving}
                     checked={discordSettings.notify_on_update}
                     onChange={async (e) => {
                       try {
@@ -540,6 +591,7 @@ export default function SettingsPage() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
+                    disabled={!engineReady || !settingsLoaded || discordSaving}
                     checked={discordSettings.auto_sync_updates}
                     onChange={async (e) => {
                       try {
@@ -556,6 +608,7 @@ export default function SettingsPage() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
+                    disabled={!engineReady || !settingsLoaded || discordSaving}
                     checked={discordSettings.notify_on_sync}
                     onChange={async (e) => {
                       try {
@@ -572,7 +625,7 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-3 pt-1">
                   <Button
                     variant="secondary"
-                    disabled={!health || discordSaving}
+                    disabled={!engineReady || !settingsLoaded || discordSaving}
                     onClick={async () => {
                       setDiscordTestStatus(null);
                       try {
@@ -594,7 +647,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        <IntegrationsSettingsCard engineReady={Boolean(health)} />
+        <IntegrationsSettingsCard engineReady={engineReady && settingsLoaded} />
       </SettingsSection>
 
       <SettingsSection id="build-tracking" title="Build Tracking">
@@ -612,7 +665,7 @@ export default function SettingsPage() {
               <span className="text-sm font-medium">Enable assembly tracking</span>
               <Switch
                 checked={buildTrackingSettings?.assembly_tracking ?? false}
-                disabled={!health || buildTrackingSaving}
+                disabled={!engineReady || !settingsLoaded || buildTrackingSaving}
                 onCheckedChange={(checked) => {
                   saveBuildTrackingMutation.mutate(
                     { assembly_tracking: checked },
@@ -692,11 +745,13 @@ export default function SettingsPage() {
         </SettingsSection>
       ) : null}
 
-      <SettingsSection id="data" title="Data & System">
-        <BackupManagementCard />
-        <ApiKeyManagementCard />
-        <LoggingManagementCard />
-      </SettingsSection>
+      {engineReady && settingsLoaded && (
+        <SettingsSection id="data" title="Data & System">
+          <BackupManagementCard />
+          <ApiKeyManagementCard />
+          <LoggingManagementCard />
+        </SettingsSection>
+      )}
 
       <Dialog
         open={deleteFilamentId != null}
@@ -716,14 +771,19 @@ export default function SettingsPage() {
           <div className="flex justify-end gap-2">
             <Button
               variant="secondary"
-              disabled={deleting}
+              disabled={!engineReady || !settingsLoaded || deleting}
               onClick={() => setDeleteFilamentId(null)}
             >
               Cancel
             </Button>
             <Button
               variant="ghost"
-              disabled={deleting || deleteFilamentId == null}
+              disabled={
+                !engineReady ||
+                !settingsLoaded ||
+                deleting ||
+                deleteFilamentId == null
+              }
               onClick={() => deleteFilamentId && void onDeleteFilament(deleteFilamentId)}
             >
               {deleting ? "Removing…" : "Delete"}
