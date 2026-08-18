@@ -98,7 +98,8 @@ describe("POST /slicer-instances/:id/open-plates", () => {
       enabled: true,
     });
 
-    const plate = join(exportsDir, "plate_01.3mf");
+    const plate = join(exportsDir, "tenant-default", "plate_01.3mf");
+    mkdirSync(join(exportsDir, "tenant-default"), { recursive: true });
     writeFileSync(plate, "fake-3mf");
     vi.mocked(runExport3mfJob).mockReturnValue({
       paths: [plate],
