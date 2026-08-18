@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import App from "./App";
 
@@ -33,10 +33,26 @@ vi.mock("./context/KitManifestSaveContext", () => ({
 vi.mock("./context/SaveStatusContext", () => ({
   SaveStatusProvider: ({ children }: { children: ReactNode }) => children,
 }));
-vi.mock("./pages/LoginPage", () => new Promise(() => {}));
+
+const loginPageModule = vi.hoisted(() => {
+  let resolveModule!: (value: { default: () => ReactNode }) => void;
+  const promise = new Promise<{ default: () => ReactNode }>((resolve) => {
+    resolveModule = resolve;
+  });
+  return {
+    promise,
+    resolve(value: { default: () => ReactNode }) {
+      resolveModule(value);
+    },
+  };
+});
+
+vi.mock("./pages/LoginPage", () => loginPageModule.promise);
 
 describe("lazy route loading", () => {
-  it("announces page loading as a polite live status", () => {
+  afterEach(cleanup);
+
+  it("announces page loading until the finite route import resolves", async () => {
     render(
       <MemoryRouter initialEntries={["/login"]}>
         <App />
@@ -45,6 +61,15 @@ describe("lazy route loading", () => {
 
     const loading = screen.getByRole("status");
     expect(loading.getAttribute("aria-live")).toBe("polite");
+    expect(loading.getAttribute("aria-atomic")).toBe("true");
     expect(loading.textContent).toContain("Loading");
+
+    loginPageModule.resolve({
+      default: () => <div>Login route loaded</div>,
+    });
+
+    expect((await screen.findByText("Login route loaded")).textContent).toBe(
+      "Login route loaded",
+    );
   });
 });

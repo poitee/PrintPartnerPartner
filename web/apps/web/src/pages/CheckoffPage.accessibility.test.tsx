@@ -186,7 +186,7 @@ describe("CheckoffPage accessibility", () => {
     expect(screen.getByRole("searchbox", { name: "Search progress parts" })).toBeTruthy();
   });
 
-  it("keeps the printable title subordinate to the single page h1", () => {
+  it("keeps the printable sheet hierarchy subordinate to the single page h1", () => {
     const { container } = render(
       <MemoryRouter>
         <CheckoffPage />
@@ -196,8 +196,12 @@ describe("CheckoffPage accessibility", () => {
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Progress");
     const printTitle = container.querySelector(".sheet-title");
+    const repositoryTitle = container.querySelector(".sheet-repo-title");
+    const folderTitle = container.querySelector(".sheet-folder-title");
     expect(printTitle?.tagName).toBe("H2");
     expect(printTitle?.textContent).toBe("Voron");
+    expect(repositoryTitle?.tagName).toBe("H3");
+    expect(folderTitle?.tagName).toBe("H4");
   });
 
   it("announces initial progress failures as alerts", () => {

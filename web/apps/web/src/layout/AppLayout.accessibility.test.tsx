@@ -78,6 +78,7 @@ describe("application shell accessibility", () => {
 
     expect(focusable[0]).toBe(skipLink);
     expect(skipLink.getAttribute("href")).toBe("#main-content");
+    expect(skipLink.classList.contains("skip-link")).toBe(true);
     expect(main.id).toBe("main-content");
   });
 });

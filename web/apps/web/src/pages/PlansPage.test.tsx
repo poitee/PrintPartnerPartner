@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import PlansPage from "./PlansPage";
 
@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   ],
   loading: false,
   error: null as string | null,
+  mobile: true,
 }));
 
 vi.mock("../hooks/useEngineHealth", () => ({
@@ -46,8 +47,13 @@ vi.mock("../context/PlanActionsContext", () => ({
 vi.mock("../queries/profiles", () => ({
   useTouchProfileLastUsedMutation: () => ({ mutate: vi.fn() }),
 }));
+vi.mock("../hooks/useMediaQuery", () => ({
+  useMediaQuery: () => state.mobile,
+}));
 
 describe("PlansPage", () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     state.profiles = [
       {
@@ -62,19 +68,38 @@ describe("PlansPage", () => {
     ];
     state.loading = false;
     state.error = null;
+    state.mobile = true;
   });
 
-  it("provides complete plan controls in the small-screen card list", () => {
+  it("renders one accessible Plans tree with complete controls on small screens", () => {
     render(
       <MemoryRouter>
         <PlansPage />
       </MemoryRouter>,
     );
 
-    const mobilePlans = screen.getByRole("list", { name: "Plans on small screens" });
-    expect(within(mobilePlans).getByRole("button", { name: "Select Voron" })).toBeTruthy();
-    expect(within(mobilePlans).getByRole("button", { name: "Actions for Voron" })).toBeTruthy();
-    expect(within(mobilePlans).getByText("6 remaining")).toBeTruthy();
+    const mobilePlans = screen.getByRole("list", { name: "Plans" });
+    expect(
+      within(mobilePlans).getByRole("button", { name: "Select Voron" }).tagName,
+    ).toBe("BUTTON");
+    expect(
+      within(mobilePlans).getByRole("button", { name: "Actions for Voron" }).tagName,
+    ).toBe("BUTTON");
+    expect(within(mobilePlans).getByText("6 remaining").textContent).toBe("6 remaining");
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("renders one accessible Plans table on wider screens", () => {
+    state.mobile = false;
+
+    render(
+      <MemoryRouter>
+        <PlansPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("table", { name: "Plans" }).tagName).toBe("TABLE");
+    expect(screen.queryByRole("list", { name: "Plans" })).toBeNull();
   });
 
   it("announces plan loading through a polite live status", () => {
@@ -89,6 +114,7 @@ describe("PlansPage", () => {
 
     const status = screen.getByRole("status");
     expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.getAttribute("aria-atomic")).toBe("true");
     expect(status.textContent).toContain("Loading plans");
   });
 

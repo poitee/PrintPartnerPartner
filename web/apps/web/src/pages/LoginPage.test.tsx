@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import LoginPage from "./LoginPage";
@@ -44,20 +45,22 @@ describe("LoginPage", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Print Partner");
   });
 
-  it("submits credentials through the form keyboard-submit path", async () => {
+  it("submits credentials when Enter is pressed in the password field", async () => {
+    const user = userEvent.setup();
     render(
       <MemoryRouter>
         <LoginPage />
       </MemoryRouter>,
     );
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Email" }), {
-      target: { value: "operator@example.com" },
-    });
-    fireEvent.change(screen.getByLabelText("Password"), {
-      target: { value: "shop-floor-password" },
-    });
-    fireEvent.submit(screen.getByRole("form", { name: "Email sign in" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Email" }),
+      "operator@example.com",
+    );
+    await user.type(
+      screen.getByLabelText("Password"),
+      "shop-floor-password{Enter}",
+    );
 
     await waitFor(() => {
       expect(auth.loginEmail).toHaveBeenCalledWith(
