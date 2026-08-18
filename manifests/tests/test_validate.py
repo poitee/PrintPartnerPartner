@@ -34,6 +34,39 @@ class ManifestValidatorTests(unittest.TestCase):
         errors = validate_manifest(FIXTURES / "unsupported-v3.yaml", SCHEMAS)
         self.assertTrue(any("unsupported manifest version 3" in error for error in errors), errors)
 
+    def test_rejects_missing_string_and_boolean_versions(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = {
+                "missing.yaml": "format: print-partner-manifest\n",
+                "string.yaml": "format: print-partner-manifest\nversion: '2'\n",
+                "boolean.yaml": "format: print-partner-manifest\nversion: true\n",
+            }
+            for name, document in cases.items():
+                with self.subTest(name=name):
+                    path = root / name
+                    path.write_text(document)
+                    errors = validate_manifest(path, SCHEMAS)
+                    self.assertTrue(
+                        any("manifest version must be an integer" in error for error in errors),
+                        errors,
+                    )
+
+    def test_rejects_malformed_json_schema(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "manifest.yaml"
+            schema_dir = root / "schema"
+            schema_dir.mkdir()
+            manifest.write_text("format: print-partner-manifest\nversion: 1\n")
+            (schema_dir / "print-partner-manifest-v1.json").write_text(
+                '{"type": "not-a-json-schema-type"}'
+            )
+
+            errors = validate_manifest(manifest, schema_dir)
+
+            self.assertTrue(any("schema is invalid" in error for error in errors), errors)
+
     def test_detects_and_clears_embedded_copy_drift(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -65,6 +98,25 @@ class ManifestValidatorTests(unittest.TestCase):
 
     def test_repository_embedded_copies_match_canonical_sources(self) -> None:
         self.assertEqual(check_embedded_copy_drift(REPO_ROOT), [])
+
+    def test_detects_orphaned_embedded_copy(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = root / "manifests" / "registry" / "index.yaml"
+            embedded_dir = root / "web" / "apps" / "server" / "src" / "data" / "manifests"
+            registry.parent.mkdir(parents=True)
+            embedded_dir.mkdir(parents=True)
+            registry.write_text("entries: []\n")
+            (embedded_dir / "registry-index.yaml").write_bytes(registry.read_bytes())
+            orphan = embedded_dir / "orphan.yaml"
+            orphan.write_text("format: print-partner-manifest\nversion: 1\n")
+
+            errors = check_embedded_copy_drift(root)
+
+            self.assertTrue(
+                any("orphan.yaml" in error and "no canonical registry entry" in error for error in errors),
+                errors,
+            )
 
     def test_sync_regenerates_embedded_copies_from_canonical_sources(self) -> None:
         with TemporaryDirectory() as directory:

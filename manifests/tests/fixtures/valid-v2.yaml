@@ -29,3 +29,10 @@ slots:
   toolhead:
     label: Toolhead
     default_group: toolhead
+variant_dimensions:
+  size:
+    - 250
+    - 300
+  style:
+    - classic
+    - compact
