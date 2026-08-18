@@ -236,7 +236,7 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     });
     
     await app.register(async (v1) => {
-      await registerApiV1Plugin(v1, coreDeps);
+      await registerApiV1Plugin(v1, coreDeps, validateRequestApiKey);
     }, { prefix: "/api/v1" });
 
     app.post(

@@ -9,8 +9,9 @@ type RouteDeps = { repo: AppRepository; jobs: InProcessJobRunner };
 function artifactsFromJobs(
   jobs: InProcessJobRunner,
   profileId: number,
+  tenantId: string,
 ): ExportArtifact[] {
-  const listed = jobs.listJobs({ profile_id: profileId });
+  const listed = jobs.listJobs({ profile_id: profileId }, tenantId);
   const artifacts: ExportArtifact[] = [];
   for (const snap of listed) {
     if (snap.status !== "done" || !snap.result) continue;
@@ -48,7 +49,7 @@ export async function registerApiV1ExtensionRoutes(
     }
     return {
       profile_id: id,
-      artifacts: artifactsFromJobs(deps.jobs, id),
+      artifacts: artifactsFromJobs(deps.jobs, id, request.tenantId),
     };
   });
 
@@ -62,7 +63,7 @@ export async function registerApiV1ExtensionRoutes(
       status: query.status,
       since: query.since,
       profile_id: query.profile_id ? Number(query.profile_id) : undefined,
-    });
+    }, request.tenantId);
     return { jobs };
   });
 }

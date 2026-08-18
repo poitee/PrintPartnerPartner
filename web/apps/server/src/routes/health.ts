@@ -60,6 +60,8 @@ export async function registerHealthRoutes(
         connected: dbOk,
         driver: saasDb.bundle?.driver ?? "sqlite",
         postgres: postgresOk,
+        support_status:
+          saasDb.bundle?.driver === "postgres" ? "experimental" : "supported",
       },
       google_drive: {
         client_id: config.googleClientId,

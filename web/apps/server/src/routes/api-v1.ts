@@ -8,6 +8,7 @@ import { registerMcpHttpRoutes } from "../mcp/http-routes.js";
 export async function registerApiV1Plugin(
   app: FastifyInstance,
   deps: CoreRouteDeps,
+  validateApiKey: (rawKey: string) => boolean,
 ): Promise<void> {
   app.get("/", async () => ({
     version: "1",
@@ -22,6 +23,7 @@ export async function registerApiV1Plugin(
     getRepo: () => deps.repo,
     jobs: deps.jobs,
     config: deps.config,
+    validateApiKey,
   });
 }
 

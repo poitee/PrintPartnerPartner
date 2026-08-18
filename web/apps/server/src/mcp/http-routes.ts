@@ -29,6 +29,7 @@ type McpHttpDeps = {
   getRepo: () => AppRepository;
   jobs: InProcessJobRunner;
   config: ServerConfig;
+  validateApiKey: (rawKey: string) => boolean;
 };
 
 type McpSession = {
@@ -63,9 +64,16 @@ export function assertMcpHttpAllowed(
   config: ServerConfig,
   request: FastifyRequest,
   reply: FastifyReply,
+  validateApiKey: (rawKey: string) => boolean,
 ): boolean {
-  const key = config.integrationApiKey;
-  if (!key) {
+  const provided = extractApiKey(request);
+  if (provided) {
+    if (validateApiKey(provided)) return true;
+    void sendProblem(reply, 401, "Unauthorized", "Valid API key required");
+    return false;
+  }
+
+  if (!config.integrationApiKey) {
     if (isLoopbackBindHost(config.host)) return true;
     void sendProblem(
       reply,
@@ -75,12 +83,8 @@ export function assertMcpHttpAllowed(
     );
     return false;
   }
-  const provided = extractApiKey(request);
-  if (!provided || provided !== key) {
-    void sendProblem(reply, 401, "Unauthorized", "Valid API key required");
-    return false;
-  }
-  return true;
+  void sendProblem(reply, 401, "Unauthorized", "Valid API key required");
+  return false;
 }
 
 function closeSession(session: McpSession): void {
@@ -157,7 +161,7 @@ export async function registerMcpHttpRoutes(
   };
 
   const mcpAuth = async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!assertMcpHttpAllowed(deps.config, request, reply)) return reply;
+    if (!assertMcpHttpAllowed(deps.config, request, reply, deps.validateApiKey)) return reply;
   };
 
   app.post("/mcp", { preHandler: mcpAuth }, async (request, reply) => {

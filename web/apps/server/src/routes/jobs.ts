@@ -17,7 +17,7 @@ import { checkAllSourceUpdates } from "../services/source-update-check.js";
 import { runExport3mfJob } from "../services/export-3mf-job.js";
 import { runPackPreviewJob } from "../services/plate-workspace.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
-import { tenantStorage } from "../middleware/tenant-context.js";
+import { getRequestTenantId, tenantStorage } from "../middleware/tenant-context.js";
 import { extractPendingPdfsForSource } from "../services/source-docs-index.js";
 import { parseCheckoffUnits, parseUnlabeledNames } from "../services/printer-checkoff.js";
 import { sendProblem } from "../lib/api-error.js";
@@ -50,15 +50,38 @@ export type JobListFilters = {
 
 type JobMeta = {
   payload: Record<string, unknown>;
+  tenantId: string;
   updatedAt: number;
+};
+
+export const COMPLETED_JOB_MAX = 1_000;
+export const COMPLETED_JOB_RETENTION_MS = 24 * 60 * 60 * 1_000;
+
+export type JobRunnerOptions = {
+  completedJobMax?: number;
+  completedJobRetentionMs?: number;
 };
 
 export class InProcessJobRunner {
   private readonly jobs = new Map<string, JobSnapshot>();
   private readonly jobMeta = new Map<string, JobMeta>();
   private readonly listeners = new Map<string, Set<(event: JobSnapshot) => void>>();
+  private readonly completedJobMax: number;
+  private readonly completedJobRetentionMs: number;
 
-  constructor(private readonly deps: JobRunnerDeps) {}
+  constructor(
+    private readonly deps: JobRunnerDeps,
+    options: JobRunnerOptions = {},
+  ) {
+    this.completedJobMax = Math.max(
+      1,
+      Math.trunc(options.completedJobMax ?? COMPLETED_JOB_MAX),
+    );
+    this.completedJobRetentionMs = Math.max(
+      1,
+      Math.trunc(options.completedJobRetentionMs ?? COMPLETED_JOB_RETENTION_MS),
+    );
+  }
 
   private get repo(): AppRepository {
     return this.deps.getRepo();
@@ -73,13 +96,57 @@ export class InProcessJobRunner {
     return this.deps.getRepo();
   }
 
-  subscribe(jobId: string, listener: (event: JobSnapshot) => void): () => void {
+  subscribe(
+    jobId: string,
+    tenantId: string,
+    listener: (event: JobSnapshot) => void,
+  ): (() => void) | null {
+    if (!this.isOwnedBy(jobId, tenantId)) return null;
     const set = this.listeners.get(jobId) ?? new Set();
     set.add(listener);
     this.listeners.set(jobId, set);
     return () => {
       set.delete(listener);
     };
+  }
+
+  private isOwnedBy(jobId: string, tenantId: string): boolean {
+    return this.jobMeta.get(jobId)?.tenantId === tenantId;
+  }
+
+  private isTerminal(snapshot: JobSnapshot): boolean {
+    return (
+      snapshot.status === "done" ||
+      snapshot.status === "error" ||
+      snapshot.status === "cancelled"
+    );
+  }
+
+  private deleteJob(jobId: string): void {
+    this.jobs.delete(jobId);
+    this.jobMeta.delete(jobId);
+    this.listeners.delete(jobId);
+  }
+
+  private pruneCompletedJobs(now = Date.now()): void {
+    const completed = [...this.jobs.entries()]
+      .filter(([, snapshot]) => this.isTerminal(snapshot))
+      .map(([jobId]) => ({
+        jobId,
+        updatedAt: this.jobMeta.get(jobId)?.updatedAt ?? 0,
+      }))
+      .sort((a, b) => a.updatedAt - b.updatedAt);
+
+    for (const item of completed) {
+      if (now - item.updatedAt >= this.completedJobRetentionMs) {
+        this.deleteJob(item.jobId);
+      }
+    }
+
+    const retained = completed.filter((item) => this.jobs.has(item.jobId));
+    while (retained.length > this.completedJobMax) {
+      this.deleteJob(retained.shift()!.jobId);
+    }
   }
 
   private touchMeta(jobId: string): void {
@@ -122,6 +189,7 @@ export class InProcessJobRunner {
           download_url: (event.result as Record<string, unknown> | null)?.download_url ?? null,
         });
       }
+      this.pruneCompletedJobs();
     }
   }
 
@@ -130,6 +198,7 @@ export class InProcessJobRunner {
     payload: Record<string, unknown>,
     tenantId = "default",
   ): Promise<string> {
+    this.pruneCompletedJobs();
     const jobId = crypto.randomUUID();
     const snap: JobSnapshot = {
       job_id: jobId,
@@ -141,7 +210,11 @@ export class InProcessJobRunner {
       error: null,
     };
     this.jobs.set(jobId, snap);
-    this.jobMeta.set(jobId, { payload: { ...payload, _tenant_id: tenantId }, updatedAt: Date.now() });
+    this.jobMeta.set(jobId, {
+      payload: { ...payload, _tenant_id: tenantId },
+      tenantId,
+      updatedAt: Date.now(),
+    });
     // Defer so the HTTP response for job_id can flush before CPU-heavy sync work runs.
     setImmediate(() => {
       void this.runJob(jobId, kind, { ...payload, _tenant_id: tenantId });
@@ -149,14 +222,20 @@ export class InProcessJobRunner {
     return jobId;
   }
 
-  listJobs(filters: JobListFilters = {}): Array<JobSnapshot & { updated_at?: string }> {
-    let items = [...this.jobs.entries()].map(([jobId, snap]) => {
+  listJobs(
+    filters: JobListFilters = {},
+    tenantId: string,
+  ): Array<JobSnapshot & { updated_at?: string }> {
+    this.pruneCompletedJobs();
+    let items = [...this.jobs.entries()]
+      .filter(([jobId]) => this.isOwnedBy(jobId, tenantId))
+      .map(([jobId, snap]) => {
       const meta = this.jobMeta.get(jobId);
       return {
         ...snap,
         updated_at: meta ? new Date(meta.updatedAt).toISOString() : undefined,
       };
-    });
+      });
     if (filters.status) {
       items = items.filter((j) => j.status === filters.status);
     }
@@ -525,7 +604,9 @@ export class InProcessJobRunner {
     );
   }
 
-  async get(jobId: string): Promise<JobSnapshot | null> {
+  async get(jobId: string, tenantId: string): Promise<JobSnapshot | null> {
+    this.pruneCompletedJobs();
+    if (!this.isOwnedBy(jobId, tenantId)) return null;
     return this.jobs.get(jobId) ?? null;
   }
 
@@ -533,25 +614,28 @@ export class InProcessJobRunner {
   async waitForTerminal(
     jobId: string,
     timeoutMs = 120_000,
+    tenantId = getRequestTenantId(),
   ): Promise<JobSnapshot> {
-    const isTerminal = (s: JobSnapshot) =>
-      s.status === "done" || s.status === "error" || s.status === "cancelled";
-
     return new Promise<JobSnapshot>((resolve, reject) => {
       const timer = setTimeout(() => {
-        unsub();
+        unsub?.();
         reject(new Error(`Job ${jobId} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
-      const unsub = this.subscribe(jobId, (event) => {
-        if (isTerminal(event)) {
+      const unsub = this.subscribe(jobId, tenantId, (event) => {
+        if (this.isTerminal(event)) {
           clearTimeout(timer);
-          unsub();
+          unsub?.();
           resolve(event);
         }
       });
+      if (!unsub) {
+        clearTimeout(timer);
+        reject(new Error(`Job ${jobId} not found`));
+        return;
+      }
       // Close race: job may have finished between start and subscribe.
       const existing = this.jobs.get(jobId);
-      if (existing && isTerminal(existing)) {
+      if (existing && this.isTerminal(existing)) {
         clearTimeout(timer);
         unsub();
         resolve(existing);
@@ -609,7 +693,8 @@ export class InProcessJobRunner {
     };
   }
 
-  async cancel(jobId: string): Promise<boolean> {
+  async cancel(jobId: string, tenantId: string): Promise<boolean> {
+    if (!this.isOwnedBy(jobId, tenantId)) return false;
     const snap = this.jobs.get(jobId);
     if (!snap || snap.status === "done" || snap.status === "error" || snap.status === "cancelled") {
       return false;
@@ -618,6 +703,7 @@ export class InProcessJobRunner {
     snap.message = "Cancelled";
     snap.finished_at = new Date().toISOString();
     this.touchMeta(jobId);
+    this.pruneCompletedJobs();
     return true;
   }
 }
@@ -635,8 +721,11 @@ export async function registerJobRoutes(
     return { job_id };
   });
 
-  app.post("/jobs/recompute", limited, async (request) => {
+  app.post("/jobs/recompute", limited, async (request, reply) => {
     const body = request.body as { profile_id?: number; apply_manifest?: boolean };
+    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+      return sendProblem(reply, 404, "Not Found", "Profile not found");
+    }
     const job_id = await jobs.start(
       "recompute",
       {
@@ -669,12 +758,15 @@ export async function registerJobRoutes(
     return { job_id };
   });
 
-  app.post("/jobs/export-stl-pack", limited, async (request) => {
+  app.post("/jobs/export-stl-pack", limited, async (request, reply) => {
     const body = request.body as {
       profile_id?: number;
       missing_only?: boolean;
       group_by?: string;
     };
+    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+      return sendProblem(reply, 404, "Not Found", "Profile not found");
+    }
     const job_id = await jobs.start(
       "export-stl-pack",
       {
@@ -687,8 +779,11 @@ export async function registerJobRoutes(
     return { job_id };
   });
 
-  app.post("/jobs/export-checklist-html", async (request) => {
+  app.post("/jobs/export-checklist-html", async (request, reply) => {
     const body = request.body as { profile_id?: number };
+    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+      return sendProblem(reply, 404, "Not Found", "Profile not found");
+    }
     const job_id = await jobs.start(
       "export-checklist-html",
       { profile_id: body.profile_id },
@@ -697,8 +792,11 @@ export async function registerJobRoutes(
     return { job_id };
   });
 
-  app.post("/jobs/export-kit-bundle", limited, async (request) => {
+  app.post("/jobs/export-kit-bundle", limited, async (request, reply) => {
     const body = request.body as { profile_id?: number; include_print_progress?: boolean };
+    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+      return sendProblem(reply, 404, "Not Found", "Profile not found");
+    }
     const job_id = await jobs.start(
       "export-kit-bundle",
       {
@@ -710,7 +808,7 @@ export async function registerJobRoutes(
     return { job_id };
   });
 
-  app.post("/jobs/export-3mf", limited, async (request) => {
+  app.post("/jobs/export-3mf", limited, async (request, reply) => {
     const body = request.body as {
       profile_id?: number;
       layout_mode?: string;
@@ -718,6 +816,9 @@ export async function registerJobRoutes(
       missing_only?: boolean;
       enabled_printer_ids?: string[];
     };
+    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+      return sendProblem(reply, 404, "Not Found", "Profile not found");
+    }
     const job_id = await jobs.start(
       "export-3mf",
       {
@@ -732,7 +833,7 @@ export async function registerJobRoutes(
     return { job_id };
   });
 
-  app.post("/jobs/auto-slice", limited, async (request) => {
+  app.post("/jobs/auto-slice", limited, async (request, reply) => {
     const body = request.body as {
       profile_id?: number;
       spacing_mm?: number;
@@ -740,6 +841,9 @@ export async function registerJobRoutes(
       enabled_printer_ids?: string[];
       timeout_s?: number;
     };
+    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+      return sendProblem(reply, 404, "Not Found", "Profile not found");
+    }
     const job_id = await jobs.start(
       "auto-slice",
       {
@@ -757,7 +861,7 @@ export async function registerJobRoutes(
     return { job_id };
   });
 
-  app.post("/jobs/pack-preview", async (request) => {
+  app.post("/jobs/pack-preview", async (request, reply) => {
     const body = request.body as {
       profile_id?: number;
       enabled_printer_ids?: string[];
@@ -766,6 +870,9 @@ export async function registerJobRoutes(
       spacing_mm?: number;
       grouping_strategy?: string;
     };
+    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+      return sendProblem(reply, 404, "Not Found", "Profile not found");
+    }
     const job_id = await jobs.start(
       "pack-preview",
       {
@@ -905,7 +1012,7 @@ export async function registerJobRoutes(
 
   app.get("/jobs/:id", async (request, reply) => {
     const id = (request.params as { id: string }).id;
-    const snap = await jobs.get(id);
+    const snap = await jobs.get(id, request.tenantId);
     if (!snap) return reply.status(404).send({ detail: "Job not found" });
     return snap;
   });
@@ -917,18 +1024,24 @@ export function registerJobWebSocket(
 ): void {
   app.get("/ws/jobs/:jobId", { websocket: true }, (socket, request) => {
     const jobId = (request.params as { jobId: string }).jobId;
-    void jobs.get(jobId).then((snap) => {
-      if (snap) {
-        socket.send(JSON.stringify(snap));
+    void jobs.get(jobId, request.tenantId).then((snap) => {
+      if (!snap) {
+        socket.close(1008, "Job not found");
+        return;
       }
-    });
-    const unsub = jobs.subscribe(jobId, (event) => {
-      socket.send(JSON.stringify(event));
-      if (event.status === "done" || event.status === "error" || event.status === "cancelled") {
+      socket.send(JSON.stringify(snap));
+      if (snap.status === "done" || snap.status === "error" || snap.status === "cancelled") {
         socket.close();
+        return;
       }
+      const unsub = jobs.subscribe(jobId, request.tenantId, (event) => {
+        socket.send(JSON.stringify(event));
+        if (event.status === "done" || event.status === "error" || event.status === "cancelled") {
+          socket.close();
+        }
+      });
+      socket.on("close", () => unsub?.());
     });
-    socket.on("close", () => unsub());
   });
 }
 

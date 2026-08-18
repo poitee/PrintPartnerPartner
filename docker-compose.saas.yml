@@ -85,6 +85,8 @@ services:
       SAAS_DATA_DIR: "/data"
       STATIC_DIR: "/app/web/apps/web/dist"
       DATABASE_URL: "postgresql://printpartner:printpartner@postgres:5432/printpartner"
+      # Postgres currently uses an experimental synchronous compatibility bridge.
+      POSTGRES_EXPERIMENTAL: "1"
       S3_BUCKET: "print-partner"
       S3_REGION: "us-east-1"
       AWS_ACCESS_KEY_ID: "rustfsadmin"

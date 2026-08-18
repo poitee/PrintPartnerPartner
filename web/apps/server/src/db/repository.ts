@@ -310,6 +310,20 @@ export class AppRepository {
     return getRequestTenantId(this.defaultTenantId);
   }
 
+  private requireProfile(profileId: number): void {
+    const visible = this.db
+      .select({ id: this.schema.buildProfiles.id })
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, profileId),
+        ),
+      )
+      .get();
+    if (!visible) throw new Error("Profile not found");
+  }
+
   async ping(): Promise<boolean> {
     const db = this.db as DrizzleDb & {
       execute?: (query: ReturnType<typeof sql>) => { run: () => void };
@@ -1321,6 +1335,7 @@ export class AppRepository {
   }
 
   deleteProfile(id: number): void {
+    this.requireProfile(id);
     this.db
       .delete(this.schema.buildProfiles)
       .where(and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)))
@@ -1580,6 +1595,7 @@ export class AppRepository {
   }
 
   getProfileLayers(profileId: number) {
+    this.requireProfile(profileId);
     const layers = this.db
       .select()
       .from(this.schema.profileLayers)
@@ -1604,6 +1620,7 @@ export class AppRepository {
   }
 
   setBaseLayer(profileId: number, projectId: number): void {
+    this.requireProfile(profileId);
     const project = this.getProjectRow(projectId);
     if (!project) throw new Error("Project not found");
     const existing = this.db
@@ -1633,6 +1650,7 @@ export class AppRepository {
   }
 
   addAddonLayer(profileId: number, projectId: number): void {
+    this.requireProfile(profileId);
     const project = this.getProjectRow(projectId);
     if (!project) throw new Error("Project not found");
     const duplicate = this.db
@@ -1716,6 +1734,7 @@ export class AppRepository {
     manifest_applied?: number;
     manifest_warnings?: Array<Record<string, unknown>>;
   } {
+    this.requireProfile(profileId);
     const layers = this.db
       .select()
       .from(this.schema.profileLayers)
@@ -1786,87 +1805,89 @@ export class AppRepository {
         throw new MergeWouldWipeProfileError("Scan found no STL files.");
       }
 
-      const newKeys = new Set(result.parts.map((p) => p.matchKey));
-      for (const row of existingRows) {
-        if (!newKeys.has(row.matchKey)) {
-          this.db.delete(this.schema.printProgress).where(eq(this.schema.printProgress.partId, row.id)).run();
-          this.db.delete(this.schema.parts).where(eq(this.schema.parts.id, row.id)).run();
+      return this.transaction(() => {
+        const newKeys = new Set(result.parts.map((p) => p.matchKey));
+        for (const row of existingRows) {
+          if (!newKeys.has(row.matchKey)) {
+            this.db.delete(this.schema.printProgress).where(eq(this.schema.printProgress.partId, row.id)).run();
+            this.db.delete(this.schema.parts).where(eq(this.schema.parts.id, row.id)).run();
+          }
         }
-      }
 
-      for (const mp of result.parts) {
-        const prior = existingRows.find((r) => r.matchKey === mp.matchKey);
-        const qty =
-          mp.quantityOverride != null ? mp.quantityOverride : mp.quantityAuto;
-        if (prior) {
-          const roleDefault =
-            loadRoleFilamentDefaults(this, profileId)[normalizePartRole(mp.role)];
-          this.db
-            .update(this.schema.parts)
-            .set({
-              relativePath: mp.relativePath,
-              filename: mp.filename,
-              sourceLayer: mp.sourceLayer,
-              status: mp.status,
-              quantityAuto: mp.quantityAuto,
-              quantityEffective: qty,
-              quantityOverride: mp.quantityOverride,
-              included: mp.included,
-              notes: mp.notes,
-              geometrySame: mp.geometrySame,
-              role: mp.role,
-              filamentColorId: prior.filamentColorId ?? roleDefault?.filament_color_id ?? null,
-              filamentCustomHex: prior.filamentCustomHex ?? roleDefault?.filament_custom_hex ?? null,
-              spoolmanSpoolId: prior.spoolmanSpoolId ?? roleDefault?.spoolman_spool_id ?? null,
-            })
-            .where(eq(this.schema.parts.id, prior.id))
-            .run();
-        } else {
-          const role = normalizePartRole(mp.role);
-          const roleDefault = loadRoleFilamentDefaults(this, profileId)[role];
-          this.db
-            .insert(this.schema.parts)
-            .values({
-              tenantId: this.tenantId,
-              profileId,
-              matchKey: mp.matchKey,
-              relativePath: mp.relativePath,
-              filename: mp.filename,
-              sourceLayer: mp.sourceLayer,
-              status: mp.status,
-              role: mp.role,
-              quantityAuto: mp.quantityAuto,
-              quantityOverride: mp.quantityOverride,
-              quantityEffective: qty,
-              included: mp.included,
-              notes: mp.notes,
-              geometrySame: mp.geometrySame,
-              filamentColorId: roleDefault?.filament_color_id ?? null,
-              filamentCustomHex: roleDefault?.filament_custom_hex ?? null,
-              spoolmanSpoolId: roleDefault?.spoolman_spool_id ?? null,
-            })
-            .run();
+        for (const mp of result.parts) {
+          const prior = existingRows.find((r) => r.matchKey === mp.matchKey);
+          const qty =
+            mp.quantityOverride != null ? mp.quantityOverride : mp.quantityAuto;
+          if (prior) {
+            const roleDefault =
+              loadRoleFilamentDefaults(this, profileId)[normalizePartRole(mp.role)];
+            this.db
+              .update(this.schema.parts)
+              .set({
+                relativePath: mp.relativePath,
+                filename: mp.filename,
+                sourceLayer: mp.sourceLayer,
+                status: mp.status,
+                quantityAuto: mp.quantityAuto,
+                quantityEffective: qty,
+                quantityOverride: mp.quantityOverride,
+                included: mp.included,
+                notes: mp.notes,
+                geometrySame: mp.geometrySame,
+                role: mp.role,
+                filamentColorId: prior.filamentColorId ?? roleDefault?.filament_color_id ?? null,
+                filamentCustomHex: prior.filamentCustomHex ?? roleDefault?.filament_custom_hex ?? null,
+                spoolmanSpoolId: prior.spoolmanSpoolId ?? roleDefault?.spoolman_spool_id ?? null,
+              })
+              .where(eq(this.schema.parts.id, prior.id))
+              .run();
+          } else {
+            const role = normalizePartRole(mp.role);
+            const roleDefault = loadRoleFilamentDefaults(this, profileId)[role];
+            this.db
+              .insert(this.schema.parts)
+              .values({
+                tenantId: this.tenantId,
+                profileId,
+                matchKey: mp.matchKey,
+                relativePath: mp.relativePath,
+                filename: mp.filename,
+                sourceLayer: mp.sourceLayer,
+                status: mp.status,
+                role: mp.role,
+                quantityAuto: mp.quantityAuto,
+                quantityOverride: mp.quantityOverride,
+                quantityEffective: qty,
+                included: mp.included,
+                notes: mp.notes,
+                geometrySame: mp.geometrySame,
+                filamentColorId: roleDefault?.filament_color_id ?? null,
+                filamentCustomHex: roleDefault?.filament_custom_hex ?? null,
+                spoolmanSpoolId: roleDefault?.spoolman_spool_id ?? null,
+              })
+              .run();
+          }
         }
-      }
 
-      const out: {
-        merged: boolean;
-        part_count: number;
-        layer_debug: Array<Record<string, unknown>>;
-        manifest_applied?: number;
-        manifest_warnings?: Array<Record<string, unknown>>;
-      } = {
-        merged: true,
-        part_count: result.parts.length,
-        layer_debug: layerDebug,
-      };
-      if (options?.apply_manifest) {
-        const manifestResult = applyManifestToProfile(this, profileId, true);
-        out.manifest_applied = manifestResult.applied_rules;
-        out.manifest_warnings = manifestResult.warnings;
-      }
-      this.touchLastRecomputed(profileId);
-      return out;
+        const out: {
+          merged: boolean;
+          part_count: number;
+          layer_debug: Array<Record<string, unknown>>;
+          manifest_applied?: number;
+          manifest_warnings?: Array<Record<string, unknown>>;
+        } = {
+          merged: true,
+          part_count: result.parts.length,
+          layer_debug: layerDebug,
+        };
+        if (options?.apply_manifest) {
+          const manifestResult = applyManifestToProfile(this, profileId, true);
+          out.manifest_applied = manifestResult.applied_rules;
+          out.manifest_warnings = manifestResult.warnings;
+        }
+        this.touchLastRecomputed(profileId);
+        return out;
+      });
     } catch (e) {
       if (e instanceof MergeWouldWipeProfileError) {
         return {
@@ -1949,6 +1970,7 @@ export class AppRepository {
   }
 
   private listPartRows(profileId: number): PartDbRow[] {
+    this.requireProfile(profileId);
     return this.db
       .select()
       .from(this.schema.parts)
@@ -2255,7 +2277,16 @@ export class AppRepository {
     parts: MergePart[];
     completedByMatchKey: Record<string, boolean[]>;
   } {
-    const profile = this.db.select().from(this.schema.buildProfiles).where(eq(this.schema.buildProfiles.id, profileId)).get();
+    const profile = this.db
+      .select()
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, profileId),
+        ),
+      )
+      .get();
     if (!profile) throw new Error("Profile not found");
     const partRows = this.listPartRows(profileId);
     const unitsById = this.printUnitsByPartId(profileId);

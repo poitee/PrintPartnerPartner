@@ -76,7 +76,13 @@ function isUnambiguousLoopback(
 function hasAuthenticatedSession(request: FastifyRequest): boolean {
   const user = request.sessionUser;
   return Boolean(
-    user && !(user.user_id === "local" && user.provider === "anonymous"),
+    user &&
+      !(user.user_id === "local" && user.provider === "anonymous") &&
+      !(
+        user.user_id === "anonymous" &&
+        user.tenant_id === "anonymous" &&
+        user.provider === "anonymous"
+      ),
   );
 }
 
