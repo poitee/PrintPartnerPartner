@@ -1011,7 +1011,13 @@ export default function CheckoffPage() {
                 }
                 refreshWatchingLinks();
               }}
-              onUnattributedUpdate={() => void refreshUnattributedPrints()}
+              onUnattributedUpdate={(count) => {
+                if (count === 0) {
+                  setUnattributedPrints([]);
+                  return;
+                }
+                void refreshUnattributedPrints();
+              }}
             />
           </Suspense>
           {unattributedPrints.length > 0 && (

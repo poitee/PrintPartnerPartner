@@ -49,6 +49,7 @@ describe("PrinterLiveStrip", () => {
         progress: 42,
       },
       updates: [],
+      unattributed: [],
       created_links: [
         {
           id: "link-1",
@@ -65,12 +66,14 @@ describe("PrinterLiveStrip", () => {
       ],
     });
     const onCheckoffUpdate = vi.fn();
+    const onUnattributedUpdate = vi.fn();
 
     render(
       <MemoryRouter>
         <PrinterLiveStrip
           engineReady
           onCheckoffUpdate={onCheckoffUpdate}
+          onUnattributedUpdate={onUnattributedUpdate}
         />
       </MemoryRouter>,
     );
@@ -80,6 +83,7 @@ describe("PrinterLiveStrip", () => {
         integration_id: "prusa-1",
       });
       expect(onCheckoffUpdate).toHaveBeenCalledWith(7);
+      expect(onUnattributedUpdate).toHaveBeenCalledWith(0);
     });
   });
 });
