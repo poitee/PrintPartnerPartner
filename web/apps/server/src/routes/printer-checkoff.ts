@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PrinterCheckoffLink, PrinterCheckoffUnit } from "@print-partner/contracts";
+import { appendFileSync } from "node:fs";
 import type { AppRepository } from "../db/repository.js";
 import type { IntegrationPort } from "../integrations/store.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
@@ -245,6 +246,9 @@ export async function registerPrinterCheckoffRoutes(
       const status = await deps.integrations.getStatus(integrationId);
       const updates = reconcilePrinterCheckoff(deps.repo, integrationId, status);
       const createdLinks: PrinterCheckoffLink[] = [];
+      // #region agent log
+      appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A/B", location: "printer-checkoff.ts:248", message: "reconcile result", data: { integrationId, state: status.state, filename: status.filename, updateCount: updates.length, links: loadPrinterCheckoffLinks(deps.repo).filter((link) => link.integration_id === integrationId).map((link) => ({ id: link.id, filename: link.filename, state: link.state })) }, timestamp: Date.now() })}\n`);
+      // #endregion
 
       // Handle externally-completed prints (no watching link transitioned)
       if (
@@ -259,6 +263,9 @@ export async function registerPrinterCheckoffRoutes(
             p.integration_id === integrationId &&
             normalizePrinterFilename(p.filename) === normalizedFilename,
         );
+        // #region agent log
+        appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A/B/C", location: "printer-checkoff.ts:267", message: "external-complete eligibility", data: { integrationId, normalizedFilename, existingUnattributedId: existing?.id, matchingLinks: loadPrinterCheckoffLinks(deps.repo).filter((link) => link.integration_id === integrationId && normalizePrinterFilename(link.filename) === normalizedFilename).map((link) => ({ id: link.id, state: link.state })) }, timestamp: Date.now() })}\n`);
+        // #endregion
         if (!existing) {
           // Fetch object list from Moonraker
           const objectNames = await getObjectListForIntegration(
@@ -278,6 +285,9 @@ export async function registerPrinterCheckoffRoutes(
             objectNames,
             candidates,
           );
+          // #region agent log
+          appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A", location: "printer-checkoff.ts:291", message: "creating unattributed print", data: { integrationId, filename: status.filename, objectCount: objectNames.length, candidateCount: candidates.length }, timestamp: Date.now() })}\n`);
+          // #endregion
           saveUnattributedPrint(deps.repo, unattributedPrint);
         }
       }
@@ -285,6 +295,9 @@ export async function registerPrinterCheckoffRoutes(
       const openUnattributed = listOpenUnattributedPrints(deps.repo).filter(
         (p) => p.integration_id === integrationId,
       );
+      // #region agent log
+      appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A/D", location: "printer-checkoff.ts:303", message: "reconcile unattributed response", data: { integrationId, open: openUnattributed.map((print) => ({ id: print.id, filename: print.filename })) }, timestamp: Date.now() })}\n`);
+      // #endregion
 
       // Auto-create watching link when a new print is detected on a printer with a default plan binding
       if (
@@ -365,6 +378,9 @@ export async function registerPrinterCheckoffRoutes(
           result.error,
         );
       }
+      // #region agent log
+      appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "B/D", location: "printer-checkoff.ts:390", message: "verify result", data: { linkId, state: result.link.state, filename: result.link.filename, integrationId: result.link.integration_id, unitsConfirmed: result.units_confirmed }, timestamp: Date.now() })}\n`);
+      // #endregion
 
       // Dispatch print.verified / print.rejected webhooks for confirmed and rejected units.
       const { link, units_confirmed, units_rejected } = result;

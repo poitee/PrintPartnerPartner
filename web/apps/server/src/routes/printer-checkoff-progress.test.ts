@@ -184,4 +184,121 @@ describe("printer progress route", () => {
     expect(verify.json()).toMatchObject({ units_confirmed: 1 });
     expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([true]);
   });
+
+  it("does not attribute repeated complete polls for a linked print", async () => {
+    const { app, repo, plan, bracket } = await setup();
+    let printerState: "PRINTING" | "FINISHED" = "PRINTING";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/v1/status")) {
+        return response({
+          printer: { state: printerState },
+          job: { progress: 100, file: { display_name: "bracket.bgcode" } },
+        });
+      }
+      if (url.includes("/api/v1/job")) {
+        return response({
+          state: printerState,
+          file: { display_name: "bracket.bgcode" },
+          refs: { download: "/usb/bracket.bgcode" },
+        });
+      }
+      if (url.includes("/usb/bracket.bgcode")) {
+        return new Response('objects_info={"objects":[{"name":"bracket_01"}]}', { status: 206 });
+      }
+      return response({});
+    }));
+
+    const printing = await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/reconcile",
+      payload: { integration_id: "prusa-1" },
+    });
+    const link = printing.json().created_links[0];
+    expect(link).toMatchObject({
+      profile_id: plan.id,
+      filename: "bracket.bgcode",
+      units: [{ part_id: bracket.id, unit_index: 0 }],
+    });
+
+    printerState = "FINISHED";
+    const complete = await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/reconcile",
+      payload: { integration_id: "prusa-1" },
+    });
+    expect(complete.json()).toMatchObject({
+      updates: [{ link_id: link.id, event: "awaiting_verify" }],
+      unattributed: [],
+    });
+
+    const repeatedComplete = await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/reconcile",
+      payload: { integration_id: "prusa-1" },
+    });
+    expect(repeatedComplete.json()).toMatchObject({
+      updates: [],
+      unattributed: [],
+    });
+
+    const verify = await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/verify",
+      payload: {
+        link_id: link.id,
+        decisions: [{ part_id: bracket.id, unit_index: 0, result: "confirmed" }],
+      },
+    });
+    expect(verify.statusCode).toBe(200);
+    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([true]);
+
+    const completeAfterVerify = await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/reconcile",
+      payload: { integration_id: "prusa-1" },
+    });
+    expect(completeAfterVerify.json()).toMatchObject({
+      updates: [],
+      unattributed: [],
+    });
+  });
+
+  it("creates an unattributed print for an unlinked external completion", async () => {
+    const { app } = await setup();
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/v1/status")) {
+        return response({
+          printer: { state: "FINISHED" },
+          job: { file: { display_name: "external.bgcode" } },
+        });
+      }
+      if (url.includes("/api/v1/job")) {
+        return response({
+          state: "FINISHED",
+          file: { display_name: "external.bgcode" },
+          refs: { download: "/usb/external.bgcode" },
+        });
+      }
+      if (url.includes("/usb/external.bgcode")) {
+        return new Response('objects_info={"objects":[{"name":"external_01"}]}', { status: 206 });
+      }
+      return response({});
+    }));
+
+    const complete = await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/reconcile",
+      payload: { integration_id: "prusa-1" },
+    });
+    expect(complete.statusCode).toBe(200);
+    expect(complete.json()).toMatchObject({
+      updates: [],
+      unattributed: [{
+        integration_id: "prusa-1",
+        filename: "external.bgcode",
+      }],
+    });
+  });
 });
