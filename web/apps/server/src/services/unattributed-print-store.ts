@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import type { AppRepository } from "../db/repository.js";
 
 export type UnattributedPrint = {
@@ -110,6 +111,9 @@ export function claimUnattributedPrint(
   };
   all[idx] = updated;
   saveRaw(repo, pruneEntries(all));
+  // #region agent log
+  appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A/E", location: "unattributed-print-store.ts:116", message: "unattributed print claimed", data: { id: updated.id, integrationId: updated.integration_id, filename: updated.filename, profileId: updated.claimed_profile_id, claimedAt: updated.claimed_at }, timestamp: Date.now() })}\n`);
+  // #endregion
   return updated;
 }
 
