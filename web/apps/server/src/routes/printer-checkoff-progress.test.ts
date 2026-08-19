@@ -60,7 +60,7 @@ async function setup() {
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  return { app, repo, plan, bracket };
+  return { app, repo, plan, bracket, repoPath };
 }
 
 function response(body: unknown, status = 200) {
@@ -71,6 +71,48 @@ function response(body: unknown, status = 200) {
 }
 
 describe("printer progress route", () => {
+  it("spends one object group's copy budget once across colliding library stems", async () => {
+    const { app, repo, plan, repoPath } = await setup();
+    writeFileSync(join(repoPath, "parts", "bracket.3mf"), "placeholder");
+    repo.recomputeProfile(plan.id);
+    const collidingParts = repo
+      .getProfilePartRows(plan.id)
+      .filter((part) => part.filename === "bracket.3mf" || part.filename === "bracket.stl");
+    expect(collidingParts).toHaveLength(2);
+
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/v1/status")) {
+        return response({
+          printer: { state: "PRINTING" },
+          job: { progress: 42, file: { display_name: "bracket.bgcode" } },
+        });
+      }
+      if (url.includes("/api/v1/job")) {
+        return response({
+          state: "PRINTING",
+          file: { display_name: "bracket.bgcode" },
+          refs: { download: "/usb/bracket.bgcode" },
+        });
+      }
+      if (url.includes("/usb/bracket.bgcode")) {
+        return new Response('objects_info={"objects":[{"name":"bracket_01"}]}', { status: 206 });
+      }
+      return response({});
+    }));
+
+    const reconcile = await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/reconcile",
+      payload: { integration_id: "prusa-1" },
+    });
+
+    expect(reconcile.statusCode).toBe(200);
+    expect(reconcile.json().created_links[0].units).toEqual([
+      { part_id: collidingParts[0]!.id, unit_index: 0 },
+    ]);
+  });
+
   it("maps a currently printing Prusa unit label and reports the created link", async () => {
     const { app, repo, plan } = await setup();
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {

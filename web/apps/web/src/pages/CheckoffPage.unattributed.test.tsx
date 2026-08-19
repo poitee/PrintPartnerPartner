@@ -7,7 +7,7 @@ import type { PlanReview, UnattributedPrint } from "../api/engine";
 import CheckoffPage from "./CheckoffPage";
 
 const testState = vi.hoisted(() => ({
-  onUnattributedUpdate: undefined as ((count: number) => void) | undefined,
+  onUnattributedUpdate: undefined as ((count?: number) => void) | undefined,
 }));
 
 const api = vi.hoisted(() => ({
@@ -33,6 +33,14 @@ const stalePrint: UnattributedPrint = {
     },
   ],
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 vi.mock("../hooks/useEngineHealth", () => ({
   useEngineHealth: () => ({ health: { ok: true }, error: null, loading: false }),
@@ -128,7 +136,7 @@ vi.mock("../api/engine", async (importOriginal) => {
   return { ...actual, ...api };
 });
 vi.mock("../components/checkoff/PrinterLiveStrip", () => ({
-  default: (props: { onUnattributedUpdate?: (count: number) => void }) => {
+  default: (props: { onUnattributedUpdate?: (count?: number) => void }) => {
     testState.onUnattributedUpdate = props.onUnattributedUpdate;
     return null;
   },
@@ -194,7 +202,7 @@ describe("CheckoffPage unattributed print reconciliation", () => {
     vi.clearAllMocks();
   });
 
-  it("removes a stale card and part annotation when reconcile reports zero open prints", async () => {
+  it("keeps printer A's unclaimed print when printer B reports zero", async () => {
     render(
       <MemoryRouter>
         <CheckoffPage />
@@ -207,8 +215,9 @@ describe("CheckoffPage unattributed print reconciliation", () => {
     act(() => testState.onUnattributedUpdate?.(0));
 
     await waitFor(() => {
-      expect(screen.queryByText(/Unclaimed print detected/)).toBeNull();
-      expect(screen.queryByText(/Possibly on Core One Fixed/)).toBeNull();
+      expect(api.fetchUnattributedPrints).toHaveBeenCalledTimes(2);
+      expect(screen.getByText(/Unclaimed print detected/)).toBeTruthy();
+      expect(screen.getByText(/Possibly on Core One Fixed/)).toBeTruthy();
     });
   });
 
@@ -230,5 +239,42 @@ describe("CheckoffPage unattributed print reconciliation", () => {
 
     expect(await screen.findByText(/Unclaimed print detected/)).toBeTruthy();
     expect(screen.getByText(/Possibly on Core One Fixed/)).toBeTruthy();
+  });
+
+  it("ignores an older global response that resolves after a newer empty response", async () => {
+    const staleResponse = deferred<UnattributedPrint[]>();
+    const emptyResponse = deferred<UnattributedPrint[]>();
+    api.fetchUnattributedPrints
+      .mockResolvedValueOnce([])
+      .mockReturnValueOnce(staleResponse.promise)
+      .mockReturnValueOnce(emptyResponse.promise);
+
+    render(
+      <MemoryRouter>
+        <CheckoffPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(api.fetchUnattributedPrints).toHaveBeenCalledOnce());
+
+    act(() => testState.onUnattributedUpdate?.(1));
+    await waitFor(() => expect(api.fetchUnattributedPrints).toHaveBeenCalledTimes(2));
+
+    act(() => testState.onUnattributedUpdate?.(0));
+    await waitFor(() => expect(api.fetchUnattributedPrints).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      emptyResponse.resolve([]);
+      await emptyResponse.promise;
+    });
+    await act(async () => {
+      staleResponse.resolve([stalePrint]);
+      await staleResponse.promise;
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Unclaimed print detected/)).toBeNull();
+      expect(screen.queryByText(/Possibly on Core One Fixed/)).toBeNull();
+    });
   });
 });

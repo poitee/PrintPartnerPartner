@@ -83,7 +83,60 @@ describe("PrinterLiveStrip", () => {
         integration_id: "prusa-1",
       });
       expect(onCheckoffUpdate).toHaveBeenCalledWith(7);
-      expect(onUnattributedUpdate).toHaveBeenCalledWith(0);
+      expect(onUnattributedUpdate).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("emits one global refresh hint after parallel per-printer reconcile results", async () => {
+    api.fetchPrinters.mockResolvedValue([
+      {
+        id: "printer-a",
+        name: "Printer A",
+        integration_id: "prusa-a",
+      },
+      {
+        id: "printer-b",
+        name: "Printer B",
+        integration_id: "prusa-b",
+      },
+    ]);
+    api.fetchIntegrations.mockResolvedValue([
+      {
+        id: "prusa-a",
+        name: "Printer A",
+        type: "prusalink",
+        config: { enabled: true },
+      },
+      {
+        id: "prusa-b",
+        name: "Printer B",
+        type: "prusalink",
+        config: { enabled: true },
+      },
+    ]);
+    api.reconcilePrinterCheckoff.mockImplementation(
+      async ({ integration_id }: { integration_id: string }) => ({
+        status: { state: "idle" },
+        updates: [],
+        created_links: [],
+        unattributed: integration_id === "prusa-a" ? [{ id: "print-a" }] : [],
+      }),
+    );
+    const onUnattributedUpdate = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <PrinterLiveStrip
+          engineReady
+          onUnattributedUpdate={onUnattributedUpdate}
+        />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(api.reconcilePrinterCheckoff).toHaveBeenCalledTimes(2);
+      expect(onUnattributedUpdate).toHaveBeenCalledTimes(1);
+      expect(onUnattributedUpdate).toHaveBeenCalledWith();
     });
   });
 });
