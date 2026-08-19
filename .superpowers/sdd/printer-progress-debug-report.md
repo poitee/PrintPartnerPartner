@@ -1,8 +1,8 @@
 # Printer Progress Production Debug Report
 
-Date: 2026-08-19 UTC  
-Base: `origin/main` at `b5637d4`  
-Branch: `cursor/fix-printer-progress-2c41-fdc1`
+Date: 2026-08-19 UTC
+Base: `origin/main` at `b5637d4`
+Branch: `cursor/fix-printer-progress-2c41`
 
 ## Scope
 
@@ -28,7 +28,7 @@ Reported symptoms:
 
 ### A — Zero-unit links disable Confirm
 
-Confidence before reproduction: high.  
+Confidence before reproduction: high.
 Verdict: confirmed.
 
 The API reproduction created an `awaiting_verify` link with a visible filename but `units: []`. The verify boundary received zero decisions and returned 400. The UI independently disables both actions when `units.length === 0`.
@@ -49,7 +49,7 @@ This rejected the alternative hypothesis that Progress persistence itself was br
 
 ### B — Server object matching loses generated `.bgcode` labels
 
-Confidence before reproduction: high.  
+Confidence before reproduction: high.
 Verdict: confirmed.
 
 The smallest Prusa API reproduction returned:
@@ -75,14 +75,14 @@ Post-fix boundary log:
 
 ### C — Prusa `.bgcode` metadata extraction fails
 
-Confidence before reproduction: medium.  
+Confidence before reproduction: medium.
 Verdict: rejected for the reproduced path; production-wide behavior remains unproven.
 
 The mocked PrusaLink download returned plaintext `objects_info` metadata in the first range and the adapter extracted `bracket_01` successfully. The failure occurred after extraction, in filename matching. No adapter change was justified by the available evidence.
 
 ### D — Newly discovered active links are not surfaced to mounted Progress
 
-Confidence before reproduction: high.  
+Confidence before reproduction: high.
 Verdict: confirmed.
 
 The route computed `updates` before creating the active-print link. The newly created link was stored after reconciliation, while the response still had `updates: []`.
@@ -99,7 +99,7 @@ The route now returns `created_links`, and the web poller notifies Progress for 
 
 ### E — PrusaLink `ATTENTION` semantics (separate unresolved question)
 
-Confidence before reproduction: medium.  
+Confidence before reproduction: medium.
 Verdict: inconclusive for the screenshot's failed rows and rejected as the cause of the reproduced missing/disabled-part paths.
 
 `ATTENTION` intentionally maps to host error today and can explain the screenshot's failed rows. This remains a separate, unresolved operational question—not a remaining part of the reproduced Progress fix. The two reported bugs reproduced with a normal `PRINTING`/`FINISHED` lifecycle, so changing `ATTENTION` semantics without a real printer payload would be speculative.
@@ -162,4 +162,4 @@ Temporary NDJSON instrumentation was removed after post-fix logs proved the corr
 - CodeRabbit CLI 0.7.3 is installed but not authenticated. `coderabbit auth status --agent` returned `not_authenticated`; `coderabbit auth login --agent` required interactive browser authentication, so CodeRabbit review could not run in this environment.
 - The recovery heuristic is intentionally conservative. A truly opaque multi-part file with no object metadata and a filename that matches no plan part remains unmapped and still requires manual attribution rather than guessing.
 - PrusaLink `ATTENTION` behavior was not changed. A real `/api/v1/status` and `/api/v1/job` payload captured while a printer is simultaneously in attention and actively printing would be needed before changing that state mapping.
-- The requested branch name was `cursor/fix-printer-progress-2c41`; Cloud branch policy required the created branch to end in `-fdc1`.
+- The branch follows the Cloud Agent naming policy: `cursor/fix-printer-progress-2c41`.
