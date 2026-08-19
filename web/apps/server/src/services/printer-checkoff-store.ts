@@ -258,6 +258,8 @@ export type PrinterCheckoffLinkPatch = Partial<
     | "last_progress"
     | "host_outcome"
     | "resolved_units"
+    | "units"
+    | "unlabeled_names"
   >
 >;
 

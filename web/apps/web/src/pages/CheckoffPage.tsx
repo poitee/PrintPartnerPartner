@@ -267,6 +267,7 @@ export default function CheckoffPage() {
   /** Farm send-queue active count (panel still reports; idle banner removed). */
   const sheetRef = useRef<HTMLElement>(null);
   const [unattributedPrints, setUnattributedPrints] = useState<UnattributedPrint[]>([]);
+  const unattributedRequestId = useRef(0);
   const [watchingLinks, setWatchingLinks] = useState<PrinterCheckoffLink[]>([]);
   const [awaitingLinks, setAwaitingLinks] = useState<PrinterCheckoffLink[]>([]);
   const [phaseManifest, setPhaseManifest] = useState<PlanPhaseManifestResponse | null>(null);
@@ -280,10 +281,14 @@ export default function CheckoffPage() {
     setAuxiliaryErrors((errors) => clearAuxiliaryError(errors, key));
   }, []);
   const refreshUnattributedPrints = useCallback(async () => {
+    const requestId = ++unattributedRequestId.current;
     try {
-      setUnattributedPrints(await fetchUnattributedPrints());
+      const prints = await fetchUnattributedPrints();
+      if (requestId !== unattributedRequestId.current) return;
+      setUnattributedPrints(prints);
       markAuxiliarySuccess("printer-activity");
     } catch (e) {
+      if (requestId !== unattributedRequestId.current) return;
       reportAuxiliaryError(
         "printer-activity",
         `Could not refresh printer activity: ${
@@ -1011,7 +1016,9 @@ export default function CheckoffPage() {
                 }
                 refreshWatchingLinks();
               }}
-              onUnattributedUpdate={() => void refreshUnattributedPrints()}
+              onUnattributedUpdate={() => {
+                void refreshUnattributedPrints();
+              }}
             />
           </Suspense>
           {unattributedPrints.length > 0 && (

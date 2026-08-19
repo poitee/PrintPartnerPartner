@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { PrinterCheckoffLink, PrinterCheckoffUnit } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import type { IntegrationPort } from "../integrations/store.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
@@ -90,6 +91,120 @@ async function buildCandidatesFromObjectNames(
   return candidates;
 }
 
+function mapNamesToProfileUnits(
+  repo: AppRepository,
+  profileId: number,
+  objectNames: string[],
+  fallbackFilename?: string,
+): {
+  units: PrinterCheckoffUnit[];
+  matchedNames: Set<string>;
+  grouped: ReturnType<typeof groupObjectsByPart>;
+  matched: ReturnType<typeof matchObjectsToFilenames>;
+} {
+  const partRows = repo.getProfilePartRows(profileId);
+  for (const part of partRows) repo.ensureProgressForPart(part);
+  const completedByPart = repo.printUnitsByPartId(profileId);
+
+  const mapCandidates = (names: string[]) => {
+    const grouped = groupObjectsByPart(names);
+    const matched = matchObjectsToFilenames(
+      grouped,
+      partRows.map((part) => part.filename).filter(Boolean),
+    );
+    const units: PrinterCheckoffUnit[] = [];
+    const used = new Set<string>();
+    const matchedNames = new Set<string>();
+
+    for (const [objectKey, matchedFiles] of matched) {
+      const plateMatch = grouped.get(objectKey);
+      if (!plateMatch || matchedFiles.length === 0) continue;
+      let remaining = plateMatch.count;
+      for (const filename of matchedFiles) {
+        if (remaining === 0) break;
+        const part = partRows.find(
+          (row) => row.filename.toLowerCase() === filename.toLowerCase(),
+        );
+        if (!part) continue;
+        const qty = Math.max(1, part.quantityEffective);
+        const completed =
+          completedByPart.get(part.id) ?? Array.from({ length: qty }, () => false);
+        for (let unitIndex = 0; unitIndex < qty && remaining > 0; unitIndex += 1) {
+          const key = `${part.id}:${unitIndex}`;
+          if (completed[unitIndex] || used.has(key)) continue;
+          used.add(key);
+          units.push({ part_id: part.id, unit_index: unitIndex });
+          remaining -= 1;
+        }
+        if (remaining < plateMatch.count) {
+          for (const object of plateMatch.objects) matchedNames.add(object.name);
+        }
+      }
+    }
+    return { units, matchedNames, grouped, matched };
+  };
+
+  const mapped = mapCandidates(objectNames);
+  if (mapped.units.length > 0 || !fallbackFilename?.trim()) return mapped;
+  return mapCandidates([fallbackFilename]);
+}
+
+function repairEmptyAwaitingLinks(
+  repo: AppRepository,
+  links: PrinterCheckoffLink[],
+): PrinterCheckoffLink[] {
+  return links.map((link) => {
+    if (link.state !== "awaiting_verify" || link.units.length > 0) return link;
+    const mapped = mapNamesToProfileUnits(
+      repo,
+      link.profile_id,
+      link.unlabeled_names ?? [],
+      link.filename,
+    );
+    if (mapped.units.length === 0) return link;
+    const unmatched = (link.unlabeled_names ?? []).filter(
+      (name) => !mapped.matchedNames.has(name),
+    );
+    return (
+      updatePrinterCheckoffLink(
+        repo,
+        link.id,
+        {
+          units: mapped.units,
+          unlabeled_names: unmatched.length ? unmatched : undefined,
+        },
+        { requireState: "awaiting_verify" },
+      ) ?? link
+    );
+  });
+}
+
+function repairLinkedUnattributedPrints(
+  repo: AppRepository,
+  integrationId?: string,
+): void {
+  const eligibleStates = new Set<PrinterCheckoffLink["state"]>([
+    "watching",
+    "awaiting_verify",
+    "verified",
+  ]);
+  const links = loadPrinterCheckoffLinks(repo).filter(
+    (link) =>
+      eligibleStates.has(link.state) &&
+      (!integrationId || link.integration_id === integrationId),
+  );
+  for (const print of listOpenUnattributedPrints(repo)) {
+    if (integrationId && print.integration_id !== integrationId) continue;
+    const normalizedFilename = normalizePrinterFilename(print.filename);
+    const link = links.find(
+      (candidate) =>
+        candidate.integration_id === print.integration_id &&
+        normalizePrinterFilename(candidate.filename) === normalizedFilename,
+    );
+    if (link) claimUnattributedPrint(repo, print.id, link.profile_id);
+  }
+}
+
 export async function registerPrinterCheckoffRoutes(
   app: FastifyInstance,
   deps: RouteDeps,
@@ -112,6 +227,7 @@ export async function registerPrinterCheckoffRoutes(
     }
     if (query.state === "awaiting_verify") {
       let links = listAwaitingVerifyPrinterCheckoffLinks(deps.repo, profileId);
+      links = repairEmptyAwaitingLinks(deps.repo, links);
       if (integrationId) {
         links = links.filter((l) => l.integration_id === integrationId);
       }
@@ -119,6 +235,7 @@ export async function registerPrinterCheckoffRoutes(
     }
 
     let links = loadPrinterCheckoffLinks(deps.repo);
+    links = repairEmptyAwaitingLinks(deps.repo, links);
     if (integrationId) {
       links = links.filter((l) => l.integration_id === integrationId);
     }
@@ -154,6 +271,7 @@ export async function registerPrinterCheckoffRoutes(
       // Always fetch live host status — never trust a client-supplied snapshot.
       const status = await deps.integrations.getStatus(integrationId);
       const updates = reconcilePrinterCheckoff(deps.repo, integrationId, status);
+      const createdLinks: PrinterCheckoffLink[] = [];
 
       // Handle externally-completed prints (no watching link transitioned)
       if (
@@ -168,7 +286,12 @@ export async function registerPrinterCheckoffRoutes(
             p.integration_id === integrationId &&
             normalizePrinterFilename(p.filename) === normalizedFilename,
         );
-        if (!existing) {
+        const existingLink = loadPrinterCheckoffLinks(deps.repo).find(
+          (link) =>
+            link.integration_id === integrationId &&
+            normalizePrinterFilename(link.filename) === normalizedFilename,
+        );
+        if (!existing && !existingLink) {
           // Fetch object list from Moonraker
           const objectNames = await getObjectListForIntegration(
             deps.repo,
@@ -191,6 +314,7 @@ export async function registerPrinterCheckoffRoutes(
         }
       }
 
+      repairLinkedUnattributedPrints(deps.repo, integrationId);
       const openUnattributed = listOpenUnattributedPrints(deps.repo).filter(
         (p) => p.integration_id === integrationId,
       );
@@ -218,38 +342,20 @@ export async function registerPrinterCheckoffRoutes(
           if (binding?.profile_id) {
             // Fetch object list and match to parts
             const objectNames = await getObjectListForIntegration(deps.repo, integrationId);
-            const partRows = deps.repo.getProfilePartRows(binding.profile_id);
-
-            // Match objects to parts using the parser
-            const grouped = groupObjectsByPart(objectNames);
-            const libraryFilenames = partRows.map((p) => p.filename).filter(Boolean);
-            const matched = matchObjectsToFilenames(grouped, libraryFilenames);
-
-            // Build checkoff units
-            const units: Array<{ part_id: number; unit_index: number }> = [];
-            for (const [stlBasename, matchedFiles] of matched) {
-              const plateMatch = grouped.get(stlBasename);
-              if (!plateMatch) continue;
-              for (const filename of matchedFiles) {
-                const part = partRows.find(
-                  (p) => p.filename.toLowerCase() === filename.toLowerCase(),
-                );
-                if (!part) continue;
-                const qty = Math.max(1, part.quantityEffective);
-                for (let i = 0; i < Math.min(plateMatch.count, qty); i++) {
-                  if (!units.find((u) => u.part_id === part.id && u.unit_index === i)) {
-                    units.push({ part_id: part.id, unit_index: i });
-                  }
-                }
-              }
-            }
+            const mapping = mapNamesToProfileUnits(
+              deps.repo,
+              binding.profile_id,
+              objectNames,
+              status.filename,
+            );
+            const { units } = mapping;
 
             // Get printer_id from fleet
             const fleet = loadFleet(deps.repo);
             const machine = fleet.find((m) => m.integration_id === integrationId);
 
             // Create watching link
-            createPrinterCheckoffLink(deps.repo, {
+            const createdLink = createPrinterCheckoffLink(deps.repo, {
               profile_id: binding.profile_id,
               integration_id: integrationId,
               printer_id: machine?.id ?? integrationId,
@@ -258,12 +364,19 @@ export async function registerPrinterCheckoffRoutes(
               units,
               started: false,
             });
+            if (createdLink) createdLinks.push(createdLink);
           }
         }
       }
 
       // Keep `applied` alias empty for older clients; prefer `updates`.
-      return { status, updates, applied: [], unattributed: openUnattributed };
+      return {
+        status,
+        updates,
+        created_links: createdLinks,
+        applied: [],
+        unattributed: openUnattributed,
+      };
     },
   );
 
@@ -367,7 +480,9 @@ export async function registerPrinterCheckoffRoutes(
   // --- Unattributed prints routes ---
 
   app.get("/printer-checkoff/unattributed", async () => {
-    return { prints: listOpenUnattributedPrints(deps.repo) };
+    repairLinkedUnattributedPrints(deps.repo);
+    const prints = listOpenUnattributedPrints(deps.repo);
+    return { prints };
   });
 
   app.post(
