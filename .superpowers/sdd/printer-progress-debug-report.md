@@ -422,6 +422,10 @@ verification. The regression tests and production fixes remain in place.
 - Red commits: `4e3bb22`, `d6394ff`, and `60fbf14`.
 - Fix-with-verification-instrumentation commit: `67a4003`.
 - Focused post-fix results: frontend 2 files / 5 tests passed; server 1 file / 7 tests passed.
+- Full post-cleanup results: contracts 13 tests, domain 127 tests, web 368 tests, and server
+  780 tests passed; the server retained 2 intentional skips.
+- ESLint, server/web TypeScript checks, and all contracts/domain/server/web production builds
+  passed.
 - Post-fix traces showed one unit for one colliding object and demonstrated that an older nonempty
   global response resolved after the newer empty response without restoring the UI.
 - Temporary NDJSON instrumentation and filesystem imports were removed after post-fix evidence was
