@@ -430,3 +430,54 @@ verification. The regression tests and production fixes remain in place.
   global response resolved after the newer empty response without restoring the UI.
 - Temporary NDJSON instrumentation and filesystem imports were removed after post-fix evidence was
   captured.
+
+## Follow-up: read-only virtual repairs and action-only claims
+
+### Runtime findings
+
+- **W — awaiting GET repair persists mapped units and initializes Progress:** high confidence;
+  confirmed. The red route test received one mapped unit, then reloaded that unit from the stored
+  link and observed the repository write path.
+- **X — failed virtual repairs are rescanned on every GET:** high confidence; confirmed. Two
+  immediate requests produced two mapping attempt/result pairs for the same repository and link
+  signature.
+- **Y — linked unattributed filtering mutates history:** high confidence; confirmed. Both the
+  global unattributed GET and integration-scoped reconcile trace entered
+  `claimUnattributedPrint`, and each red test observed a `printer.unattributed_prints` setting
+  write.
+- **Z — verify validates decisions before repairing an empty link:** high confidence; confirmed.
+  The pre-fix verify trace loaded `unitCount: 0` with two decisions and the route returned HTTP
+  400.
+- **AA — explicit verification lacks the history-claim boundary:** high confidence; confirmed.
+  Before the change, successful verify had no matching-history claim path; after the change, the
+  trace loaded two persisted units before validation and claimed the matching record only after
+  the explicit decisions succeeded.
+
+### Fix and verification
+
+- Awaiting GET now builds a virtual repaired link from read-only profile/progress data. It does not
+  initialize Progress or update the stored link.
+- Failed virtual mappings use a five-second `WeakMap` cache keyed by repository and link signature,
+  so immediate repeated polls scan once while changed signatures and later retries remain
+  actionable.
+- GET and reconcile responses filter linked unattributed duplicates in memory. Only explicit
+  verify/claim actions mark matching history claimed.
+- POST verify conservatively maps and persists a zero-unit awaiting link before decision
+  validation, then applies confirmed/rejected decisions with the existing never-auto-tick prefix
+  guard.
+- The shared object-group `remaining` budget is unchanged, preserving deterministic collision
+  allocation at no more than the parsed object count.
+- Red test commit: `97e794a`.
+- Implementation-with-verification-instrumentation commit: `43ffc4f`.
+- Strengthened stored-history assertions: `2663ff1`.
+- Instrumentation cleanup commit: `58c9884`.
+- Focused post-cleanup results: server 1 file / 10 tests passed; frontend 2 files / 5 tests passed.
+- Full post-cleanup results: contracts 13 tests, domain 127 tests, web 368 tests, and server
+  783 tests passed; the server retained 2 intentional skips.
+- ESLint, server/web TypeScript checks, and all contracts/domain/server/web production builds
+  passed.
+- Post-fix traces showed one failed mapping attempt across two immediate GETs, verify loading two
+  persisted units before validating two decisions, and matching-history claim only on explicit
+  verify.
+- Temporary NDJSON instrumentation and filesystem imports were removed after post-fix evidence was
+  captured.
