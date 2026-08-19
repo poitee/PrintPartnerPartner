@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { appendFileSync } from "node:fs";
 import type { PrinterCheckoffLink, PrinterCheckoffUnit } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import type { IntegrationPort } from "../integrations/store.js";
@@ -13,6 +14,7 @@ import {
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import {
   createPrinterCheckoffLink,
+  getPrinterCheckoffLink,
   listAwaitingVerifyPrinterCheckoffLinks,
   listWatchingPrinterCheckoffLinks,
   loadPrinterCheckoffLinks,
@@ -31,6 +33,7 @@ import {
   listUnattributedPrints,
   saveUnattributedPrint,
 } from "../services/unattributed-print-store.js";
+import type { UnattributedPrint } from "../services/unattributed-print-store.js";
 import { normalizePrinterFilename } from "../services/printer-checkoff.js";
 import { loadFleet } from "../services/printer-fleet.js";
 import { deductSpoolmanFilamentAfterVerify } from "../services/spoolman-deduct.js";
@@ -103,7 +106,6 @@ function mapNamesToProfileUnits(
   matched: ReturnType<typeof matchObjectsToFilenames>;
 } {
   const partRows = repo.getProfilePartRows(profileId);
-  for (const part of partRows) repo.ensureProgressForPart(part);
   const completedByPart = repo.printUnitsByPartId(profileId);
 
   const mapCandidates = (names: string[]) => {
@@ -149,59 +151,112 @@ function mapNamesToProfileUnits(
   return mapCandidates([fallbackFilename]);
 }
 
-function repairEmptyAwaitingLinks(
+const FAILED_VIRTUAL_REPAIR_TTL_MS = 5_000;
+const failedVirtualRepairs = new WeakMap<AppRepository, Map<string, number>>();
+
+function virtualRepairSignature(link: PrinterCheckoffLink): string {
+  return JSON.stringify([
+    link.id,
+    link.profile_id,
+    link.filename,
+    link.unlabeled_names ?? [],
+  ]);
+}
+
+function virtualizeEmptyAwaitingLinks(
   repo: AppRepository,
   links: PrinterCheckoffLink[],
 ): PrinterCheckoffLink[] {
   return links.map((link) => {
     if (link.state !== "awaiting_verify" || link.units.length > 0) return link;
+    const signature = virtualRepairSignature(link);
+    const repoFailures = failedVirtualRepairs.get(repo);
+    const retryAfter = repoFailures?.get(signature) ?? 0;
+    if (retryAfter > Date.now()) return link;
+    repoFailures?.delete(signature);
+    // #region agent log
+    appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A,B", location: "printer-checkoff.ts:repairEmptyAwaitingLinks", message: "attempt empty-link repair", data: { linkId: link.id, profileId: link.profile_id, unlabeledCount: link.unlabeled_names?.length ?? 0 }, timestamp: Date.now() })}\n`);
+    // #endregion
     const mapped = mapNamesToProfileUnits(
       repo,
       link.profile_id,
       link.unlabeled_names ?? [],
       link.filename,
     );
-    if (mapped.units.length === 0) return link;
+    // #region agent log
+    appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A,B", location: "printer-checkoff.ts:repairEmptyAwaitingLinks", message: "empty-link repair mapped", data: { linkId: link.id, mappedUnitCount: mapped.units.length }, timestamp: Date.now() })}\n`);
+    // #endregion
+    if (mapped.units.length === 0) {
+      const failures = repoFailures ?? new Map<string, number>();
+      failures.set(signature, Date.now() + FAILED_VIRTUAL_REPAIR_TTL_MS);
+      if (!repoFailures) failedVirtualRepairs.set(repo, failures);
+      return link;
+    }
     const unmatched = (link.unlabeled_names ?? []).filter(
       (name) => !mapped.matchedNames.has(name),
     );
-    return (
-      updatePrinterCheckoffLink(
-        repo,
-        link.id,
-        {
-          units: mapped.units,
-          unlabeled_names: unmatched.length ? unmatched : undefined,
-        },
-        { requireState: "awaiting_verify" },
-      ) ?? link
-    );
+    return {
+      ...link,
+      units: mapped.units,
+      unlabeled_names: unmatched.length ? unmatched : undefined,
+    };
   });
 }
 
-function repairLinkedUnattributedPrints(
+function linkedCheckoffLinks(
   repo: AppRepository,
   integrationId?: string,
-): void {
+): PrinterCheckoffLink[] {
   const eligibleStates = new Set<PrinterCheckoffLink["state"]>([
     "watching",
     "awaiting_verify",
     "verified",
   ]);
-  const links = loadPrinterCheckoffLinks(repo).filter(
+  return loadPrinterCheckoffLinks(repo).filter(
     (link) =>
       eligibleStates.has(link.state) &&
       (!integrationId || link.integration_id === integrationId),
   );
+}
+
+function printMatchesLink(
+  print: UnattributedPrint,
+  link: PrinterCheckoffLink,
+): boolean {
+  return (
+    link.integration_id === print.integration_id &&
+    normalizePrinterFilename(link.filename) === normalizePrinterFilename(print.filename)
+  );
+}
+
+function filterLinkedUnattributedPrints(
+  repo: AppRepository,
+  prints: UnattributedPrint[],
+  integrationId?: string,
+): UnattributedPrint[] {
+  const links = linkedCheckoffLinks(repo, integrationId);
+  return prints.filter((print) => {
+    if (integrationId && print.integration_id !== integrationId) return false;
+    return !links.some((link) => printMatchesLink(print, link));
+  });
+}
+
+function claimMatchingUnattributedPrints(
+  repo: AppRepository,
+  link: PrinterCheckoffLink,
+): void {
+  const integrationId: string | undefined = undefined;
   for (const print of listOpenUnattributedPrints(repo)) {
-    if (integrationId && print.integration_id !== integrationId) continue;
     const normalizedFilename = normalizePrinterFilename(print.filename);
-    const link = links.find(
-      (candidate) =>
-        candidate.integration_id === print.integration_id &&
-        normalizePrinterFilename(candidate.filename) === normalizedFilename,
-    );
-    if (link) claimUnattributedPrint(repo, print.id, link.profile_id);
+    if (
+      print.integration_id === link.integration_id &&
+      normalizePrinterFilename(link.filename) === normalizedFilename
+    ) {
+      // #region agent log
+      appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "C,E", location: "printer-checkoff.ts:repairLinkedUnattributedPrints", message: "linked duplicate will be claimed", data: { printId: print.id, linkId: link.id, scoped: Boolean(integrationId) }, timestamp: Date.now() })}\n`);
+      // #endregion
+      claimUnattributedPrint(repo, print.id, link.profile_id);
+    }
   }
 }
 
@@ -227,7 +282,7 @@ export async function registerPrinterCheckoffRoutes(
     }
     if (query.state === "awaiting_verify") {
       let links = listAwaitingVerifyPrinterCheckoffLinks(deps.repo, profileId);
-      links = repairEmptyAwaitingLinks(deps.repo, links);
+      links = virtualizeEmptyAwaitingLinks(deps.repo, links);
       if (integrationId) {
         links = links.filter((l) => l.integration_id === integrationId);
       }
@@ -235,7 +290,7 @@ export async function registerPrinterCheckoffRoutes(
     }
 
     let links = loadPrinterCheckoffLinks(deps.repo);
-    links = repairEmptyAwaitingLinks(deps.repo, links);
+    links = virtualizeEmptyAwaitingLinks(deps.repo, links);
     if (integrationId) {
       links = links.filter((l) => l.integration_id === integrationId);
     }
@@ -314,10 +369,14 @@ export async function registerPrinterCheckoffRoutes(
         }
       }
 
-      repairLinkedUnattributedPrints(deps.repo, integrationId);
-      const openUnattributed = listOpenUnattributedPrints(deps.repo).filter(
-        (p) => p.integration_id === integrationId,
+      const openUnattributed = filterLinkedUnattributedPrints(
+        deps.repo,
+        listOpenUnattributedPrints(deps.repo),
+        integrationId,
       );
+      // #region agent log
+      appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "C", location: "printer-checkoff.ts:reconcile", message: "reconcile open unattributed after repair", data: { integrationId, openCount: openUnattributed.length }, timestamp: Date.now() })}\n`);
+      // #endregion
 
       // Auto-create watching link when a new print is detected on a printer with a default plan binding
       if (
@@ -389,6 +448,32 @@ export async function registerPrinterCheckoffRoutes(
       if (!linkId) {
         return sendProblem(reply, 400, "Bad Request", "link_id is required");
       }
+      const storedLink = getPrinterCheckoffLink(deps.repo, linkId);
+      if (
+        storedLink?.state === "awaiting_verify" &&
+        storedLink.units.length === 0
+      ) {
+        const mapped = mapNamesToProfileUnits(
+          deps.repo,
+          storedLink.profile_id,
+          storedLink.unlabeled_names ?? [],
+          storedLink.filename,
+        );
+        if (mapped.units.length > 0) {
+          const unmatched = (storedLink.unlabeled_names ?? []).filter(
+            (name) => !mapped.matchedNames.has(name),
+          );
+          updatePrinterCheckoffLink(
+            deps.repo,
+            storedLink.id,
+            {
+              units: mapped.units,
+              unlabeled_names: unmatched.length ? unmatched : undefined,
+            },
+            { requireState: "awaiting_verify" },
+          );
+        }
+      }
       const result = verifyPrinterCheckoff(deps.repo, linkId, body.decisions);
       if ("error" in result) {
         return sendProblem(
@@ -401,6 +486,7 @@ export async function registerPrinterCheckoffRoutes(
 
       // Dispatch print.verified / print.rejected webhooks for confirmed and rejected units.
       const { link, units_confirmed, units_rejected } = result;
+      claimMatchingUnattributedPrints(deps.repo, link);
       const webhookBase = {
         link_id: link.id,
         profile_id: link.profile_id,
@@ -480,8 +566,10 @@ export async function registerPrinterCheckoffRoutes(
   // --- Unattributed prints routes ---
 
   app.get("/printer-checkoff/unattributed", async () => {
-    repairLinkedUnattributedPrints(deps.repo);
-    const prints = listOpenUnattributedPrints(deps.repo);
+    const prints = filterLinkedUnattributedPrints(
+      deps.repo,
+      listOpenUnattributedPrints(deps.repo),
+    );
     return { prints };
   });
 
@@ -553,8 +641,8 @@ export async function registerPrinterCheckoffRoutes(
         { requireState: "watching" },
       );
 
-      // Mark as claimed
-      claimUnattributedPrint(deps.repo, id, profileId);
+      // Mark matching history as claimed only on this explicit claim action.
+      claimMatchingUnattributedPrints(deps.repo, updated ?? link);
 
       // Update the default plan binding for this printer to the claimed plan
       const bindingsRaw = deps.repo.getSetting("printer.plan_bindings");
