@@ -42,7 +42,6 @@ try {
   );
 
   const printBg = await screenSheet.evaluate((element) => {
-    const view = element.ownerDocument.defaultView;
     const styles = [...element.ownerDocument.styleSheets].flatMap((sheet) => {
       try {
         return [...sheet.cssRules];
@@ -50,16 +49,15 @@ try {
         return [];
       }
     });
-    const printRule = styles.find(
-      (rule) =>
-        rule.type === CSSRule.MEDIA_RULE &&
-        rule.conditionText === "print" &&
-        [...rule.cssRules].some(
-          (inner) =>
-            inner.selectorText === ".checkoff-sheet" &&
-            inner.cssText.includes("--paper-bg: #ffffff"),
-        ),
-    );
+    const printRule = styles.find((rule) => {
+      if (!("conditionText" in rule) || rule.conditionText !== "print") return false;
+      return [...rule.cssRules].some(
+        (inner) =>
+          "selectorText" in inner &&
+          inner.selectorText === ".checkoff-sheet" &&
+          inner.cssText.includes("--paper-bg: #ffffff"),
+      );
+    });
     return printRule ? "#ffffff" : null;
   });
   assert.equal(printBg, "#ffffff", "print media must force paper white");
