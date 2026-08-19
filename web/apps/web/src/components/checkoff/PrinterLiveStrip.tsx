@@ -186,7 +186,7 @@ export default function PrinterLiveStrip({
             const reconcileResult = await reconcilePrinterCheckoff({
               integration_id: h.integrationId,
             });
-            const { updates, status: s } = reconcileResult;
+            const { updates, created_links: createdLinks, status: s } = reconcileResult;
             status = s;
             for (const row of updates ?? []) {
               if (toastedLinks.current.has(row.link_id)) continue;
@@ -199,6 +199,9 @@ export default function PrinterLiveStrip({
                 );
               }
               onCheckoffUpdateRef.current?.(row.profile_id);
+            }
+            for (const link of createdLinks ?? []) {
+              onCheckoffUpdateRef.current?.(link.profile_id);
             }
             // Report unattributed print count
             const unattributed = (reconcileResult as Record<string, unknown>).unattributed;

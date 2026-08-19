@@ -1368,6 +1368,7 @@ export async function reconcilePrinterCheckoff(options: {
 }): Promise<{
   status: PrinterHostStatus;
   updates: PrinterCheckoffReconcileUpdate[];
+  created_links: PrinterCheckoffLink[];
   applied: PrinterCheckoffApplied[];
 }> {
   return engineFetch(`/printer-checkoff/reconcile`, {
