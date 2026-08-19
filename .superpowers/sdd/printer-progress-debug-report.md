@@ -304,7 +304,7 @@ Reconcile and open-list retrieval now repair only exact `integration_id + normal
 - ESLint: passed.
 - Contracts, domain, server, and web production builds: passed.
 
-Temporary NDJSON instrumentation remains active pending manual post-fix confirmation, per the debug workflow.
+Temporary NDJSON instrumentation was retained through manual post-fix confirmation and then removed.
 
 ## Follow-up: stale Progress client state after repair
 
@@ -370,5 +370,25 @@ Post-fix server instrumentation still shows the repair and authoritative empty r
 {"message":"unattributed list result","data":{"open":[],"links":[{"normalizedFilename":"bracket.bgcode","profileId":1,"state":"verified"}]}}
 ```
 
-The unlinked control still returns `external.bgcode` as open. Temporary NDJSON instrumentation
-remains active pending manual verification of the frontend clear.
+The unlinked control still returns `external.bgcode` as open.
+
+### Successful fresh-origin verification
+
+Manual verification on a fresh origin confirmed the complete repaired lifecycle:
+
+- the backend open-unattributed list was empty;
+- Progress showed `1/1` complete and `0 remaining`;
+- `Core One Fixed` showed complete;
+- no `Unclaimed print detected` card appeared;
+- no attribution plan dropdown appeared;
+- no `Possibly on Core One Fixed` annotation appeared;
+- no Confirm card appeared.
+
+The earlier contradictory browser state was specific to an origin controlled by a stale service
+worker/client cache. Moving to a fresh origin loaded the current application and produced UI state
+consistent with the backend's authoritative empty result. This stale-service-worker-origin
+observation explains the discrepancy without changing the server repair or the zero-count client
+clear.
+
+All temporary NDJSON instrumentation and its filesystem imports were removed after this successful
+verification. The regression tests and production fixes remain in place.

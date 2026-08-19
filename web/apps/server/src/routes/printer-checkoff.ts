@@ -1,6 +1,5 @@
 import type { FastifyInstance } from "fastify";
 import type { PrinterCheckoffLink, PrinterCheckoffUnit } from "@print-partner/contracts";
-import { appendFileSync } from "node:fs";
 import type { AppRepository } from "../db/repository.js";
 import type { IntegrationPort } from "../integrations/store.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
@@ -272,9 +271,6 @@ export async function registerPrinterCheckoffRoutes(
       const status = await deps.integrations.getStatus(integrationId);
       const updates = reconcilePrinterCheckoff(deps.repo, integrationId, status);
       const createdLinks: PrinterCheckoffLink[] = [];
-      // #region agent log
-      appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A/B/C", location: "printer-checkoff.ts:249", message: "reconcile lifecycle state", data: { integrationId, state: status.state, normalizedFilename: normalizePrinterFilename(status.filename ?? ""), updateCount: updates.length, matchingLinks: status.filename ? loadPrinterCheckoffLinks(deps.repo).filter((link) => link.integration_id === integrationId && normalizePrinterFilename(link.filename) === normalizePrinterFilename(status.filename ?? "")).map((link) => ({ id: link.id, profileId: link.profile_id, state: link.state })) : [] }, timestamp: Date.now() })}\n`);
-      // #endregion
 
       // Handle externally-completed prints (no watching link transitioned)
       if (
@@ -321,9 +317,6 @@ export async function registerPrinterCheckoffRoutes(
       const openUnattributed = listOpenUnattributedPrints(deps.repo).filter(
         (p) => p.integration_id === integrationId,
       );
-      // #region agent log
-      appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A/B/C", location: "printer-checkoff.ts:297", message: "reconcile open unattributed result", data: { integrationId, open: openUnattributed.map((print) => ({ id: print.id, normalizedFilename: normalizePrinterFilename(print.filename), claimedAt: print.claimed_at, claimedProfileId: print.claimed_profile_id })), links: loadPrinterCheckoffLinks(deps.repo).filter((link) => link.integration_id === integrationId).map((link) => ({ id: link.id, normalizedFilename: normalizePrinterFilename(link.filename), profileId: link.profile_id, state: link.state })) }, timestamp: Date.now() })}\n`);
-      // #endregion
 
       // Auto-create watching link when a new print is detected on a printer with a default plan binding
       if (
@@ -404,9 +397,6 @@ export async function registerPrinterCheckoffRoutes(
           result.error,
         );
       }
-      // #region agent log
-      appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "C/E", location: "printer-checkoff.ts:380", message: "verify lifecycle result", data: { linkId: result.link.id, integrationId: result.link.integration_id, normalizedFilename: normalizePrinterFilename(result.link.filename), profileId: result.link.profile_id, state: result.link.state, unitsConfirmed: result.units_confirmed }, timestamp: Date.now() })}\n`);
-      // #endregion
 
       // Dispatch print.verified / print.rejected webhooks for confirmed and rejected units.
       const { link, units_confirmed, units_rejected } = result;
@@ -491,9 +481,6 @@ export async function registerPrinterCheckoffRoutes(
   app.get("/printer-checkoff/unattributed", async () => {
     repairLinkedUnattributedPrints(deps.repo);
     const prints = listOpenUnattributedPrints(deps.repo);
-    // #region agent log
-    appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A/B/C/D", location: "printer-checkoff.ts:466", message: "unattributed list result", data: { open: prints.map((print) => ({ id: print.id, integrationId: print.integration_id, normalizedFilename: normalizePrinterFilename(print.filename) })), links: loadPrinterCheckoffLinks(deps.repo).map((link) => ({ id: link.id, integrationId: link.integration_id, normalizedFilename: normalizePrinterFilename(link.filename), profileId: link.profile_id, state: link.state })) }, timestamp: Date.now() })}\n`);
-    // #endregion
     return { prints };
   });
 
