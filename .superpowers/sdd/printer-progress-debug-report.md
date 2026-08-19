@@ -305,3 +305,70 @@ Reconcile and open-list retrieval now repair only exact `integration_id + normal
 - Contracts, domain, server, and web production builds: passed.
 
 Temporary NDJSON instrumentation remains active pending manual post-fix confirmation, per the debug workflow.
+
+## Follow-up: stale Progress client state after repair
+
+### Boundary trace and hypotheses
+
+Manual verification on the repaired backend returned `created_links: []`, `updates: []`, and
+`unattributed: []` while Progress still rendered the stale unattributed card and part annotation.
+The frontend trace established:
+
+1. `PrinterLiveStrip` reads the reconcile `unattributed` array and calls
+   `onUnattributedUpdate(unattributed.length)`.
+2. `CheckoffPage` previously discarded that count and always started
+   `refreshUnattributedPrints()`.
+3. The card and `suggestedPartIds` annotation both derive from the existing
+   `unattributedPrints` state array, so neither could disappear until a replacement list request
+   completed with fresh data.
+
+- **O — the zero count is discarded at the page callback:** high confidence; confirmed. The red
+  UI regression invoked the mounted page callback with `0` while the list query continued to
+  return the stale record. Both `Unclaimed print detected` and `Possibly on Core One Fixed`
+  remained rendered.
+- **P — the reconcile callback is not invoked:** low confidence; rejected. The
+  `PrinterLiveStrip` boundary test observes `onUnattributedUpdate(0)` from an empty reconcile
+  array.
+- **Q — the card and part annotation use separate stale sources:** low confidence; rejected.
+  The behavior test showed both are added and removed together from `unattributedPrints`.
+- **R — nonzero reconcile updates would be lost by a direct clear:** medium confidence; rejected
+  by the control case. A count of `1` still performs the list fetch and renders both UI signals.
+
+The focused red result was one expected failure and one passing nonzero control. The failure was:
+
+```text
+expected "Unclaimed print detected Core One Fixed · cube.bgcode" to be absent
+received the stale card after onUnattributedUpdate(0)
+```
+
+### Minimal fix
+
+`CheckoffPage` now treats the reconcile count as authoritative for the empty case:
+
+- count `0` synchronously clears `unattributedPrints`;
+- count greater than zero keeps the existing list refetch, preserving candidate details needed by
+  the card and annotation.
+
+This avoids retaining or immediately re-reading a stale record when reconcile has already proved
+that no open records exist.
+
+### Automated verification
+
+- Focused web: 2 files, 3 tests passed.
+- Focused server reconciliation: 1 file, 6 tests passed.
+- Full web: 83 files, 366 tests passed.
+- Full server: 125 files passed, 1 skipped; 779 tests passed, 2 skipped.
+- Server and web TypeScript typecheck: passed.
+- ESLint: passed.
+- Contracts, domain, server, and web production builds: passed.
+
+Post-fix server instrumentation still shows the repair and authoritative empty result:
+
+```json
+{"message":"unattributed print claimed","data":{"integrationId":"prusa-1","filename":"bracket.bgcode","profileId":1}}
+{"message":"reconcile open unattributed result","data":{"open":[],"links":[{"normalizedFilename":"bracket.bgcode","profileId":1,"state":"verified"}]}}
+{"message":"unattributed list result","data":{"open":[],"links":[{"normalizedFilename":"bracket.bgcode","profileId":1,"state":"verified"}]}}
+```
+
+The unlinked control still returns `external.bgcode` as open. Temporary NDJSON instrumentation
+remains active pending manual verification of the frontend clear.
