@@ -182,6 +182,15 @@ describe("printer progress route", () => {
       state: "complete",
       filename: "bracket.bgcode",
     });
+    const stale = createUnattributedPrint(
+      "prusa-1",
+      "core-one",
+      "Core One",
+      "bracket.bgcode",
+      ["bracket_01"],
+      [],
+    );
+    saveUnattributedPrint(repo, stale);
     const setSetting = vi.spyOn(repo, "setSetting");
     const ensureProgressForPart = vi.spyOn(repo, "ensureProgressForPart");
 
@@ -198,6 +207,9 @@ describe("printer progress route", () => {
     expect(getPrinterCheckoffLink(repo, link.id)?.units).toEqual([]);
     expect(ensureProgressForPart).not.toHaveBeenCalled();
     expect(setSetting).not.toHaveBeenCalled();
+    const storedPrint = listUnattributedPrints(repo).find((p) => p.id === stale.id);
+    expect(storedPrint?.claimed_at).toBeUndefined();
+    expect(storedPrint?.claimed_profile_id).toBeUndefined();
   });
 
   it("caches an unrepairable link scan across immediate GET polls without writes", async () => {
@@ -443,11 +455,9 @@ describe("printer progress route", () => {
 
     expect(open.json().prints).toEqual([]);
     expect(setSetting).not.toHaveBeenCalled();
-    expect(listUnattributedPrints(repo)).toContainEqual(expect.objectContaining({
-      id: stale.id,
-      claimed_at: undefined,
-      claimed_profile_id: undefined,
-    }));
+    const storedPrint = listUnattributedPrints(repo).find((p) => p.id === stale.id);
+    expect(storedPrint?.claimed_at).toBeUndefined();
+    expect(storedPrint?.claimed_profile_id).toBeUndefined();
     expect(getPrinterCheckoffLink(repo, link.id)?.state).toBe("awaiting_verify");
   });
 
@@ -505,11 +515,9 @@ describe("printer progress route", () => {
     });
     expect(repeatedComplete.json().unattributed).toEqual([]);
     expect(setSetting).not.toHaveBeenCalled();
-    expect(listUnattributedPrints(repo)).toContainEqual(expect.objectContaining({
-      id: stale.id,
-      claimed_profile_id: undefined,
-      claimed_at: undefined,
-    }));
+    const storedPrint = listUnattributedPrints(repo).find((p) => p.id === stale.id);
+    expect(storedPrint?.claimed_profile_id).toBeUndefined();
+    expect(storedPrint?.claimed_at).toBeUndefined();
     expect(getPrinterCheckoffLink(repo, link.id)?.state).toBe("awaiting_verify");
     expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([false]);
   });
