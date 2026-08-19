@@ -257,3 +257,51 @@ This preserves external completion behavior when no link exists while making rep
 ### Remaining concern
 
 PrusaLink exposes filename and terminal state here, but no stable print-instance identifier. Deduplication therefore uses integration plus normalized filename, matching the existing unattributed-record policy. A newly completed external job that reuses a historical linked filename and was never observed while printing is indistinguishable from a repeated terminal poll; supporting that case reliably would require a host job ID or an explicit observed state-cycle marker.
+
+## Follow-up: migration repair for an existing duplicate
+
+### Reproduction and hypotheses
+
+Manual post-fix verification showed that the prevention fix did not migrate an unattributed record created before `ab28c3e`. A route regression now seeds that stale record beside a linked lifecycle, confirms the unit, repeats reconcile, lists open unattributed prints, and checks both retained claim history and `1/1` Progress.
+
+- **J — stale open records have no repair path:** high confidence; confirmed. Before the repair, reconcile returned the stale record while an exact matching `verified` link remained loaded.
+- **K — normalization prevents correlation:** low confidence; rejected. Both records normalized to `bracket.bgcode`.
+- **L — Confirm deletes or loses the checkoff link:** low confidence; rejected. The post-Confirm trace retained the matching link in `verified`.
+- **M — the existing claim mutation cannot preserve history:** medium confidence; rejected. Post-fix tracing showed `claimUnattributedPrint` persisted `claimed_at` and `claimed_profile_id`.
+- **N — repairing linked duplicates suppresses genuinely unlinked completions:** medium confidence; rejected by the control case. `external.bgcode`, with no matching link, remained open.
+
+Pre-fix evidence:
+
+```json
+{"message":"reconcile lifecycle state","data":{"state":"complete","normalizedFilename":"bracket.bgcode","matchingLinks":[{"profileId":1,"state":"verified"}]}}
+{"message":"reconcile open unattributed result","data":{"open":[{"normalizedFilename":"bracket.bgcode"}],"links":[{"normalizedFilename":"bracket.bgcode","profileId":1,"state":"verified"}]}}
+```
+
+Post-fix evidence:
+
+```json
+{"message":"unattributed print claimed","data":{"integrationId":"prusa-1","filename":"bracket.bgcode","profileId":1}}
+{"message":"reconcile open unattributed result","data":{"open":[],"links":[{"normalizedFilename":"bracket.bgcode","profileId":1,"state":"verified"}]}}
+{"message":"unattributed list result","data":{"open":[],"links":[{"normalizedFilename":"bracket.bgcode","profileId":1,"state":"verified"}]}}
+{"message":"reconcile open unattributed result","data":{"open":[{"normalizedFilename":"external.bgcode"}],"links":[]}}
+```
+
+### Root cause and repair
+
+`ab28c3e` guarded only creation of new unattributed records. `listOpenUnattributedPrints` continued to return already-persisted open records verbatim, and neither reconcile nor the open-list route correlated them with checkoff history.
+
+Reconcile and open-list retrieval now repair only exact `integration_id + normalized filename` matches against `watching`, `awaiting_verify`, or `verified` links. The stale record is claimed to the matching link's profile, preserving history and making it non-open. Records without a matching eligible link are unchanged.
+
+### TDD and verification
+
+- Red regression commit: `700fed9`.
+- Red result: focused route suite failed because repeated complete reconcile returned the seeded `bracket.bgcode` record.
+- Runtime instrumentation commit: `90877c0`.
+- Repair commit: `e3eedf2`.
+- Green focused result: 1 file, 6 tests passed.
+- Full tests: contracts 13, domain 127, web 364, server 779 passed; server retained 2 skipped tests.
+- Server and web TypeScript typecheck: passed.
+- ESLint: passed.
+- Contracts, domain, server, and web production builds: passed.
+
+Temporary NDJSON instrumentation remains active pending manual post-fix confirmation, per the debug workflow.
