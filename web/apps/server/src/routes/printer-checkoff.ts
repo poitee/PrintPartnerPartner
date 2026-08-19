@@ -179,6 +179,32 @@ function repairEmptyAwaitingLinks(
   });
 }
 
+function repairLinkedUnattributedPrints(
+  repo: AppRepository,
+  integrationId?: string,
+): void {
+  const eligibleStates = new Set<PrinterCheckoffLink["state"]>([
+    "watching",
+    "awaiting_verify",
+    "verified",
+  ]);
+  const links = loadPrinterCheckoffLinks(repo).filter(
+    (link) =>
+      eligibleStates.has(link.state) &&
+      (!integrationId || link.integration_id === integrationId),
+  );
+  for (const print of listOpenUnattributedPrints(repo)) {
+    if (integrationId && print.integration_id !== integrationId) continue;
+    const normalizedFilename = normalizePrinterFilename(print.filename);
+    const link = links.find(
+      (candidate) =>
+        candidate.integration_id === print.integration_id &&
+        normalizePrinterFilename(candidate.filename) === normalizedFilename,
+    );
+    if (link) claimUnattributedPrint(repo, print.id, link.profile_id);
+  }
+}
+
 export async function registerPrinterCheckoffRoutes(
   app: FastifyInstance,
   deps: RouteDeps,
@@ -291,6 +317,7 @@ export async function registerPrinterCheckoffRoutes(
         }
       }
 
+      repairLinkedUnattributedPrints(deps.repo, integrationId);
       const openUnattributed = listOpenUnattributedPrints(deps.repo).filter(
         (p) => p.integration_id === integrationId,
       );
@@ -462,6 +489,7 @@ export async function registerPrinterCheckoffRoutes(
   // --- Unattributed prints routes ---
 
   app.get("/printer-checkoff/unattributed", async () => {
+    repairLinkedUnattributedPrints(deps.repo);
     const prints = listOpenUnattributedPrints(deps.repo);
     // #region agent log
     appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A/B/C/D", location: "printer-checkoff.ts:466", message: "unattributed list result", data: { open: prints.map((print) => ({ id: print.id, integrationId: print.integration_id, normalizedFilename: normalizePrinterFilename(print.filename) })), links: loadPrinterCheckoffLinks(deps.repo).map((link) => ({ id: link.id, integrationId: link.integration_id, normalizedFilename: normalizePrinterFilename(link.filename), profileId: link.profile_id, state: link.state })) }, timestamp: Date.now() })}\n`);
