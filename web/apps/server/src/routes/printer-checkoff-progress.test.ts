@@ -212,7 +212,7 @@ describe("printer progress route", () => {
     expect(storedPrint?.claimed_profile_id).toBeUndefined();
   });
 
-  it("caches an unrepairable link scan across immediate GET polls without writes", async () => {
+  it("caches an unrepairable link scan across later poll intervals without writes", async () => {
     const { app, repo, plan } = await setup();
     const link = createPrinterCheckoffLink(repo, {
       profile_id: plan.id,
@@ -230,15 +230,19 @@ describe("printer progress route", () => {
     const getProfilePartRows = vi.spyOn(repo, "getProfilePartRows");
     const ensureProgressForPart = vi.spyOn(repo, "ensureProgressForPart");
     const setSetting = vi.spyOn(repo, "setSetting");
+    let now = Date.now();
+    const dateNow = vi.spyOn(Date, "now").mockImplementation(() => now);
 
     const first = await app.inject({
       method: "GET",
       url: `/printer-checkoff?state=awaiting_verify&profile_id=${plan.id}`,
     });
+    now += 60_000;
     const second = await app.inject({
       method: "GET",
       url: `/printer-checkoff?state=awaiting_verify&profile_id=${plan.id}`,
     });
+    dateNow.mockRestore();
 
     expect(first.json().links[0]).toMatchObject({ id: link.id, units: [] });
     expect(second.json().links[0]).toMatchObject({ id: link.id, units: [] });

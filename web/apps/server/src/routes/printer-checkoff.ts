@@ -150,8 +150,7 @@ function mapNamesToProfileUnits(
   return mapCandidates([fallbackFilename]);
 }
 
-const FAILED_VIRTUAL_REPAIR_TTL_MS = 5_000;
-const failedVirtualRepairs = new WeakMap<AppRepository, Map<string, number>>();
+const failedVirtualRepairs = new WeakMap<AppRepository, Set<string>>();
 
 function virtualRepairSignature(link: PrinterCheckoffLink): string {
   return JSON.stringify([
@@ -170,9 +169,7 @@ function virtualizeEmptyAwaitingLinks(
     if (link.state !== "awaiting_verify" || link.units.length > 0) return link;
     const signature = virtualRepairSignature(link);
     const repoFailures = failedVirtualRepairs.get(repo);
-    const retryAfter = repoFailures?.get(signature) ?? 0;
-    if (retryAfter > Date.now()) return link;
-    repoFailures?.delete(signature);
+    if (repoFailures?.has(signature)) return link;
     const mapped = mapNamesToProfileUnits(
       repo,
       link.profile_id,
@@ -180,8 +177,8 @@ function virtualizeEmptyAwaitingLinks(
       link.filename,
     );
     if (mapped.units.length === 0) {
-      const failures = repoFailures ?? new Map<string, number>();
-      failures.set(signature, Date.now() + FAILED_VIRTUAL_REPAIR_TTL_MS);
+      const failures = repoFailures ?? new Set<string>();
+      failures.add(signature);
       if (!repoFailures) failedVirtualRepairs.set(repo, failures);
       return link;
     }
