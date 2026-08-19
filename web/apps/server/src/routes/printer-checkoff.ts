@@ -263,10 +263,15 @@ export async function registerPrinterCheckoffRoutes(
             p.integration_id === integrationId &&
             normalizePrinterFilename(p.filename) === normalizedFilename,
         );
+        const existingLink = loadPrinterCheckoffLinks(deps.repo).find(
+          (link) =>
+            link.integration_id === integrationId &&
+            normalizePrinterFilename(link.filename) === normalizedFilename,
+        );
         // #region agent log
         appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A/B/C", location: "printer-checkoff.ts:267", message: "external-complete eligibility", data: { integrationId, normalizedFilename, existingUnattributedId: existing?.id, matchingLinks: loadPrinterCheckoffLinks(deps.repo).filter((link) => link.integration_id === integrationId && normalizePrinterFilename(link.filename) === normalizedFilename).map((link) => ({ id: link.id, state: link.state })) }, timestamp: Date.now() })}\n`);
         // #endregion
-        if (!existing) {
+        if (!existing && !existingLink) {
           // Fetch object list from Moonraker
           const objectNames = await getObjectListForIntegration(
             deps.repo,
