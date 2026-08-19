@@ -73,11 +73,11 @@ function response(body: unknown, status = 200) {
 describe("printer progress route", () => {
   it("spends one object group's copy budget once across colliding library stems", async () => {
     const { app, repo, plan, repoPath } = await setup();
-    writeFileSync(join(repoPath, "parts", "bracket.3mf"), "placeholder");
+    writeFileSync(join(repoPath, "parts", "bracket.stl.stl"), "solid");
     repo.recomputeProfile(plan.id);
     const collidingParts = repo
       .getProfilePartRows(plan.id)
-      .filter((part) => part.filename === "bracket.3mf" || part.filename === "bracket.stl");
+      .filter((part) => part.filename === "bracket.stl" || part.filename === "bracket.stl.stl");
     expect(collidingParts).toHaveLength(2);
 
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
