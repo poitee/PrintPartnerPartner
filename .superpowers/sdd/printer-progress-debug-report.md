@@ -163,3 +163,97 @@ Temporary NDJSON instrumentation was removed after post-fix logs proved the corr
 - The recovery heuristic is intentionally conservative. A truly opaque multi-part file with no object metadata and a filename that matches no plan part remains unmapped and still requires manual attribution rather than guessing.
 - PrusaLink `ATTENTION` behavior was not changed. A real `/api/v1/status` and `/api/v1/job` payload captured while a printer is simultaneously in attention and actively printing would be needed before changing that state mapping.
 - The branch follows the Cloud Agent naming policy: `cursor/fix-printer-progress-2c41`.
+
+## Follow-up: duplicate unattributed completion
+
+### Reproduction
+
+The post-fix browser walkthrough exposed a second reconcile defect:
+
+1. `Core One Fixed` moved from `printing cube.bgcode` to `complete`.
+2. Confirm persisted Progress `1/1` and removed the checkoff card.
+3. An `Unclaimed print detected` entry for the same integration and filename remained and reappeared when the printer was selected.
+
+A route-level regression reproduced the same lifecycle with a real repository and mocked PrusaLink boundary:
+
+`PRINTING → FINISHED → repeated FINISHED → Confirm → repeated FINISHED`
+
+The red test failed on the repeated `FINISHED` poll because `unattributed` contained `bracket.bgcode` instead of remaining empty. The unlinked control case, `FINISHED external.bgcode` with no checkoff link, continued to create one unattributed record.
+
+### Hypotheses and runtime verdicts
+
+#### F — `updates.length` only signals the transition poll
+
+Confidence before route reproduction: high.
+Verdict: confirmed.
+
+On the first complete poll, reconcile transitioned the watching link and returned one update:
+
+```json
+{"message":"reconcile result","data":{"state":"complete","filename":"bracket.bgcode","updateCount":1,"links":[{"filename":"bracket.bgcode","state":"awaiting_verify"}]}}
+```
+
+On the repeated complete poll, the same link was no longer watching, so reconcile returned no updates. The external-complete branch then created an unattributed record even though its own boundary trace showed the matching awaiting link:
+
+```json
+{"message":"external-complete eligibility","data":{"normalizedFilename":"bracket.bgcode","matchingLinks":[{"state":"awaiting_verify"}]}}
+{"message":"creating unattributed print","data":{"filename":"bracket.bgcode","objectCount":1,"candidateCount":1}}
+```
+
+#### G — The transitioned or verified checkoff link was deleted
+
+Confidence before route reproduction: low.
+Verdict: rejected.
+
+The repeated pre-fix poll loaded the matching link in `awaiting_verify`. Post-fix verification also loaded it after Confirm in `verified`, so checkoff history remained available for deduplication.
+
+#### H — Filename normalization prevented correlation
+
+Confidence before route reproduction: low.
+Verdict: rejected.
+
+The live filename and stored checkoff filename both normalized to `bracket.bgcode`; the boundary trace found the matching link by integration and normalized filename.
+
+#### I — Confirm itself created or retained the duplicate
+
+Confidence before route reproduction: medium.
+Verdict: rejected as the creation point.
+
+The duplicate existed before Confirm, on the second complete poll. Confirm correctly changed the checkoff link to `verified` and marked one unit; it did not originate the unattributed record.
+
+### Root cause and fix
+
+The external-complete branch treated `updates.length === 0` as equivalent to “this completion has no checkoff link.” That is only true on the transition poll. Every later complete poll has no updates because reconciliation intentionally processes watching links only.
+
+Before creating an unattributed record, the route now checks both:
+
+- existing unattributed records for integration plus normalized filename;
+- existing checkoff links for integration plus normalized filename.
+
+This preserves external completion behavior when no link exists while making repeated complete polling idempotent across both `awaiting_verify` and `verified`.
+
+### TDD and post-fix evidence
+
+- Red commit: `ff03a6c`.
+- Red result: focused suite had 1 expected failure; repeated complete returned one unattributed `bracket.bgcode`.
+- Fix commit: `ab28c3e`.
+- Post-fix focused result: 1 file, 5 tests passed.
+- Post-fix trace: repeated complete with `awaiting_verify` returned `open: []`.
+- Confirm trace: the link transitioned to `verified` with `unitsConfirmed: 1`.
+- Post-confirm complete trace: the matching `verified` link returned `open: []`.
+- External control trace: unlinked `external.bgcode` executed unattributed creation and returned one open record.
+- Temporary NDJSON instrumentation was removed in `0112610` after the post-fix trace proved both paths.
+
+### Follow-up full verification
+
+- Contracts: 1 file, 13 tests passed.
+- Domain: 18 files, 127 tests passed.
+- Web: 82 files, 364 tests passed.
+- Server: 125 files passed, 1 skipped; 778 tests passed, 2 skipped.
+- Server and web TypeScript typecheck: passed.
+- ESLint: passed.
+- Contracts, domain, server, and web production builds: passed.
+
+### Remaining concern
+
+PrusaLink exposes filename and terminal state here, but no stable print-instance identifier. Deduplication therefore uses integration plus normalized filename, matching the existing unattributed-record policy. A newly completed external job that reuses a historical linked filename and was never observed while printing is indistinguishable from a repeated terminal poll; supporting that case reliably would require a host job ID or an explicit observed state-cycle marker.
