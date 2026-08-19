@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 async function setup() {
-  const dir = mkdtempSync(join(tmpdir(), "pp-printer-progress-debug-"));
+  const dir = mkdtempSync(join(tmpdir(), "pp-printer-checkoff-progress-"));
   const sqlite = new SqliteDatabase(dir);
   sqlite.connect();
   const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);

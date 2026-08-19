@@ -97,12 +97,12 @@ Pre-fix log:
 
 The route now returns `created_links`, and the web poller notifies Progress for each new link's immutable `profile_id`.
 
-### E — PrusaLink `ATTENTION` or filename mismatch causes both symptoms
+### E — PrusaLink `ATTENTION` semantics (separate unresolved question)
 
 Confidence before reproduction: medium.  
 Verdict: inconclusive for the screenshot's failed rows and rejected as the cause of the reproduced missing/disabled-part paths.
 
-`ATTENTION` intentionally maps to host error today and can explain the screenshot's failed rows. The two reported bugs reproduced with a normal `PRINTING`/`FINISHED` lifecycle, so changing `ATTENTION` semantics without a real printer payload would be speculative.
+`ATTENTION` intentionally maps to host error today and can explain the screenshot's failed rows. This remains a separate, unresolved operational question—not a remaining part of the reproduced Progress fix. The two reported bugs reproduced with a normal `PRINTING`/`FINISHED` lifecycle, so changing `ATTENTION` semantics without a real printer payload would be speculative.
 
 ## Root causes
 
@@ -136,7 +136,7 @@ After the minimal fixes, the focused suites passed:
 - server: 6 files, 39 tests;
 - web: 2 files, 6 tests.
 
-Post-cleanup focused filename-repair test: 1 file, 3 tests passed.
+Post-cleanup focused printer-checkoff Progress test: 1 file, 3 tests passed.
 
 ## Full verification
 
