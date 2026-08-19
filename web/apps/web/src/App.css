@@ -1092,13 +1092,38 @@
   font-family: system-ui, sans-serif;
 }
 
-/* GRE-234: no cream sheet on screen — paper tokens stay GRE-233 white. */
+/* GRE-234: on screen, dark desk uses card tokens — not blinding paper white.
+   @media print below forces GRE-233 paper white for ink-friendly output. */
 
 /* GRE-233: Progress Print sheet is print-only — desk loop is the screen UI.
    `.is-print-prep` briefly mounts off-screen so thumbs can load before window.print. */
 @media screen {
   .checkoff-sheet-print-only:not(.is-print-prep) {
     display: none !important;
+  }
+
+  .dark .checkoff-sheet {
+    --paper-bg: var(--card);
+    --paper-fg: var(--foreground);
+    --paper-muted: var(--muted-foreground);
+    --paper-muted-fg: var(--muted-foreground);
+    --paper-border: var(--border);
+    --paper-border-strong: var(--border);
+    --paper-surface: var(--muted);
+    --paper-surface-hover: var(--secondary);
+    --paper-focus: var(--ring);
+    --paper-shadow: var(--shadow-md);
+
+    --paper-success-bg: hsl(152 30% 14%);
+    --paper-success-chip-bg: hsl(152 35% 18%);
+    --paper-success-border: hsl(152 40% 28%);
+    --paper-success-fg: hsl(152 45% 65%);
+
+    --paper-destructive: hsl(0 58% 62%);
+    --paper-destructive-hover: hsl(0 58% 68%);
+    --paper-destructive-border: hsl(0 40% 35%);
+    --paper-destructive-border-hover: hsl(0 45% 42%);
+    --paper-destructive-bg-hover: hsl(0 30% 14%);
   }
 }
 

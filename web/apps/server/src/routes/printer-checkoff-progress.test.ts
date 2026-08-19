@@ -8,7 +8,10 @@ import { AppRepository } from "../db/repository.js";
 import { registerPrinterCheckoffRoutes } from "./printer-checkoff.js";
 import { createIntegrationPort } from "../integrations/store.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
-import { createPrinterCheckoffLink } from "../services/printer-checkoff-store.js";
+import {
+  createPrinterCheckoffLink,
+  getPrinterCheckoffLink,
+} from "../services/printer-checkoff-store.js";
 import { reconcilePrinterCheckoff } from "../services/printer-checkoff.js";
 import {
   createUnattributedPrint,
@@ -165,7 +168,7 @@ describe("printer progress route", () => {
     expect(repo.printUnitsByPartId(plan.id).values().next().value).toEqual([false]);
   });
 
-  it("repairs a legacy zero-unit awaiting card so Confirm persists Progress", async () => {
+  it("returns virtual units for a legacy zero-unit awaiting card without persisting on GET", async () => {
     const { app, repo, plan, bracket } = await setup();
     const link = createPrinterCheckoffLink(repo, {
       profile_id: plan.id,
@@ -179,6 +182,17 @@ describe("printer progress route", () => {
       state: "complete",
       filename: "bracket.bgcode",
     });
+    const stale = createUnattributedPrint(
+      "prusa-1",
+      "core-one",
+      "Core One",
+      "bracket.bgcode",
+      ["bracket_01"],
+      [],
+    );
+    saveUnattributedPrint(repo, stale);
+    const setSetting = vi.spyOn(repo, "setSetting");
+    const ensureProgressForPart = vi.spyOn(repo, "ensureProgressForPart");
 
     const awaiting = await app.inject({
       method: "GET",
@@ -190,18 +204,120 @@ describe("printer progress route", () => {
         units: [{ part_id: bracket.id, unit_index: 0 }],
       }],
     });
+    expect(getPrinterCheckoffLink(repo, link.id)?.units).toEqual([]);
+    expect(ensureProgressForPart).not.toHaveBeenCalled();
+    expect(setSetting).not.toHaveBeenCalled();
+    const storedPrint = listUnattributedPrints(repo).find((p) => p.id === stale.id);
+    expect(storedPrint?.claimed_at).toBeUndefined();
+    expect(storedPrint?.claimed_profile_id).toBeUndefined();
+  });
+
+  it("caches an unrepairable link scan across later poll intervals without writes", async () => {
+    const { app, repo, plan } = await setup();
+    const link = createPrinterCheckoffLink(repo, {
+      profile_id: plan.id,
+      integration_id: "prusa-1",
+      printer_id: "core-one",
+      host_name: "Core One",
+      filename: "unknown.bgcode",
+      units: [],
+      unlabeled_names: ["not-a-library-part"],
+    })!;
+    reconcilePrinterCheckoff(repo, "prusa-1", {
+      state: "complete",
+      filename: "unknown.bgcode",
+    });
+    const getProfilePartRows = vi.spyOn(repo, "getProfilePartRows");
+    const ensureProgressForPart = vi.spyOn(repo, "ensureProgressForPart");
+    const setSetting = vi.spyOn(repo, "setSetting");
+    let now = Date.now();
+    const dateNow = vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    const first = await app.inject({
+      method: "GET",
+      url: `/printer-checkoff?state=awaiting_verify&profile_id=${plan.id}`,
+    });
+    now += 60_000;
+    const second = await app.inject({
+      method: "GET",
+      url: `/printer-checkoff?state=awaiting_verify&profile_id=${plan.id}`,
+    });
+    dateNow.mockRestore();
+
+    expect(first.json().links[0]).toMatchObject({ id: link.id, units: [] });
+    expect(second.json().links[0]).toMatchObject({ id: link.id, units: [] });
+    expect(getProfilePartRows).toHaveBeenCalledTimes(1);
+    expect(ensureProgressForPart).not.toHaveBeenCalled();
+    expect(setSetting).not.toHaveBeenCalled();
+  });
+
+  it("repairs and persists an empty link only when verify applies confirm and reject decisions", async () => {
+    const { app, repo, plan, bracket, repoPath } = await setup();
+    writeFileSync(join(repoPath, "parts", "frame.stl"), "solid");
+    repo.recomputeProfile(plan.id);
+    const frame = repo.listParts(plan.id).parts.find((p) => p.filename === "frame.stl")!;
+    const link = createPrinterCheckoffLink(repo, {
+      profile_id: plan.id,
+      integration_id: "prusa-1",
+      printer_id: "core-one",
+      host_name: "Core One",
+      filename: "plate.bgcode",
+      units: [],
+      unlabeled_names: ["bracket_01", "frame_01"],
+    })!;
+    reconcilePrinterCheckoff(repo, "prusa-1", {
+      state: "complete",
+      filename: "plate.bgcode",
+    });
+    const stale = createUnattributedPrint(
+      "prusa-1",
+      "core-one",
+      "Core One",
+      "plate.bgcode",
+      ["bracket_01", "frame_01"],
+      [],
+    );
+    saveUnattributedPrint(repo, stale);
 
     const verify = await app.inject({
       method: "POST",
       url: "/printer-checkoff/verify",
       payload: {
         link_id: link.id,
-        decisions: [{ part_id: bracket.id, unit_index: 0, result: "confirmed" }],
+        decisions: [
+          { part_id: bracket.id, unit_index: 0, result: "confirmed" },
+          {
+            part_id: frame.id,
+            unit_index: 0,
+            result: "rejected",
+            reason: "bed_adhesion",
+          },
+        ],
       },
     });
     expect(verify.statusCode).toBe(200);
-    expect(verify.json()).toMatchObject({ units_confirmed: 1 });
+    expect(verify.json()).toMatchObject({
+      units_confirmed: 1,
+      units_rejected: 1,
+      link: {
+        state: "verified",
+        units: [
+          { part_id: bracket.id, unit_index: 0 },
+          { part_id: frame.id, unit_index: 0 },
+        ],
+      },
+    });
+    expect(getPrinterCheckoffLink(repo, link.id)?.units).toEqual([
+      { part_id: bracket.id, unit_index: 0 },
+      { part_id: frame.id, unit_index: 0 },
+    ]);
     expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([true]);
+    expect(repo.printUnitsByPartId(plan.id).get(frame.id)).toEqual([false]);
+    expect(listUnattributedPrints(repo)).toContainEqual(expect.objectContaining({
+      id: stale.id,
+      claimed_profile_id: plan.id,
+      claimed_at: expect.any(String),
+    }));
   });
 
   it("persists Progress when the same API receives a valid mapped unit", async () => {
@@ -311,20 +427,57 @@ describe("printer progress route", () => {
     });
   });
 
-  it("repairs a stale unattributed duplicate after its linked print is confirmed", async () => {
+  it("filters a linked unattributed duplicate on GET without persisting a claim", async () => {
+    const { app, repo, plan } = await setup();
+    const link = createPrinterCheckoffLink(repo, {
+      profile_id: plan.id,
+      integration_id: "prusa-1",
+      printer_id: "core-one",
+      host_name: "Core One",
+      filename: "bracket.bgcode",
+      units: [],
+    })!;
+    reconcilePrinterCheckoff(repo, "prusa-1", {
+      state: "complete",
+      filename: "bracket.bgcode",
+    });
+    const stale = createUnattributedPrint(
+      "prusa-1",
+      "core-one",
+      "Core One",
+      "BRACKET.BGCODE",
+      ["bracket_01"],
+      [],
+    );
+    saveUnattributedPrint(repo, stale);
+    const setSetting = vi.spyOn(repo, "setSetting");
+
+    const open = await app.inject({
+      method: "GET",
+      url: "/printer-checkoff/unattributed",
+    });
+
+    expect(open.json().prints).toEqual([]);
+    expect(setSetting).not.toHaveBeenCalled();
+    const storedPrint = listUnattributedPrints(repo).find((p) => p.id === stale.id);
+    expect(storedPrint?.claimed_at).toBeUndefined();
+    expect(storedPrint?.claimed_profile_id).toBeUndefined();
+    expect(getPrinterCheckoffLink(repo, link.id)?.state).toBe("awaiting_verify");
+  });
+
+  it("filters a linked stale unattributed duplicate during reconcile without persisting a claim", async () => {
     const { app, repo, plan, bracket } = await setup();
-    let printerState: "PRINTING" | "FINISHED" = "PRINTING";
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("/api/v1/status")) {
         return response({
-          printer: { state: printerState },
+          printer: { state: "FINISHED" },
           job: { progress: 100, file: { display_name: "BRACKET.BGCODE" } },
         });
       }
       if (url.includes("/api/v1/job")) {
         return response({
-          state: printerState,
+          state: "FINISHED",
           file: { display_name: "BRACKET.BGCODE" },
           refs: { download: "/usb/BRACKET.BGCODE" },
         });
@@ -335,16 +488,17 @@ describe("printer progress route", () => {
       return response({});
     }));
 
-    const printing = await app.inject({
-      method: "POST",
-      url: "/printer-checkoff/reconcile",
-      payload: { integration_id: "prusa-1" },
-    });
-    const link = printing.json().created_links[0];
-    expect(link).toMatchObject({
+    const link = createPrinterCheckoffLink(repo, {
       profile_id: plan.id,
+      integration_id: "prusa-1",
+      printer_id: "core-one",
+      host_name: "Core One",
       filename: "bracket.bgcode",
       units: [{ part_id: bracket.id, unit_index: 0 }],
+    })!;
+    reconcilePrinterCheckoff(repo, "prusa-1", {
+      state: "complete",
+      filename: "bracket.bgcode",
     });
 
     const stale = createUnattributedPrint(
@@ -356,22 +510,7 @@ describe("printer progress route", () => {
       [],
     );
     saveUnattributedPrint(repo, stale);
-
-    printerState = "FINISHED";
-    await app.inject({
-      method: "POST",
-      url: "/printer-checkoff/reconcile",
-      payload: { integration_id: "prusa-1" },
-    });
-    const verify = await app.inject({
-      method: "POST",
-      url: "/printer-checkoff/verify",
-      payload: {
-        link_id: link.id,
-        decisions: [{ part_id: bracket.id, unit_index: 0, result: "confirmed" }],
-      },
-    });
-    expect(verify.statusCode).toBe(200);
+    const setSetting = vi.spyOn(repo, "setSetting");
 
     const repeatedComplete = await app.inject({
       method: "POST",
@@ -379,18 +518,12 @@ describe("printer progress route", () => {
       payload: { integration_id: "prusa-1" },
     });
     expect(repeatedComplete.json().unattributed).toEqual([]);
-
-    const open = await app.inject({
-      method: "GET",
-      url: "/printer-checkoff/unattributed",
-    });
-    expect(open.json().prints).toEqual([]);
-    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([true]);
-    expect(listUnattributedPrints(repo)).toContainEqual(expect.objectContaining({
-      id: stale.id,
-      claimed_profile_id: plan.id,
-      claimed_at: expect.any(String),
-    }));
+    expect(setSetting).not.toHaveBeenCalled();
+    const storedPrint = listUnattributedPrints(repo).find((p) => p.id === stale.id);
+    expect(storedPrint?.claimed_profile_id).toBeUndefined();
+    expect(storedPrint?.claimed_at).toBeUndefined();
+    expect(getPrinterCheckoffLink(repo, link.id)?.state).toBe("awaiting_verify");
+    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([false]);
   });
 
   it("creates an unattributed print for an unlinked external completion", async () => {

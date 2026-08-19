@@ -61,12 +61,13 @@ describe("GRE-234 branding tokens", () => {
 
   it("keeps print paper tokens pure white (no brass bleed)", () => {
     expect(lightTokens).toMatch(/--paper-bg:\s*#ffffff/);
-    // Paper group stays on :root only — .dark must not recolor the sheet.
+    // Paper group stays on :root only — .dark must not override global paper tokens.
     expect(darkTokens).not.toMatch(/--paper-bg:/);
     expect(darkTokens).not.toMatch(/--paper-fg:/);
-    // Screen must not cream the checkoff sheet (GRE-234 + GRE-233 paper white).
-    expect(appCss).not.toMatch(/\.dark\s+\.checkoff-sheet/);
-    expect(appCss).not.toMatch(/--paper-bg-screen-dark/);
+    // Screen: dark desk remaps sheet to card tokens (not blinding white).
+    expect(appCss).toMatch(
+      /@media screen[\s\S]*?\.dark\s+\.checkoff-sheet\s*\{[^}]*--paper-bg:\s*var\(--card\)/s,
+    );
     expect(appCss).not.toMatch(/#f0ebe3|#ebe4d9/);
     // Print sheet explicitly paper white; no theme --primary on the sheet.
     expect(appCss).toMatch(
