@@ -186,6 +186,7 @@ describe("CheckoffPage unattributed print reconciliation", () => {
     api.fetchUnattributedPrints.mockReset();
     api.fetchUnattributedPrints.mockResolvedValue([stalePrint]);
     localStorage.clear();
+    localStorage.setItem("print-partner.checkoff.ui.v1", JSON.stringify({ filter: "all" }));
   });
 
   afterEach(() => {
