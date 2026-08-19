@@ -10,6 +10,11 @@ import { createIntegrationPort } from "../integrations/store.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
 import { createPrinterCheckoffLink } from "../services/printer-checkoff-store.js";
 import { reconcilePrinterCheckoff } from "../services/printer-checkoff.js";
+import {
+  createUnattributedPrint,
+  listUnattributedPrints,
+  saveUnattributedPrint,
+} from "../services/unattributed-print-store.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -262,6 +267,88 @@ describe("printer progress route", () => {
       updates: [],
       unattributed: [],
     });
+  });
+
+  it("repairs a stale unattributed duplicate after its linked print is confirmed", async () => {
+    const { app, repo, plan, bracket } = await setup();
+    let printerState: "PRINTING" | "FINISHED" = "PRINTING";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/api/v1/status")) {
+        return response({
+          printer: { state: printerState },
+          job: { progress: 100, file: { display_name: "BRACKET.BGCODE" } },
+        });
+      }
+      if (url.includes("/api/v1/job")) {
+        return response({
+          state: printerState,
+          file: { display_name: "BRACKET.BGCODE" },
+          refs: { download: "/usb/BRACKET.BGCODE" },
+        });
+      }
+      if (url.includes("/usb/BRACKET.BGCODE")) {
+        return new Response('objects_info={"objects":[{"name":"bracket_01"}]}', { status: 206 });
+      }
+      return response({});
+    }));
+
+    const printing = await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/reconcile",
+      payload: { integration_id: "prusa-1" },
+    });
+    const link = printing.json().created_links[0];
+    expect(link).toMatchObject({
+      profile_id: plan.id,
+      filename: "bracket.bgcode",
+      units: [{ part_id: bracket.id, unit_index: 0 }],
+    });
+
+    const stale = createUnattributedPrint(
+      "prusa-1",
+      "core-one",
+      "Core One",
+      "bracket.bgcode",
+      ["bracket_01"],
+      [],
+    );
+    saveUnattributedPrint(repo, stale);
+
+    printerState = "FINISHED";
+    await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/reconcile",
+      payload: { integration_id: "prusa-1" },
+    });
+    const verify = await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/verify",
+      payload: {
+        link_id: link.id,
+        decisions: [{ part_id: bracket.id, unit_index: 0, result: "confirmed" }],
+      },
+    });
+    expect(verify.statusCode).toBe(200);
+
+    const repeatedComplete = await app.inject({
+      method: "POST",
+      url: "/printer-checkoff/reconcile",
+      payload: { integration_id: "prusa-1" },
+    });
+    expect(repeatedComplete.json().unattributed).toEqual([]);
+
+    const open = await app.inject({
+      method: "GET",
+      url: "/printer-checkoff/unattributed",
+    });
+    expect(open.json().prints).toEqual([]);
+    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([true]);
+    expect(listUnattributedPrints(repo)).toContainEqual(expect.objectContaining({
+      id: stale.id,
+      claimed_profile_id: plan.id,
+      claimed_at: expect.any(String),
+    }));
   });
 
   it("creates an unattributed print for an unlinked external completion", async () => {
