@@ -127,7 +127,6 @@ describe("printer progress route", () => {
       host_name: "Core One",
       filename: "bracket.bgcode",
       units: [],
-      unlabeled_names: ["bracket_01"],
     })!;
     reconcilePrinterCheckoff(repo, "prusa-1", {
       state: "complete",
