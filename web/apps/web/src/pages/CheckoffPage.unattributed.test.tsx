@@ -260,7 +260,7 @@ describe("CheckoffPage unattributed print reconciliation", () => {
     act(() => testState.onUnattributedUpdate?.(1));
     await waitFor(() => expect(api.fetchUnattributedPrints).toHaveBeenCalledTimes(2));
 
-    act(() => testState.onUnattributedUpdate?.(0));
+    act(() => testState.onUnattributedUpdate?.(1));
     await waitFor(() => expect(api.fetchUnattributedPrints).toHaveBeenCalledTimes(3));
 
     await act(async () => {
