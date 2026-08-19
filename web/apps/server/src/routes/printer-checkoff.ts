@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import { appendFileSync } from "node:fs";
 import type { PrinterCheckoffLink, PrinterCheckoffUnit } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import type { IntegrationPort } from "../integrations/store.js";
@@ -174,18 +173,12 @@ function virtualizeEmptyAwaitingLinks(
     const retryAfter = repoFailures?.get(signature) ?? 0;
     if (retryAfter > Date.now()) return link;
     repoFailures?.delete(signature);
-    // #region agent log
-    appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A,B", location: "printer-checkoff.ts:repairEmptyAwaitingLinks", message: "attempt empty-link repair", data: { linkId: link.id, profileId: link.profile_id, unlabeledCount: link.unlabeled_names?.length ?? 0 }, timestamp: Date.now() })}\n`);
-    // #endregion
     const mapped = mapNamesToProfileUnits(
       repo,
       link.profile_id,
       link.unlabeled_names ?? [],
       link.filename,
     );
-    // #region agent log
-    appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A,B", location: "printer-checkoff.ts:repairEmptyAwaitingLinks", message: "empty-link repair mapped", data: { linkId: link.id, mappedUnitCount: mapped.units.length }, timestamp: Date.now() })}\n`);
-    // #endregion
     if (mapped.units.length === 0) {
       const failures = repoFailures ?? new Map<string, number>();
       failures.set(signature, Date.now() + FAILED_VIRTUAL_REPAIR_TTL_MS);
@@ -245,16 +238,12 @@ function claimMatchingUnattributedPrints(
   repo: AppRepository,
   link: PrinterCheckoffLink,
 ): void {
-  const integrationId: string | undefined = undefined;
   for (const print of listOpenUnattributedPrints(repo)) {
     const normalizedFilename = normalizePrinterFilename(print.filename);
     if (
       print.integration_id === link.integration_id &&
       normalizePrinterFilename(link.filename) === normalizedFilename
     ) {
-      // #region agent log
-      appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "C,E", location: "printer-checkoff.ts:repairLinkedUnattributedPrints", message: "linked duplicate will be claimed", data: { printId: print.id, linkId: link.id, scoped: Boolean(integrationId) }, timestamp: Date.now() })}\n`);
-      // #endregion
       claimUnattributedPrint(repo, print.id, link.profile_id);
     }
   }
@@ -374,9 +363,6 @@ export async function registerPrinterCheckoffRoutes(
         listOpenUnattributedPrints(deps.repo),
         integrationId,
       );
-      // #region agent log
-      appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "C", location: "printer-checkoff.ts:reconcile", message: "reconcile open unattributed after repair", data: { integrationId, openCount: openUnattributed.length }, timestamp: Date.now() })}\n`);
-      // #endregion
 
       // Auto-create watching link when a new print is detected on a printer with a default plan binding
       if (

@@ -4,7 +4,6 @@ import type {
   PrintVerifyDecision,
   PrinterCheckoffLink,
 } from "@print-partner/contracts";
-import { appendFileSync } from "node:fs";
 import type { AppRepository } from "../db/repository.js";
 import {
   applyCheckoffUnits,
@@ -103,9 +102,6 @@ export function verifyPrinterCheckoff(
   if (link.state !== "awaiting_verify") {
     return { error: "Link is not awaiting verify", status: 409 };
   }
-  // #region agent log
-  appendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "D,E", location: "printer-checkoff-verify.ts:verifyPrinterCheckoff", message: "verify loaded link before validation", data: { linkId: link.id, unitCount: link.units.length, decisionCount: Array.isArray(rawDecisions) ? rawDecisions.length : -1 }, timestamp: Date.now() })}\n`);
-  // #endregion
 
   const parsed = parseDecisions(rawDecisions);
   if ("error" in parsed) {
