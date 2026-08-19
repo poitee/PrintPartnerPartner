@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+// #region agent log
+import { appendFileSync as debugAppendFileSync } from "node:fs";
+// #endregion
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Printer } from "lucide-react";
@@ -50,8 +53,8 @@ type Props = {
   onCheckoffUpdate?: (profileId: number) => void;
   /** Reports whether any linked host is actively printing/paused. */
   onLiveStateChange?: (state: PrinterLiveStripState) => void;
-  /** Called when unattributed print count changes. */
-  onUnattributedUpdate?: (count: number) => void;
+  /** Requests an authoritative global unattributed-print refresh after reconcile. */
+  onUnattributedUpdate?: (legacyPerHostCount?: number) => void;
   className?: string;
 };
 
@@ -176,6 +179,7 @@ export default function PrinterLiveStrip({
         return next;
       });
     }
+    let receivedReconcileResult = false;
     await Promise.allSettled(
       linked.map(async (h) => {
         try {
@@ -206,7 +210,10 @@ export default function PrinterLiveStrip({
             // Report unattributed print count
             const unattributed = (reconcileResult as Record<string, unknown>).unattributed;
             if (Array.isArray(unattributed)) {
-              onUnattributedUpdateRef.current?.(unattributed.length);
+              receivedReconcileResult = true;
+              // #region agent log
+              debugAppendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A,C", location: "PrinterLiveStrip.tsx:per-host-reconcile", message: "per-host unattributed result", data: { integrationId: h.integrationId, count: unattributed.length }, timestamp: Date.now() })}\n`);
+              // #endregion
             }
           }
           if (id === requestId.current) {
@@ -226,6 +233,9 @@ export default function PrinterLiveStrip({
         }
       }),
     );
+    if (id === requestId.current && receivedReconcileResult) {
+      onUnattributedUpdateRef.current?.();
+    }
   }, []);
 
   useEffect(() => {

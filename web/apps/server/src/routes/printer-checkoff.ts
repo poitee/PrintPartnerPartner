@@ -1,4 +1,7 @@
 import type { FastifyInstance } from "fastify";
+// #region agent log
+import { appendFileSync as debugAppendFileSync } from "node:fs";
+// #endregion
 import type { PrinterCheckoffLink, PrinterCheckoffUnit } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import type { IntegrationPort } from "../integrations/store.js";
@@ -119,7 +122,12 @@ function mapNamesToProfileUnits(
     for (const [objectKey, matchedFiles] of matched) {
       const plateMatch = grouped.get(objectKey);
       if (!plateMatch || matchedFiles.length === 0) continue;
+      // #region agent log
+      debugAppendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "D,E", location: "printer-checkoff.ts:group-start", message: "object group allocation started", data: { objectKey, count: plateMatch.count, matchedFiles }, timestamp: Date.now() })}\n`);
+      // #endregion
+      let remaining = plateMatch.count;
       for (const filename of matchedFiles) {
+        if (remaining === 0) break;
         const part = partRows.find(
           (row) => row.filename.toLowerCase() === filename.toLowerCase(),
         );
@@ -127,7 +135,6 @@ function mapNamesToProfileUnits(
         const qty = Math.max(1, part.quantityEffective);
         const completed =
           completedByPart.get(part.id) ?? Array.from({ length: qty }, () => false);
-        let remaining = plateMatch.count;
         for (let unitIndex = 0; unitIndex < qty && remaining > 0; unitIndex += 1) {
           const key = `${part.id}:${unitIndex}`;
           if (completed[unitIndex] || used.has(key)) continue;
@@ -138,8 +145,14 @@ function mapNamesToProfileUnits(
         if (remaining < plateMatch.count) {
           for (const object of plateMatch.objects) matchedNames.add(object.name);
         }
+        // #region agent log
+        debugAppendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "D", location: "printer-checkoff.ts:file-allocation", message: "matched filename allocation completed", data: { objectKey, filename, initialBudget: plateMatch.count, remaining, totalUnits: units.length }, timestamp: Date.now() })}\n`);
+        // #endregion
       }
     }
+    // #region agent log
+    debugAppendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "D,E", location: "printer-checkoff.ts:mapping-result", message: "mapping completed", data: { objectCount: names.length, unitCount: units.length, units }, timestamp: Date.now() })}\n`);
+    // #endregion
     return { units, matchedNames, grouped, matched };
   };
 

@@ -1,4 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+// #region agent log
+import { appendFileSync as debugAppendFileSync } from "node:fs";
+// #endregion
 import { Link, useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -267,6 +270,8 @@ export default function CheckoffPage() {
   /** Farm send-queue active count (panel still reports; idle banner removed). */
   const sheetRef = useRef<HTMLElement>(null);
   const [unattributedPrints, setUnattributedPrints] = useState<UnattributedPrint[]>([]);
+  const unattributedRequestId = useRef(0);
+  const debugUnattributedRequestId = useRef(0);
   const [watchingLinks, setWatchingLinks] = useState<PrinterCheckoffLink[]>([]);
   const [awaitingLinks, setAwaitingLinks] = useState<PrinterCheckoffLink[]>([]);
   const [phaseManifest, setPhaseManifest] = useState<PlanPhaseManifestResponse | null>(null);
@@ -280,10 +285,21 @@ export default function CheckoffPage() {
     setAuxiliaryErrors((errors) => clearAuxiliaryError(errors, key));
   }, []);
   const refreshUnattributedPrints = useCallback(async () => {
+    const requestId = ++unattributedRequestId.current;
+    const debugRequestId = ++debugUnattributedRequestId.current;
+    // #region agent log
+    debugAppendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "B", location: "CheckoffPage.tsx:refresh-start", message: "global unattributed refresh started", data: { requestId: debugRequestId }, timestamp: Date.now() })}\n`);
+    // #endregion
     try {
-      setUnattributedPrints(await fetchUnattributedPrints());
+      const prints = await fetchUnattributedPrints();
+      // #region agent log
+      debugAppendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "B", location: "CheckoffPage.tsx:refresh-response", message: "global unattributed refresh resolved", data: { requestId: debugRequestId, count: prints.length }, timestamp: Date.now() })}\n`);
+      // #endregion
+      if (requestId !== unattributedRequestId.current) return;
+      setUnattributedPrints(prints);
       markAuxiliarySuccess("printer-activity");
     } catch (e) {
+      if (requestId !== unattributedRequestId.current) return;
       reportAuxiliaryError(
         "printer-activity",
         `Could not refresh printer activity: ${
@@ -1012,10 +1028,9 @@ export default function CheckoffPage() {
                 refreshWatchingLinks();
               }}
               onUnattributedUpdate={(count) => {
-                if (count === 0) {
-                  setUnattributedPrints([]);
-                  return;
-                }
+                // #region agent log
+                debugAppendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A", location: "CheckoffPage.tsx:per-host-callback", message: "per-host count consumed by page", data: { count, branch: count === 0 ? "clear" : "global-refresh" }, timestamp: Date.now() })}\n`);
+                // #endregion
                 void refreshUnattributedPrints();
               }}
             />
