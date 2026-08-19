@@ -1,7 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-// #region agent log
-import { appendFileSync as debugAppendFileSync } from "node:fs";
-// #endregion
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Printer } from "lucide-react";
@@ -54,7 +51,7 @@ type Props = {
   /** Reports whether any linked host is actively printing/paused. */
   onLiveStateChange?: (state: PrinterLiveStripState) => void;
   /** Requests an authoritative global unattributed-print refresh after reconcile. */
-  onUnattributedUpdate?: (legacyPerHostCount?: number) => void;
+  onUnattributedUpdate?: () => void;
   className?: string;
 };
 
@@ -207,13 +204,10 @@ export default function PrinterLiveStrip({
             for (const link of createdLinks ?? []) {
               onCheckoffUpdateRef.current?.(link.profile_id);
             }
-            // Report unattributed print count
+            // A per-host result is only a hint to refresh the authoritative global list.
             const unattributed = (reconcileResult as Record<string, unknown>).unattributed;
             if (Array.isArray(unattributed)) {
               receivedReconcileResult = true;
-              // #region agent log
-              debugAppendFileSync("/opt/cursor/logs/debug.log", `${JSON.stringify({ hypothesisId: "A,C", location: "PrinterLiveStrip.tsx:per-host-reconcile", message: "per-host unattributed result", data: { integrationId: h.integrationId, count: unattributed.length }, timestamp: Date.now() })}\n`);
-              // #endregion
             }
           }
           if (id === requestId.current) {

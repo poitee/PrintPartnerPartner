@@ -392,3 +392,37 @@ clear.
 
 All temporary NDJSON instrumentation and its filesystem imports were removed after this successful
 verification. The regression tests and production fixes remain in place.
+
+## Follow-up: globally authoritative unattributed refresh and collision budget
+
+### Runtime findings
+
+- **S — integration-scoped reconcile counts are globally authoritative:** high confidence;
+  confirmed. Parallel Printer A and Printer B responses logged counts `1` and `0`, respectively.
+  The page consumed Printer B's zero through its direct `clear` branch, even though Printer A still
+  had an open record.
+- **T — overlapping global requests can apply out of order:** high confidence; confirmed. Global
+  request 3 resolved empty before request 2 resolved with one stale record; request 2 then restored
+  the card because the page had no latest-request guard.
+- **U — object allocation resets its budget for every colliding filename:** high confidence;
+  confirmed. One `bracket_01` object matched `bracket.stl` and `bracket.stl.stl`; both filename
+  allocations independently started with budget 1, producing two mapped units.
+- **V — collision matching order is unstable:** low confidence; rejected. The matcher returned the
+  same repository order in repeated runs. The overflow was caused by budget scope, not ordering.
+
+### Fix and verification
+
+- `PrinterLiveStrip` now emits one refresh hint after all successful per-host reconciliations in a
+  poll settle. It no longer exports any integration-scoped count as global state.
+- `CheckoffPage` always refreshes from the authoritative
+  `GET /printer-checkoff/unattributed` endpoint and applies a response only when its request
+  generation is still current.
+- `mapNamesToProfileUnits` initializes one `remaining` budget per object group and spends it across
+  matched filenames in stable matcher order.
+- Red commits: `4e3bb22`, `d6394ff`, and `60fbf14`.
+- Fix-with-verification-instrumentation commit: `67a4003`.
+- Focused post-fix results: frontend 2 files / 5 tests passed; server 1 file / 7 tests passed.
+- Post-fix traces showed one unit for one colliding object and demonstrated that an older nonempty
+  global response resolved after the newer empty response without restoring the UI.
+- Temporary NDJSON instrumentation and filesystem imports were removed after post-fix evidence was
+  captured.
