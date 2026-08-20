@@ -100,11 +100,15 @@ import {
   diffPlanDraftSnapshot,
   digestPlanDraft,
   MAX_PLAN_DRAFT_LIFECYCLE_VERSION,
+  mergeRebasedPlanDraft,
+  newPlanDraftPartDecisionBaseline,
   PLAN_DRAFT_DIGEST_FORMAT,
   type PlanDraftDiff,
   type PlanDraftPartDecision,
   type PlanDraftSnapshot,
   type PlanDraftState,
+  type RebaseAcceptedPart,
+  type RebaseConflict,
   PlanDraftPartNotFoundError,
   type PlanSnapshotInput,
   type PlanSnapshotPart,
@@ -189,6 +193,7 @@ export type RecomputePlanDraftResult =
   | { readonly kind: "accepted_baseline_required" }
   | { readonly kind: "base_changed" }
   | { readonly kind: "inputs_changed" }
+  | { readonly kind: "idempotency_conflict" }
   | { readonly kind: "transaction_unavailable" }
   | { readonly kind: "no_layers" }
   | { readonly kind: "no_stls" }
@@ -217,6 +222,32 @@ export type TransitionPlanDraftResult =
   | { readonly kind: "not_allowed"; readonly state: PlanDraftState }
   | { readonly kind: "not_found" }
   | { readonly kind: "transaction_unavailable" };
+
+export type RebasePlanDraftResult =
+  | { readonly kind: "rebased"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "existing"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "idempotency_conflict" }
+  | { readonly kind: "merge_conflicts"; readonly conflicts: readonly RebaseConflict[] }
+  | { readonly kind: "source_conflict"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "not_abandoned"; readonly state: PlanDraftState }
+  | { readonly kind: "accepted_baseline_required" }
+  | { readonly kind: "base_unchanged" }
+  | { readonly kind: "base_changed" }
+  | { readonly kind: "inputs_changed" }
+  | { readonly kind: "not_found" }
+  | { readonly kind: "no_layers" | "no_stls" | "would_wipe" }
+  | { readonly kind: "transaction_unavailable" };
+
+type StoredRebasePlanDraftResult = Extract<
+  RebasePlanDraftResult,
+  {
+    readonly kind:
+      | "existing"
+      | "idempotency_conflict"
+      | "source_conflict"
+      | "not_found";
+  }
+>;
 
 type AcceptedPlanRevisionIdentity = Omit<
   PlanRevisionRow,
@@ -293,6 +324,19 @@ type CapturedPlanInputs = {
   readonly layers: readonly CapturedPlanLayer[];
   readonly inputs: readonly CurrentPlanInput[];
 };
+
+type PreparedPlanDraft = {
+  readonly baseRevisionId: number | null;
+  readonly basePlanVersion: number;
+  readonly capture: CapturedPlanInputs;
+  readonly inputs: readonly PlanSnapshotInput[];
+  readonly parts: readonly (PlanSnapshotPart & { readonly baseRevisionPartId: number | null })[];
+  readonly snapshotDigest: string;
+};
+
+type PreparePlanDraftResult =
+  | { readonly kind: "prepared"; readonly value: PreparedPlanDraft }
+  | { readonly kind: "no_layers" | "no_stls" | "would_wipe" };
 
 type PlanFreshnessContext = {
   readonly globalNaming: StlNamingProfileDict;
@@ -2476,6 +2520,14 @@ export class AppRepository {
       )
       .get();
     if (!profile?.revisionId) return null;
+    return this.getPlanRevisionById(profileId, profile.revisionId, profile.planVersion);
+  }
+
+  private getPlanRevisionById(
+    profileId: number,
+    revisionId: number,
+    planVersion: number,
+  ): AcceptedPlanRevision {
     const revision = this.db
       .select()
       .from(this.schema.planRevisions)
@@ -2483,7 +2535,7 @@ export class AppRepository {
         and(
           eq(this.schema.planRevisions.tenantId, this.tenantId),
           eq(this.schema.planRevisions.profileId, profileId),
-          eq(this.schema.planRevisions.id, profile.revisionId),
+          eq(this.schema.planRevisions.id, revisionId),
         ),
       )
       .get();
@@ -2507,12 +2559,35 @@ export class AppRepository {
         effectiveRole: part.roleOverride ?? part.roleInferred,
         effectiveQuantity: part.quantityEffective,
       }));
-    return { ...identity, planVersion: profile.planVersion, parts };
+    return { ...identity, planVersion, parts };
   }
 
   getAcceptedPlanPartRows(profileId: number): PartRow[] | null {
     const revision = this.getAcceptedPlanRevision(profileId);
     return revision?.parts.map(acceptedRevisionPartRow) ?? null;
+  }
+
+  private planDraftOrigin(row: PlanDraftRow): PlanDraftSnapshot["origin"] {
+    if (
+      row.rebasedFromDraftId == null &&
+      row.rebasedFromLifecycleVersion == null &&
+      row.rebasedFromSnapshotDigest == null
+    ) {
+      return { kind: "recompute" };
+    }
+    if (
+      row.rebasedFromDraftId != null &&
+      row.rebasedFromLifecycleVersion != null &&
+      row.rebasedFromSnapshotDigest != null
+    ) {
+      return {
+        kind: "rebase",
+        sourceDraftId: row.rebasedFromDraftId,
+        sourceLifecycleVersion: row.rebasedFromLifecycleVersion,
+        sourceSnapshotDigest: row.rebasedFromSnapshotDigest,
+      };
+    }
+    throw new Error("Plan draft rebase origin is invalid");
   }
 
   getPlanDraft(profileId: number, draftId: number): PlanDraftSnapshot | null {
@@ -2561,6 +2636,7 @@ export class AppRepository {
       basePlanVersion: row.basePlanVersion,
       state: row.state,
       lifecycleVersion: row.lifecycleVersion,
+      origin: this.planDraftOrigin(row),
       digestFormat: row.digestFormat,
       snapshotDigest: row.snapshotDigest,
       createdBy: row.createdBy,
@@ -2651,56 +2727,15 @@ export class AppRepository {
     );
   }
 
-  recomputePlanDraft(input: {
-    profileId: number;
-    actor: string;
-    idempotencyKey: string;
-  }): RecomputePlanDraftResult {
-    const actor = requiredText(input.actor, "Plan draft actor");
-    const idempotencyKey = requiredText(input.idempotencyKey, "Plan draft idempotency key");
-    this.requireProfile(input.profileId);
-    const existing = this.db
-      .select({ id: this.schema.planDrafts.id })
-      .from(this.schema.planDrafts)
-      .where(
-        and(
-          eq(this.schema.planDrafts.tenantId, this.tenantId),
-          eq(this.schema.planDrafts.profileId, input.profileId),
-          eq(this.schema.planDrafts.createdBy, actor),
-          eq(this.schema.planDrafts.idempotencyKey, idempotencyKey),
-        ),
-      )
-      .get();
-    if (existing) {
-      const draft = this.getPlanDraft(input.profileId, existing.id);
-      if (!draft) throw new Error("Saved Plan draft is missing");
-      return { kind: "existing", draft };
-    }
-
-    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
-    const profile = this.db
-      .select({
-        baseRevisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
-        basePlanVersion: this.schema.buildProfiles.acceptedPlanVersion,
-      })
-      .from(this.schema.buildProfiles)
-      .where(
-        and(
-          eq(this.schema.buildProfiles.tenantId, this.tenantId),
-          eq(this.schema.buildProfiles.id, input.profileId),
-        ),
-      )
-      .get();
-    if (!profile) throw new Error("Profile not found");
-    if (this.planDraftNeedsAcceptedBaseline(input.profileId, profile)) {
-      return { kind: "accepted_baseline_required" };
-    }
+  private preparePlanDraft(
+    profileId: number,
+    base: { readonly baseRevisionId: number | null; readonly basePlanVersion: number },
+  ): PreparePlanDraftResult {
     const accepted =
-      profile.baseRevisionId == null ? null : this.getAcceptedPlanRevision(input.profileId);
-    if (profile.baseRevisionId != null && accepted?.id !== profile.baseRevisionId) {
-      throw new Error("Accepted Plan revision is missing");
-    }
-    const capture = this.capturePlanInputs(input.profileId);
+      base.baseRevisionId == null
+        ? null
+        : this.getPlanRevisionById(profileId, base.baseRevisionId, base.basePlanVersion);
+    const capture = this.capturePlanInputs(profileId);
     const acceptedByKey = new Map<string, AcceptedPlanRevisionPart>();
     for (const part of [...(accepted?.parts ?? [])].sort((left, right) => left.id - right.id)) {
       if (!acceptedByKey.has(part.partKey)) acceptedByKey.set(part.partKey, part);
@@ -2723,7 +2758,6 @@ export class AppRepository {
         absolutePath: null,
       };
     }
-
     const scans: Array<[string, ReturnType<typeof scanRepo>]> = [];
     for (const layer of capture.layers) {
       if (!layer.localPath) continue;
@@ -2739,7 +2773,6 @@ export class AppRepository {
     }
     if (!scans.length) return { kind: "no_layers" };
     if (scans.every(([, rows]) => rows.length === 0)) return { kind: "no_stls" };
-
     let merged: ReturnType<typeof mergeLayers>;
     try {
       merged = mergeLayers(scans, existingParts, { geometryCompare: false });
@@ -2750,7 +2783,7 @@ export class AppRepository {
       if (error instanceof MergeWouldWipeProfileError) return { kind: "would_wipe" };
       throw error;
     }
-    const roleDefaults = loadRoleFilamentDefaults(this, input.profileId);
+    const roleDefaults = loadRoleFilamentDefaults(this, profileId);
     const draftInputs: PlanSnapshotInput[] = capture.inputs.map((captured) => ({
       sourceId: captured.source_id,
       sourceLayer: captured.source_layer,
@@ -2768,7 +2801,8 @@ export class AppRepository {
     } => {
       const prior = acceptedByKey.get(part.matchKey);
       const defaults = roleDefaults[normalizePartRole(part.role)];
-      const quantityOverride = prior?.quantityOverride ?? part.quantityOverride;
+      const editableBaseline = prior ?? newPlanDraftPartDecisionBaseline();
+      const quantityOverride = editableBaseline.quantityOverride;
       const trackingKind = trackingBySourceLayer.get(part.sourceLayer);
       if (!trackingKind) throw new Error("Draft Part Source layer is not captured");
       let artifactDigest: string | null = null;
@@ -2797,7 +2831,7 @@ export class AppRepository {
         quantityInferred: part.quantityAuto,
         quantityOverride,
         quantityEffective: quantityOverride ?? part.quantityAuto,
-        included: part.included,
+        included: editableBaseline.included,
         notes: part.notes,
         githubBlobUrl: prior?.githubBlobUrl ?? null,
         geometrySame: prior?.geometrySame ?? part.geometrySame,
@@ -2807,12 +2841,127 @@ export class AppRepository {
         artifactDigest,
       };
     });
-    const snapshotDigest = digestPlanDraft({
-      baseRevisionId: profile.baseRevisionId,
-      basePlanVersion: profile.basePlanVersion,
-      inputs: draftInputs,
-      parts: draftParts,
-    });
+    return {
+      kind: "prepared",
+      value: {
+        baseRevisionId: base.baseRevisionId,
+        basePlanVersion: base.basePlanVersion,
+        capture,
+        inputs: draftInputs,
+        parts: draftParts,
+        snapshotDigest: digestPlanDraft({
+          baseRevisionId: base.baseRevisionId,
+          basePlanVersion: base.basePlanVersion,
+          inputs: draftInputs,
+          parts: draftParts,
+        }),
+      },
+    };
+  }
+
+  private rebaseAcceptedParts(
+    profileId: number,
+    revisionId: number | null,
+  ): RebaseAcceptedPart[] {
+    if (revisionId == null) return [];
+    const revision = this.db
+      .select({ id: this.schema.planRevisions.id })
+      .from(this.schema.planRevisions)
+      .where(
+        and(
+          eq(this.schema.planRevisions.tenantId, this.tenantId),
+          eq(this.schema.planRevisions.profileId, profileId),
+          eq(this.schema.planRevisions.id, revisionId),
+        ),
+      )
+      .get();
+    if (!revision) throw new Error("Plan draft base revision is missing");
+    return this.db
+      .select()
+      .from(this.schema.planRevisionParts)
+      .where(
+        and(
+          eq(this.schema.planRevisionParts.tenantId, this.tenantId),
+          eq(this.schema.planRevisionParts.revisionId, revisionId),
+        ),
+      )
+      .orderBy(asc(this.schema.planRevisionParts.id))
+      .all()
+      .map((part) => ({
+        id: part.id,
+        projectionPartId: part.projectionPartId,
+        partKey: part.partKey,
+        relativePath: part.relativePath,
+        filename: part.filename,
+        sourceLayer: part.sourceLayer,
+        status: part.status,
+        roleInferred: part.roleInferred,
+        roleOverride: part.roleOverride,
+        filamentColorId: part.filamentColorId,
+        filamentCustomHex: part.filamentCustomHex,
+        spoolmanSpoolId: part.spoolmanSpoolId,
+        quantityInferred: part.quantityInferred,
+        quantityOverride: part.quantityOverride,
+        quantityEffective: part.quantityEffective,
+        included: part.included,
+        notes: part.notes,
+        githubBlobUrl: part.githubBlobUrl,
+        geometrySame: part.geometrySame,
+        requirement: part.requirement,
+        optionGroupId: part.optionGroupId,
+        manifestSource: part.manifestSource,
+        artifactDigest: part.artifactDigest,
+      }));
+  }
+
+  recomputePlanDraft(input: {
+    profileId: number;
+    actor: string;
+    idempotencyKey: string;
+  }): RecomputePlanDraftResult {
+    const actor = requiredText(input.actor, "Plan draft actor");
+    const idempotencyKey = requiredText(input.idempotencyKey, "Plan draft idempotency key");
+    this.requireProfile(input.profileId);
+    const existing = this.db
+      .select({ id: this.schema.planDrafts.id })
+      .from(this.schema.planDrafts)
+      .where(
+        and(
+          eq(this.schema.planDrafts.tenantId, this.tenantId),
+          eq(this.schema.planDrafts.profileId, input.profileId),
+          eq(this.schema.planDrafts.createdBy, actor),
+          eq(this.schema.planDrafts.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .get();
+    if (existing) {
+      const draft = this.getPlanDraft(input.profileId, existing.id);
+      if (!draft) throw new Error("Saved Plan draft is missing");
+      if (draft.origin.kind !== "recompute") return { kind: "idempotency_conflict" };
+      return { kind: "existing", draft };
+    }
+
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+    const profile = this.db
+      .select({
+        baseRevisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
+        basePlanVersion: this.schema.buildProfiles.acceptedPlanVersion,
+      })
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, input.profileId),
+        ),
+      )
+      .get();
+    if (!profile) throw new Error("Profile not found");
+    if (this.planDraftNeedsAcceptedBaseline(input.profileId, profile)) {
+      return { kind: "accepted_baseline_required" };
+    }
+    const preparation = this.preparePlanDraft(input.profileId, profile);
+    if (preparation.kind !== "prepared") return preparation;
+    const prepared = preparation.value;
 
     const writeResult = this.transaction(
       ():
@@ -2820,7 +2969,8 @@ export class AppRepository {
         | { kind: "existing"; draftId: number }
         | { kind: "accepted_baseline_required" }
         | { kind: "base_changed" }
-        | { kind: "inputs_changed" } => {
+        | { kind: "inputs_changed" }
+        | { kind: "idempotency_conflict" } => {
         const concurrentWinner = this.db
           .select({ id: this.schema.planDrafts.id })
           .from(this.schema.planDrafts)
@@ -2833,7 +2983,13 @@ export class AppRepository {
             ),
           )
           .get();
-        if (concurrentWinner) return { kind: "existing", draftId: concurrentWinner.id };
+        if (concurrentWinner) {
+          const winner = this.getPlanDraft(input.profileId, concurrentWinner.id);
+          if (!winner) throw new Error("Saved Plan draft is missing");
+          return winner.origin.kind === "recompute"
+            ? { kind: "existing", draftId: concurrentWinner.id }
+            : { kind: "idempotency_conflict" };
+        }
         const currentProfile = this.db
           .select({
             baseRevisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
@@ -2857,7 +3013,10 @@ export class AppRepository {
         ) {
           return { kind: "base_changed" };
         }
-        if (this.capturePlanInputs(input.profileId).fingerprint !== capture.fingerprint) {
+        if (
+          this.capturePlanInputs(input.profileId).fingerprint !==
+          prepared.capture.fingerprint
+        ) {
           return { kind: "inputs_changed" };
         }
         const inserted = this.db
@@ -2869,7 +3028,7 @@ export class AppRepository {
             basePlanVersion: profile.basePlanVersion,
             state: "open",
             digestFormat: PLAN_DRAFT_DIGEST_FORMAT,
-            snapshotDigest,
+            snapshotDigest: prepared.snapshotDigest,
             createdBy: actor,
             idempotencyKey,
             createdAt: new Date().toISOString(),
@@ -2877,13 +3036,13 @@ export class AppRepository {
           .returning({ id: this.schema.planDrafts.id })
           .get();
         if (!inserted) throw new Error("Plan draft could not be created");
-        for (const captured of draftInputs) {
+        for (const captured of prepared.inputs) {
           this.db
             .insert(this.schema.planDraftInputs)
             .values({ tenantId: this.tenantId, draftId: inserted.id, ...captured })
             .run();
         }
-        for (const part of draftParts) {
+        for (const part of prepared.parts) {
           this.db
             .insert(this.schema.planDraftParts)
             .values({ tenantId: this.tenantId, draftId: inserted.id, ...part })
@@ -2896,13 +3055,364 @@ export class AppRepository {
     if (
       writeResult.kind === "accepted_baseline_required" ||
       writeResult.kind === "base_changed" ||
-      writeResult.kind === "inputs_changed"
+      writeResult.kind === "inputs_changed" ||
+      writeResult.kind === "idempotency_conflict"
     ) {
       return writeResult;
     }
     const draft = this.getPlanDraft(input.profileId, writeResult.draftId);
     if (!draft) throw new Error("Created Plan draft is missing");
     return { kind: writeResult.kind, draft };
+  }
+
+  private storedRebasePlanDraft(input: {
+    readonly profileId: number;
+    readonly sourceDraftId: number;
+    readonly sourceLifecycleVersion: number;
+    readonly sourceSnapshotDigest: string;
+    readonly actor: string;
+    readonly idempotencyKey: string;
+  }): StoredRebasePlanDraftResult | null {
+    const winnerRow = this.db
+      .select({ id: this.schema.planDrafts.id })
+      .from(this.schema.planDrafts)
+      .where(
+        and(
+          eq(this.schema.planDrafts.tenantId, this.tenantId),
+          eq(this.schema.planDrafts.profileId, input.profileId),
+          eq(this.schema.planDrafts.createdBy, input.actor),
+          eq(this.schema.planDrafts.idempotencyKey, input.idempotencyKey),
+        ),
+      )
+      .get();
+    if (winnerRow) {
+      const winner = this.getPlanDraft(input.profileId, winnerRow.id);
+      if (!winner) throw new Error("Saved Plan draft is missing");
+      return winner.origin.kind === "rebase" &&
+        winner.origin.sourceDraftId === input.sourceDraftId &&
+        winner.origin.sourceLifecycleVersion === input.sourceLifecycleVersion &&
+        winner.origin.sourceSnapshotDigest === input.sourceSnapshotDigest
+        ? { kind: "existing", draft: winner }
+        : { kind: "idempotency_conflict" };
+    }
+    const successorRow = this.db
+      .select({ id: this.schema.planDrafts.id })
+      .from(this.schema.planDrafts)
+      .where(
+        and(
+          eq(this.schema.planDrafts.tenantId, this.tenantId),
+          eq(this.schema.planDrafts.profileId, input.profileId),
+          eq(this.schema.planDrafts.rebasedFromDraftId, input.sourceDraftId),
+          eq(this.schema.planDrafts.rebasedFromLifecycleVersion, input.sourceLifecycleVersion),
+        ),
+      )
+      .get();
+    if (!successorRow) return null;
+    const successor = this.getPlanDraft(input.profileId, successorRow.id);
+    if (!successor) throw new Error("Rebased Plan draft is missing");
+    if (
+      successor.origin.kind === "rebase" &&
+      successor.origin.sourceSnapshotDigest === input.sourceSnapshotDigest
+    ) {
+      return { kind: "existing", draft: successor };
+    }
+    const sourceRow = this.db
+      .select({ id: this.schema.planDrafts.id })
+      .from(this.schema.planDrafts)
+      .where(
+        and(
+          eq(this.schema.planDrafts.tenantId, this.tenantId),
+          eq(this.schema.planDrafts.profileId, input.profileId),
+          eq(this.schema.planDrafts.id, input.sourceDraftId),
+        ),
+      )
+      .get();
+    if (!sourceRow) return { kind: "not_found" };
+    const source = this.getPlanDraft(input.profileId, sourceRow.id);
+    return source ? { kind: "source_conflict", draft: source } : { kind: "not_found" };
+  }
+
+  rebasePlanDraft(input: {
+    readonly profileId: number;
+    readonly sourceDraftId: number;
+    readonly expectedSourceLifecycleVersion: number;
+    readonly expectedSourceSnapshotDigest: string;
+    readonly actor: string;
+    readonly idempotencyKey: string;
+  }): RebasePlanDraftResult {
+    const actor = requiredText(input.actor, "Plan draft actor");
+    const idempotencyKey = requiredText(input.idempotencyKey, "Plan draft idempotency key");
+    const expectedDigest = sha256Digest(
+      input.expectedSourceSnapshotDigest,
+      "Expected source Plan draft snapshot digest",
+    );
+    if (
+      !Number.isSafeInteger(input.expectedSourceLifecycleVersion) ||
+      input.expectedSourceLifecycleVersion < 0 ||
+      input.expectedSourceLifecycleVersion > MAX_PLAN_DRAFT_LIFECYCLE_VERSION
+    ) {
+      throw new Error("Expected source Plan draft lifecycle version is invalid");
+    }
+    const storedInput = {
+      profileId: input.profileId,
+      sourceDraftId: input.sourceDraftId,
+      sourceLifecycleVersion: input.expectedSourceLifecycleVersion,
+      sourceSnapshotDigest: expectedDigest,
+      actor,
+      idempotencyKey,
+    };
+    const stored = this.storedRebasePlanDraft(storedInput);
+    if (stored) return stored;
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+    const sourceHeader = this.db
+      .select({ id: this.schema.planDrafts.id })
+      .from(this.schema.planDrafts)
+      .where(
+        and(
+          eq(this.schema.planDrafts.tenantId, this.tenantId),
+          eq(this.schema.planDrafts.profileId, input.profileId),
+          eq(this.schema.planDrafts.id, input.sourceDraftId),
+        ),
+      )
+      .get();
+    if (!sourceHeader) return { kind: "not_found" };
+    const source = this.getPlanDraft(input.profileId, input.sourceDraftId);
+    if (!source) return { kind: "not_found" };
+    if (source.state !== "abandoned") return { kind: "not_abandoned", state: source.state };
+    if (
+      source.lifecycleVersion !== input.expectedSourceLifecycleVersion ||
+      source.snapshotDigest !== expectedDigest
+    ) {
+      return { kind: "source_conflict", draft: source };
+    }
+    const profile = this.db
+      .select({
+        baseRevisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
+        basePlanVersion: this.schema.buildProfiles.acceptedPlanVersion,
+      })
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, input.profileId),
+        ),
+      )
+      .get();
+    if (!profile) return { kind: "not_found" };
+    if (this.planDraftNeedsAcceptedBaseline(input.profileId, profile)) {
+      return { kind: "accepted_baseline_required" };
+    }
+    if (
+      profile.baseRevisionId === source.baseRevisionId &&
+      profile.basePlanVersion === source.basePlanVersion
+    ) {
+      return this.transaction((): RebasePlanDraftResult => {
+        const transactionStored = this.storedRebasePlanDraft(storedInput);
+        if (transactionStored) return transactionStored;
+        const currentSourceHeader = this.db
+          .select({ id: this.schema.planDrafts.id })
+          .from(this.schema.planDrafts)
+          .where(
+            and(
+              eq(this.schema.planDrafts.tenantId, this.tenantId),
+              eq(this.schema.planDrafts.profileId, input.profileId),
+              eq(this.schema.planDrafts.id, input.sourceDraftId),
+            ),
+          )
+          .get();
+        if (!currentSourceHeader) return { kind: "not_found" };
+        const currentSource = this.getPlanDraft(input.profileId, input.sourceDraftId);
+        if (!currentSource) return { kind: "not_found" };
+        if (currentSource.state !== "abandoned") {
+          return { kind: "not_abandoned", state: currentSource.state };
+        }
+        if (
+          currentSource.lifecycleVersion !== input.expectedSourceLifecycleVersion ||
+          currentSource.snapshotDigest !== expectedDigest
+        ) {
+          return { kind: "source_conflict", draft: currentSource };
+        }
+        const currentProfile = this.db
+          .select({
+            baseRevisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
+            basePlanVersion: this.schema.buildProfiles.acceptedPlanVersion,
+          })
+          .from(this.schema.buildProfiles)
+          .where(
+            and(
+              eq(this.schema.buildProfiles.tenantId, this.tenantId),
+              eq(this.schema.buildProfiles.id, input.profileId),
+            ),
+          )
+          .get();
+        if (!currentProfile) return { kind: "not_found" };
+        if (this.planDraftNeedsAcceptedBaseline(input.profileId, currentProfile)) {
+          return { kind: "accepted_baseline_required" };
+        }
+        return currentProfile.baseRevisionId === currentSource.baseRevisionId &&
+          currentProfile.basePlanVersion === currentSource.basePlanVersion
+          ? { kind: "base_unchanged" }
+          : { kind: "base_changed" };
+      }, "immediate");
+    }
+    const preparation = this.preparePlanDraft(input.profileId, profile);
+    if (preparation.kind !== "prepared") return preparation;
+    const prepared = preparation.value;
+    const virtualDraft: PlanDraftSnapshot = {
+      id: 0,
+      profileId: input.profileId,
+      baseRevisionId: prepared.baseRevisionId,
+      basePlanVersion: prepared.basePlanVersion,
+      state: "open",
+      lifecycleVersion: 0,
+      origin: { kind: "recompute" },
+      digestFormat: PLAN_DRAFT_DIGEST_FORMAT,
+      snapshotDigest: prepared.snapshotDigest,
+      createdBy: actor,
+      idempotencyKey,
+      createdAt: "",
+      inputs: prepared.inputs.map((captured, index) => ({
+        ...captured,
+        id: index + 1,
+        draftId: 0,
+      })),
+      parts: prepared.parts.map((part, index) => ({
+        ...part,
+        id: index + 1,
+        draftId: 0,
+      })),
+    };
+    const merged = mergeRebasedPlanDraft({
+      source,
+      sourceBaseParts: this.rebaseAcceptedParts(input.profileId, source.baseRevisionId),
+      fresh: virtualDraft,
+      currentBaseParts: this.rebaseAcceptedParts(input.profileId, profile.baseRevisionId),
+    });
+    if (merged.kind === "conflicts") {
+      return { kind: "merge_conflicts", conflicts: merged.conflicts };
+    }
+
+    const writeResult = this.transaction(():
+      | { readonly kind: "created"; readonly draftId: number }
+      | Exclude<
+          RebasePlanDraftResult,
+          { readonly kind: "rebased" } | { readonly kind: "merge_conflicts" }
+        > => {
+      const transactionStored = this.storedRebasePlanDraft(storedInput);
+      if (transactionStored) return transactionStored;
+      const currentSourceHeader = this.db
+        .select({ id: this.schema.planDrafts.id })
+        .from(this.schema.planDrafts)
+        .where(
+          and(
+            eq(this.schema.planDrafts.tenantId, this.tenantId),
+            eq(this.schema.planDrafts.profileId, input.profileId),
+            eq(this.schema.planDrafts.id, input.sourceDraftId),
+          ),
+        )
+        .get();
+      if (!currentSourceHeader) return { kind: "not_found" };
+      const currentSource = this.getPlanDraft(input.profileId, input.sourceDraftId);
+      if (!currentSource) return { kind: "not_found" };
+      if (currentSource.state !== "abandoned") {
+        return { kind: "not_abandoned", state: currentSource.state };
+      }
+      if (
+        currentSource.lifecycleVersion !== input.expectedSourceLifecycleVersion ||
+        currentSource.snapshotDigest !== expectedDigest
+      ) {
+        return { kind: "source_conflict", draft: currentSource };
+      }
+      const currentProfile = this.db
+        .select({
+          baseRevisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
+          basePlanVersion: this.schema.buildProfiles.acceptedPlanVersion,
+        })
+        .from(this.schema.buildProfiles)
+        .where(
+          and(
+            eq(this.schema.buildProfiles.tenantId, this.tenantId),
+            eq(this.schema.buildProfiles.id, input.profileId),
+          ),
+        )
+        .get();
+      if (!currentProfile) return { kind: "not_found" };
+      if (this.planDraftNeedsAcceptedBaseline(input.profileId, currentProfile)) {
+        return { kind: "accepted_baseline_required" };
+      }
+      if (
+        currentProfile.baseRevisionId === currentSource.baseRevisionId &&
+        currentProfile.basePlanVersion === currentSource.basePlanVersion
+      ) {
+        return { kind: "base_unchanged" };
+      }
+      if (
+        currentProfile.baseRevisionId !== prepared.baseRevisionId ||
+        currentProfile.basePlanVersion !== prepared.basePlanVersion
+      ) {
+        return { kind: "base_changed" };
+      }
+      if (
+        this.capturePlanInputs(input.profileId).fingerprint !== prepared.capture.fingerprint
+      ) {
+        return { kind: "inputs_changed" };
+      }
+      const inserted = this.db
+        .insert(this.schema.planDrafts)
+        .values({
+          tenantId: this.tenantId,
+          profileId: input.profileId,
+          baseRevisionId: prepared.baseRevisionId,
+          basePlanVersion: prepared.basePlanVersion,
+          state: "open",
+          lifecycleVersion: 0,
+          rebasedFromDraftId: input.sourceDraftId,
+          rebasedFromLifecycleVersion: input.expectedSourceLifecycleVersion,
+          rebasedFromSnapshotDigest: expectedDigest,
+          digestFormat: PLAN_DRAFT_DIGEST_FORMAT,
+          snapshotDigest: merged.draft.snapshotDigest,
+          createdBy: actor,
+          idempotencyKey,
+          createdAt: new Date().toISOString(),
+        })
+        .returning({ id: this.schema.planDrafts.id })
+        .get();
+      if (!inserted) throw new Error("Rebased Plan draft could not be created");
+      for (const captured of merged.draft.inputs) {
+        const { id: _id, draftId: _draftId, ...values } = captured;
+        this.db
+          .insert(this.schema.planDraftInputs)
+          .values({ tenantId: this.tenantId, draftId: inserted.id, ...values })
+          .run();
+      }
+      for (const part of merged.draft.parts) {
+        const { id: _id, draftId: _draftId, ...values } = part;
+        this.db
+          .insert(this.schema.planDraftParts)
+          .values({ tenantId: this.tenantId, draftId: inserted.id, ...values })
+          .run();
+      }
+      const persisted = this.getPlanDraft(input.profileId, inserted.id);
+      if (
+        !persisted ||
+        persisted.snapshotDigest !== merged.draft.snapshotDigest ||
+        persisted.origin.kind !== "rebase" ||
+        persisted.origin.sourceDraftId !== input.sourceDraftId ||
+        persisted.origin.sourceLifecycleVersion !== input.expectedSourceLifecycleVersion ||
+        persisted.origin.sourceSnapshotDigest !== expectedDigest ||
+        persisted.baseRevisionId !== prepared.baseRevisionId ||
+        persisted.basePlanVersion !== prepared.basePlanVersion ||
+        persisted.state !== "open" ||
+        persisted.lifecycleVersion !== 0
+      ) {
+        throw new Error("Rebased Plan draft could not be verified");
+      }
+      return { kind: "created", draftId: inserted.id };
+    }, "immediate");
+    if (writeResult.kind !== "created") return writeResult;
+    const draft = this.getPlanDraft(input.profileId, writeResult.draftId);
+    if (!draft) throw new Error("Rebased Plan draft is missing");
+    return { kind: "rebased", draft };
   }
 
   editPlanDraftParts(input: {

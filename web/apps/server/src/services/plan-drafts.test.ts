@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   applyPlanDraftPartDecision,
   digestPlanDraft,
+  extractRebasePartDecisions,
   MAX_PLAN_DRAFT_PART_QUANTITY,
+  mergeRebasedPlanDraft,
+  type RebaseAcceptedPart,
   type PlanDraftPartDecision,
   type PlanDraftSnapshot,
 } from "./plan-drafts.js";
@@ -86,6 +89,7 @@ function draftFixture(): PlanDraftSnapshot {
     basePlanVersion: input.basePlanVersion,
     state: "open",
     lifecycleVersion: 0,
+    origin: { kind: "recompute" },
     digestFormat: "plan-draft-v1",
     snapshotDigest: digestPlanDraft({ ...input, parts }),
     createdBy: "test:user",
@@ -261,5 +265,299 @@ describe("Plan draft Part decisions", () => {
       decision: { kind: "set_included", partIds: [32, 31], value: false },
     });
     expect(noOp).toEqual(left);
+  });
+});
+
+function acceptedPart(input: {
+  readonly draftPart: PlanDraftSnapshot["parts"][number];
+  readonly id: number;
+  readonly projectionPartId?: number | null;
+}): RebaseAcceptedPart {
+  const { id: _id, draftId: _draftId, baseRevisionPartId: _base, ...part } =
+    input.draftPart;
+  return {
+    ...part,
+    id: input.id,
+    projectionPartId: input.projectionPartId ?? null,
+  };
+}
+
+describe("Plan draft rebase merge", () => {
+  it("extracts new-Part inclusion and quantity decisions from the known default baseline", () => {
+    const source = draftFixture();
+    source.parts[0]!.baseRevisionPartId = null;
+    source.parts[0]!.included = false;
+    source.parts[0]!.quantityOverride = 5;
+    source.parts[1]!.baseRevisionPartId = null;
+    source.parts[1]!.included = true;
+    source.parts[1]!.quantityOverride = null;
+
+    expect(extractRebasePartDecisions({ source, baseParts: [] })).toEqual([
+      { kind: "set_included", sourcePartId: 31, value: false },
+      { kind: "set_quantity_override", sourcePartId: 31, value: 5 },
+    ]);
+  });
+
+  it("emits no delta for an explicit no-op and extracts a quantity clear", () => {
+    const source = draftFixture();
+    const base = acceptedPart({ draftPart: source.parts[0]!, id: 23 });
+    source.parts = [
+      { ...source.parts[0]!, included: base.included, quantityOverride: null },
+    ];
+
+    expect(extractRebasePartDecisions({ source, baseParts: [base] })).toEqual([
+      { kind: "set_quantity_override", sourcePartId: 31, value: null },
+    ]);
+    source.parts[0]!.quantityOverride = base.quantityOverride;
+    expect(extractRebasePartDecisions({ source, baseParts: [base] })).toEqual([]);
+  });
+
+  it("reports a concurrent quantity decision and accepts a convergent value", () => {
+    const source = draftFixture();
+    const base = acceptedPart({ draftPart: source.parts[0]!, id: 23 });
+    source.parts = [{ ...source.parts[0]!, quantityOverride: 3 }];
+    const fresh = draftFixture();
+    fresh.parts = [
+      {
+        ...fresh.parts[0]!,
+        id: 41,
+        baseRevisionPartId: 33,
+        quantityOverride: 4,
+        quantityEffective: 4,
+      },
+    ];
+    const current = acceptedPart({ draftPart: fresh.parts[0]!, id: 33 });
+
+    expect(
+      mergeRebasedPlanDraft({
+        source,
+        sourceBaseParts: [{ ...base, quantityOverride: null, quantityEffective: 2 }],
+        fresh,
+        currentBaseParts: [current],
+      }),
+    ).toMatchObject({
+      kind: "conflicts",
+      conflicts: [{ kind: "concurrent_decision", field: "quantityOverride" }],
+    });
+    fresh.parts[0]!.quantityOverride = 3;
+    fresh.parts[0]!.quantityEffective = 3;
+    expect(
+      mergeRebasedPlanDraft({
+        source,
+        sourceBaseParts: [{ ...base, quantityOverride: null, quantityEffective: 2 }],
+        fresh,
+        currentBaseParts: [current],
+      }).kind,
+    ).toBe("merged");
+  });
+
+  it("prefers an exact Part key with changed bytes over a copied old digest", () => {
+    const source = draftFixture();
+    source.parts = [
+      {
+        ...source.parts[0]!,
+        included: false,
+        artifactDigest: "a".repeat(64),
+      },
+    ];
+    const base = acceptedPart({
+      draftPart: { ...source.parts[0]!, included: true },
+      id: 23,
+    });
+    const fresh = draftFixture();
+    fresh.parts = [
+      {
+        ...fresh.parts[0]!,
+        id: 41,
+        baseRevisionPartId: null,
+        included: true,
+        artifactDigest: "b".repeat(64),
+      },
+      {
+        ...fresh.parts[0]!,
+        id: 42,
+        baseRevisionPartId: null,
+        partKey: "parts/copy.stl",
+        relativePath: "parts/copy.stl",
+        filename: "copy.stl",
+        included: true,
+        artifactDigest: "a".repeat(64),
+      },
+    ];
+    const result = mergeRebasedPlanDraft({
+      source,
+      sourceBaseParts: [base],
+      fresh,
+      currentBaseParts: [],
+    });
+
+    expect(result.kind).toBe("merged");
+    if (result.kind !== "merged") throw new Error("rebase merge conflicted");
+    expect(result.draft.parts.map((part) => [part.id, part.included])).toEqual([
+      [41, false],
+      [42, true],
+    ]);
+  });
+
+  it("uses a unique tracked artifact only when the exact key disappeared", () => {
+    const source = draftFixture();
+    source.parts = [{ ...source.parts[0]!, included: false }];
+    const base = acceptedPart({
+      draftPart: { ...source.parts[0]!, included: true },
+      id: 23,
+    });
+    const fresh = draftFixture();
+    fresh.parts = [
+      {
+        ...fresh.parts[0]!,
+        id: 41,
+        baseRevisionPartId: null,
+        partKey: "parts/renamed.stl",
+        relativePath: "parts/renamed.stl",
+        filename: "renamed.stl",
+        included: true,
+      },
+    ];
+
+    const result = mergeRebasedPlanDraft({
+      source,
+      sourceBaseParts: [base],
+      fresh,
+      currentBaseParts: [],
+    });
+
+    expect(result.kind).toBe("merged");
+    if (result.kind !== "merged") throw new Error("rebase merge conflicted");
+    expect(result.draft.parts[0]).toMatchObject({ id: 41, included: false });
+  });
+
+  it("replays both fields from one source Part onto one target", () => {
+    const source = draftFixture();
+    const base = acceptedPart({
+      draftPart: { ...source.parts[0]!, included: true, quantityOverride: null },
+      id: 23,
+    });
+    source.parts = [
+      { ...source.parts[0]!, included: false, quantityOverride: 5, quantityEffective: 5 },
+    ];
+    const fresh = draftFixture();
+    fresh.parts = [
+      {
+        ...fresh.parts[0]!,
+        id: 41,
+        baseRevisionPartId: 33,
+        included: true,
+        quantityOverride: null,
+        quantityEffective: 2,
+      },
+    ];
+
+    const result = mergeRebasedPlanDraft({
+      source,
+      sourceBaseParts: [base],
+      fresh,
+      currentBaseParts: [acceptedPart({ draftPart: fresh.parts[0]!, id: 33 })],
+    });
+
+    expect(result.kind).toBe("merged");
+    if (result.kind !== "merged") throw new Error("rebase merge conflicted");
+    expect(result.draft.parts[0]).toMatchObject({
+      included: false,
+      quantityOverride: 5,
+      quantityEffective: 5,
+    });
+  });
+
+  it("rejects non-unique exact and artifact evidence in complete snapshots", () => {
+    const source = draftFixture();
+    source.parts = [
+      { ...source.parts[0]!, included: false },
+      { ...source.parts[0]!, id: 33, baseRevisionPartId: 25 },
+    ];
+    const fresh = draftFixture();
+    fresh.parts = [{ ...fresh.parts[0]!, id: 41, baseRevisionPartId: null }];
+
+    expect(
+      mergeRebasedPlanDraft({
+        source,
+        sourceBaseParts: [
+          acceptedPart({ draftPart: { ...source.parts[0]!, included: true }, id: 23 }),
+          acceptedPart({ draftPart: source.parts[1]!, id: 25 }),
+        ],
+        fresh,
+        currentBaseParts: [],
+      }),
+    ).toMatchObject({ kind: "conflicts", conflicts: [{ kind: "target_ambiguous" }] });
+
+    source.parts[1]!.partKey = "parts/other.stl";
+    fresh.parts[0]!.partKey = "parts/renamed.stl";
+    fresh.parts[0]!.relativePath = "parts/renamed.stl";
+    expect(
+      mergeRebasedPlanDraft({
+        source,
+        sourceBaseParts: [
+          acceptedPart({ draftPart: { ...source.parts[0]!, included: true }, id: 23 }),
+          acceptedPart({ draftPart: source.parts[1]!, id: 25 }),
+        ],
+        fresh,
+        currentBaseParts: [],
+      }),
+    ).toMatchObject({ kind: "conflicts", conflicts: [{ kind: "target_ambiguous" }] });
+  });
+
+  it("reports a deterministic collision when two source Parts claim one target", () => {
+    const source = draftFixture();
+    const first = { ...source.parts[0]!, included: false };
+    const second = {
+      ...source.parts[1]!,
+      included: false,
+    };
+    source.parts = [second, first];
+    const fresh = draftFixture();
+    fresh.parts = [
+      {
+        ...fresh.parts[1]!,
+        id: 41,
+        baseRevisionPartId: 33,
+      },
+    ];
+
+    const result = mergeRebasedPlanDraft({
+      source,
+      sourceBaseParts: [
+        acceptedPart({ draftPart: { ...first, included: true }, id: 23, projectionPartId: 90 }),
+        acceptedPart({ draftPart: { ...second, included: true }, id: 24 }),
+      ],
+      fresh,
+      currentBaseParts: [
+        acceptedPart({ draftPart: fresh.parts[0]!, id: 33, projectionPartId: 90 }),
+      ],
+    });
+
+    expect(result).toEqual({
+      kind: "conflicts",
+      conflicts: [
+        { kind: "target_collision", sourcePartIds: [31, 32], targetPartId: 41 },
+      ],
+    });
+  });
+
+  it("reports duplicate Source mappings only for decision-bearing Parts", () => {
+    const source = draftFixture();
+    source.parts[0]!.included = false;
+    source.inputs.push({ ...source.inputs[0]!, id: 2, sourceId: 8 });
+    const fresh = draftFixture();
+
+    expect(
+      mergeRebasedPlanDraft({
+        source,
+        sourceBaseParts: [
+          acceptedPart({ draftPart: { ...source.parts[0]!, included: true }, id: 23 }),
+          acceptedPart({ draftPart: source.parts[1]!, id: 24 }),
+        ],
+        fresh,
+        currentBaseParts: [],
+      }),
+    ).toMatchObject({ kind: "conflicts", conflicts: [{ kind: "source_identity" }] });
   });
 });

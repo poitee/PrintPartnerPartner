@@ -238,6 +238,12 @@ export const planDrafts = sqliteTable(
     basePlanVersion: integer("base_plan_version").notNull(),
     state: text("state").$type<"open" | "abandoned" | "consumed">().notNull(),
     lifecycleVersion: integer("lifecycle_version").notNull().default(0),
+    rebasedFromDraftId: integer("rebased_from_draft_id").references(
+      (): AnySQLiteColumn => planDrafts.id,
+      { onDelete: "cascade" },
+    ),
+    rebasedFromLifecycleVersion: integer("rebased_from_lifecycle_version"),
+    rebasedFromSnapshotDigest: text("rebased_from_snapshot_digest"),
     digestFormat: text("digest_format").notNull(),
     snapshotDigest: text("snapshot_digest").notNull(),
     createdBy: text("created_by").notNull(),
@@ -263,6 +269,17 @@ export const planDrafts = sqliteTable(
     check(
       "chk_plan_drafts_lifecycle_version",
       sql`${t.lifecycleVersion} >= 0 AND ${t.lifecycleVersion} <= 2147483647`,
+    ),
+    check(
+      "chk_plan_drafts_rebase_origin",
+      sql`(${t.rebasedFromDraftId} IS NULL
+            AND ${t.rebasedFromLifecycleVersion} IS NULL
+            AND ${t.rebasedFromSnapshotDigest} IS NULL)
+          OR (${t.rebasedFromDraftId} IS NOT NULL
+            AND ${t.rebasedFromLifecycleVersion} IS NOT NULL
+            AND ${t.rebasedFromSnapshotDigest} IS NOT NULL
+            AND ${t.rebasedFromLifecycleVersion} >= 0
+            AND ${t.rebasedFromLifecycleVersion} <= 2147483647)`,
     ),
   ],
 );
@@ -726,7 +743,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 21;
+export const currentSchemaVersion = 22;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -1298,6 +1315,11 @@ export const schemaMigrations: string[] = [
     base_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE RESTRICT,
     base_plan_version INTEGER NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('open', 'abandoned', 'consumed')),
+    lifecycle_version INTEGER NOT NULL DEFAULT 0
+      CHECK (lifecycle_version >= 0 AND lifecycle_version <= 2147483647),
+    rebased_from_draft_id INTEGER REFERENCES plan_drafts(id) ON DELETE CASCADE,
+    rebased_from_lifecycle_version INTEGER,
+    rebased_from_snapshot_digest TEXT,
     digest_format TEXT NOT NULL,
     snapshot_digest TEXT NOT NULL,
     created_by TEXT NOT NULL,
@@ -1306,6 +1328,16 @@ export const schemaMigrations: string[] = [
     CHECK (
       (base_revision_id IS NULL AND base_plan_version = 0)
       OR (base_revision_id IS NOT NULL AND base_plan_version > 0)
+    ),
+    CHECK (
+      (rebased_from_draft_id IS NULL
+        AND rebased_from_lifecycle_version IS NULL
+        AND rebased_from_snapshot_digest IS NULL)
+      OR (rebased_from_draft_id IS NOT NULL
+        AND rebased_from_lifecycle_version IS NOT NULL
+        AND rebased_from_snapshot_digest IS NOT NULL
+        AND rebased_from_lifecycle_version >= 0
+        AND rebased_from_lifecycle_version <= 2147483647)
     )
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_drafts_tenant_actor_profile_key
@@ -1314,6 +1346,69 @@ export const schemaMigrations: string[] = [
     ON plan_drafts (tenant_id, profile_id, created_at, id)`,
   `ALTER TABLE plan_drafts ADD COLUMN lifecycle_version INTEGER NOT NULL DEFAULT 0
     CHECK (lifecycle_version >= 0 AND lifecycle_version <= 2147483647)`,
+  `ALTER TABLE plan_drafts ADD COLUMN rebased_from_draft_id INTEGER
+    REFERENCES plan_drafts(id) ON DELETE CASCADE`,
+  `ALTER TABLE plan_drafts ADD COLUMN rebased_from_lifecycle_version INTEGER`,
+  `ALTER TABLE plan_drafts ADD COLUMN rebased_from_snapshot_digest TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_drafts_tenant_profile_rebase_source_generation
+    ON plan_drafts (
+      tenant_id, profile_id, rebased_from_draft_id, rebased_from_lifecycle_version
+    ) WHERE rebased_from_draft_id IS NOT NULL`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_lineage_insert
+    BEFORE INSERT ON plan_drafts
+    WHEN (
+      (NEW.rebased_from_draft_id IS NULL
+        OR NEW.rebased_from_lifecycle_version IS NULL
+        OR NEW.rebased_from_snapshot_digest IS NULL)
+      AND NOT (
+        NEW.rebased_from_draft_id IS NULL
+        AND NEW.rebased_from_lifecycle_version IS NULL
+        AND NEW.rebased_from_snapshot_digest IS NULL
+      )
+    ) OR (
+      NEW.rebased_from_draft_id IS NOT NULL
+      AND (
+        NEW.rebased_from_lifecycle_version < 0
+        OR NEW.rebased_from_lifecycle_version > 2147483647
+        OR NOT EXISTS (
+          SELECT 1 FROM plan_drafts source
+           WHERE source.id = NEW.rebased_from_draft_id
+             AND source.tenant_id = NEW.tenant_id
+             AND source.profile_id = NEW.profile_id
+             AND source.state = 'abandoned'
+             AND source.lifecycle_version = NEW.rebased_from_lifecycle_version
+             AND source.snapshot_digest = NEW.rebased_from_snapshot_digest
+        )
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft rebase lineage violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_lineage_update
+    BEFORE UPDATE OF rebased_from_draft_id, rebased_from_lifecycle_version,
+      rebased_from_snapshot_digest ON plan_drafts
+    WHEN (
+      (NEW.rebased_from_draft_id IS NULL
+        OR NEW.rebased_from_lifecycle_version IS NULL
+        OR NEW.rebased_from_snapshot_digest IS NULL)
+      AND NOT (
+        NEW.rebased_from_draft_id IS NULL
+        AND NEW.rebased_from_lifecycle_version IS NULL
+        AND NEW.rebased_from_snapshot_digest IS NULL
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft rebase lineage violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_lineage_immutable
+    BEFORE UPDATE OF rebased_from_draft_id, rebased_from_lifecycle_version,
+      rebased_from_snapshot_digest ON plan_drafts
+    WHEN NEW.rebased_from_draft_id IS NOT OLD.rebased_from_draft_id
+      OR NEW.rebased_from_lifecycle_version IS NOT OLD.rebased_from_lifecycle_version
+      OR NEW.rebased_from_snapshot_digest IS NOT OLD.rebased_from_snapshot_digest
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft rebase lineage is immutable');
+    END`,
   `CREATE TABLE IF NOT EXISTS plan_draft_inputs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id TEXT NOT NULL DEFAULT 'default',

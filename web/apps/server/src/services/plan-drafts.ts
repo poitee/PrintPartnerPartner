@@ -47,6 +47,15 @@ export type PlanDraftPart = PlanSnapshotPart & {
   baseRevisionPartId: number | null;
 };
 
+export type PlanDraftOrigin =
+  | { readonly kind: "recompute" }
+  | {
+      readonly kind: "rebase";
+      readonly sourceDraftId: number;
+      readonly sourceLifecycleVersion: number;
+      readonly sourceSnapshotDigest: string;
+    };
+
 export type PlanDraftSnapshot = {
   id: number;
   profileId: number;
@@ -54,6 +63,7 @@ export type PlanDraftSnapshot = {
   basePlanVersion: number;
   state: PlanDraftState;
   lifecycleVersion: number;
+  origin: PlanDraftOrigin;
   digestFormat: string;
   snapshotDigest: string;
   createdBy: string;
@@ -75,9 +85,326 @@ export type PlanDraftPartDecision =
       readonly value: number | null;
     };
 
+export type RebasePartDecision =
+  | {
+      readonly kind: "set_included";
+      readonly sourcePartId: number;
+      readonly value: boolean;
+    }
+  | {
+      readonly kind: "set_quantity_override";
+      readonly sourcePartId: number;
+      readonly value: number | null;
+    };
+
+export type RebaseAcceptedPart = PlanSnapshotPart & {
+  readonly id: number;
+  readonly projectionPartId: number | null;
+};
+
+export type RebaseConflict =
+  | {
+      readonly kind: "source_identity";
+      readonly sourcePartId: number;
+      readonly sourceLayer: string;
+    }
+  | {
+      readonly kind: "target_missing" | "target_ambiguous";
+      readonly sourcePartId: number;
+      readonly targetPartIds: readonly number[];
+    }
+  | {
+      readonly kind: "target_collision";
+      readonly sourcePartIds: readonly number[];
+      readonly targetPartId: number;
+    }
+  | {
+      readonly kind: "concurrent_decision";
+      readonly sourcePartId: number;
+      readonly targetPartId: number;
+      readonly field: "included" | "quantityOverride";
+    };
+
+export type RebasePlanDraftMergeResult =
+  | { readonly kind: "merged"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "conflicts"; readonly conflicts: readonly RebaseConflict[] };
+
 export class PlanDraftPartNotFoundError extends Error {}
 
 type BasePart = PlanSnapshotPart & { id: number };
+
+export function newPlanDraftPartDecisionBaseline(): Pick<
+  PlanSnapshotPart,
+  "included" | "quantityOverride"
+> {
+  return { included: true, quantityOverride: null };
+}
+
+export function extractRebasePartDecisions(input: {
+  readonly source: PlanDraftSnapshot;
+  readonly baseParts: readonly RebaseAcceptedPart[];
+}): RebasePartDecision[] {
+  const baseById = new Map(input.baseParts.map((part) => [part.id, part]));
+  const decisions: RebasePartDecision[] = [];
+  for (const part of [...input.source.parts].sort((left, right) => left.id - right.id)) {
+    const baseline =
+      part.baseRevisionPartId == null
+        ? newPlanDraftPartDecisionBaseline()
+        : baseById.get(part.baseRevisionPartId);
+    if (!baseline) throw new Error("Plan draft rebase predecessor is missing");
+    if (part.included !== baseline.included) {
+      decisions.push({ kind: "set_included", sourcePartId: part.id, value: part.included });
+    }
+    if (part.quantityOverride !== baseline.quantityOverride) {
+      decisions.push({
+        kind: "set_quantity_override",
+        sourcePartId: part.id,
+        value: part.quantityOverride,
+      });
+    }
+  }
+  return decisions;
+}
+
+type PartEvidenceIndex = ReadonlyMap<
+  number,
+  ReadonlyMap<string, readonly PlanDraftPart[]>
+>;
+
+type DraftMatchIndex = {
+  readonly sourceIdByLayer: ReadonlyMap<string, number | null>;
+  readonly trackedSourceIds: ReadonlySet<number>;
+  readonly byPartKey: PartEvidenceIndex;
+  readonly byArtifactDigest: PartEvidenceIndex;
+};
+
+function addPartEvidence(
+  index: Map<number, Map<string, PlanDraftPart[]>>,
+  sourceId: number,
+  value: string,
+  part: PlanDraftPart,
+): void {
+  const byValue = index.get(sourceId) ?? new Map<string, PlanDraftPart[]>();
+  const matches = byValue.get(value) ?? [];
+  matches.push(part);
+  byValue.set(value, matches);
+  index.set(sourceId, byValue);
+}
+
+function indexDraftForRebase(draft: PlanDraftSnapshot): DraftMatchIndex {
+  const sourceIdByLayer = new Map<string, number | null>();
+  const trackedSourceIds = new Set<number>();
+  for (const input of draft.inputs) {
+    sourceIdByLayer.set(
+      input.sourceLayer,
+      sourceIdByLayer.has(input.sourceLayer) ? null : input.sourceId,
+    );
+    if (input.trackingKind === "revision") trackedSourceIds.add(input.sourceId);
+  }
+  const byPartKey = new Map<number, Map<string, PlanDraftPart[]>>();
+  const byArtifactDigest = new Map<number, Map<string, PlanDraftPart[]>>();
+  for (const part of draft.parts) {
+    const sourceId = sourceIdByLayer.get(part.sourceLayer);
+    if (sourceId == null) continue;
+    addPartEvidence(byPartKey, sourceId, part.partKey, part);
+    if (part.artifactDigest != null) {
+      addPartEvidence(byArtifactDigest, sourceId, part.artifactDigest, part);
+    }
+  }
+  return { sourceIdByLayer, trackedSourceIds, byPartKey, byArtifactDigest };
+}
+
+function indexedParts(
+  index: PartEvidenceIndex,
+  sourceId: number,
+  value: string,
+): readonly PlanDraftPart[] {
+  return index.get(sourceId)?.get(value) ?? [];
+}
+
+function sortRebaseConflicts(conflicts: readonly RebaseConflict[]): RebaseConflict[] {
+  return [...conflicts].sort((left, right) => {
+    const leftSource =
+      left.kind === "target_collision" ? left.sourcePartIds[0] ?? 0 : left.sourcePartId;
+    const rightSource =
+      right.kind === "target_collision" ? right.sourcePartIds[0] ?? 0 : right.sourcePartId;
+    return leftSource - rightSource || left.kind.localeCompare(right.kind);
+  });
+}
+
+export function mergeRebasedPlanDraft(input: {
+  readonly source: PlanDraftSnapshot;
+  readonly sourceBaseParts: readonly RebaseAcceptedPart[];
+  readonly fresh: PlanDraftSnapshot;
+  readonly currentBaseParts: readonly RebaseAcceptedPart[];
+}): RebasePlanDraftMergeResult {
+  const decisions = extractRebasePartDecisions({
+    source: input.source,
+    baseParts: input.sourceBaseParts,
+  });
+  if (decisions.length === 0) return { kind: "merged", draft: structuredClone(input.fresh) };
+  const sourceById = new Map(input.source.parts.map((part) => [part.id, part]));
+  const sourceIndex = indexDraftForRebase(input.source);
+  const freshIndex = indexDraftForRebase(input.fresh);
+  const oldBaseById = new Map(input.sourceBaseParts.map((part) => [part.id, part]));
+  const currentBaseById = new Map(input.currentBaseParts.map((part) => [part.id, part]));
+  const freshByProjection = new Map<number, PlanDraftPart[]>();
+  const oldProjectionCounts = new Map<number, number>();
+  const currentProjectionCounts = new Map<number, number>();
+  for (const part of input.sourceBaseParts) {
+    if (part.projectionPartId != null) {
+      oldProjectionCounts.set(
+        part.projectionPartId,
+        (oldProjectionCounts.get(part.projectionPartId) ?? 0) + 1,
+      );
+    }
+  }
+  for (const part of input.currentBaseParts) {
+    if (part.projectionPartId != null) {
+      currentProjectionCounts.set(
+        part.projectionPartId,
+        (currentProjectionCounts.get(part.projectionPartId) ?? 0) + 1,
+      );
+    }
+  }
+  for (const part of input.fresh.parts) {
+    if (part.baseRevisionPartId == null) continue;
+    const projectionId = currentBaseById.get(part.baseRevisionPartId)?.projectionPartId;
+    if (projectionId == null) continue;
+    const matches = freshByProjection.get(projectionId) ?? [];
+    matches.push(part);
+    freshByProjection.set(projectionId, matches);
+  }
+  const sourcePartIds = [...new Set(decisions.map((decision) => decision.sourcePartId))].sort(
+    (left, right) => left - right,
+  );
+  const targetBySource = new Map<number, PlanDraftPart>();
+  const conflicts: RebaseConflict[] = [];
+  for (const sourcePartId of sourcePartIds) {
+    const sourcePart = sourceById.get(sourcePartId);
+    if (!sourcePart) throw new Error("Plan draft rebase decision Part is missing");
+    const sourceId = sourceIndex.sourceIdByLayer.get(sourcePart.sourceLayer);
+    if (sourceId == null) {
+      conflicts.push({
+        kind: "source_identity",
+        sourcePartId,
+        sourceLayer: sourcePart.sourceLayer,
+      });
+      continue;
+    }
+    let candidates: readonly PlanDraftPart[] = [];
+    let ambiguousEvidence = false;
+    const oldAncestor =
+      sourcePart.baseRevisionPartId == null
+        ? null
+        : oldBaseById.get(sourcePart.baseRevisionPartId) ?? null;
+    const projectionId = oldAncestor?.projectionPartId ?? null;
+    if (
+      projectionId != null &&
+      oldProjectionCounts.get(projectionId) === 1 &&
+      currentProjectionCounts.get(projectionId) === 1
+    ) {
+      candidates = freshByProjection.get(projectionId) ?? [];
+    }
+    if (candidates.length === 0) {
+      const exactCount = indexedParts(sourceIndex.byPartKey, sourceId, sourcePart.partKey).length;
+      const exactTargets = indexedParts(freshIndex.byPartKey, sourceId, sourcePart.partKey);
+      if (exactCount === 1 && exactTargets.length === 1) candidates = exactTargets;
+      else if (exactTargets.length > 0) {
+        candidates = exactTargets;
+        ambiguousEvidence = true;
+      }
+    }
+    if (!ambiguousEvidence && candidates.length === 0 && sourcePart.artifactDigest != null) {
+      const sourceDigestCount = indexedParts(
+        sourceIndex.byArtifactDigest,
+        sourceId,
+        sourcePart.artifactDigest,
+      ).length;
+      const freshDigestTargets = freshIndex.trackedSourceIds.has(sourceId)
+        ? indexedParts(freshIndex.byArtifactDigest, sourceId, sourcePart.artifactDigest)
+        : [];
+      const sourceTracked = sourceIndex.trackedSourceIds.has(sourceId);
+      if (sourceTracked && sourceDigestCount === 1 && freshDigestTargets.length === 1) {
+        candidates = freshDigestTargets;
+      } else if (freshDigestTargets.length > 0) {
+        candidates = freshDigestTargets;
+        ambiguousEvidence = true;
+      }
+    }
+    if (ambiguousEvidence || candidates.length !== 1) {
+      conflicts.push({
+        kind: candidates.length === 0 ? "target_missing" : "target_ambiguous",
+        sourcePartId,
+        targetPartIds: candidates.map((part) => part.id).sort((left, right) => left - right),
+      });
+      continue;
+    }
+    const target = candidates[0];
+    if (!target) throw new Error("Plan draft rebase target is missing");
+    targetBySource.set(sourcePartId, target);
+  }
+  const sourcesByTarget = new Map<number, number[]>();
+  for (const [sourcePartId, target] of targetBySource) {
+    const sourceIds = sourcesByTarget.get(target.id) ?? [];
+    sourceIds.push(sourcePartId);
+    sourcesByTarget.set(target.id, sourceIds);
+  }
+  for (const [targetPartId, claimedSources] of sourcesByTarget) {
+    if (claimedSources.length > 1) {
+      conflicts.push({
+        kind: "target_collision",
+        sourcePartIds: claimedSources.sort((left, right) => left - right),
+        targetPartId,
+      });
+    }
+  }
+  if (conflicts.length) return { kind: "conflicts", conflicts: sortRebaseConflicts(conflicts) };
+
+  const next = structuredClone(input.fresh);
+  const nextById = new Map(next.parts.map((part) => [part.id, part]));
+  for (const decision of decisions) {
+    const sourcePart = sourceById.get(decision.sourcePartId);
+    if (!sourcePart) throw new Error("Plan draft rebase decision Part is missing");
+    const baseline =
+      sourcePart.baseRevisionPartId == null
+        ? newPlanDraftPartDecisionBaseline()
+        : oldBaseById.get(sourcePart.baseRevisionPartId);
+    if (!baseline) throw new Error("Plan draft rebase predecessor is missing");
+    const target = targetBySource.get(decision.sourcePartId);
+    if (!target) throw new Error("Plan draft rebase target is missing");
+    const nextTarget = nextById.get(target.id);
+    if (!nextTarget) throw new Error("Plan draft rebase target snapshot is missing");
+    if (decision.kind === "set_included") {
+      if (target.included !== baseline.included && target.included !== decision.value) {
+        conflicts.push({
+          kind: "concurrent_decision",
+          sourcePartId: decision.sourcePartId,
+          targetPartId: target.id,
+          field: "included",
+        });
+      } else {
+        nextTarget.included = decision.value;
+      }
+    } else if (
+      target.quantityOverride !== baseline.quantityOverride &&
+      target.quantityOverride !== decision.value
+    ) {
+      conflicts.push({
+        kind: "concurrent_decision",
+        sourcePartId: decision.sourcePartId,
+        targetPartId: target.id,
+        field: "quantityOverride",
+      });
+    } else {
+      nextTarget.quantityOverride = decision.value;
+      nextTarget.quantityEffective = decision.value ?? nextTarget.quantityInferred;
+    }
+  }
+  if (conflicts.length) return { kind: "conflicts", conflicts: sortRebaseConflicts(conflicts) };
+  next.snapshotDigest = digestPlanDraft(next);
+  return { kind: "merged", draft: next };
+}
 
 export type PlanDraftDiff = {
   baseRevisionId: number | null;

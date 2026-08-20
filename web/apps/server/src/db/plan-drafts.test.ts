@@ -126,6 +126,38 @@ function editableDraftFixture() {
   return { ...context, profile, source, draft: created.draft };
 }
 
+function advanceEmptyAcceptedRevision(input: {
+  raw: Database.Database;
+  profileId: number;
+  parentRevisionId: number | null;
+}): number {
+  const revision = input.raw
+    .prepare(
+      `INSERT INTO plan_revisions (
+        tenant_id, profile_id, revision_number, parent_revision_id, input_set_id,
+        provenance_kind, digest_format, snapshot_digest, created_by, accepted_by,
+        created_at, accepted_at
+      ) VALUES ('default', ?, 2, ?, NULL, 'legacy', 'plan-revision-parts-v1', ?,
+        'test', 'test', ?, ?)`,
+    )
+    .run(
+      input.profileId,
+      input.parentRevisionId,
+      "7".repeat(64),
+      "2026-08-20T15:00:00.000Z",
+      "2026-08-20T15:00:00.000Z",
+    );
+  const revisionId = Number(revision.lastInsertRowid);
+  input.raw
+    .prepare(
+      `UPDATE build_profiles
+          SET accepted_plan_revision_id = ?, accepted_plan_version = 2
+        WHERE tenant_id = 'default' AND id = ?`,
+    )
+    .run(revisionId, input.profileId);
+  return revisionId;
+}
+
 afterEach(() => {
   for (const root of tempDirs.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -1447,6 +1479,588 @@ describe("saved Plan drafts", () => {
         transition: { kind: "abandon", expectedLifecycleVersion: 0 },
       }),
     ).toThrow(/digest mismatch/i);
+    for (const [table, rows] of before) {
+      expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(rows);
+    }
+    database.close();
+  });
+
+  it("rebases saved Part decisions onto a newer accepted Plan without changing accepted state", () => {
+    const { database, raw, profile, repo, draft, root } = editableDraftFixture();
+    const partId = draft.parts[0]?.id;
+    if (!partId) throw new Error("editable draft Part is missing");
+    const edited = repo.editPlanDraftParts({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: draft.snapshotDigest,
+      decision: { kind: "set_included", partIds: [partId], value: false },
+    });
+    if (edited.kind !== "updated") throw new Error("test draft was not edited");
+    const abandoned = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    if (abandoned.kind !== "transitioned") throw new Error("test draft was not abandoned");
+    const nextRevisionId = advanceEmptyAcceptedRevision({
+      raw,
+      profileId: profile.id,
+      parentRevisionId: draft.baseRevisionId,
+    });
+    const acceptedBefore = snapshotTables(raw, ACCEPTED_STATE_TABLES);
+
+    const result = repo.rebasePlanDraft({
+      profileId: profile.id,
+      sourceDraftId: draft.id,
+      expectedSourceLifecycleVersion: 1,
+      expectedSourceSnapshotDigest: edited.draft.snapshotDigest,
+      actor: "test:user",
+      idempotencyKey: "rebase-draft",
+    });
+
+    expect(result).toMatchObject({
+      kind: "rebased",
+      draft: {
+        baseRevisionId: nextRevisionId,
+        basePlanVersion: 2,
+        state: "open",
+        lifecycleVersion: 0,
+        origin: {
+          kind: "rebase",
+          sourceDraftId: draft.id,
+          sourceLifecycleVersion: 1,
+          sourceSnapshotDigest: edited.draft.snapshotDigest,
+        },
+        parts: expect.arrayContaining([
+          expect.objectContaining({ partKey: "bracket.stl", included: false }),
+        ]),
+      },
+    });
+    if (result.kind !== "rebased") throw new Error("test draft was not rebased");
+    raw
+      .prepare(
+        "UPDATE plan_drafts SET state = 'open', lifecycle_version = lifecycle_version + 1 WHERE id = ?",
+      )
+      .run(draft.id);
+    expect(
+      repo.rebasePlanDraft({
+        profileId: profile.id,
+        sourceDraftId: draft.id,
+        expectedSourceLifecycleVersion: 1,
+        expectedSourceSnapshotDigest: edited.draft.snapshotDigest,
+        actor: "test:user",
+        idempotencyKey: "rebase-draft",
+      }),
+    ).toEqual({ kind: "existing", draft: result.draft });
+    expect(
+      repo.rebasePlanDraft({
+        profileId: profile.id,
+        sourceDraftId: draft.id,
+        expectedSourceLifecycleVersion: 1,
+        expectedSourceSnapshotDigest: edited.draft.snapshotDigest,
+        actor: "test:other-user",
+        idempotencyKey: "other-rebase-key",
+      }),
+    ).toEqual({ kind: "existing", draft: result.draft });
+    expect(
+      repo.recomputePlanDraft({
+        profileId: profile.id,
+        actor: "test:user",
+        idempotencyKey: "rebase-draft",
+      }),
+    ).toEqual({ kind: "idempotency_conflict" });
+    expect(
+      repo.rebasePlanDraft({
+        profileId: profile.id,
+        sourceDraftId: draft.id,
+        expectedSourceLifecycleVersion: 2,
+        expectedSourceSnapshotDigest: edited.draft.snapshotDigest,
+        actor: "test:user",
+        idempotencyKey: "editable-draft",
+      }),
+    ).toEqual({ kind: "idempotency_conflict" });
+    for (const [table, rows] of acceptedBefore) {
+      expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(rows);
+    }
+    database.close();
+    const reopened = new SqliteDatabase(root);
+    reopened.connect();
+    const reopenedRepo = new AppRepository(getDb(reopened), "default", reopened.reposDir);
+    expect(reopenedRepo.getPlanDraft(profile.id, result.draft.id)).toEqual(result.draft);
+    reopened.close();
+  });
+
+  it("refuses a same-base rebase and detects lifecycle ABA", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    const abandoned = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    if (abandoned.kind !== "transitioned") throw new Error("test draft was not abandoned");
+    const request = {
+      profileId: profile.id,
+      sourceDraftId: draft.id,
+      expectedSourceLifecycleVersion: 1,
+      expectedSourceSnapshotDigest: draft.snapshotDigest,
+      actor: "test:user",
+      idempotencyKey: "same-base-rebase",
+    } as const;
+
+    expect(repo.rebasePlanDraft(request)).toEqual({ kind: "base_unchanged" });
+    const otherTenant = new AppRepository(getDb(database), "farm-b", database.reposDir);
+    expect(otherTenant.rebasePlanDraft(request)).toEqual({ kind: "not_found" });
+    const otherProfile = repo.createProfile("Other rebase Build");
+    expect(
+      repo.rebasePlanDraft({ ...request, profileId: otherProfile.id }),
+    ).toEqual({ kind: "not_found" });
+    raw
+      .prepare(
+        "UPDATE plan_drafts SET state = 'open', lifecycle_version = lifecycle_version + 1 WHERE id = ?",
+      )
+      .run(draft.id);
+    raw
+      .prepare(
+        "UPDATE plan_drafts SET state = 'abandoned', lifecycle_version = lifecycle_version + 1 WHERE id = ?",
+      )
+      .run(draft.id);
+    expect(repo.rebasePlanDraft(request)).toMatchObject({
+      kind: "source_conflict",
+      draft: { id: draft.id, state: "abandoned", lifecycleVersion: 3 },
+    });
+    expect(raw.prepare("SELECT count(*) AS count FROM plan_drafts").get()).toEqual({ count: 1 });
+    database.close();
+  });
+
+  it("detects accepted movement before same-base refusal and immutable revision loading", () => {
+    const sameBase = editableDraftFixture();
+    const sameBaseAbandoned = sameBase.repo.transitionPlanDraft({
+      profileId: sameBase.profile.id,
+      draftId: sameBase.draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    if (sameBaseAbandoned.kind !== "transitioned") {
+      throw new Error("test draft was not abandoned");
+    }
+    let sameBaseMoved = false;
+    Object.assign(sameBase.repo, {
+      planDraftNeedsAcceptedBaseline: () => {
+        if (!sameBaseMoved) {
+          sameBaseMoved = true;
+          advanceEmptyAcceptedRevision({
+            raw: sameBase.raw,
+            profileId: sameBase.profile.id,
+            parentRevisionId: sameBase.draft.baseRevisionId,
+          });
+        }
+        return false;
+      },
+    });
+    expect(
+      sameBase.repo.rebasePlanDraft({
+        profileId: sameBase.profile.id,
+        sourceDraftId: sameBase.draft.id,
+        expectedSourceLifecycleVersion: 1,
+        expectedSourceSnapshotDigest: sameBase.draft.snapshotDigest,
+        actor: "test:user",
+        idempotencyKey: "same-base-moved",
+      }),
+    ).toEqual({ kind: "base_changed" });
+    expect(sameBase.raw.prepare("SELECT count(*) AS count FROM plan_drafts").get()).toEqual({
+      count: 1,
+    });
+    sameBase.database.close();
+
+    const revisionLoad = editableDraftFixture();
+    const revisionLoadAbandoned = revisionLoad.repo.transitionPlanDraft({
+      profileId: revisionLoad.profile.id,
+      draftId: revisionLoad.draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    if (revisionLoadAbandoned.kind !== "transitioned") {
+      throw new Error("test draft was not abandoned");
+    }
+    const secondRevisionId = advanceEmptyAcceptedRevision({
+      raw: revisionLoad.raw,
+      profileId: revisionLoad.profile.id,
+      parentRevisionId: revisionLoad.draft.baseRevisionId,
+    });
+    const thirdRevision = revisionLoad.raw
+      .prepare(
+        `INSERT INTO plan_revisions (
+          tenant_id, profile_id, revision_number, parent_revision_id, input_set_id,
+          provenance_kind, digest_format, snapshot_digest, created_by, accepted_by,
+          created_at, accepted_at
+        ) VALUES ('default', ?, 3, ?, NULL, 'legacy', 'plan-revision-parts-v1', ?,
+          'test', 'test', ?, ?)`,
+      )
+      .run(
+        revisionLoad.profile.id,
+        secondRevisionId,
+        "8".repeat(64),
+        "2026-08-20T16:00:00.000Z",
+        "2026-08-20T16:00:00.000Z",
+      );
+    let revisionLoadMoved = false;
+    Object.assign(revisionLoad.repo, {
+      planDraftNeedsAcceptedBaseline: () => {
+        if (!revisionLoadMoved) {
+          revisionLoadMoved = true;
+          revisionLoad.raw
+            .prepare(
+              `UPDATE build_profiles
+                  SET accepted_plan_revision_id = ?, accepted_plan_version = 3
+                WHERE tenant_id = 'default' AND id = ?`,
+            )
+            .run(Number(thirdRevision.lastInsertRowid), revisionLoad.profile.id);
+        }
+        return false;
+      },
+    });
+    expect(
+      revisionLoad.repo.rebasePlanDraft({
+        profileId: revisionLoad.profile.id,
+        sourceDraftId: revisionLoad.draft.id,
+        expectedSourceLifecycleVersion: 1,
+        expectedSourceSnapshotDigest: revisionLoad.draft.snapshotDigest,
+        actor: "test:user",
+        idempotencyKey: "revision-load-moved",
+      }),
+    ).toEqual({ kind: "base_changed" });
+    expect(
+      revisionLoad.raw.prepare("SELECT count(*) AS count FROM plan_drafts").get(),
+    ).toEqual({ count: 1 });
+    revisionLoad.database.close();
+  });
+
+  it("writes nothing when a newer accepted quantity conflicts with the saved decision", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    const partId = draft.parts[0]?.id;
+    if (!partId) throw new Error("editable draft Part is missing");
+    const edited = repo.editPlanDraftParts({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: draft.snapshotDigest,
+      decision: { kind: "set_quantity_override", partIds: [partId], value: 3 },
+    });
+    if (edited.kind !== "updated") throw new Error("test draft was not edited");
+    const abandoned = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    if (abandoned.kind !== "transitioned") throw new Error("test draft was not abandoned");
+    const nextRevisionId = advanceEmptyAcceptedRevision({
+      raw,
+      profileId: profile.id,
+      parentRevisionId: draft.baseRevisionId,
+    });
+    raw
+      .prepare(
+        `INSERT INTO plan_revision_parts (
+          tenant_id, revision_id, projection_part_id, part_key, relative_path, filename,
+          source_layer, status, role_inferred, role_override, filament_color_id,
+          filament_custom_hex, spoolman_spool_id, quantity_inferred, quantity_override,
+          quantity_effective, included, notes, github_blob_url, geometry_same, requirement,
+          option_group_id, manifest_source, artifact_digest
+        ) SELECT tenant_id, ?, projection_part_id, part_key, relative_path, filename,
+          source_layer, status, role_inferred, role_override, filament_color_id,
+          filament_custom_hex, spoolman_spool_id, quantity_inferred,
+          CASE WHEN part_key = 'bracket.stl' THEN 4 ELSE quantity_override END,
+          CASE WHEN part_key = 'bracket.stl' THEN 4 ELSE quantity_effective END,
+          included, notes, github_blob_url, geometry_same, requirement, option_group_id,
+          manifest_source, artifact_digest
+          FROM plan_revision_parts WHERE revision_id = ?`,
+      )
+      .run(nextRevisionId, draft.baseRevisionId);
+    const before = snapshotTables(raw, [
+      ...ACCEPTED_STATE_TABLES,
+      "plan_drafts",
+      "plan_draft_inputs",
+      "plan_draft_parts",
+    ]);
+
+    expect(
+      repo.rebasePlanDraft({
+        profileId: profile.id,
+        sourceDraftId: draft.id,
+        expectedSourceLifecycleVersion: 1,
+        expectedSourceSnapshotDigest: edited.draft.snapshotDigest,
+        actor: "test:user",
+        idempotencyKey: "conflicting-rebase",
+      }),
+    ).toMatchObject({
+      kind: "merge_conflicts",
+      conflicts: [{ kind: "concurrent_decision", field: "quantityOverride" }],
+    });
+    for (const [table, rows] of before) {
+      expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(rows);
+    }
+    database.close();
+  });
+
+  it("returns typed zero-write outcomes when the rebase base or inputs move before write", () => {
+    const baseRace = editableDraftFixture();
+    const baseAbandoned = baseRace.repo.transitionPlanDraft({
+      profileId: baseRace.profile.id,
+      draftId: baseRace.draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    if (baseAbandoned.kind !== "transitioned") throw new Error("test draft was not abandoned");
+    advanceEmptyAcceptedRevision({
+      raw: baseRace.raw,
+      profileId: baseRace.profile.id,
+      parentRevisionId: baseRace.draft.baseRevisionId,
+    });
+    const thirdRevision = baseRace.raw
+      .prepare(
+        `INSERT INTO plan_revisions (
+          tenant_id, profile_id, revision_number, parent_revision_id, input_set_id,
+          provenance_kind, digest_format, snapshot_digest, created_by, accepted_by,
+          created_at, accepted_at
+        ) VALUES ('default', ?, 3, NULL, NULL, 'legacy', 'plan-revision-parts-v1', ?,
+          'test', 'test', ?, ?)`,
+      )
+      .run(
+        baseRace.profile.id,
+        "8".repeat(64),
+        "2026-08-20T16:00:00.000Z",
+        "2026-08-20T16:00:00.000Z",
+      );
+    const nativeBaseTransaction = baseRace.repo.transaction.bind(baseRace.repo);
+    baseRace.repo.transaction = <T>(
+      fn: () => T,
+      behavior: "deferred" | "immediate" = "deferred",
+    ): T => {
+      baseRace.raw
+        .prepare(
+          `UPDATE build_profiles
+              SET accepted_plan_revision_id = ?, accepted_plan_version = 3
+            WHERE tenant_id = 'default' AND id = ?`,
+        )
+        .run(Number(thirdRevision.lastInsertRowid), baseRace.profile.id);
+      return nativeBaseTransaction(fn, behavior);
+    };
+    expect(
+      baseRace.repo.rebasePlanDraft({
+        profileId: baseRace.profile.id,
+        sourceDraftId: baseRace.draft.id,
+        expectedSourceLifecycleVersion: 1,
+        expectedSourceSnapshotDigest: baseRace.draft.snapshotDigest,
+        actor: "test:user",
+        idempotencyKey: "base-race-rebase",
+      }),
+    ).toEqual({ kind: "base_changed" });
+    expect(baseRace.raw.prepare("SELECT count(*) AS count FROM plan_drafts").get()).toEqual({
+      count: 1,
+    });
+    baseRace.database.close();
+
+    const inputRace = editableDraftFixture();
+    const inputAbandoned = inputRace.repo.transitionPlanDraft({
+      profileId: inputRace.profile.id,
+      draftId: inputRace.draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    if (inputAbandoned.kind !== "transitioned") throw new Error("test draft was not abandoned");
+    advanceEmptyAcceptedRevision({
+      raw: inputRace.raw,
+      profileId: inputRace.profile.id,
+      parentRevisionId: inputRace.draft.baseRevisionId,
+    });
+    const nativeInputTransaction = inputRace.repo.transaction.bind(inputRace.repo);
+    inputRace.repo.transaction = <T>(
+      fn: () => T,
+      behavior: "deferred" | "immediate" = "deferred",
+    ): T => {
+      inputRace.repo.updateImportRules(inputRace.source.id, ["parts/"]);
+      return nativeInputTransaction(fn, behavior);
+    };
+    expect(
+      inputRace.repo.rebasePlanDraft({
+        profileId: inputRace.profile.id,
+        sourceDraftId: inputRace.draft.id,
+        expectedSourceLifecycleVersion: 1,
+        expectedSourceSnapshotDigest: inputRace.draft.snapshotDigest,
+        actor: "test:user",
+        idempotencyKey: "input-race-rebase",
+      }),
+    ).toEqual({ kind: "inputs_changed" });
+    expect(inputRace.raw.prepare("SELECT count(*) AS count FROM plan_drafts").get()).toEqual({
+      count: 1,
+    });
+    inputRace.database.close();
+  });
+
+  it("returns the transaction-local source when a concurrent successor conflicts", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    const abandoned = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    if (abandoned.kind !== "transitioned") throw new Error("test draft was not abandoned");
+    advanceEmptyAcceptedRevision({
+      raw,
+      profileId: profile.id,
+      parentRevisionId: draft.baseRevisionId,
+    });
+    const concurrentRepo = new AppRepository(getDb(database), "default", database.reposDir);
+    const nativeTransaction = repo.transaction.bind(repo);
+    repo.transaction = <T>(
+      fn: () => T,
+      behavior: "deferred" | "immediate" = "deferred",
+    ): T => {
+      const successor = concurrentRepo.rebasePlanDraft({
+        profileId: profile.id,
+        sourceDraftId: draft.id,
+        expectedSourceLifecycleVersion: 1,
+        expectedSourceSnapshotDigest: draft.snapshotDigest,
+        actor: "test:concurrent",
+        idempotencyKey: "concurrent-successor",
+      });
+      if (successor.kind !== "rebased") throw new Error("concurrent rebase was not created");
+      raw.exec(`
+        DROP TRIGGER trg_plan_drafts_lineage_immutable;
+        DROP TRIGGER trg_plan_drafts_identity_immutable
+      `);
+      raw
+        .prepare("UPDATE plan_drafts SET rebased_from_snapshot_digest = ? WHERE id = ?")
+        .run("0".repeat(64), successor.draft.id);
+      raw
+        .prepare(
+          "UPDATE plan_drafts SET state = 'open', lifecycle_version = lifecycle_version + 1 WHERE id = ?",
+        )
+        .run(draft.id);
+      return nativeTransaction(fn, behavior);
+    };
+
+    expect(
+      repo.rebasePlanDraft({
+        profileId: profile.id,
+        sourceDraftId: draft.id,
+        expectedSourceLifecycleVersion: 1,
+        expectedSourceSnapshotDigest: draft.snapshotDigest,
+        actor: "test:user",
+        idempotencyKey: "losing-rebase",
+      }),
+    ).toMatchObject({
+      kind: "source_conflict",
+      draft: { id: draft.id, state: "open", lifecycleVersion: 2 },
+    });
+    database.close();
+  });
+
+  it("enforces immutable complete rebase lineage and one successor per source generation", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    expect(() =>
+      raw
+        .prepare(
+          "UPDATE plan_drafts SET rebased_from_draft_id = ? WHERE id = ?",
+        )
+        .run(draft.id, draft.id),
+    ).toThrow(/lineage/i);
+    const abandoned = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    if (abandoned.kind !== "transitioned") throw new Error("test draft was not abandoned");
+    const insertSuccessor = raw.prepare(
+      `INSERT INTO plan_drafts (
+        tenant_id, profile_id, base_revision_id, base_plan_version, state,
+        lifecycle_version, rebased_from_draft_id, rebased_from_lifecycle_version,
+        rebased_from_snapshot_digest, digest_format, snapshot_digest, created_by,
+        idempotency_key, created_at
+      ) SELECT tenant_id, profile_id, base_revision_id, base_plan_version, 'open', 0,
+        id, lifecycle_version, snapshot_digest, digest_format, snapshot_digest, ?, ?, created_at
+        FROM plan_drafts WHERE id = ?`,
+    );
+    const inserted = insertSuccessor.run("test:successor", "lineage-one", draft.id);
+    const successorId = Number(inserted.lastInsertRowid);
+    expect(() =>
+      insertSuccessor.run("test:other", "lineage-two", draft.id),
+    ).toThrow(/unique/i);
+    expect(() =>
+      raw
+        .prepare(
+          "UPDATE plan_drafts SET rebased_from_snapshot_digest = ? WHERE id = ?",
+        )
+        .run("0".repeat(64), successorId),
+    ).toThrow(/immutable/i);
+    const otherProfile = repo.createProfile("Other lineage Build");
+    expect(() =>
+      raw
+        .prepare(
+          `INSERT INTO plan_drafts (
+            tenant_id, profile_id, base_revision_id, base_plan_version, state,
+            lifecycle_version, rebased_from_draft_id, rebased_from_lifecycle_version,
+            rebased_from_snapshot_digest, digest_format, snapshot_digest, created_by,
+            idempotency_key, created_at
+          ) SELECT tenant_id, ?, NULL, 0, 'open', 0, id, lifecycle_version,
+            snapshot_digest, digest_format, snapshot_digest, 'test:foreign',
+            'foreign-lineage', created_at FROM plan_drafts WHERE id = ?`,
+        )
+        .run(otherProfile.id, draft.id),
+    ).toThrow(/lineage/i);
+    expect(
+      raw
+        .prepare("DELETE FROM build_profiles WHERE tenant_id = 'default' AND id = ?")
+        .run(profile.id).changes,
+    ).toBe(1);
+    expect(
+      raw.prepare("SELECT count(*) AS count FROM plan_drafts WHERE profile_id = ?").get(profile.id),
+    ).toEqual({ count: 0 });
+    expect(raw.prepare("SELECT count(*) AS count FROM plan_draft_inputs").get()).toEqual({
+      count: 0,
+    });
+    expect(raw.prepare("SELECT count(*) AS count FROM plan_draft_parts").get()).toEqual({
+      count: 0,
+    });
+    database.close();
+  });
+
+  it("rolls back every rebase row when a result Part insert fails", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    const abandoned = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    if (abandoned.kind !== "transitioned") throw new Error("test draft was not abandoned");
+    advanceEmptyAcceptedRevision({
+      raw,
+      profileId: profile.id,
+      parentRevisionId: draft.baseRevisionId,
+    });
+    raw.exec(`
+      CREATE TRIGGER reject_rebased_draft_part
+      BEFORE INSERT ON plan_draft_parts
+      WHEN EXISTS (
+        SELECT 1 FROM plan_drafts draft
+         WHERE draft.id = NEW.draft_id AND draft.rebased_from_draft_id IS NOT NULL
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'injected rebase Part failure');
+      END
+    `);
+    const before = snapshotTables(raw, [
+      ...ACCEPTED_STATE_TABLES,
+      "plan_drafts",
+      "plan_draft_inputs",
+      "plan_draft_parts",
+    ]);
+
+    expect(() =>
+      repo.rebasePlanDraft({
+        profileId: profile.id,
+        sourceDraftId: draft.id,
+        expectedSourceLifecycleVersion: 1,
+        expectedSourceSnapshotDigest: draft.snapshotDigest,
+        actor: "test:user",
+        idempotencyKey: "rollback-rebase",
+      }),
+    ).toThrow(/injected rebase Part failure/i);
     for (const [table, rows] of before) {
       expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(rows);
     }

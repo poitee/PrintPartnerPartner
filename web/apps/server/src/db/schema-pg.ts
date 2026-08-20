@@ -240,6 +240,12 @@ export const planDrafts = pgTable(
     basePlanVersion: integer("base_plan_version").notNull(),
     state: text("state").$type<"open" | "abandoned" | "consumed">().notNull(),
     lifecycleVersion: integer("lifecycle_version").notNull().default(0),
+    rebasedFromDraftId: integer("rebased_from_draft_id").references(
+      (): AnyPgColumn => planDrafts.id,
+      { onDelete: "cascade" },
+    ),
+    rebasedFromLifecycleVersion: integer("rebased_from_lifecycle_version"),
+    rebasedFromSnapshotDigest: text("rebased_from_snapshot_digest"),
     digestFormat: text("digest_format").notNull(),
     snapshotDigest: text("snapshot_digest").notNull(),
     createdBy: text("created_by").notNull(),
@@ -262,6 +268,17 @@ export const planDrafts = pgTable(
     check(
       "chk_plan_drafts_lifecycle_version",
       sql`${t.lifecycleVersion} >= 0 AND ${t.lifecycleVersion} <= 2147483647`,
+    ),
+    check(
+      "chk_plan_drafts_rebase_origin",
+      sql`(${t.rebasedFromDraftId} IS NULL
+            AND ${t.rebasedFromLifecycleVersion} IS NULL
+            AND ${t.rebasedFromSnapshotDigest} IS NULL)
+          OR (${t.rebasedFromDraftId} IS NOT NULL
+            AND ${t.rebasedFromLifecycleVersion} IS NOT NULL
+            AND ${t.rebasedFromSnapshotDigest} IS NOT NULL
+            AND ${t.rebasedFromLifecycleVersion} >= 0
+            AND ${t.rebasedFromLifecycleVersion} <= 2147483647)`,
     ),
   ],
 );
@@ -722,4 +739,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 21;
+export const currentSchemaVersion = 22;

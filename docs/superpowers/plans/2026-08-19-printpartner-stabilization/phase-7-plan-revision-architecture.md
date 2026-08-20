@@ -109,8 +109,39 @@ Other generation mismatches conflict. Resume requires a clean, current accepted
 base; abandon remains available when the base is stale or compatibility-dirty.
 The state and generation update is one scoped compare-and-swap followed by a
 verified read. PostgreSQL returns `transaction_unavailable` until its repository
-has a real transaction path. Routes, UI, rebase, audit timestamps, event history,
-and Apply remain deferred.
+has a real transaction path. Routes, UI, audit timestamps, event history, and
+Apply remain deferred.
+
+Schema v22 adds immutable rebase lineage directly to `plan_drafts`. A rebase
+origin records the abandoned source draft ID, its lifecycle generation, and
+its verified snapshot digest. All three values are present or all are null.
+Both databases require the source and result to share a tenant and Build,
+require the source to be abandoned at the recorded generation and digest, and
+allow only one successor for one source generation. Lineage and lifecycle
+metadata remain outside `plan-draft-v1`.
+
+`rebasePlanDraft` extracts only inclusion and quantity override deltas. A Part
+without an accepted predecessor uses the known recompute baseline of included
+and no quantity override. Matching considers only decision-bearing Parts and
+uses unique accepted projection identity first, then unique Source and Part
+key identity, then unique tracked Source and artifact digest identity when the
+exact key disappeared. Field-level three-way replay accepts unchanged or
+convergent current values and reports deterministic conflicts for divergent
+decisions, ambiguous identity, missing targets, or target collisions.
+
+Retry lookup by actor, Build, and key runs before freshness work. A matching
+rebase origin returns the stored result. A key owned by recompute or another
+origin returns `idempotency_conflict`. A second actor or key for the same source
+generation returns the one stored successor. A same-base request returns
+`base_unchanged` only after confirmation inside an immediate transaction.
+Preparation loads the immutable revision named by the captured base rather
+than following the mutable accepted pointer. SQLite prepares the fresh scan
+outside one immediate write transaction, then repeats retry lookup, verifies
+source integrity and current accepted and input state, inserts the complete
+open result, and verifies it before commit. PostgreSQL remains fail closed
+without a native transaction.
+Rebase does not add edit history, conflict drafts, routes, UI, Apply, or
+Required-unit reconciliation.
 
 Draft recompute accepts `(NULL, 0)` only when the Build also has no live
 compatibility Parts. A null pointer with a nonzero version, or a null pointer
@@ -234,7 +265,7 @@ readAcceptedPlanRevision(buildId): AcceptedPlanRevision | null
 recomputePlanDraft(buildId, actorId): PlanDraft
 applyManifestToPlanDraft(draftId): PlanDraft
 diffPlanDraft(draftId): PlanDraftDiff
-rebasePlanDraft(draftId, actorId): PlanDraft
+rebasePlanDraft(command: RebasePlanDraftCommand): RebasePlanDraftResult
 applyPlanChanges(command: ApplyPlanChanges): ApplyPlanResult
 ```
 
@@ -242,6 +273,11 @@ Contracts own the wire values. Repository code owns tenant-filtered
 persistence. Pure services own canonical serialization, diffing, and
 Required-unit reconciliation. Routes parse actor, expected version, and
 idempotency values at the boundary.
+
+The current saved-draft edit command persists only inclusion and quantity
+override decisions. Source selection, naming, and manifest-derived fields are
+fresh recompute inputs, not additional saved edit operations for rebase to
+replay.
 
 ## Implementation slices
 

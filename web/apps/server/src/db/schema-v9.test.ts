@@ -287,7 +287,7 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v21 tables and records schema version 21", () => {
+  it("creates the v15-v22 tables and records schema version 22", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
       for (const table of [
@@ -303,7 +303,7 @@ describe("schema v9-v13 (SQLite)", () => {
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "21" });
+      ).toMatchObject({ value: "22" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -342,7 +342,7 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("adds and backfills the v21 lifecycle generation", () => {
+  it("adds v22 origin without changing lifecycle state or digest", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-schema-v21-"));
     const databasePath = join(dir, "print-partner.db");
     const legacy = new Database(databasePath);
@@ -374,20 +374,54 @@ describe("schema v9-v13 (SQLite)", () => {
     try {
       expect(
         rawSqlite(upgraded)
-          .prepare("SELECT state, lifecycle_version FROM plan_drafts ORDER BY id")
+          .prepare(
+            `SELECT state, lifecycle_version, snapshot_digest,
+                    rebased_from_draft_id, rebased_from_lifecycle_version,
+                    rebased_from_snapshot_digest
+               FROM plan_drafts ORDER BY id`,
+          )
           .all(),
       ).toEqual([
-        { state: "open", lifecycle_version: 0 },
-        { state: "abandoned", lifecycle_version: 0 },
-        { state: "consumed", lifecycle_version: 0 },
+        {
+          state: "open",
+          lifecycle_version: 0,
+          snapshot_digest: "a",
+          rebased_from_draft_id: null,
+          rebased_from_lifecycle_version: null,
+          rebased_from_snapshot_digest: null,
+        },
+        {
+          state: "abandoned",
+          lifecycle_version: 0,
+          snapshot_digest: "b",
+          rebased_from_draft_id: null,
+          rebased_from_lifecycle_version: null,
+          rebased_from_snapshot_digest: null,
+        },
+        {
+          state: "consumed",
+          lifecycle_version: 0,
+          snapshot_digest: "c",
+          rebased_from_draft_id: null,
+          rebased_from_lifecycle_version: null,
+          rebased_from_snapshot_digest: null,
+        },
       ]);
+      rawSqlite(upgraded)
+        .prepare("INSERT INTO build_profiles (id, tenant_id, name) VALUES (1, 'default', 'Migrated')")
+        .run();
+      expect(() =>
+        rawSqlite(upgraded)
+          .prepare("UPDATE plan_drafts SET rebased_from_draft_id = 2 WHERE id = 1")
+          .run(),
+      ).toThrow(/lineage/i);
     } finally {
       upgraded.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("creates the v21 draft uniqueness and lifecycle declarations in SQLite", () => {
+  it("creates the v22 draft uniqueness, lifecycle, and origin declarations in SQLite", () => {
     withSqlite((sqlite) => {
       const raw = rawSqlite(sqlite);
       const creationKey = raw
@@ -413,6 +447,33 @@ describe("schema v9-v13 (SQLite)", () => {
         .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'plan_drafts'")
         .get() as { sql: string };
       expect(table.sql).toMatch(/lifecycle_version >= 0 AND lifecycle_version <= 2147483647/i);
+      expect(table.sql).toContain("rebased_from_draft_id");
+      expect(
+        raw
+          .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?")
+          .get("uq_plan_drafts_tenant_profile_rebase_source_generation"),
+      ).toBeDefined();
+      expect(
+        raw
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE ?")
+          .all("trg_plan_drafts_lineage_%"),
+      ).toHaveLength(3);
+      const lineageInsert = raw
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_plan_drafts_lineage_insert'",
+        )
+        .get();
+      if (
+        !lineageInsert ||
+        typeof lineageInsert !== "object" ||
+        !("sql" in lineageInsert) ||
+        typeof lineageInsert.sql !== "string"
+      ) {
+        throw new Error("Plan draft lineage insert trigger is missing");
+      }
+      expect(lineageInsert.sql).not.toMatch(
+        /NEW\.rebased_from_draft_id\s*=\s*NEW\.id/i,
+      );
     });
   });
 
@@ -824,8 +885,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(21);
-    expect(pgSchema.currentSchemaVersion).toBe(21);
+    expect(sqliteSchema.currentSchemaVersion).toBe(22);
+    expect(pgSchema.currentSchemaVersion).toBe(22);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -919,7 +980,7 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
     expect(POSTGRES_DDL).toContain("trg_plan_revision_part_projection_owner");
   });
 
-  it("creates the v21 draft snapshot tables and lifecycle guards in Postgres", () => {
+  it("creates the v22 draft snapshot tables and lifecycle guards in Postgres", () => {
     for (const [table, expected] of Object.entries(V20_COLUMNS)) {
       expect(pgCreatedColumns(table)).toEqual(expect.arrayContaining(expected));
     }
@@ -937,7 +998,7 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
     );
     expect(POSTGRES_DDL).toMatch(/lifecycle_version >= 0 AND lifecycle_version <= 2147483647/i);
     expect(POSTGRES_DDL).toMatch(
-      /CREATE TRIGGER trg_plan_drafts_identity_immutable\s+BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version\s+ON plan_drafts\s+FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_identity_immutable\(\)/i,
+      /DROP TRIGGER IF EXISTS trg_plan_drafts_identity_immutable ON plan_drafts;[\s\S]*CREATE TRIGGER trg_plan_drafts_identity_immutable\s+BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version,\s+rebased_from_draft_id, rebased_from_lifecycle_version,\s+rebased_from_snapshot_digest\s+ON plan_drafts\s+FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_identity_immutable\(\)/i,
     );
     expect(POSTGRES_DDL).toMatch(
       /CREATE TRIGGER trg_plan_draft_inputs_ownership_write\s+BEFORE INSERT OR UPDATE ON plan_draft_inputs\s+FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_input_ownership\(\)/i,
@@ -946,8 +1007,16 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
       /CREATE TRIGGER trg_plan_draft_parts_ownership_write\s+BEFORE INSERT OR UPDATE ON plan_draft_parts\s+FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_part_ownership\(\)/i,
     );
     expect(POSTGRES_DDL).toMatch(
-      /BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version\s+ON plan_drafts/i,
+      /BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version,\s+rebased_from_draft_id, rebased_from_lifecycle_version,\s+rebased_from_snapshot_digest\s+ON plan_drafts/i,
     );
+    expect(POSTGRES_DDL).toContain("chk_plan_drafts_rebase_origin");
+    expect(POSTGRES_DDL).toContain(
+      "uq_plan_drafts_tenant_profile_rebase_source_generation",
+    );
+    expect(POSTGRES_DDL).toMatch(
+      /source\.state = 'abandoned'[\s\S]*source\.lifecycle_version = NEW\.rebased_from_lifecycle_version[\s\S]*source\.snapshot_digest = NEW\.rebased_from_snapshot_digest/i,
+    );
+    expect(POSTGRES_DDL).toMatch(/source\.id <> NEW\.id/i);
   });
 
   it("adds v13 profile-sync provenance columns on slicer profile tables", () => {

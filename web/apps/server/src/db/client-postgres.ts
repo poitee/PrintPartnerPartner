@@ -692,6 +692,9 @@ export const postgresPostInitMigrations: string[] = [
     lifecycle_version INTEGER NOT NULL DEFAULT 0
       CONSTRAINT chk_plan_drafts_lifecycle_version
       CHECK (lifecycle_version >= 0 AND lifecycle_version <= 2147483647),
+    rebased_from_draft_id INTEGER REFERENCES plan_drafts(id) ON DELETE CASCADE,
+    rebased_from_lifecycle_version INTEGER,
+    rebased_from_snapshot_digest TEXT,
     digest_format TEXT NOT NULL,
     snapshot_digest TEXT NOT NULL,
     created_by TEXT NOT NULL,
@@ -700,6 +703,16 @@ export const postgresPostInitMigrations: string[] = [
     CONSTRAINT chk_plan_drafts_base CHECK (
       (base_revision_id IS NULL AND base_plan_version = 0)
       OR (base_revision_id IS NOT NULL AND base_plan_version > 0)
+    ),
+    CONSTRAINT chk_plan_drafts_rebase_origin CHECK (
+      (rebased_from_draft_id IS NULL
+        AND rebased_from_lifecycle_version IS NULL
+        AND rebased_from_snapshot_digest IS NULL)
+      OR (rebased_from_draft_id IS NOT NULL
+        AND rebased_from_lifecycle_version IS NOT NULL
+        AND rebased_from_snapshot_digest IS NOT NULL
+        AND rebased_from_lifecycle_version >= 0
+        AND rebased_from_lifecycle_version <= 2147483647)
     )
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_drafts_tenant_actor_profile_key
@@ -707,6 +720,14 @@ export const postgresPostInitMigrations: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_plan_drafts_tenant_profile_created
     ON plan_drafts (tenant_id, profile_id, created_at, id)`,
   `ALTER TABLE plan_drafts ADD COLUMN IF NOT EXISTS lifecycle_version INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE plan_drafts ADD COLUMN IF NOT EXISTS rebased_from_draft_id INTEGER
+    REFERENCES plan_drafts(id) ON DELETE CASCADE`,
+  `ALTER TABLE plan_drafts ADD COLUMN IF NOT EXISTS rebased_from_lifecycle_version INTEGER`,
+  `ALTER TABLE plan_drafts ADD COLUMN IF NOT EXISTS rebased_from_snapshot_digest TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_drafts_tenant_profile_rebase_source_generation
+    ON plan_drafts (
+      tenant_id, profile_id, rebased_from_draft_id, rebased_from_lifecycle_version
+    ) WHERE rebased_from_draft_id IS NOT NULL`,
   `DO $block$
     BEGIN
       IF NOT EXISTS (
@@ -714,6 +735,24 @@ export const postgresPostInitMigrations: string[] = [
       ) THEN
         ALTER TABLE plan_drafts ADD CONSTRAINT chk_plan_drafts_lifecycle_version
           CHECK (lifecycle_version >= 0 AND lifecycle_version <= 2147483647);
+      END IF;
+    END
+  $block$`,
+  `DO $block$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_plan_drafts_rebase_origin'
+      ) THEN
+        ALTER TABLE plan_drafts ADD CONSTRAINT chk_plan_drafts_rebase_origin CHECK (
+          (rebased_from_draft_id IS NULL
+            AND rebased_from_lifecycle_version IS NULL
+            AND rebased_from_snapshot_digest IS NULL)
+          OR (rebased_from_draft_id IS NOT NULL
+            AND rebased_from_lifecycle_version IS NOT NULL
+            AND rebased_from_snapshot_digest IS NOT NULL
+            AND rebased_from_lifecycle_version >= 0
+            AND rebased_from_lifecycle_version <= 2147483647)
+        );
       END IF;
     END
   $block$`,
@@ -781,6 +820,18 @@ export const postgresPostInitMigrations: string[] = [
       ) THEN
         RAISE EXCEPTION 'Plan draft ownership violation';
       END IF;
+      IF TG_OP = 'INSERT' AND NEW.rebased_from_draft_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM plan_drafts source
+         WHERE source.id = NEW.rebased_from_draft_id
+           AND source.id <> NEW.id
+           AND source.tenant_id = NEW.tenant_id
+           AND source.profile_id = NEW.profile_id
+           AND source.state = 'abandoned'
+           AND source.lifecycle_version = NEW.rebased_from_lifecycle_version
+           AND source.snapshot_digest = NEW.rebased_from_snapshot_digest
+      ) THEN
+        RAISE EXCEPTION 'Plan draft rebase lineage violation';
+      END IF;
       RETURN NEW;
     END
   $function$ LANGUAGE plpgsql`,
@@ -825,7 +876,10 @@ export const postgresPostInitMigrations: string[] = [
       IF NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
         OR NEW.profile_id IS DISTINCT FROM OLD.profile_id
         OR NEW.base_revision_id IS DISTINCT FROM OLD.base_revision_id
-        OR NEW.base_plan_version IS DISTINCT FROM OLD.base_plan_version THEN
+        OR NEW.base_plan_version IS DISTINCT FROM OLD.base_plan_version
+        OR NEW.rebased_from_draft_id IS DISTINCT FROM OLD.rebased_from_draft_id
+        OR NEW.rebased_from_lifecycle_version IS DISTINCT FROM OLD.rebased_from_lifecycle_version
+        OR NEW.rebased_from_snapshot_digest IS DISTINCT FROM OLD.rebased_from_snapshot_digest THEN
         RAISE EXCEPTION 'Plan draft identity is immutable';
       END IF;
       RETURN NEW;
@@ -833,12 +887,13 @@ export const postgresPostInitMigrations: string[] = [
   $function$ LANGUAGE plpgsql`,
   `DO $block$
     BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_drafts_identity_immutable') THEN
-        CREATE TRIGGER trg_plan_drafts_identity_immutable
-          BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version
-          ON plan_drafts
-          FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_identity_immutable();
-      END IF;
+      DROP TRIGGER IF EXISTS trg_plan_drafts_identity_immutable ON plan_drafts;
+      CREATE TRIGGER trg_plan_drafts_identity_immutable
+        BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version,
+          rebased_from_draft_id, rebased_from_lifecycle_version,
+          rebased_from_snapshot_digest
+        ON plan_drafts
+        FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_identity_immutable();
     END
   $block$`,
   `CREATE OR REPLACE FUNCTION validate_plan_draft_input_ownership() RETURNS trigger AS $function$
