@@ -51,18 +51,20 @@ import {
   deleteProfileLayer,
   fetchPlanLayers,
   fetchSourceCategories,
-  fetchSources,
   fetchStlNaming,
   replaceProfileLayer,
   setProfileBaseLayer,
   startRecompute,
-  updateSource,
   type ProfileLayer,
   type RoleFilamentRow,
-  type SourceSummary,
   DEFAULT_STL_NAMING_PROFILE,
   type StlNamingProfile,
 } from "../api/engine";
+import {
+  useSourcesQuery,
+  useUpdateSourceMutation,
+  type SourceSummary,
+} from "../queries/sources";
 import { buildRoute, exportRoute, libraryRoute } from "../lib/routes";
 import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { takeKitImportResult } from "../lib/kitImportStash";
@@ -89,6 +91,8 @@ import {
 type BuildLocationState = {
   kitImport?: KitImportJobResult;
 };
+
+const EMPTY_SOURCES: SourceSummary[] = [];
 
 export default function BuildPage() {
   return <BuildPageContent />;
@@ -117,7 +121,6 @@ function BuildPageContent() {
   const previousSelectedProfileIdRef = useRef<number | null | undefined>(undefined);
 
   const [layers, setLayers] = useState<ProfileLayer[]>([]);
-  const [sources, setSources] = useState<SourceSummary[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [categoryError, setCategoryError] = useState<string | null>(null);
   const [addonSourceId, setAddonSourceId] = useState("");
@@ -137,6 +140,15 @@ function BuildPageContent() {
     error: engineError,
   });
   const engineReady = engineState === "ready";
+  const sourcesQuery = useSourcesQuery(engineReady);
+  const sources = sourcesQuery.data ?? EMPTY_SOURCES;
+  const updateSourceMutation = useUpdateSourceMutation();
+  const sourceQueryError =
+    sourcesQuery.error instanceof Error
+      ? sourcesQuery.error.message
+      : sourcesQuery.error
+        ? String(sourcesQuery.error)
+        : null;
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
   const buildStale = selectedProfile?.freshness.status === "stale";
@@ -215,12 +227,8 @@ function BuildPageContent() {
         ),
       );
     try {
-      const [layerRows, sourceRows] = await Promise.all([
-        fetchPlanLayers(profileId),
-        fetchSources(),
-      ]);
+      const layerRows = await fetchPlanLayers(profileId);
       setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
-      setSources(sourceRows);
       setLoadedProfileId(profileId);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -238,8 +246,10 @@ function BuildPageContent() {
       const next = category?.trim() || null;
       if (previous === next) return;
       try {
-        const updated = await updateSource(sourceId, { category: next });
-        setSources((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+        const updated = await updateSourceMutation.mutateAsync({
+          id: sourceId,
+          body: { category: next },
+        });
         toast.success(
           next
             ? `Moved “${updated.name}” to ${next}`
@@ -249,7 +259,7 @@ function BuildPageContent() {
         toast.error(e instanceof Error ? e.message : String(e));
       }
     },
-    [sources],
+    [sources, updateSourceMutation],
   );
 
   useEffect(() => {
@@ -295,13 +305,9 @@ function BuildPageContent() {
           }
         });
       try {
-        const [layerRows, sourceRows] = await Promise.all([
-          fetchPlanLayers(selectedProfileId),
-          fetchSources(),
-        ]);
+        const layerRows = await fetchPlanLayers(selectedProfileId);
         if (cancelled) return;
         setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
-        setSources(sourceRows);
         setLoadedProfileId(selectedProfileId);
       } catch (e) {
         if (!cancelled) {
@@ -456,17 +462,27 @@ function BuildPageContent() {
     error: loadError,
     hasData: hasProfileData,
   });
+  const sourcesState = resolveResourceState({
+    loading: sourcesQuery.isLoading,
+    error: sourceQueryError,
+    hasData: sourcesQuery.data != null,
+  });
   const profilesBackgroundError = getBackgroundError(
     profilesError,
     profiles.length > 0,
   );
   const profileDataBackgroundError = getBackgroundError(loadError, hasProfileData);
+  const sourcesBackgroundError = getBackgroundError(
+    sourceQueryError,
+    sourcesQuery.data != null,
+  );
   const workspaceReady =
     engineReady &&
     profilesState === "ready" &&
     profiles.length > 0 &&
     selectedProfileId != null &&
-    profileDataState === "ready";
+    profileDataState === "ready" &&
+    sourcesState === "ready";
 
   const onUpdateBuild = async () => {
     if (selectedProfileId == null) return;
@@ -609,13 +625,19 @@ function BuildPageContent() {
 
       <DeskNextStep>{planNextStep}</DeskNextStep>
 
-      {(profilesBackgroundError || profileDataBackgroundError || categoryError) && (
+      {(profilesBackgroundError ||
+        profileDataBackgroundError ||
+        sourcesBackgroundError ||
+        categoryError) && (
         <div className="space-y-1 text-sm text-destructive" role="alert">
           {profilesBackgroundError && (
             <p>Could not refresh plans: {profilesBackgroundError}</p>
           )}
           {profileDataBackgroundError && (
             <p>Could not refresh plan: {profileDataBackgroundError}</p>
+          )}
+          {sourcesBackgroundError && (
+            <p>Could not refresh sources: {sourcesBackgroundError}</p>
           )}
           {categoryError && <p>{categoryError}</p>}
         </div>
@@ -699,6 +721,27 @@ function BuildPageContent() {
           title="Select a plan"
           description="Choose a plan in the sidebar plan picker (or the mobile plan switcher in the header)."
         />
+      ) : sourcesState === "loading" ? (
+        <Card className="border-border shadow-sm">
+          <CardContent className="pt-6">
+            <p className="text-sm text-muted-foreground">Loading sources…</p>
+          </CardContent>
+        </Card>
+      ) : sourcesState === "error" ? (
+        <Card className="border-destructive/40 bg-destructive/5 shadow-none">
+          <CardContent className="space-y-3 pt-6">
+            <p className="text-sm text-destructive">
+              Could not load sources: {sourceQueryError}
+            </p>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void sourcesQuery.refetch()}
+            >
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       ) : profileDataState === "loading" ? (
         <Card className="border-border shadow-sm">
           <CardContent className="pt-6">
@@ -732,6 +775,7 @@ function BuildPageContent() {
             profileId={kitImportSetup.profile_id}
             onDismiss={() => setKitImportSetup(null)}
             onSourcesChanged={() => {
+              void sourcesQuery.refetch();
               if (selectedProfileId != null) void loadProfileData(selectedProfileId);
             }}
           />

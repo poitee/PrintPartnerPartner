@@ -41,14 +41,13 @@ type Props = {
   disabled?: boolean;
 };
 
-/** Inline source attach and sync from the Build page. */
 export default function BuildSourcesPanel({
   profileId,
   layers,
   onLayersChange,
   disabled,
 }: Props) {
-  const { data: sources = [], refetch } = useSourcesQuery();
+  const { data: sources = [] } = useSourcesQuery();
   const syncJob = useJobRunner("sync");
   const [addonSourceId, setAddonSourceId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -72,7 +71,6 @@ export default function BuildSourcesPanel({
         if (snap.status === "error") toast.error(snap.message || "Sync failed");
         else {
           toast.success("Source synced");
-          void refetch();
         }
       },
       { sourceIds: [sourceId] },

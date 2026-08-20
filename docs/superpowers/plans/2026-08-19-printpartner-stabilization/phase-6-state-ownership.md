@@ -7,6 +7,9 @@
 Remove competing source and plan snapshots from pages, panels, context, and the
 workflow indicator.
 
+The Source-list migration follows the
+[Source state ownership architecture](phase-6-source-state-architecture.md).
+
 ## Changes
 
 - Define query-backed feature modules for sources and plan revisions.

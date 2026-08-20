@@ -147,7 +147,7 @@ export default function SettingsPage() {
   const { updateCheck, refresh: refreshUpdateCheck } = useAppUpdateCheck(engineReady);
   const [updateCheckRefreshing, setUpdateCheckRefreshing] = useState(false);
   const { busy: updateBusy, message: updateMessage, runJob: runUpdateJob } =
-    useJobRunner("source-updates");
+    useJobRunner("check-source-updates");
   const [filaments, setFilaments] = useState<CustomFilament[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [newFilamentName, setNewFilamentName] = useState("");
