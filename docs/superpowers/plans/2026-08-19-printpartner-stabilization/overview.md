@@ -197,5 +197,7 @@ than treating component tests as proof of the user journey.
 
 ## Current stop point
 
-Phases 0 through 3 are complete. Phase 4, release identity repair, is the next
-implementation unit. Later phases remain documented but have not started.
+Phases 0 through 3 are complete. Phase 4's local release repair is implemented
+and prepared for `3.2.0`; the phase remains open until an explicitly approved
+tag push proves the public image, release asset, and runtime identity. Later
+phases remain documented but have not started.

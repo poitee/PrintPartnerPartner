@@ -35,8 +35,9 @@ export async function registerHealthRoutes(
     return {
       ok: dbOk,
       version: config.version,
-      semver: getBuildSemver(),
-      build: getVersionInfo(),
+      semver: getBuildSemver(config.releaseIdentity),
+      build: getVersionInfo(config.releaseIdentity),
+      release: config.releaseIdentity,
       deploy_mode: config.deployMode,
       multi_user: config.multiUser,
       data_dir: config.dataDir,

@@ -385,6 +385,17 @@ export type ApiV1Index = {
   health: string;
 };
 
+export type RuntimeReleaseIdentity = {
+  version: string;
+  runtime_version: string;
+  commit: string | null;
+  tag: string | null;
+  image_digest: string | null;
+  deployment_mode: DeployMode;
+  github_release_url: string | null;
+  build_date: string | null;
+};
+
 export type HealthResponse = {
   ok: boolean;
   version: string;
@@ -394,6 +405,7 @@ export type HealthResponse = {
   port?: number;
   api_version?: string;
   capabilities?: string[];
+  release?: RuntimeReleaseIdentity;
   db?: {
     connected: boolean;
     driver: string;

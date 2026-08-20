@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 
 SCRIPT = Path(__file__).with_name("workflow-smoke.sh")
+RELEASE_WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "release.yml"
 
 
 class SmokeHandler(BaseHTTPRequestHandler):
@@ -125,6 +126,45 @@ class WorkflowSmokeTests(unittest.TestCase):
     def test_rejects_non_success_asset_response(self) -> None:
         result = self.run_smoke(asset_status=500)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class ReleaseWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = RELEASE_WORKFLOW.read_text()
+
+    def test_peels_annotated_tag_before_any_image_publish(self) -> None:
+        peel = self.workflow.index('git rev-parse "refs/tags/${TAG}^{}"')
+        publish = self.workflow.index("Build and push candidate image")
+        self.assertIn("fetch-depth: 0", self.workflow)
+        self.assertLess(peel, publish)
+
+    def test_does_not_mutate_package_visibility(self) -> None:
+        self.assertNotIn("visibility", self.workflow.lower())
+        self.assertNotIn("/packages/container/", self.workflow)
+
+    def test_release_precedes_create_or_verify_version_alias(self) -> None:
+        release = self.workflow.index("Create or verify GitHub Release")
+        version_alias = self.workflow.index("Create or verify immutable version alias")
+        latest = self.workflow.index("Advance latest convenience alias")
+        self.assertLess(release, version_alias)
+        self.assertLess(version_alias, latest)
+        self.assertIn('test "$existing" = "$DIGEST"', self.workflow)
+        self.assertIn("group: release-publication", self.workflow)
+        self.assertIn('latest_release="$(gh release view', self.workflow)
+
+    def test_attaches_and_verifies_release_identity_asset(self) -> None:
+        self.assertIn("render-asset", self.workflow)
+        self.assertIn("release-identity.json", self.workflow)
+        self.assertIn("cmp --silent", self.workflow)
+
+    def test_verifies_index_and_platform_descriptor_annotations(self) -> None:
+        self.assertIn("index:org.opencontainers.image.revision", self.workflow)
+        self.assertIn(
+            "manifest-descriptor:org.opencontainers.image.revision", self.workflow
+        )
+        self.assertIn("all(.manifests[] | select(", self.workflow)
+        self.assertIn(".platform.architecture == \"arm64\"", self.workflow)
 
 
 if __name__ == "__main__":

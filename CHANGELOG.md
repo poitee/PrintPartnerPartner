@@ -6,8 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-08-20
+
 ### Added
 
+- **Verifiable release identity** — one release command now prepares and checks
+  every current version sink. Release images carry the peeled Git commit and
+  tag in runtime health and OCI metadata; GitHub Releases attach the image
+  digest in `release-identity.json`.
 - **Multi-printer 3MF print plan** — Export uses the kit’s enabled fleet machines (Settings → Printer fleet + Export “Printers for this plan”). Parts assign by loaded `filament_color_id`, pack per bed, and write one 3MF per plate (zip / single-offset / single-plate-only modes) plus a `print_plan.json` manifest. Settings slots use the filament catalog picker; Export shows a printer → filament → parts assignment tree and per-printer plate estimates. Preview packing, assignment warnings, and checkbox state honor the same enabled-printer fallback as export. Plate filenames include the printer id so duplicate names cannot overwrite each other. See `docs/3MF_EXPORT_VALIDATION.md`.
 - **Auto-sync missing STLs + background thumbs (GRE-235)** — when a plan is selected (or Parts opens / compose applies) and STLs are missing or thumbs are empty, one coordinated job syncs sources then regenerates thumbnails. Parts shows Spinner + “Syncing STLs…” while running; Sync remains as retry on failure or if files are still gone. Review parts expose `stl_missing` / `thumb_empty` (distinct from checkoff `missing`).
 - **HTTP MCP attach (GRE-225)** — streamable HTTP at `/api/v1/mcp`; `PRINT_PARTNER_API_KEY` required unless `HOST` is loopback; pending proposes are per MCP session; Cursor plugin at `cursor-plugin/print-partner`; tools `get_remaining`, `duplicate_plan`, `archive_plan` (confirm-to-apply). Connect guide: `docs/assistant-mcp.md`.
@@ -36,10 +42,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 - **Color editor redesign** — the Build tab's "Colors by part type" section now uses a click-to-open color picker per role: a custom-color (hex) field plus a searchable filament catalog shown as product-thumbnail + name rows. Selected catalog colors show their product photo on the role swatch.
-- **Version alignment** — `PP_VERSION` defaults, Docker/Compose, package metadata, and deployment docs now use `3.1.0`, matching the latest repository release tag so update checks and deployments agree.
+- **Release publication order** — CI validates the annotated tag before
+  publishing, creates the GitHub Release before the immutable version image
+  alias, verifies matching existing artifacts on retry, and advances `latest`
+  only after the release identity passes.
 
 ### Fixed
 
+- **Failed `v3.1.0` publication path** — removed the unsupported GHCR visibility
+  mutation that previously allowed an image push to succeed before GitHub
+  Release creation failed. The disconnected historical tag remains unchanged.
 - **Kit-import setup panel** — the "Share import setup" panel now reliably appears after importing a shared build; the `?profile=` URL sync no longer drops the navigation state, and the import result is also handed off via a sessionStorage stash as a fallback.
 
 ## [3.1.0] - 2026-08-15
@@ -240,3 +252,5 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 [0.2.0]: https://github.com/poitee/PrintPartnerPartner/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/poitee/PrintPartnerPartner/releases/tag/v0.1.0
 [3.1.0]: https://github.com/poitee/PrintPartnerPartner/compare/v3.0.0...v3.1.0
+[Unreleased]: https://github.com/poitee/PrintPartnerPartner/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/poitee/PrintPartnerPartner/releases/tag/v3.2.0

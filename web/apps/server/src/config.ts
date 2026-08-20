@@ -1,4 +1,11 @@
-import type { AiProviderId, DeployMode, SearchProviderId } from "@print-partner/contracts";
+import type {
+  AiProviderId,
+  DeployMode,
+  RuntimeReleaseIdentity,
+  SearchProviderId,
+} from "@print-partner/contracts";
+import { createRequire } from "node:module";
+import { resolveRuntimeReleaseIdentity } from "./lib/version.js";
 
 export type { DeployMode, AiProviderId, SearchProviderId };
 
@@ -25,6 +32,7 @@ export type ServerConfig = {
   /** Shared slicer exchange volume root (host path). Empty disables managed open. */
   exchangeDir: string;
   version: string;
+  releaseIdentity: RuntimeReleaseIdentity;
   corsOrigin: string | boolean | string[];
   staticDir: string | null;
   databaseUrl: string | null;
@@ -120,6 +128,8 @@ export type ServerConfig = {
 };
 
 const DEFAULT_DATA_DIR = process.env.PRINT_PARTNER_DATA_DIR ?? "./data";
+const require = createRequire(import.meta.url);
+const appPackage = require("../../../package.json") as { version: string };
 
 function parseDeployMode(raw: string | undefined): DeployMode {
   if (raw === "saas") return "saas";
@@ -213,6 +223,11 @@ function aiCredentialsPresent(
 
 export function loadConfig(): ServerConfig {
   const deployMode = parseDeployMode(process.env.DEPLOY_MODE);
+  const releaseIdentity = resolveRuntimeReleaseIdentity({
+    packageVersion: appPackage.version,
+    deployMode,
+    env: process.env,
+  });
   const port = Number(process.env.PORT ?? 18765);
   const host = process.env.HOST ?? "127.0.0.1";
   const dataDir =
@@ -275,7 +290,8 @@ export function loadConfig(): ServerConfig {
     dataDir,
     trustProxy: process.env.TRUST_PROXY === "1",
     exchangeDir: (process.env.PP_EXCHANGE_DIR ?? "").trim() || "/exchange",
-    version: process.env.PP_VERSION ?? "3.1.0-web",
+    version: releaseIdentity.runtime_version,
+    releaseIdentity,
     corsOrigin: parseCorsOrigin(process.env.ALLOWED_ORIGINS ?? process.env.CORS_ORIGIN),
     staticDir: process.env.STATIC_DIR ?? null,
     databaseUrl: process.env.DATABASE_URL ?? null,

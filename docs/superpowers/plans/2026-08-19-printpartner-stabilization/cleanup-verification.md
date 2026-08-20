@@ -19,7 +19,7 @@ Run from `web/` unless noted otherwise:
 | Legacy settings compatibility | `npm run test --workspace @print-partner/server -- --run src/assistant/resolve-assistant.test.ts` | 11 passed, including a persisted SearXNG setting overriding a conflicting environment provider |
 | Compose | `docker compose ... config -q` from the repository root | Base, SaaS, and base plus `pp-compose.yml` overlay passed |
 | Manifest validation | `/tmp/printpartner-manifest-venv/bin/python -m unittest discover -s manifests/tests -v` | 9 passed |
-| Shell syntax | `bash -n scripts/release.sh web/scripts/workflow-smoke.sh` | Passed |
+| Release command | `npm run test:release` | Passed; preparation, dry-run, tag peeling, and identity rendering covered |
 | Notice copies | `cmp THIRD_PARTY_NOTICES.md web/apps/server/src/data/legal/THIRD_PARTY_NOTICES.md` | Identical |
 | Diff whitespace | `git diff --check` | Passed |
 

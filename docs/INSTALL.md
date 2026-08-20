@@ -181,9 +181,9 @@ docker compose pull && docker compose up -d
 
 Use a [personal access token](https://github.com/settings/tokens) with `read:packages` scope, or `gh auth token` after `gh auth login`.
 
-Release tags should publish the image as public automatically; if pull still fails on a fresh clone, use option 1 while waiting for the maintainer to fix package visibility.
-
-**Note:** The first release cut after the GHCR visibility workflow was added may still require a one-time manual **Make public** on the GitHub Packages page (`Package settings → Change visibility`) if `docker compose pull` fails before that release runs.
+Package visibility is managed once from the GitHub Packages settings page; the
+release workflow does not change it. If an anonymous pull fails on a fresh
+clone, use option 1 and report the package-access problem to the maintainer.
 
 ### Build fails or container exits immediately
 

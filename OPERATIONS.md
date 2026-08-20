@@ -68,6 +68,7 @@ keys when independent revocation is needed.
 
 ### Check System Status
 
+<!-- release-version:start -->
 ```bash
 # Health check
 curl http://localhost:8080/health | jq .
@@ -75,12 +76,19 @@ curl http://localhost:8080/health | jq .
 # Expected response:
 # {
 #   "ok": true,
-#   "version": "3.1.0",
+#   "version": "3.2.0-web",
+#   "release": {
+#     "version": "3.2.0",
+#     "commit": "abc1234...",
+#     "tag": "v3.2.0",
+#     "deployment_mode": "self-host"
+#   },
 #   "db": { "connected": true, "driver": "sqlite" },
 #   "capabilities": [...],
-#   "semver": "v3.1.0+abc1234"
+#   "semver": "v3.2.0+abc1234"
 # }
 ```
+<!-- release-version:end -->
 
 ### Create Backups
 
@@ -463,6 +471,8 @@ services:
 ---
 
 Last updated: August 15, 2026  
-Version: 3.1.0+main
+<!-- release-version:start -->
+Prepared for: 3.2.0
+<!-- release-version:end -->
 
 For more info: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md)
