@@ -60,6 +60,72 @@ export const profileLayers = sqliteTable("profile_layers", {
   projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
 });
 
+export const sourceRevisions = sqliteTable(
+  "source_revisions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "restrict" }),
+    upstreamRevisionKey: text("upstream_revision_key").notNull(),
+    manifestDigest: text("manifest_digest").notNull(),
+    snapshotLocator: text("snapshot_locator").notNull(),
+    syncedAt: text("synced_at").notNull(),
+    completeness: text("completeness").notNull().default("complete"),
+  },
+  (t) => [
+    uniqueIndex("uq_source_revisions_tenant_source_upstream").on(
+      t.tenantId,
+      t.projectId,
+      t.upstreamRevisionKey,
+    ),
+  ],
+);
+
+export const planRevisionInputSets = sqliteTable(
+  "plan_revision_input_sets",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    inputSetDigest: text("input_set_digest").notNull(),
+    expectedInputCount: integer("expected_input_count").notNull(),
+    recordedAt: text("recorded_at").notNull(),
+    publishedAt: text("published_at"),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_revision_input_sets_tenant_plan_digest").on(
+      t.tenantId,
+      t.profileId,
+      t.inputSetDigest,
+    ),
+  ],
+);
+
+export const planRevisionInputs = sqliteTable(
+  "plan_revision_inputs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    inputSetId: integer("input_set_id")
+      .notNull()
+      .references(() => planRevisionInputSets.id, { onDelete: "cascade" }),
+    sourceRevisionId: integer("source_revision_id")
+      .notNull()
+      .references(() => sourceRevisions.id, { onDelete: "restrict" }),
+    manifestDigest: text("manifest_digest").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_revision_inputs_set_revision").on(
+      t.inputSetId,
+      t.sourceRevisionId,
+    ),
+  ],
+);
+
 export const parts = sqliteTable("parts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
@@ -446,7 +512,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 15;
+export const currentSchemaVersion = 16;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -780,4 +846,43 @@ export const schemaMigrations: string[] = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  // v16 — immutable Source revision identities and atomically published Plan inputs.
+  `CREATE TABLE IF NOT EXISTS source_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    upstream_revision_key TEXT NOT NULL,
+    manifest_digest TEXT NOT NULL,
+    snapshot_locator TEXT NOT NULL,
+    synced_at TEXT NOT NULL,
+    completeness TEXT NOT NULL DEFAULT 'complete' CHECK (completeness = 'complete')
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_source_revisions_tenant_source_upstream
+    ON source_revisions (tenant_id, project_id, upstream_revision_key)`,
+  `CREATE INDEX IF NOT EXISTS idx_source_revisions_tenant_source_synced
+    ON source_revisions (tenant_id, project_id, synced_at)`,
+  `CREATE TABLE IF NOT EXISTS plan_revision_input_sets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    input_set_digest TEXT NOT NULL,
+    expected_input_count INTEGER NOT NULL,
+    recorded_at TEXT NOT NULL,
+    published_at TEXT
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_input_sets_tenant_plan_digest
+    ON plan_revision_input_sets (tenant_id, profile_id, input_set_digest)`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_revision_input_sets_tenant_plan_published
+    ON plan_revision_input_sets (tenant_id, profile_id, published_at)`,
+  `CREATE TABLE IF NOT EXISTS plan_revision_inputs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    input_set_id INTEGER NOT NULL REFERENCES plan_revision_input_sets(id) ON DELETE CASCADE,
+    source_revision_id INTEGER NOT NULL REFERENCES source_revisions(id) ON DELETE RESTRICT,
+    manifest_digest TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_inputs_set_revision
+    ON plan_revision_inputs (input_set_id, source_revision_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_revision_inputs_tenant_set
+    ON plan_revision_inputs (tenant_id, input_set_id)`,
 ];

@@ -48,6 +48,41 @@ const V14_TABLES = [
 
 const V15_TABLES = ["slicer_instances"];
 
+const V16_TABLES = [
+  "source_revisions",
+  "plan_revision_input_sets",
+  "plan_revision_inputs",
+];
+
+const V16_COLUMNS: Record<string, string[]> = {
+  source_revisions: [
+    "id",
+    "tenant_id",
+    "project_id",
+    "upstream_revision_key",
+    "manifest_digest",
+    "snapshot_locator",
+    "synced_at",
+    "completeness",
+  ],
+  plan_revision_input_sets: [
+    "id",
+    "tenant_id",
+    "profile_id",
+    "input_set_digest",
+    "expected_input_count",
+    "recorded_at",
+    "published_at",
+  ],
+  plan_revision_inputs: [
+    "id",
+    "tenant_id",
+    "input_set_id",
+    "source_revision_id",
+    "manifest_digest",
+  ],
+};
+
 /** Profile-sync provenance columns (schema v13) on the three slicer profile tables. */
 const PROFILE_PROVENANCE_COLUMNS = ["source_path", "synced_from_slicer_version", "last_synced_at"];
 
@@ -117,17 +152,25 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15 slicer_instances table and records schema version 15", () => {
+  it("creates the v15-v16 tables and records schema version 16", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
-      for (const table of V15_TABLES) {
+      for (const table of [...V15_TABLES, ...V16_TABLES]) {
         expect(tables, `missing table ${table}`).toContain(table);
       }
       expect(
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "15" });
+      ).toMatchObject({ value: "16" });
+    });
+  });
+
+  it("creates every v16 revision column", () => {
+    withSqlite((sqlite) => {
+      for (const [table, expected] of Object.entries(V16_COLUMNS)) {
+        expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
+      }
     });
   });
 
@@ -356,8 +399,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(15);
-    expect(pgSchema.currentSchemaVersion).toBe(15);
+    expect(sqliteSchema.currentSchemaVersion).toBe(16);
+    expect(pgSchema.currentSchemaVersion).toBe(16);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -382,6 +425,15 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
       const present = new Set([...pgCreatedColumns(table), ...pgAddedColumns(table)]);
       const missing = declaredCols!.filter((c) => !present.has(c.toLowerCase()));
       expect(missing, `Postgres DDL for ${table} is missing: ${missing.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("creates every v16 revision column in Postgres DDL", () => {
+    for (const [table, expected] of Object.entries(V16_COLUMNS)) {
+      const present = new Set([...pgCreatedColumns(table), ...pgAddedColumns(table)]);
+      for (const column of expected) {
+        expect(present.has(column), `Postgres ${table} never gets column ${column}`).toBe(true);
+      }
     }
   });
 

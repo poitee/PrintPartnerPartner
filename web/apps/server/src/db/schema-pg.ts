@@ -62,6 +62,72 @@ export const profileLayers = pgTable("profile_layers", {
   projectId: integer("project_id").references(() => projects.id, { onDelete: "set null" }),
 });
 
+export const sourceRevisions = pgTable(
+  "source_revisions",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "restrict" }),
+    upstreamRevisionKey: text("upstream_revision_key").notNull(),
+    manifestDigest: text("manifest_digest").notNull(),
+    snapshotLocator: text("snapshot_locator").notNull(),
+    syncedAt: text("synced_at").notNull(),
+    completeness: text("completeness").notNull().default("complete"),
+  },
+  (t) => [
+    uniqueIndex("uq_source_revisions_tenant_source_upstream").on(
+      t.tenantId,
+      t.projectId,
+      t.upstreamRevisionKey,
+    ),
+  ],
+);
+
+export const planRevisionInputSets = pgTable(
+  "plan_revision_input_sets",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    inputSetDigest: text("input_set_digest").notNull(),
+    expectedInputCount: integer("expected_input_count").notNull(),
+    recordedAt: text("recorded_at").notNull(),
+    publishedAt: text("published_at"),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_revision_input_sets_tenant_plan_digest").on(
+      t.tenantId,
+      t.profileId,
+      t.inputSetDigest,
+    ),
+  ],
+);
+
+export const planRevisionInputs = pgTable(
+  "plan_revision_inputs",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    inputSetId: integer("input_set_id")
+      .notNull()
+      .references(() => planRevisionInputSets.id, { onDelete: "cascade" }),
+    sourceRevisionId: integer("source_revision_id")
+      .notNull()
+      .references(() => sourceRevisions.id, { onDelete: "restrict" }),
+    manifestDigest: text("manifest_digest").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_revision_inputs_set_revision").on(
+      t.inputSetId,
+      t.sourceRevisionId,
+    ),
+  ],
+);
+
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),
   tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
@@ -445,4 +511,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 15;
+export const currentSchemaVersion = 16;

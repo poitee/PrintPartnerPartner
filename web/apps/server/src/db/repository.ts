@@ -26,6 +26,7 @@ import {
   loadSourceCategories,
   normalizeSourceCategories,
 } from "@print-partner/domain";
+import { createHash } from "node:crypto";
 import { inArray } from "drizzle-orm";
 import { applyManifestToProfile } from "../services/manifest-apply.js";
 import { loadKitManifest, saveKitManifest, type KitManifestRecord } from "../services/kit-manifest-store.js";
@@ -51,8 +52,21 @@ import { getColorById, resolvePartFilamentHex } from "../services/filament-catal
 import type { FilamentResolveContext } from "../services/filament-resolve.js";
 import { formatSpoolSummaryBadge } from "../integrations/spoolman-client.js";
 import { REMOTE_CHECKED_AT_KEY, REMOTE_UPDATE_STATUS_KEY } from "../services/source-update-check.js";
-import type { PartRow, ProfileSummary, SourceSummary, PlanDecision, PlanSnapshot, PlanSnapshotSummary, PlanSnapshotSource, PlanDecisionActor, PlanDecisionKind } from "@print-partner/contracts";
-import { and, asc, count, desc, eq, gte, ne, sql } from "drizzle-orm";
+import type {
+  PartRow,
+  PlanDecision,
+  PlanDecisionActor,
+  PlanDecisionKind,
+  PlanRevisionInput,
+  PlanRevisionInputSet,
+  PlanSnapshot,
+  PlanSnapshotSource,
+  PlanSnapshotSummary,
+  ProfileSummary,
+  SourceRevision,
+  SourceSummary,
+} from "@print-partner/contracts";
+import { and, asc, count, desc, eq, gte, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { join, resolve, sep, basename } from "node:path";
 import type { DrizzleDb } from "./client.js";
 import {
@@ -82,6 +96,9 @@ export type SchemaTables = Pick<
   | "printProgress"
   | "profileLayers"
   | "projects"
+  | "sourceRevisions"
+  | "planRevisionInputSets"
+  | "planRevisionInputs"
   | "sourceDocs"
   | "sourceNotes"
   | "planDecisions"
@@ -109,6 +126,8 @@ export type PlanDecisionRow = typeof defaultSchema.planDecisions.$inferSelect;
 export type PlanSnapshotRow = typeof defaultSchema.planSnapshots.$inferSelect;
 export type PrintJobRow = typeof defaultSchema.printJobs.$inferSelect;
 export type PrintJobPartRow = typeof defaultSchema.printJobParts.$inferSelect;
+export type SourceRevisionRow = typeof defaultSchema.sourceRevisions.$inferSelect;
+export type PlanRevisionInputSetRow = typeof defaultSchema.planRevisionInputSets.$inferSelect;
 
 /** Slim slicer-profile projection used by the auto-slice routing layer. */
 export type SlicerProfileRow = {
@@ -263,6 +282,35 @@ function sourceSummary(row: ProjectRow, docCount = 0): SourceSummary {
   };
 }
 
+function sourceRevision(row: SourceRevisionRow): SourceRevision {
+  if (row.completeness !== "complete") {
+    throw new Error("Incomplete sync attempt is not a Source revision");
+  }
+  return {
+    id: row.id,
+    source_id: row.projectId,
+    upstream_revision_key: row.upstreamRevisionKey,
+    manifest_digest: row.manifestDigest,
+    snapshot_locator: row.snapshotLocator,
+    synced_at: row.syncedAt,
+    completeness: "complete",
+  };
+}
+
+function requiredText(value: string, label: string): string {
+  const normalized = value.trim();
+  if (!normalized) throw new Error(`${label} is required`);
+  return normalized;
+}
+
+function manifestDigest(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalized)) {
+    throw new Error("Manifest digest must be a SHA-256 hex digest");
+  }
+  return normalized;
+}
+
 function partRow(row: PartDbRow): PartRow {
   return {
     id: row.id,
@@ -328,6 +376,35 @@ export class AppRepository {
     const part = this.getPartRow(partId);
     if (!part) throw new Error("Part not found");
     return part;
+  }
+
+  private planRevisionInputSet(row: PlanRevisionInputSetRow): PlanRevisionInputSet {
+    if (!row.publishedAt) throw new Error("Plan revision input set is not published");
+    const inputs = this.db
+      .select()
+      .from(this.schema.planRevisionInputs)
+      .where(
+        and(
+          eq(this.schema.planRevisionInputs.tenantId, this.tenantId),
+          eq(this.schema.planRevisionInputs.inputSetId, row.id),
+        ),
+      )
+      .orderBy(asc(this.schema.planRevisionInputs.sourceRevisionId))
+      .all()
+      .map((input) => ({
+        source_revision_id: input.sourceRevisionId,
+        manifest_digest: input.manifestDigest,
+      }));
+    if (inputs.length !== row.expectedInputCount) {
+      throw new Error("Published Plan revision input set is incomplete");
+    }
+    return {
+      id: row.id,
+      plan_id: row.profileId,
+      recorded_at: row.recordedAt,
+      published_at: row.publishedAt,
+      inputs,
+    };
   }
 
   async ping(): Promise<boolean> {
@@ -1054,6 +1131,263 @@ export class AppRepository {
     );
   }
 
+  recordSourceRevision(input: {
+    sourceId: number;
+    upstreamRevisionKey: string;
+    manifestDigest: string;
+    snapshotLocator: string;
+    syncedAt: string;
+    completeness: string;
+  }): SourceRevision {
+    if (input.completeness !== "complete") {
+      throw new Error("Incomplete sync attempt is not a Source revision");
+    }
+    if (!this.getProjectRow(input.sourceId)) throw new Error("Source not found");
+
+    const upstreamRevisionKey = requiredText(
+      input.upstreamRevisionKey,
+      "Upstream revision key",
+    );
+    const digest = manifestDigest(input.manifestDigest);
+    const snapshotLocator = requiredText(input.snapshotLocator, "Snapshot locator");
+    const syncedAt = requiredText(input.syncedAt, "Sync time");
+    if (Number.isNaN(Date.parse(syncedAt))) throw new Error("Sync time must be an ISO timestamp");
+
+    const findRegistered = () =>
+      this.db
+        .select()
+        .from(this.schema.sourceRevisions)
+        .where(
+          and(
+            eq(this.schema.sourceRevisions.tenantId, this.tenantId),
+            eq(this.schema.sourceRevisions.projectId, input.sourceId),
+            eq(this.schema.sourceRevisions.upstreamRevisionKey, upstreamRevisionKey),
+          ),
+        )
+        .get();
+
+    const existing = findRegistered();
+    if (existing) {
+      if (
+        existing.manifestDigest !== digest ||
+        existing.snapshotLocator !== snapshotLocator
+      ) {
+        throw new Error("Source revision conflict for the upstream revision key");
+      }
+      return sourceRevision(existing);
+    }
+
+    this.db
+      .insert(this.schema.sourceRevisions)
+      .values({
+        tenantId: this.tenantId,
+        projectId: input.sourceId,
+        upstreamRevisionKey,
+        manifestDigest: digest,
+        snapshotLocator,
+        syncedAt,
+        completeness: "complete",
+      })
+      .onConflictDoNothing()
+      .run();
+
+    const registered = findRegistered();
+    if (!registered) throw new Error("Source revision could not be registered");
+    if (
+      registered.manifestDigest !== digest ||
+      registered.snapshotLocator !== snapshotLocator
+    ) {
+      throw new Error("Source revision conflict for the upstream revision key");
+    }
+    return sourceRevision(registered);
+  }
+
+  getSourceRevision(id: number): SourceRevision | null {
+    const row = this.db
+      .select()
+      .from(this.schema.sourceRevisions)
+      .where(
+        and(
+          eq(this.schema.sourceRevisions.tenantId, this.tenantId),
+          eq(this.schema.sourceRevisions.id, id),
+        ),
+      )
+      .get();
+    return row ? sourceRevision(row) : null;
+  }
+
+  listSourceRevisions(sourceId: number): SourceRevision[] {
+    if (!this.getProjectRow(sourceId)) throw new Error("Source not found");
+    return this.db
+      .select()
+      .from(this.schema.sourceRevisions)
+      .where(
+        and(
+          eq(this.schema.sourceRevisions.tenantId, this.tenantId),
+          eq(this.schema.sourceRevisions.projectId, sourceId),
+        ),
+      )
+      .orderBy(asc(this.schema.sourceRevisions.id))
+      .all()
+      .map(sourceRevision);
+  }
+
+  publishPlanRevisionInputs(
+    profileId: number,
+    inputs: readonly PlanRevisionInput[],
+  ): PlanRevisionInputSet {
+    this.requireProfile(profileId);
+    const canonical = [...inputs]
+      .map((input) => ({
+        source_revision_id: input.source_revision_id,
+        manifest_digest: manifestDigest(input.manifest_digest),
+      }))
+      .sort((a, b) => a.source_revision_id - b.source_revision_id);
+
+    for (let index = 1; index < canonical.length; index += 1) {
+      if (canonical[index - 1]!.source_revision_id === canonical[index]!.source_revision_id) {
+        throw new Error("Plan revision inputs cannot contain duplicate Source revisions");
+      }
+    }
+    for (const input of canonical) {
+      const revision = this.getSourceRevision(input.source_revision_id);
+      if (!revision) throw new Error("Source revision not found");
+      if (revision.manifest_digest !== input.manifest_digest) {
+        throw new Error("Plan revision input digest does not match the Source revision");
+      }
+    }
+
+    const inputSetDigest = createHash("sha256")
+      .update(JSON.stringify(canonical))
+      .digest("hex");
+    const recordedAt = new Date().toISOString();
+    this.db
+      .insert(this.schema.planRevisionInputSets)
+      .values({
+        tenantId: this.tenantId,
+        profileId,
+        inputSetDigest,
+        expectedInputCount: canonical.length,
+        recordedAt,
+      })
+      .onConflictDoNothing()
+      .run();
+
+    const setRow = this.db
+      .select()
+      .from(this.schema.planRevisionInputSets)
+      .where(
+        and(
+          eq(this.schema.planRevisionInputSets.tenantId, this.tenantId),
+          eq(this.schema.planRevisionInputSets.profileId, profileId),
+          eq(this.schema.planRevisionInputSets.inputSetDigest, inputSetDigest),
+        ),
+      )
+      .get();
+    if (!setRow) throw new Error("Plan revision input set could not be created");
+    if (setRow.expectedInputCount !== canonical.length) {
+      throw new Error("Plan revision input set has conflicting content");
+    }
+
+    for (const input of canonical) {
+      this.db
+        .insert(this.schema.planRevisionInputs)
+        .values({
+          tenantId: this.tenantId,
+          inputSetId: setRow.id,
+          sourceRevisionId: input.source_revision_id,
+          manifestDigest: input.manifest_digest,
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+
+    const storedInputs = this.db
+      .select()
+      .from(this.schema.planRevisionInputs)
+      .where(
+        and(
+          eq(this.schema.planRevisionInputs.tenantId, this.tenantId),
+          eq(this.schema.planRevisionInputs.inputSetId, setRow.id),
+        ),
+      )
+      .orderBy(asc(this.schema.planRevisionInputs.sourceRevisionId))
+      .all();
+    const exactMatch =
+      storedInputs.length === canonical.length &&
+      storedInputs.every(
+        (stored, index) =>
+          stored.sourceRevisionId === canonical[index]!.source_revision_id &&
+          stored.manifestDigest === canonical[index]!.manifest_digest,
+      );
+    if (!exactMatch) throw new Error("Plan revision input set has conflicting content");
+
+    if (!setRow.publishedAt) {
+      this.db
+        .update(this.schema.planRevisionInputSets)
+        .set({ publishedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(this.schema.planRevisionInputSets.tenantId, this.tenantId),
+            eq(this.schema.planRevisionInputSets.id, setRow.id),
+            isNull(this.schema.planRevisionInputSets.publishedAt),
+          ),
+        )
+        .run();
+    }
+    const published = this.db
+      .select()
+      .from(this.schema.planRevisionInputSets)
+      .where(
+        and(
+          eq(this.schema.planRevisionInputSets.tenantId, this.tenantId),
+          eq(this.schema.planRevisionInputSets.id, setRow.id),
+          isNotNull(this.schema.planRevisionInputSets.publishedAt),
+        ),
+      )
+      .get();
+    if (!published) throw new Error("Plan revision input set was not published");
+    return this.planRevisionInputSet(published);
+  }
+
+  getLatestPlanRevisionInputSet(profileId: number): PlanRevisionInputSet | null {
+    this.requireProfile(profileId);
+    const row = this.db
+      .select()
+      .from(this.schema.planRevisionInputSets)
+      .where(
+        and(
+          eq(this.schema.planRevisionInputSets.tenantId, this.tenantId),
+          eq(this.schema.planRevisionInputSets.profileId, profileId),
+          isNotNull(this.schema.planRevisionInputSets.publishedAt),
+        ),
+      )
+      .orderBy(
+        desc(this.schema.planRevisionInputSets.publishedAt),
+        desc(this.schema.planRevisionInputSets.id),
+      )
+      .limit(1)
+      .get();
+    return row ? this.planRevisionInputSet(row) : null;
+  }
+
+  listPlanRevisionInputSets(profileId: number): PlanRevisionInputSet[] {
+    this.requireProfile(profileId);
+    return this.db
+      .select()
+      .from(this.schema.planRevisionInputSets)
+      .where(
+        and(
+          eq(this.schema.planRevisionInputSets.tenantId, this.tenantId),
+          eq(this.schema.planRevisionInputSets.profileId, profileId),
+          isNotNull(this.schema.planRevisionInputSets.publishedAt),
+        ),
+      )
+      .orderBy(asc(this.schema.planRevisionInputSets.id))
+      .all()
+      .map((row) => this.planRevisionInputSet(row));
+  }
+
   createSource(input: {
     name: string;
     url?: string;
@@ -1166,6 +1500,20 @@ export class AppRepository {
   }
 
   deleteSource(id: number): void {
+    const revision = this.db
+      .select({ id: this.schema.sourceRevisions.id })
+      .from(this.schema.sourceRevisions)
+      .where(
+        and(
+          eq(this.schema.sourceRevisions.tenantId, this.tenantId),
+          eq(this.schema.sourceRevisions.projectId, id),
+        ),
+      )
+      .limit(1)
+      .get();
+    if (revision) {
+      throw new Error("Source has immutable revision history; archive it instead");
+    }
     this.db
       .delete(this.schema.projects)
       .where(and(eq(this.schema.projects.tenantId, this.tenantId), eq(this.schema.projects.id, id)))

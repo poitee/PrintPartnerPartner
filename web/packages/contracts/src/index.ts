@@ -463,6 +463,29 @@ export type SourceSummary = {
   doc_count?: number;
 };
 
+export type SourceRevision = {
+  readonly id: number;
+  readonly source_id: number;
+  readonly upstream_revision_key: string;
+  readonly manifest_digest: string;
+  readonly snapshot_locator: string;
+  readonly synced_at: string;
+  readonly completeness: "complete";
+};
+
+export type PlanRevisionInput = {
+  readonly source_revision_id: number;
+  readonly manifest_digest: string;
+};
+
+export type PlanRevisionInputSet = {
+  readonly id: number;
+  readonly plan_id: number;
+  readonly recorded_at: string;
+  readonly published_at: string;
+  readonly inputs: readonly PlanRevisionInput[];
+};
+
 export type PartRow = {
   id: number;
   match_key: string;

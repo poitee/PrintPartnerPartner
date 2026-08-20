@@ -416,6 +416,45 @@ export const postgresPostInitMigrations: string[] = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  // v16 — immutable Source revision identities and atomically published Plan inputs.
+  `CREATE TABLE IF NOT EXISTS source_revisions (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    upstream_revision_key TEXT NOT NULL,
+    manifest_digest TEXT NOT NULL,
+    snapshot_locator TEXT NOT NULL,
+    synced_at TEXT NOT NULL,
+    completeness TEXT NOT NULL DEFAULT 'complete' CHECK (completeness = 'complete')
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_source_revisions_tenant_source_upstream
+    ON source_revisions (tenant_id, project_id, upstream_revision_key)`,
+  `CREATE INDEX IF NOT EXISTS idx_source_revisions_tenant_source_synced
+    ON source_revisions (tenant_id, project_id, synced_at)`,
+  `CREATE TABLE IF NOT EXISTS plan_revision_input_sets (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    input_set_digest TEXT NOT NULL,
+    expected_input_count INTEGER NOT NULL,
+    recorded_at TEXT NOT NULL,
+    published_at TEXT
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_input_sets_tenant_plan_digest
+    ON plan_revision_input_sets (tenant_id, profile_id, input_set_digest)`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_revision_input_sets_tenant_plan_published
+    ON plan_revision_input_sets (tenant_id, profile_id, published_at)`,
+  `CREATE TABLE IF NOT EXISTS plan_revision_inputs (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    input_set_id INTEGER NOT NULL REFERENCES plan_revision_input_sets(id) ON DELETE CASCADE,
+    source_revision_id INTEGER NOT NULL REFERENCES source_revisions(id) ON DELETE RESTRICT,
+    manifest_digest TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_inputs_set_revision
+    ON plan_revision_inputs (input_set_id, source_revision_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_revision_inputs_tenant_set
+    ON plan_revision_inputs (tenant_id, input_set_id)`,
 ];
 
 export class PostgresDatabase {
