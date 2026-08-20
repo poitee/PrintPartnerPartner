@@ -119,11 +119,6 @@ describe("profile-sync watcher end-to-end", () => {
         (e) => events.push(e.name),
       );
 
-      // Let chokidar finish its initial scan before writing — writing immediately
-      // after startProfileSyncWatcher() returns races chokidar's own readiness
-      // and can silently drop the first "add" event under load.
-      await new Promise((r) => setTimeout(r, 400));
-
       // Write a profile (simulating a slicer save).
       writeFileSync(join(processDir, "pp sync test 0.24mm.json"), ORCA_PROCESS);
       // Give chokidar + debounce time to fire.
