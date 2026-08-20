@@ -287,7 +287,7 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v20 tables and records schema version 20", () => {
+  it("creates the v15-v21 tables and records schema version 21", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
       for (const table of [
@@ -303,7 +303,7 @@ describe("schema v9-v13 (SQLite)", () => {
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "20" });
+      ).toMatchObject({ value: "21" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -342,7 +342,52 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v20 draft uniqueness and lifecycle declarations in SQLite", () => {
+  it("adds and backfills the v21 lifecycle generation", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-schema-v21-"));
+    const databasePath = join(dir, "print-partner.db");
+    const legacy = new Database(databasePath);
+    legacy.exec(`
+      CREATE TABLE plan_drafts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id TEXT NOT NULL DEFAULT 'default',
+        profile_id INTEGER NOT NULL,
+        base_revision_id INTEGER,
+        base_plan_version INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        digest_format TEXT NOT NULL,
+        snapshot_digest TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO plan_drafts (
+        tenant_id, profile_id, base_revision_id, base_plan_version, state,
+        digest_format, snapshot_digest, created_by, idempotency_key, created_at
+      ) VALUES
+        ('default', 1, NULL, 0, 'open', 'plan-draft-v1', 'a', 'test', 'open', 'now'),
+        ('default', 1, NULL, 0, 'abandoned', 'plan-draft-v1', 'b', 'test', 'abandoned', 'now'),
+        ('default', 1, NULL, 0, 'consumed', 'plan-draft-v1', 'c', 'test', 'consumed', 'now');
+    `);
+    legacy.close();
+    const upgraded = new SqliteDatabase(dir);
+    upgraded.connect();
+    try {
+      expect(
+        rawSqlite(upgraded)
+          .prepare("SELECT state, lifecycle_version FROM plan_drafts ORDER BY id")
+          .all(),
+      ).toEqual([
+        { state: "open", lifecycle_version: 0 },
+        { state: "abandoned", lifecycle_version: 0 },
+        { state: "consumed", lifecycle_version: 0 },
+      ]);
+    } finally {
+      upgraded.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates the v21 draft uniqueness and lifecycle declarations in SQLite", () => {
     withSqlite((sqlite) => {
       const raw = rawSqlite(sqlite);
       const creationKey = raw
@@ -357,13 +402,17 @@ describe("schema v9-v13 (SQLite)", () => {
       expect(predecessor.sql).toMatch(
         /ON plan_draft_parts \(tenant_id, draft_id, base_revision_part_id\)/i,
       );
-      expect(
-        raw
+      const lifecycle = raw
           .prepare(
             "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_plan_drafts_state_transition'",
           )
-          .get(),
-      ).toBeDefined();
+          .get() as { sql: string };
+      expect(lifecycle.sql).toMatch(/UPDATE OF state, lifecycle_version/i);
+      expect(lifecycle.sql).toMatch(/NEW\.lifecycle_version = OLD\.lifecycle_version \+ 1/i);
+      const table = raw
+        .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'plan_drafts'")
+        .get() as { sql: string };
+      expect(table.sql).toMatch(/lifecycle_version >= 0 AND lifecycle_version <= 2147483647/i);
     });
   });
 
@@ -775,8 +824,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(20);
-    expect(pgSchema.currentSchemaVersion).toBe(20);
+    expect(sqliteSchema.currentSchemaVersion).toBe(21);
+    expect(pgSchema.currentSchemaVersion).toBe(21);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -870,7 +919,7 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
     expect(POSTGRES_DDL).toContain("trg_plan_revision_part_projection_owner");
   });
 
-  it("creates the v20 draft snapshot tables and ownership triggers in Postgres", () => {
+  it("creates the v21 draft snapshot tables and lifecycle guards in Postgres", () => {
     for (const [table, expected] of Object.entries(V20_COLUMNS)) {
       expect(pgCreatedColumns(table)).toEqual(expect.arrayContaining(expected));
     }
@@ -884,8 +933,9 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
       /CREATE TRIGGER trg_plan_drafts_ownership_write\s+BEFORE INSERT OR UPDATE ON plan_drafts\s+FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_ownership\(\)/i,
     );
     expect(POSTGRES_DDL).toMatch(
-      /CREATE TRIGGER trg_plan_drafts_state_transition\s+BEFORE UPDATE OF state ON plan_drafts\s+FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_state_transition\(\)/i,
+      /DROP TRIGGER IF EXISTS trg_plan_drafts_state_transition ON plan_drafts;[\s\S]*CREATE TRIGGER trg_plan_drafts_state_transition\s+BEFORE UPDATE OF state, lifecycle_version ON plan_drafts\s+FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_state_transition\(\)/i,
     );
+    expect(POSTGRES_DDL).toMatch(/lifecycle_version >= 0 AND lifecycle_version <= 2147483647/i);
     expect(POSTGRES_DDL).toMatch(
       /CREATE TRIGGER trg_plan_drafts_identity_immutable\s+BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version\s+ON plan_drafts\s+FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_identity_immutable\(\)/i,
     );
@@ -932,7 +982,7 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
       } else if (/^\s*CREATE OR REPLACE FUNCTION/i.test(stmt)) {
         expect(stmt, `not idempotent: ${head}`).toMatch(/CREATE OR REPLACE FUNCTION/i);
       } else if (/^\s*DO \$block\$/i.test(stmt)) {
-        expect(stmt, `not idempotent: ${head}`).toMatch(/IF NOT EXISTS/i);
+        expect(stmt, `not idempotent: ${head}`).toMatch(/IF NOT EXISTS|DROP TRIGGER IF EXISTS/i);
       } else {
         throw new Error(`unexpected non-DDL post-init statement: ${head}`);
       }

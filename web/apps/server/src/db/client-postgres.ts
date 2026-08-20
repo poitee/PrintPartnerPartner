@@ -689,6 +689,9 @@ export const postgresPostInitMigrations: string[] = [
     base_plan_version INTEGER NOT NULL,
     state TEXT NOT NULL CONSTRAINT chk_plan_drafts_state
       CHECK (state IN ('open', 'abandoned', 'consumed')),
+    lifecycle_version INTEGER NOT NULL DEFAULT 0
+      CONSTRAINT chk_plan_drafts_lifecycle_version
+      CHECK (lifecycle_version >= 0 AND lifecycle_version <= 2147483647),
     digest_format TEXT NOT NULL,
     snapshot_digest TEXT NOT NULL,
     created_by TEXT NOT NULL,
@@ -703,6 +706,17 @@ export const postgresPostInitMigrations: string[] = [
     ON plan_drafts (tenant_id, created_by, profile_id, idempotency_key)`,
   `CREATE INDEX IF NOT EXISTS idx_plan_drafts_tenant_profile_created
     ON plan_drafts (tenant_id, profile_id, created_at, id)`,
+  `ALTER TABLE plan_drafts ADD COLUMN IF NOT EXISTS lifecycle_version INTEGER NOT NULL DEFAULT 0`,
+  `DO $block$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_plan_drafts_lifecycle_version'
+      ) THEN
+        ALTER TABLE plan_drafts ADD CONSTRAINT chk_plan_drafts_lifecycle_version
+          CHECK (lifecycle_version >= 0 AND lifecycle_version <= 2147483647);
+      END IF;
+    END
+  $block$`,
   `CREATE TABLE IF NOT EXISTS plan_draft_inputs (
     id SERIAL PRIMARY KEY,
     tenant_id TEXT NOT NULL DEFAULT 'default',
@@ -782,10 +796,16 @@ export const postgresPostInitMigrations: string[] = [
   $block$`,
   `CREATE OR REPLACE FUNCTION enforce_plan_draft_state_transition() RETURNS trigger AS $function$
     BEGIN
-      IF NOT (
-        NEW.state = OLD.state
-        OR (OLD.state = 'open' AND NEW.state IN ('abandoned', 'consumed'))
-        OR (OLD.state = 'abandoned' AND NEW.state = 'open')
+      IF NEW.state = OLD.state THEN
+        IF NEW.lifecycle_version <> OLD.lifecycle_version THEN
+          RAISE EXCEPTION 'Invalid Plan draft lifecycle version';
+        END IF;
+      ELSIF NOT (
+        NEW.lifecycle_version = OLD.lifecycle_version + 1
+        AND (
+          (OLD.state = 'open' AND NEW.state IN ('abandoned', 'consumed'))
+          OR (OLD.state = 'abandoned' AND NEW.state = 'open')
+        )
       ) THEN
         RAISE EXCEPTION 'Invalid Plan draft state transition';
       END IF;
@@ -794,11 +814,10 @@ export const postgresPostInitMigrations: string[] = [
   $function$ LANGUAGE plpgsql`,
   `DO $block$
     BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_drafts_state_transition') THEN
-        CREATE TRIGGER trg_plan_drafts_state_transition
-          BEFORE UPDATE OF state ON plan_drafts
-          FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_state_transition();
-      END IF;
+      DROP TRIGGER IF EXISTS trg_plan_drafts_state_transition ON plan_drafts;
+      CREATE TRIGGER trg_plan_drafts_state_transition
+        BEFORE UPDATE OF state, lifecycle_version ON plan_drafts
+        FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_state_transition();
     END
   $block$`,
   `CREATE OR REPLACE FUNCTION enforce_plan_draft_identity_immutable() RETURNS trigger AS $function$

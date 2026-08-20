@@ -239,6 +239,7 @@ export const planDrafts = pgTable(
     }),
     basePlanVersion: integer("base_plan_version").notNull(),
     state: text("state").$type<"open" | "abandoned" | "consumed">().notNull(),
+    lifecycleVersion: integer("lifecycle_version").notNull().default(0),
     digestFormat: text("digest_format").notNull(),
     snapshotDigest: text("snapshot_digest").notNull(),
     createdBy: text("created_by").notNull(),
@@ -257,6 +258,10 @@ export const planDrafts = pgTable(
       "chk_plan_drafts_base",
       sql`(${t.baseRevisionId} IS NULL AND ${t.basePlanVersion} = 0)
           OR (${t.baseRevisionId} IS NOT NULL AND ${t.basePlanVersion} > 0)`,
+    ),
+    check(
+      "chk_plan_drafts_lifecycle_version",
+      sql`${t.lifecycleVersion} >= 0 AND ${t.lifecycleVersion} <= 2147483647`,
     ),
   ],
 );
@@ -717,4 +722,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 20;
+export const currentSchemaVersion = 21;

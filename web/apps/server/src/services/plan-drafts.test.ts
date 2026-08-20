@@ -85,6 +85,7 @@ function draftFixture(): PlanDraftSnapshot {
     baseRevisionId: input.baseRevisionId,
     basePlanVersion: input.basePlanVersion,
     state: "open",
+    lifecycleVersion: 0,
     digestFormat: "plan-draft-v1",
     snapshotDigest: digestPlanDraft({ ...input, parts }),
     createdBy: "test:user",

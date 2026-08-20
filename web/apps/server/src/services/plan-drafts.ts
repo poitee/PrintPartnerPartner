@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 export const PLAN_DRAFT_DIGEST_FORMAT = "plan-draft-v1";
 export const MAX_PLAN_DRAFT_PART_QUANTITY = 10_000;
+export const MAX_PLAN_DRAFT_LIFECYCLE_VERSION = 2_147_483_647;
 
 export type PlanDraftState = "open" | "abandoned" | "consumed";
 
@@ -52,6 +53,7 @@ export type PlanDraftSnapshot = {
   baseRevisionId: number | null;
   basePlanVersion: number;
   state: PlanDraftState;
+  lifecycleVersion: number;
   digestFormat: string;
   snapshotDigest: string;
   createdBy: string;

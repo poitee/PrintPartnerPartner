@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
 import { getDb, SqliteDatabase } from "./client.js";
 import { AppRepository } from "./repository.js";
+import { MAX_PLAN_DRAFT_LIFECYCLE_VERSION } from "../services/plan-drafts.js";
 
 const tempDirs: string[] = [];
 
@@ -653,6 +654,21 @@ describe("saved Plan drafts", () => {
       raw
         .prepare("UPDATE plan_drafts SET state = 'abandoned' WHERE id = ?")
         .run(created.draft.id),
+    ).toThrow(/transition/i);
+    expect(() =>
+      raw
+        .prepare("UPDATE plan_drafts SET lifecycle_version = lifecycle_version + 1 WHERE id = ?")
+        .run(created.draft.id),
+    ).toThrow(/transition/i);
+    expect(() =>
+      raw
+        .prepare("UPDATE plan_drafts SET state = 'abandoned', lifecycle_version = lifecycle_version + 2 WHERE id = ?")
+        .run(created.draft.id),
+    ).toThrow(/transition/i);
+    expect(() =>
+      raw
+        .prepare("UPDATE plan_drafts SET state = 'abandoned', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
+        .run(created.draft.id),
     ).not.toThrow();
     expect(() =>
       raw
@@ -666,12 +682,12 @@ describe("saved Plan drafts", () => {
     ).toThrow(/open/i);
     expect(() =>
       raw
-        .prepare("UPDATE plan_drafts SET state = 'consumed' WHERE id = ?")
+        .prepare("UPDATE plan_drafts SET state = 'consumed', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
         .run(created.draft.id),
     ).toThrow(/transition/i);
     expect(() =>
       raw
-        .prepare("UPDATE plan_drafts SET state = 'open' WHERE id = ?")
+        .prepare("UPDATE plan_drafts SET state = 'open', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
         .run(created.draft.id),
     ).not.toThrow();
     expect(() =>
@@ -686,17 +702,17 @@ describe("saved Plan drafts", () => {
     ).not.toThrow();
     expect(() =>
       raw
-        .prepare("UPDATE plan_drafts SET state = 'consumed' WHERE id = ?")
+        .prepare("UPDATE plan_drafts SET state = 'consumed', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
         .run(created.draft.id),
     ).not.toThrow();
     expect(() =>
       raw
-        .prepare("UPDATE plan_drafts SET state = 'open' WHERE id = ?")
+        .prepare("UPDATE plan_drafts SET state = 'open', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
         .run(created.draft.id),
     ).toThrow(/transition/i);
     expect(() =>
       raw
-        .prepare("UPDATE plan_drafts SET state = 'abandoned' WHERE id = ?")
+        .prepare("UPDATE plan_drafts SET state = 'abandoned', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
         .run(created.draft.id),
     ).toThrow(/transition/i);
     expect(() =>
@@ -719,6 +735,9 @@ describe("saved Plan drafts", () => {
         .prepare("UPDATE plan_draft_parts SET tenant_id = 'farm-b' WHERE draft_id = ?")
         .run(created.draft.id),
     ).toThrow(/ownership/i);
+    raw.prepare("DELETE FROM plan_drafts WHERE id = ?").run(created.draft.id);
+    expect(raw.prepare("SELECT count(*) AS count FROM plan_draft_inputs WHERE draft_id = ?").get(created.draft.id)).toEqual({ count: 0 });
+    expect(raw.prepare("SELECT count(*) AS count FROM plan_draft_parts WHERE draft_id = ?").get(created.draft.id)).toEqual({ count: 0 });
     database.close();
   });
 
@@ -1001,7 +1020,7 @@ describe("saved Plan drafts", () => {
   it("rejects closed drafts and draft identities outside the tenant and Build", () => {
     const abandoned = editableDraftFixture();
     abandoned.raw
-      .prepare("UPDATE plan_drafts SET state = 'abandoned' WHERE id = ?")
+      .prepare("UPDATE plan_drafts SET state = 'abandoned', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
       .run(abandoned.draft.id);
     expect(
       abandoned.repo.editPlanDraftParts({
@@ -1019,7 +1038,7 @@ describe("saved Plan drafts", () => {
 
     const consumed = editableDraftFixture();
     consumed.raw
-      .prepare("UPDATE plan_drafts SET state = 'consumed' WHERE id = ?")
+      .prepare("UPDATE plan_drafts SET state = 'consumed', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
       .run(consumed.draft.id);
     expect(
       consumed.repo.editPlanDraftParts({
@@ -1128,6 +1147,308 @@ describe("saved Plan drafts", () => {
     ).toThrow(/quantity/i);
     for (const table of tables) {
       expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(before.get(table));
+    }
+    database.close();
+  });
+
+  it("versions abandon and resume transitions while preserving draft and accepted state", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    const protectedTables = [
+      ...ACCEPTED_STATE_TABLES,
+      "plan_draft_inputs",
+      "plan_draft_parts",
+    ];
+    const before = snapshotTables(raw, protectedTables);
+
+    const abandoned = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    expect(abandoned).toMatchObject({
+      kind: "transitioned",
+      draft: { state: "abandoned", lifecycleVersion: 1 },
+    });
+    if (abandoned.kind !== "transitioned") throw new Error("draft was not abandoned");
+    expect(
+      repo.transitionPlanDraft({
+        profileId: profile.id,
+        draftId: draft.id,
+        transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+      }),
+    ).toEqual({ kind: "unchanged", draft: abandoned.draft });
+    const resumed = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "resume", expectedLifecycleVersion: 1 },
+    });
+    expect(resumed).toMatchObject({
+      kind: "transitioned",
+      draft: { state: "open", lifecycleVersion: 2 },
+    });
+    expect(resumed.kind === "transitioned" && resumed.draft.snapshotDigest).toBe(
+      draft.snapshotDigest,
+    );
+    for (const table of protectedTables) {
+      expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(before.get(table));
+    }
+    if (resumed.kind !== "transitioned") throw new Error("draft was not resumed");
+    raw
+      .prepare(
+        `UPDATE build_profiles
+            SET accepted_plan_revision_id = NULL, accepted_plan_version = 0
+          WHERE tenant_id = 'default' AND id = ?`,
+      )
+      .run(profile.id);
+    expect(
+      repo.transitionPlanDraft({
+        profileId: profile.id,
+        draftId: draft.id,
+        transition: { kind: "resume", expectedLifecycleVersion: 1 },
+      }),
+    ).toEqual({ kind: "unchanged", draft: resumed.draft });
+    database.close();
+  });
+
+  it("rejects lifecycle ABA and converges exact retries across repositories and restart", () => {
+    const { database, profile, repo, draft, root } = editableDraftFixture();
+    const secondRepo = new AppRepository(getDb(database), "default", database.reposDir);
+    const first = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    expect(first.kind).toBe("transitioned");
+    if (first.kind !== "transitioned") throw new Error("draft was not abandoned");
+    expect(
+      secondRepo.transitionPlanDraft({
+        profileId: profile.id,
+        draftId: draft.id,
+        transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+      }),
+    ).toEqual({ kind: "unchanged", draft: first.draft });
+    const resumed = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "resume", expectedLifecycleVersion: 1 },
+    });
+    expect(resumed.kind).toBe("transitioned");
+    const abandonedAgain = repo.transitionPlanDraft({
+      profileId: profile.id,
+      draftId: draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 2 },
+    });
+    expect(abandonedAgain).toMatchObject({
+      kind: "transitioned",
+      draft: { state: "abandoned", lifecycleVersion: 3 },
+    });
+    if (abandonedAgain.kind !== "transitioned") {
+      throw new Error("draft was not abandoned again");
+    }
+    expect(
+      repo.transitionPlanDraft({
+        profileId: profile.id,
+        draftId: draft.id,
+        transition: { kind: "resume", expectedLifecycleVersion: 1 },
+      }),
+    ).toEqual({ kind: "conflict", draft: abandonedAgain.draft });
+
+    database.close();
+    const reopened = new SqliteDatabase(root);
+    reopened.connect();
+    const reopenedRepo = new AppRepository(getDb(reopened), "default", reopened.reposDir);
+    expect(reopenedRepo.getPlanDraft(profile.id, draft.id)).toEqual(abandonedAgain.draft);
+    reopened.close();
+  });
+
+  it("allows stale and dirty abandon but refuses a new resume", () => {
+    const dirty = editableDraftFixture();
+    dirty.raw
+      .prepare(
+        `UPDATE build_profiles
+            SET accepted_plan_revision_id = NULL, accepted_plan_version = 0
+          WHERE tenant_id = 'default' AND id = ?`,
+      )
+      .run(dirty.profile.id);
+    const dirtyAbandon = dirty.repo.transitionPlanDraft({
+      profileId: dirty.profile.id,
+      draftId: dirty.draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    expect(dirtyAbandon.kind).toBe("transitioned");
+    expect(
+      dirty.repo.transitionPlanDraft({
+        profileId: dirty.profile.id,
+        draftId: dirty.draft.id,
+        transition: { kind: "resume", expectedLifecycleVersion: 1 },
+      }),
+    ).toEqual({ kind: "accepted_baseline_required" });
+    dirty.database.close();
+
+    const moved = editableDraftFixture();
+    const acceptedId = moved.draft.baseRevisionId;
+    if (!acceptedId) throw new Error("accepted test revision is missing");
+    const nextRevision = moved.raw
+      .prepare(
+        `INSERT INTO plan_revisions (
+          tenant_id, profile_id, revision_number, parent_revision_id, input_set_id,
+          provenance_kind, digest_format, snapshot_digest, created_by, accepted_by,
+          created_at, accepted_at
+        ) VALUES ('default', ?, 2, ?, NULL, 'legacy', 'plan-revision-parts-v1', ?,
+          'test', 'test', ?, ?)`,
+      )
+      .run(
+        moved.profile.id,
+        acceptedId,
+        "8".repeat(64),
+        "2026-08-20T14:00:00.000Z",
+        "2026-08-20T14:00:00.000Z",
+      );
+    moved.raw
+      .prepare(
+        `UPDATE build_profiles
+            SET accepted_plan_revision_id = ?, accepted_plan_version = 2
+          WHERE tenant_id = 'default' AND id = ?`,
+      )
+      .run(Number(nextRevision.lastInsertRowid), moved.profile.id);
+    const staleAbandon = moved.repo.transitionPlanDraft({
+      profileId: moved.profile.id,
+      draftId: moved.draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    expect(staleAbandon.kind).toBe("transitioned");
+    if (staleAbandon.kind !== "transitioned") throw new Error("stale draft was not abandoned");
+    expect(
+      moved.repo.transitionPlanDraft({
+        profileId: moved.profile.id,
+        draftId: moved.draft.id,
+        transition: { kind: "resume", expectedLifecycleVersion: 1 },
+      }),
+    ).toEqual({ kind: "base_changed", draft: staleAbandon.draft });
+    moved.database.close();
+  });
+
+  it("rejects terminal, corrupt, foreign, and invalid-generation transitions", () => {
+    const wrongSource = editableDraftFixture();
+    expect(
+      wrongSource.repo.transitionPlanDraft({
+        profileId: wrongSource.profile.id,
+        draftId: wrongSource.draft.id,
+        transition: { kind: "resume", expectedLifecycleVersion: 0 },
+      }),
+    ).toEqual({ kind: "not_allowed", state: "open" });
+    wrongSource.repo.transitionPlanDraft({
+      profileId: wrongSource.profile.id,
+      draftId: wrongSource.draft.id,
+      transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+    });
+    expect(
+      wrongSource.repo.transitionPlanDraft({
+        profileId: wrongSource.profile.id,
+        draftId: wrongSource.draft.id,
+        transition: { kind: "abandon", expectedLifecycleVersion: 1 },
+      }),
+    ).toEqual({ kind: "not_allowed", state: "abandoned" });
+    wrongSource.database.close();
+
+    const consumed = editableDraftFixture();
+    consumed.raw
+      .prepare("UPDATE plan_drafts SET state = 'consumed', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
+      .run(consumed.draft.id);
+    for (const kind of ["abandon", "resume"] as const) {
+      expect(
+        consumed.repo.transitionPlanDraft({
+          profileId: consumed.profile.id,
+          draftId: consumed.draft.id,
+          transition: { kind, expectedLifecycleVersion: 1 },
+        }),
+      ).toEqual({ kind: "not_allowed", state: "consumed" });
+    }
+    const otherTenant = new AppRepository(
+      getDb(consumed.database),
+      "farm-b",
+      consumed.database.reposDir,
+    );
+    expect(
+      otherTenant.transitionPlanDraft({
+        profileId: consumed.profile.id,
+        draftId: consumed.draft.id,
+        transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+      }),
+    ).toEqual({ kind: "not_found" });
+    const otherProfile = consumed.repo.createProfile("Other lifecycle Build");
+    expect(
+      consumed.repo.transitionPlanDraft({
+        profileId: otherProfile.id,
+        draftId: consumed.draft.id,
+        transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+      }),
+    ).toEqual({ kind: "not_found" });
+    expect(
+      consumed.repo.transitionPlanDraft({
+        profileId: consumed.profile.id,
+        draftId: consumed.draft.id,
+        transition: {
+          kind: "abandon",
+          expectedLifecycleVersion: MAX_PLAN_DRAFT_LIFECYCLE_VERSION - 1,
+        },
+      }),
+    ).toEqual({ kind: "not_allowed", state: "consumed" });
+    expect(() =>
+      consumed.repo.transitionPlanDraft({
+        profileId: consumed.profile.id,
+        draftId: consumed.draft.id,
+        transition: {
+          kind: "abandon",
+          expectedLifecycleVersion: MAX_PLAN_DRAFT_LIFECYCLE_VERSION,
+        },
+      }),
+    ).toThrow(/lifecycle version/i);
+    consumed.database.close();
+
+    const corrupt = editableDraftFixture();
+    corrupt.raw
+      .prepare("UPDATE plan_drafts SET snapshot_digest = ? WHERE id = ?")
+      .run("0".repeat(64), corrupt.draft.id);
+    expect(() =>
+      corrupt.repo.transitionPlanDraft({
+        profileId: corrupt.profile.id,
+        draftId: corrupt.draft.id,
+        transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+      }),
+    ).toThrow(/digest mismatch/i);
+    expect(
+      corrupt.raw
+        .prepare("SELECT state, lifecycle_version FROM plan_drafts WHERE id = ?")
+        .get(corrupt.draft.id),
+    ).toEqual({ state: "open", lifecycle_version: 0 });
+    corrupt.database.close();
+  });
+
+  it("rolls back lifecycle state and generation when the transition write fails", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    const before = snapshotTables(raw, [
+      ...ACCEPTED_STATE_TABLES,
+      "plan_drafts",
+      "plan_draft_inputs",
+      "plan_draft_parts",
+    ]);
+    raw.exec(`
+      CREATE TRIGGER corrupt_plan_draft_after_transition
+      AFTER UPDATE OF state ON plan_drafts
+      BEGIN
+        UPDATE plan_drafts SET snapshot_digest = '${"0".repeat(64)}' WHERE id = NEW.id;
+      END
+    `);
+    expect(() =>
+      repo.transitionPlanDraft({
+        profileId: profile.id,
+        draftId: draft.id,
+        transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+      }),
+    ).toThrow(/digest mismatch/i);
+    for (const [table, rows] of before) {
+      expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(rows);
     }
     database.close();
   });

@@ -237,6 +237,7 @@ export const planDrafts = sqliteTable(
     }),
     basePlanVersion: integer("base_plan_version").notNull(),
     state: text("state").$type<"open" | "abandoned" | "consumed">().notNull(),
+    lifecycleVersion: integer("lifecycle_version").notNull().default(0),
     digestFormat: text("digest_format").notNull(),
     snapshotDigest: text("snapshot_digest").notNull(),
     createdBy: text("created_by").notNull(),
@@ -258,6 +259,10 @@ export const planDrafts = sqliteTable(
       "chk_plan_drafts_base",
       sql`(${t.baseRevisionId} IS NULL AND ${t.basePlanVersion} = 0)
           OR (${t.baseRevisionId} IS NOT NULL AND ${t.basePlanVersion} > 0)`,
+    ),
+    check(
+      "chk_plan_drafts_lifecycle_version",
+      sql`${t.lifecycleVersion} >= 0 AND ${t.lifecycleVersion} <= 2147483647`,
     ),
   ],
 );
@@ -721,7 +726,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 20;
+export const currentSchemaVersion = 21;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -1307,6 +1312,8 @@ export const schemaMigrations: string[] = [
     ON plan_drafts (tenant_id, created_by, profile_id, idempotency_key)`,
   `CREATE INDEX IF NOT EXISTS idx_plan_drafts_tenant_profile_created
     ON plan_drafts (tenant_id, profile_id, created_at, id)`,
+  `ALTER TABLE plan_drafts ADD COLUMN lifecycle_version INTEGER NOT NULL DEFAULT 0
+    CHECK (lifecycle_version >= 0 AND lifecycle_version <= 2147483647)`,
   `CREATE TABLE IF NOT EXISTS plan_draft_inputs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id TEXT NOT NULL DEFAULT 'default',
@@ -1397,12 +1404,18 @@ export const schemaMigrations: string[] = [
     BEGIN
       SELECT RAISE(ABORT, 'Plan draft identity is immutable');
     END`,
-  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_state_transition
-    BEFORE UPDATE OF state ON plan_drafts
+  `DROP TRIGGER IF EXISTS trg_plan_drafts_state_transition`,
+  `CREATE TRIGGER trg_plan_drafts_state_transition
+    BEFORE UPDATE OF state, lifecycle_version ON plan_drafts
     WHEN NOT (
-      NEW.state = OLD.state
-      OR (OLD.state = 'open' AND NEW.state IN ('abandoned', 'consumed'))
-      OR (OLD.state = 'abandoned' AND NEW.state = 'open')
+      (NEW.state = OLD.state AND NEW.lifecycle_version = OLD.lifecycle_version)
+      OR (
+        NEW.lifecycle_version = OLD.lifecycle_version + 1
+        AND (
+          (OLD.state = 'open' AND NEW.state IN ('abandoned', 'consumed'))
+          OR (OLD.state = 'abandoned' AND NEW.state = 'open')
+        )
+      )
     )
     BEGIN
       SELECT RAISE(ABORT, 'Invalid Plan draft state transition');

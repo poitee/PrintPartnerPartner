@@ -99,10 +99,12 @@ import {
   applyPlanDraftPartDecision,
   diffPlanDraftSnapshot,
   digestPlanDraft,
+  MAX_PLAN_DRAFT_LIFECYCLE_VERSION,
   PLAN_DRAFT_DIGEST_FORMAT,
   type PlanDraftDiff,
   type PlanDraftPartDecision,
   type PlanDraftSnapshot,
+  type PlanDraftState,
   PlanDraftPartNotFoundError,
   type PlanSnapshotInput,
   type PlanSnapshotPart,
@@ -199,6 +201,20 @@ export type EditPlanDraftPartsResult =
   | { readonly kind: "accepted_baseline_required" }
   | { readonly kind: "base_changed"; readonly draft: PlanDraftSnapshot }
   | { readonly kind: "not_open"; readonly state: "abandoned" | "consumed" }
+  | { readonly kind: "not_found" }
+  | { readonly kind: "transaction_unavailable" };
+
+export type PlanDraftLifecycleTransition =
+  | { readonly kind: "abandon"; readonly expectedLifecycleVersion: number }
+  | { readonly kind: "resume"; readonly expectedLifecycleVersion: number };
+
+export type TransitionPlanDraftResult =
+  | { readonly kind: "transitioned"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "unchanged"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "conflict"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "accepted_baseline_required" }
+  | { readonly kind: "base_changed"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "not_allowed"; readonly state: PlanDraftState }
   | { readonly kind: "not_found" }
   | { readonly kind: "transaction_unavailable" };
 
@@ -2544,6 +2560,7 @@ export class AppRepository {
       baseRevisionId: row.baseRevisionId,
       basePlanVersion: row.basePlanVersion,
       state: row.state,
+      lifecycleVersion: row.lifecycleVersion,
       digestFormat: row.digestFormat,
       snapshotDigest: row.snapshotDigest,
       createdBy: row.createdBy,
@@ -3021,6 +3038,111 @@ export class AppRepository {
         throw new Error("Edited Plan draft could not be verified");
       }
       return { kind: "updated", draft: persisted };
+    }, "immediate");
+  }
+
+  transitionPlanDraft(input: {
+    readonly profileId: number;
+    readonly draftId: number;
+    readonly transition: PlanDraftLifecycleTransition;
+  }): TransitionPlanDraftResult {
+    const expectedLifecycleVersion = input.transition.expectedLifecycleVersion;
+    if (
+      !Number.isSafeInteger(expectedLifecycleVersion) ||
+      expectedLifecycleVersion < 0 ||
+      expectedLifecycleVersion >= MAX_PLAN_DRAFT_LIFECYCLE_VERSION
+    ) {
+      throw new Error(
+        `Expected Plan draft lifecycle version must be a nonnegative safe integer below ${MAX_PLAN_DRAFT_LIFECYCLE_VERSION}`,
+      );
+    }
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+
+    return this.transaction((): TransitionPlanDraftResult => {
+      const header = this.db
+        .select({ id: this.schema.planDrafts.id })
+        .from(this.schema.planDrafts)
+        .where(
+          and(
+            eq(this.schema.planDrafts.tenantId, this.tenantId),
+            eq(this.schema.planDrafts.profileId, input.profileId),
+            eq(this.schema.planDrafts.id, input.draftId),
+          ),
+        )
+        .get();
+      if (!header) return { kind: "not_found" };
+      const current = this.getPlanDraft(input.profileId, input.draftId);
+      if (!current) return { kind: "not_found" };
+      if (current.state === "consumed") return { kind: "not_allowed", state: current.state };
+
+      const source: PlanDraftState =
+        input.transition.kind === "abandon" ? "open" : "abandoned";
+      const target: PlanDraftState =
+        input.transition.kind === "abandon" ? "abandoned" : "open";
+      if (
+        current.state === target &&
+        current.lifecycleVersion === expectedLifecycleVersion + 1
+      ) {
+        return { kind: "unchanged", draft: current };
+      }
+      if (current.lifecycleVersion !== expectedLifecycleVersion) {
+        return { kind: "conflict", draft: current };
+      }
+      if (current.state !== source) return { kind: "not_allowed", state: current.state };
+
+      if (input.transition.kind === "resume") {
+        const profile = this.db
+          .select({
+            baseRevisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
+            basePlanVersion: this.schema.buildProfiles.acceptedPlanVersion,
+          })
+          .from(this.schema.buildProfiles)
+          .where(
+            and(
+              eq(this.schema.buildProfiles.tenantId, this.tenantId),
+              eq(this.schema.buildProfiles.id, input.profileId),
+            ),
+          )
+          .get();
+        if (!profile) return { kind: "not_found" };
+        if (this.planDraftNeedsAcceptedBaseline(input.profileId, profile)) {
+          return { kind: "accepted_baseline_required" };
+        }
+        if (
+          profile.baseRevisionId !== current.baseRevisionId ||
+          profile.basePlanVersion !== current.basePlanVersion
+        ) {
+          return { kind: "base_changed", draft: current };
+        }
+      }
+
+      const write = this.db
+        .update(this.schema.planDrafts)
+        .set({
+          state: target,
+          lifecycleVersion: sql`${this.schema.planDrafts.lifecycleVersion} + 1`,
+        })
+        .where(
+          and(
+            eq(this.schema.planDrafts.tenantId, this.tenantId),
+            eq(this.schema.planDrafts.profileId, input.profileId),
+            eq(this.schema.planDrafts.id, input.draftId),
+            eq(this.schema.planDrafts.state, source),
+            eq(this.schema.planDrafts.lifecycleVersion, expectedLifecycleVersion),
+          ),
+        )
+        .run();
+      if (write.changes !== 1) return { kind: "conflict", draft: current };
+      const persisted = this.getPlanDraft(input.profileId, input.draftId);
+      if (!persisted) throw new Error("Transitioned Plan draft is missing");
+      if (
+        persisted.state !== target ||
+        persisted.lifecycleVersion !== expectedLifecycleVersion + 1 ||
+        persisted.snapshotDigest !== current.snapshotDigest
+      ) {
+        throw new Error("Transitioned Plan draft is invalid");
+      }
+      return { kind: "transitioned", draft: persisted };
     }, "immediate");
   }
 

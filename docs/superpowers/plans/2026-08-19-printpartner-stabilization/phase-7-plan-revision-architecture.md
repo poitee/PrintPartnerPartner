@@ -51,8 +51,8 @@ one fresh accepted baseline before it enables draft reads.
 ## Drafts
 
 Phase 7 slice 2 starts with persisted recompute snapshots and deterministic
-diffs. Unit 2b adds bounded Part decisions. Later units in this slice add
-lifecycle. Later Phase 7 slices add Required-unit reconciliation and Apply:
+diffs. Unit 2b adds bounded Part decisions. Unit 2c1 adds saved draft lifecycle.
+Later Phase 7 slices add Required-unit reconciliation and Apply:
 
 ```ts
 type PlanDraftState = "open" | "abandoned" | "consumed";
@@ -91,6 +91,26 @@ keeps the complete `open | abandoned | consumed` state discriminant for later
 commands. A Build may have several open drafts. Callers list them in creation
 order by `created_at`, then draft ID, and read one by ID. There is no singular
 `readOpenDraft` rule.
+
+Schema v21 adds `lifecycle_version` to distinguish repeated state cycles. The
+single `transitionPlanDraft` command accepts `abandon` or `resume` with an
+expected generation. It maps only `open -> abandoned` and
+`abandoned -> open`; `consumed` remains terminal. A state change increments the
+generation exactly once, while a same-state write cannot change it. Both
+databases enforce that rule and cap the portable integer at 2,147,483,647. A
+new transition accepts expected generations only through 2,147,483,646 so its
+increment remains in range. Lifecycle state and generation are excluded from
+`plan-draft-v1`, which continues to represent planning content.
+
+SQLite transitions use one immediate transaction and verify the complete
+snapshot digest before policy checks. A matching target state at generation
+`expected + 1` is an exact retry and returns unchanged before freshness checks.
+Other generation mismatches conflict. Resume requires a clean, current accepted
+base; abandon remains available when the base is stale or compatibility-dirty.
+The state and generation update is one scoped compare-and-swap followed by a
+verified read. PostgreSQL returns `transaction_unavailable` until its repository
+has a real transaction path. Routes, UI, rebase, audit timestamps, event history,
+and Apply remain deferred.
 
 Draft recompute accepts `(NULL, 0)` only when the Build also has no live
 compatibility Parts. A null pointer with a nonzero version, or a null pointer
