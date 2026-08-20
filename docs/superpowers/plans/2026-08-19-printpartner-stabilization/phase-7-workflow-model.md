@@ -36,6 +36,9 @@ accepted Plan revision. If the production-loop model wins, use a Build planning
 state and a separate production-run state rather than one five-stage boolean
 list.
 
+The concrete storage, command, transaction, and Required-unit boundaries are
+defined in [the Plan revision architecture](phase-7-plan-revision-architecture.md).
+
 ## Verification
 
 Static checks run domain transition tests, workflow component tests, typecheck,

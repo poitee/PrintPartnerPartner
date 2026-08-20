@@ -1,5 +1,6 @@
 import {
   type AnySQLiteColumn,
+  check,
   integer,
   sqliteTable,
   text,
@@ -51,6 +52,11 @@ export const buildProfiles = sqliteTable(
     archivedAt: text("archived_at"),
     /** ISO timestamp of last spine selection (picker / activate). */
     lastUsedAt: text("last_used_at"),
+    acceptedPlanRevisionId: integer("accepted_plan_revision_id").references(
+      (): AnySQLiteColumn => planRevisions.id,
+      { onDelete: "set null" },
+    ),
+    acceptedPlanVersion: integer("accepted_plan_version").notNull().default(0),
   },
   (t) => [uniqueIndex("uq_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -148,6 +154,74 @@ export const planAcceptedInputSets = sqliteTable("plan_accepted_input_sets", {
     .notNull()
     .references(() => planRevisionInputSets.id, { onDelete: "restrict" }),
   acceptedAt: text("accepted_at").notNull(),
+});
+
+export const planRevisions = sqliteTable(
+  "plan_revisions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    revisionNumber: integer("revision_number").notNull(),
+    parentRevisionId: integer("parent_revision_id").references(
+      (): AnySQLiteColumn => planRevisions.id,
+      { onDelete: "restrict" },
+    ),
+    inputSetId: integer("input_set_id").references(() => planRevisionInputSets.id, {
+      onDelete: "restrict",
+    }),
+    provenanceKind: text("provenance_kind").$type<"tracked" | "legacy">().notNull(),
+    digestFormat: text("digest_format").notNull(),
+    snapshotDigest: text("snapshot_digest").notNull(),
+    createdBy: text("created_by").notNull(),
+    acceptedBy: text("accepted_by").notNull(),
+    createdAt: text("created_at").notNull(),
+    acceptedAt: text("accepted_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_revisions_tenant_plan_number").on(
+      t.tenantId,
+      t.profileId,
+      t.revisionNumber,
+    ),
+    check(
+      "chk_plan_revisions_provenance",
+      sql`(${t.provenanceKind} = 'tracked' AND ${t.inputSetId} IS NOT NULL)
+          OR (${t.provenanceKind} = 'legacy' AND ${t.inputSetId} IS NULL)`,
+    ),
+  ],
+);
+
+export const planRevisionParts = sqliteTable("plan_revision_parts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  revisionId: integer("revision_id")
+    .notNull()
+    .references(() => planRevisions.id, { onDelete: "cascade" }),
+  projectionPartId: integer("projection_part_id"),
+  partKey: text("part_key").notNull(),
+  relativePath: text("relative_path").notNull().default(""),
+  filename: text("filename").notNull().default(""),
+  sourceLayer: text("source_layer").notNull().default(""),
+  status: text("status").notNull().default("base"),
+  roleInferred: text("role_inferred").notNull().default("primary"),
+  roleOverride: text("role_override"),
+  filamentColorId: text("filament_color_id"),
+  filamentCustomHex: text("filament_custom_hex"),
+  spoolmanSpoolId: text("spoolman_spool_id"),
+  quantityInferred: integer("quantity_inferred").notNull().default(1),
+  quantityOverride: integer("quantity_override"),
+  quantityEffective: integer("quantity_effective").notNull().default(1),
+  included: integer("included", { mode: "boolean" }).notNull().default(true),
+  notes: text("notes").notNull().default(""),
+  githubBlobUrl: text("github_blob_url"),
+  geometrySame: integer("geometry_same", { mode: "boolean" }),
+  requirement: text("requirement"),
+  optionGroupId: text("option_group_id"),
+  manifestSource: text("manifest_source"),
+  artifactDigest: text("artifact_digest"),
 });
 
 export const parts = sqliteTable("parts", {
@@ -536,7 +610,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 18;
+export const currentSchemaVersion = 19;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -930,4 +1004,175 @@ export const schemaMigrations: string[] = [
     input_set_id INTEGER NOT NULL REFERENCES plan_revision_input_sets(id) ON DELETE RESTRICT,
     accepted_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS plan_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    revision_number INTEGER NOT NULL,
+    parent_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE RESTRICT,
+    input_set_id INTEGER REFERENCES plan_revision_input_sets(id) ON DELETE RESTRICT,
+    provenance_kind TEXT NOT NULL,
+    digest_format TEXT NOT NULL,
+    snapshot_digest TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    accepted_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    accepted_at TEXT NOT NULL,
+    CONSTRAINT chk_plan_revisions_provenance CHECK (
+      (provenance_kind = 'tracked' AND input_set_id IS NOT NULL)
+      OR (provenance_kind = 'legacy' AND input_set_id IS NULL)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revisions_tenant_plan_number
+    ON plan_revisions (tenant_id, profile_id, revision_number)`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_revisions_tenant_plan
+    ON plan_revisions (tenant_id, profile_id, accepted_at)`,
+  `CREATE TABLE IF NOT EXISTS plan_revision_parts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    revision_id INTEGER NOT NULL REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    projection_part_id INTEGER,
+    part_key TEXT NOT NULL,
+    relative_path TEXT NOT NULL DEFAULT '',
+    filename TEXT NOT NULL DEFAULT '',
+    source_layer TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'base',
+    role_inferred TEXT NOT NULL DEFAULT 'primary',
+    role_override TEXT,
+    filament_color_id TEXT,
+    filament_custom_hex TEXT,
+    spoolman_spool_id TEXT,
+    quantity_inferred INTEGER NOT NULL DEFAULT 1,
+    quantity_override INTEGER,
+    quantity_effective INTEGER NOT NULL DEFAULT 1,
+    included INTEGER NOT NULL DEFAULT 1,
+    notes TEXT NOT NULL DEFAULT '',
+    github_blob_url TEXT,
+    geometry_same INTEGER,
+    requirement TEXT,
+    option_group_id TEXT,
+    manifest_source TEXT,
+    artifact_digest TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_revision_parts_tenant_revision
+    ON plan_revision_parts (tenant_id, revision_id)`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revisions_ownership_insert
+    BEFORE INSERT ON plan_revisions
+    WHEN NOT EXISTS (
+      SELECT 1 FROM build_profiles profile
+       WHERE profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
+    ) OR (
+      NEW.parent_revision_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM plan_revisions parent
+         WHERE parent.id = NEW.parent_revision_id
+           AND parent.profile_id = NEW.profile_id
+           AND parent.tenant_id = NEW.tenant_id
+      )
+    ) OR (
+      NEW.input_set_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM plan_revision_input_sets input_set
+         WHERE input_set.id = NEW.input_set_id
+           AND input_set.profile_id = NEW.profile_id
+           AND input_set.tenant_id = NEW.tenant_id
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan revision ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revision_parts_ownership_insert
+    BEFORE INSERT ON plan_revision_parts
+    WHEN NOT EXISTS (
+      SELECT 1 FROM plan_revisions revision
+       WHERE revision.id = NEW.revision_id AND revision.tenant_id = NEW.tenant_id
+    ) OR (
+      NEW.projection_part_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+          FROM parts part
+          JOIN plan_revisions revision ON revision.id = NEW.revision_id
+         WHERE part.id = NEW.projection_part_id
+           AND part.tenant_id = NEW.tenant_id
+           AND part.profile_id = revision.profile_id
+           AND revision.tenant_id = NEW.tenant_id
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan revision Part ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revisions_immutable_update
+    BEFORE UPDATE ON plan_revisions
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plan revisions are immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revisions_immutable_delete
+    BEFORE DELETE ON plan_revisions
+    WHEN EXISTS (
+      SELECT 1 FROM build_profiles profile
+       WHERE profile.id = OLD.profile_id AND profile.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plan revisions are immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revision_parts_immutable_update
+    BEFORE UPDATE ON plan_revision_parts
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plan revision Parts are immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revision_parts_immutable_delete
+    BEFORE DELETE ON plan_revision_parts
+    WHEN EXISTS (
+      SELECT 1
+        FROM plan_revisions revision
+        JOIN build_profiles profile
+          ON profile.id = revision.profile_id
+         AND profile.tenant_id = revision.tenant_id
+       WHERE revision.id = OLD.revision_id
+         AND revision.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plan revision Parts are immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_parts_invalidate_accepted_revision_insert
+    AFTER INSERT ON parts
+    BEGIN
+      UPDATE build_profiles
+         SET accepted_plan_revision_id = NULL
+       WHERE id = NEW.profile_id AND tenant_id = NEW.tenant_id;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_parts_invalidate_accepted_revision_update
+    AFTER UPDATE ON parts
+    BEGIN
+      UPDATE build_profiles
+         SET accepted_plan_revision_id = NULL
+       WHERE (id = OLD.profile_id AND tenant_id = OLD.tenant_id)
+          OR (id = NEW.profile_id AND tenant_id = NEW.tenant_id);
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_parts_invalidate_accepted_revision_delete
+    AFTER DELETE ON parts
+    BEGIN
+      UPDATE build_profiles
+         SET accepted_plan_revision_id = NULL
+       WHERE id = OLD.profile_id AND tenant_id = OLD.tenant_id;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_profile_layers_invalidate_accepted_revision_insert
+    AFTER INSERT ON profile_layers
+    BEGIN
+      UPDATE build_profiles
+         SET accepted_plan_revision_id = NULL
+       WHERE id = NEW.profile_id AND tenant_id = NEW.tenant_id;
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_profile_layers_invalidate_accepted_revision_update
+    AFTER UPDATE ON profile_layers
+    BEGIN
+      UPDATE build_profiles
+         SET accepted_plan_revision_id = NULL
+       WHERE (id = OLD.profile_id AND tenant_id = OLD.tenant_id)
+          OR (id = NEW.profile_id AND tenant_id = NEW.tenant_id);
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_profile_layers_invalidate_accepted_revision_delete
+    AFTER DELETE ON profile_layers
+    BEGIN
+      UPDATE build_profiles
+         SET accepted_plan_revision_id = NULL
+       WHERE id = OLD.profile_id AND tenant_id = OLD.tenant_id;
+    END`,
 ];

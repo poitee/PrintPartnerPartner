@@ -1,6 +1,7 @@
 import {
   type AnyPgColumn,
   boolean,
+  check,
   integer,
   pgTable,
   serial,
@@ -53,6 +54,11 @@ export const buildProfiles = pgTable(
     archivedAt: text("archived_at"),
     /** ISO timestamp of last spine selection (picker / activate). */
     lastUsedAt: text("last_used_at"),
+    acceptedPlanRevisionId: integer("accepted_plan_revision_id").references(
+      (): AnyPgColumn => planRevisions.id,
+      { onDelete: "set null" },
+    ),
+    acceptedPlanVersion: integer("accepted_plan_version").notNull().default(0),
   },
   (t) => [uniqueIndex("uq_profiles_tenant_name").on(t.tenantId, t.name)],
 );
@@ -150,6 +156,74 @@ export const planAcceptedInputSets = pgTable("plan_accepted_input_sets", {
     .notNull()
     .references(() => planRevisionInputSets.id, { onDelete: "restrict" }),
   acceptedAt: text("accepted_at").notNull(),
+});
+
+export const planRevisions = pgTable(
+  "plan_revisions",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    revisionNumber: integer("revision_number").notNull(),
+    parentRevisionId: integer("parent_revision_id").references(
+      (): AnyPgColumn => planRevisions.id,
+      { onDelete: "restrict" },
+    ),
+    inputSetId: integer("input_set_id").references(() => planRevisionInputSets.id, {
+      onDelete: "restrict",
+    }),
+    provenanceKind: text("provenance_kind").$type<"tracked" | "legacy">().notNull(),
+    digestFormat: text("digest_format").notNull(),
+    snapshotDigest: text("snapshot_digest").notNull(),
+    createdBy: text("created_by").notNull(),
+    acceptedBy: text("accepted_by").notNull(),
+    createdAt: text("created_at").notNull(),
+    acceptedAt: text("accepted_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_revisions_tenant_plan_number").on(
+      t.tenantId,
+      t.profileId,
+      t.revisionNumber,
+    ),
+    check(
+      "chk_plan_revisions_provenance",
+      sql`(${t.provenanceKind} = 'tracked' AND ${t.inputSetId} IS NOT NULL)
+          OR (${t.provenanceKind} = 'legacy' AND ${t.inputSetId} IS NULL)`,
+    ),
+  ],
+);
+
+export const planRevisionParts = pgTable("plan_revision_parts", {
+  id: serial("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  revisionId: integer("revision_id")
+    .notNull()
+    .references(() => planRevisions.id, { onDelete: "cascade" }),
+  projectionPartId: integer("projection_part_id"),
+  partKey: text("part_key").notNull(),
+  relativePath: text("relative_path").notNull().default(""),
+  filename: text("filename").notNull().default(""),
+  sourceLayer: text("source_layer").notNull().default(""),
+  status: text("status").notNull().default("base"),
+  roleInferred: text("role_inferred").notNull().default("primary"),
+  roleOverride: text("role_override"),
+  filamentColorId: text("filament_color_id"),
+  filamentCustomHex: text("filament_custom_hex"),
+  spoolmanSpoolId: text("spoolman_spool_id"),
+  quantityInferred: integer("quantity_inferred").notNull().default(1),
+  quantityOverride: integer("quantity_override"),
+  quantityEffective: integer("quantity_effective").notNull().default(1),
+  included: boolean("included").notNull().default(true),
+  notes: text("notes").notNull().default(""),
+  githubBlobUrl: text("github_blob_url"),
+  geometrySame: boolean("geometry_same"),
+  requirement: text("requirement"),
+  optionGroupId: text("option_group_id"),
+  manifestSource: text("manifest_source"),
+  artifactDigest: text("artifact_digest"),
 });
 
 export const parts = pgTable("parts", {
@@ -535,4 +609,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 18;
+export const currentSchemaVersion = 19;

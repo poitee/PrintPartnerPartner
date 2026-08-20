@@ -5,8 +5,20 @@ import { dirname, join } from "node:path";
 import * as schema from "./schema.js";
 import { currentSchemaVersion, schemaMigrations, schemaVersionKey } from "./schema.js";
 import { seedStarterProfiles } from "./seed-starter-profiles.js";
+import {
+  ACCEPTED_PLAN_REVISION_SCHEMA_VERSION,
+  backfillAcceptedPlanRevisions,
+} from "./accepted-plan-revisions.js";
 
 export type DrizzleDb = BetterSQLite3Database<typeof schema>;
+
+function parseSchemaVersion(value: string | undefined): number {
+  if (value == null) return 0;
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`Invalid database schema version: ${value}`);
+  }
+  return Number(value);
+}
 
 export class SqliteDatabase {
   private sqlite: Database.Database | null = null;
@@ -42,6 +54,20 @@ export class SqliteDatabase {
 
   private runMigrations(): void {
     if (!this.sqlite) throw new Error("Database not connected");
+    const hasSettingsTable = this.sqlite
+      .prepare(
+        "SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'",
+      )
+      .get() as { found: number } | undefined;
+    const versionBeforeMigration = hasSettingsTable
+      ? parseSchemaVersion(
+          (
+            this.sqlite
+              .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
+              .get("default", schemaVersionKey) as { value?: string } | undefined
+          )?.value,
+        )
+      : 0;
     for (const stmt of schemaMigrations) {
       try {
         this.sqlite.exec(stmt);
@@ -136,6 +162,43 @@ export class SqliteDatabase {
     if (!profileCols.some((c) => c.name === "special_request")) {
       this.sqlite.exec("ALTER TABLE build_profiles ADD COLUMN special_request TEXT");
     }
+    if (!profileCols.some((c) => c.name === "accepted_plan_revision_id")) {
+      this.sqlite.exec(
+        "ALTER TABLE build_profiles ADD COLUMN accepted_plan_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE SET NULL",
+      );
+    }
+    if (!profileCols.some((c) => c.name === "accepted_plan_version")) {
+      this.sqlite.exec(
+        "ALTER TABLE build_profiles ADD COLUMN accepted_plan_version INTEGER NOT NULL DEFAULT 0",
+      );
+    }
+    this.sqlite.exec(`
+      CREATE TRIGGER IF NOT EXISTS trg_build_profiles_revision_ownership_insert
+      BEFORE INSERT ON build_profiles
+      WHEN NEW.accepted_plan_revision_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM plan_revisions revision
+         WHERE revision.id = NEW.accepted_plan_revision_id
+           AND revision.profile_id = NEW.id
+           AND revision.tenant_id = NEW.tenant_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'Accepted Plan revision ownership violation');
+      END;
+      CREATE TRIGGER IF NOT EXISTS trg_build_profiles_revision_ownership_update
+      BEFORE UPDATE OF id, tenant_id, accepted_plan_revision_id ON build_profiles
+      WHEN NEW.accepted_plan_revision_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM plan_revisions revision
+         WHERE revision.id = NEW.accepted_plan_revision_id
+           AND revision.profile_id = NEW.id
+           AND revision.tenant_id = NEW.tenant_id
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'Accepted Plan revision ownership violation');
+      END;
+    `);
+    if (versionBeforeMigration < ACCEPTED_PLAN_REVISION_SCHEMA_VERSION) {
+      backfillAcceptedPlanRevisions(this.sqlite);
+    }
     const printProgressCols = this.sqlite.pragma("table_info(print_progress)") as { name: string }[];
     if (!printProgressCols.some((c) => c.name === "assembled")) {
       this.sqlite.exec("ALTER TABLE print_progress ADD COLUMN assembled INTEGER NOT NULL DEFAULT 0");
@@ -163,7 +226,7 @@ export class SqliteDatabase {
     const row = this.sqlite
       .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
       .get("default", schemaVersionKey) as { value?: string } | undefined;
-    const version = row?.value ? Number(row.value) : 0;
+    const version = parseSchemaVersion(row?.value);
     if (version < currentSchemaVersion) {
       this.sqlite
         .prepare(

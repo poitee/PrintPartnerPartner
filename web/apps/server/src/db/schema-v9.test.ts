@@ -57,6 +57,54 @@ const V16_TABLES = [
 
 const V18_TABLES = ["plan_accepted_input_sets"];
 
+const V19_TABLES = ["plan_revisions", "plan_revision_parts"];
+
+const V19_COLUMNS: Record<string, string[]> = {
+  build_profiles: ["accepted_plan_revision_id", "accepted_plan_version"],
+  plan_revisions: [
+    "id",
+    "tenant_id",
+    "profile_id",
+    "revision_number",
+    "parent_revision_id",
+    "input_set_id",
+    "provenance_kind",
+    "digest_format",
+    "snapshot_digest",
+    "created_by",
+    "accepted_by",
+    "created_at",
+    "accepted_at",
+  ],
+  plan_revision_parts: [
+    "id",
+    "tenant_id",
+    "revision_id",
+    "projection_part_id",
+    "part_key",
+    "relative_path",
+    "filename",
+    "source_layer",
+    "status",
+    "role_inferred",
+    "role_override",
+    "filament_color_id",
+    "filament_custom_hex",
+    "spoolman_spool_id",
+    "quantity_inferred",
+    "quantity_override",
+    "quantity_effective",
+    "included",
+    "notes",
+    "github_blob_url",
+    "geometry_same",
+    "requirement",
+    "option_group_id",
+    "manifest_source",
+    "artifact_digest",
+  ],
+};
+
 const V18_COLUMNS: Record<string, string[]> = {
   plan_revision_input_sets: ["format_version"],
   plan_revision_inputs: [
@@ -182,17 +230,17 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v18 tables and records schema version 18", () => {
+  it("creates the v15-v19 tables and records schema version 19", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
-      for (const table of [...V15_TABLES, ...V16_TABLES, ...V18_TABLES]) {
+      for (const table of [...V15_TABLES, ...V16_TABLES, ...V18_TABLES, ...V19_TABLES]) {
         expect(tables, `missing table ${table}`).toContain(table);
       }
       expect(
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "18" });
+      ).toMatchObject({ value: "19" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -210,6 +258,14 @@ describe("schema v9-v13 (SQLite)", () => {
   it("creates every v18 accepted-input column", () => {
     withSqlite((sqlite) => {
       for (const [table, expected] of Object.entries(V18_COLUMNS)) {
+        expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
+      }
+    });
+  });
+
+  it("creates every v19 accepted-revision column", () => {
+    withSqlite((sqlite) => {
+      for (const [table, expected] of Object.entries(V19_COLUMNS)) {
         expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
       }
     });
@@ -623,8 +679,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(18);
-    expect(pgSchema.currentSchemaVersion).toBe(18);
+    expect(sqliteSchema.currentSchemaVersion).toBe(19);
+    expect(pgSchema.currentSchemaVersion).toBe(19);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -678,6 +734,15 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
     }
   });
 
+  it("adds every v19 accepted-revision column in Postgres DDL", () => {
+    for (const [table, expected] of Object.entries(V19_COLUMNS)) {
+      const present = new Set([...pgCreatedColumns(table), ...pgAddedColumns(table)]);
+      for (const column of expected) {
+        expect(present.has(column), `Postgres ${table} never gets column ${column}`).toBe(true);
+      }
+    }
+  });
+
   it("enforces the v18 Plan-input identity constraints in Postgres", () => {
     expect(POSTGRES_DDL).toMatch(
       /ALTER TABLE plan_revision_inputs ALTER COLUMN source_id SET NOT NULL/i,
@@ -690,6 +755,23 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
     expect(POSTGRES_DDL).toMatch(
       /CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_inputs_v2_set_source[\s\S]*WHERE effective_naming_digest IS NOT NULL/i,
     );
+  });
+
+  it("enforces v19 accepted-revision ownership and immutability in Postgres", () => {
+    for (const constraint of [
+      "fk_plan_revisions_profile_owner",
+      "fk_plan_revisions_parent_owner",
+      "fk_plan_revisions_input_owner",
+      "fk_plan_revision_parts_revision_owner",
+      "fk_build_profiles_revision_owner",
+    ]) {
+      expect(POSTGRES_DDL).toContain(constraint);
+    }
+    expect(POSTGRES_DDL).toContain("trg_plan_revisions_immutable");
+    expect(POSTGRES_DDL).toContain("trg_plan_revision_parts_immutable");
+    expect(POSTGRES_DDL).toContain("trg_parts_invalidate_accepted_revision");
+    expect(POSTGRES_DDL).toContain("trg_profile_layers_invalidate_accepted_revision");
+    expect(POSTGRES_DDL).toContain("trg_plan_revision_part_projection_owner");
   });
 
   it("adds v13 profile-sync provenance columns on slicer profile tables", () => {
@@ -721,6 +803,10 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
         expect(stmt, `not idempotent: ${head}`).toMatch(
           /source_id IS NULL OR plan_revision_inputs\.source_layer IS NULL/i,
         );
+      } else if (/^\s*CREATE OR REPLACE FUNCTION/i.test(stmt)) {
+        expect(stmt, `not idempotent: ${head}`).toMatch(/CREATE OR REPLACE FUNCTION/i);
+      } else if (/^\s*DO \$block\$/i.test(stmt)) {
+        expect(stmt, `not idempotent: ${head}`).toMatch(/IF NOT EXISTS/i);
       } else {
         throw new Error(`unexpected non-DDL post-init statement: ${head}`);
       }

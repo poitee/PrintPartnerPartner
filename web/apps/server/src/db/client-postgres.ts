@@ -492,6 +492,195 @@ export const postgresPostInitMigrations: string[] = [
     input_set_id INTEGER NOT NULL REFERENCES plan_revision_input_sets(id) ON DELETE RESTRICT,
     accepted_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS plan_revisions (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    revision_number INTEGER NOT NULL,
+    parent_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE RESTRICT,
+    input_set_id INTEGER REFERENCES plan_revision_input_sets(id) ON DELETE RESTRICT,
+    provenance_kind TEXT NOT NULL,
+    digest_format TEXT NOT NULL,
+    snapshot_digest TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    accepted_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    accepted_at TEXT NOT NULL,
+    CONSTRAINT chk_plan_revisions_provenance CHECK (
+      (provenance_kind = 'tracked' AND input_set_id IS NOT NULL)
+      OR (provenance_kind = 'legacy' AND input_set_id IS NULL)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revisions_tenant_plan_number
+    ON plan_revisions (tenant_id, profile_id, revision_number)`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_revisions_tenant_plan
+    ON plan_revisions (tenant_id, profile_id, accepted_at)`,
+  `CREATE TABLE IF NOT EXISTS plan_revision_parts (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    revision_id INTEGER NOT NULL REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    projection_part_id INTEGER,
+    part_key TEXT NOT NULL,
+    relative_path TEXT NOT NULL DEFAULT '',
+    filename TEXT NOT NULL DEFAULT '',
+    source_layer TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'base',
+    role_inferred TEXT NOT NULL DEFAULT 'primary',
+    role_override TEXT,
+    filament_color_id TEXT,
+    filament_custom_hex TEXT,
+    spoolman_spool_id TEXT,
+    quantity_inferred INTEGER NOT NULL DEFAULT 1,
+    quantity_override INTEGER,
+    quantity_effective INTEGER NOT NULL DEFAULT 1,
+    included BOOLEAN NOT NULL DEFAULT TRUE,
+    notes TEXT NOT NULL DEFAULT '',
+    github_blob_url TEXT,
+    geometry_same BOOLEAN,
+    requirement TEXT,
+    option_group_id TEXT,
+    manifest_source TEXT,
+    artifact_digest TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_revision_parts_tenant_revision
+    ON plan_revision_parts (tenant_id, revision_id)`,
+  `ALTER TABLE build_profiles ADD COLUMN IF NOT EXISTS accepted_plan_revision_id INTEGER
+    REFERENCES plan_revisions(id) ON DELETE SET NULL`,
+  `ALTER TABLE build_profiles ADD COLUMN IF NOT EXISTS accepted_plan_version INTEGER NOT NULL DEFAULT 0`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_build_profiles_tenant_id
+    ON build_profiles (tenant_id, id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_input_sets_owner_id
+    ON plan_revision_input_sets (tenant_id, profile_id, id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revisions_owner_id
+    ON plan_revisions (tenant_id, profile_id, id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revisions_tenant_id
+    ON plan_revisions (tenant_id, id)`,
+  `DO $block$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_plan_revisions_profile_owner') THEN
+        ALTER TABLE plan_revisions ADD CONSTRAINT fk_plan_revisions_profile_owner
+          FOREIGN KEY (tenant_id, profile_id)
+          REFERENCES build_profiles (tenant_id, id) ON DELETE CASCADE;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_plan_revisions_parent_owner') THEN
+        ALTER TABLE plan_revisions ADD CONSTRAINT fk_plan_revisions_parent_owner
+          FOREIGN KEY (tenant_id, profile_id, parent_revision_id)
+          REFERENCES plan_revisions (tenant_id, profile_id, id) ON DELETE RESTRICT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_plan_revisions_input_owner') THEN
+        ALTER TABLE plan_revisions ADD CONSTRAINT fk_plan_revisions_input_owner
+          FOREIGN KEY (tenant_id, profile_id, input_set_id)
+          REFERENCES plan_revision_input_sets (tenant_id, profile_id, id) ON DELETE RESTRICT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_plan_revision_parts_revision_owner') THEN
+        ALTER TABLE plan_revision_parts ADD CONSTRAINT fk_plan_revision_parts_revision_owner
+          FOREIGN KEY (tenant_id, revision_id)
+          REFERENCES plan_revisions (tenant_id, id) ON DELETE CASCADE;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_build_profiles_revision_owner') THEN
+        ALTER TABLE build_profiles ADD CONSTRAINT fk_build_profiles_revision_owner
+          FOREIGN KEY (tenant_id, id, accepted_plan_revision_id)
+          REFERENCES plan_revisions (tenant_id, profile_id, id) ON DELETE NO ACTION
+          DEFERRABLE INITIALLY DEFERRED;
+      END IF;
+    END
+  $block$`,
+  `CREATE OR REPLACE FUNCTION protect_plan_revisions_immutable()
+    RETURNS trigger LANGUAGE plpgsql AS $function$
+    BEGIN
+      IF TG_OP = 'UPDATE' OR EXISTS (
+        SELECT 1 FROM build_profiles profile
+         WHERE profile.id = OLD.profile_id AND profile.tenant_id = OLD.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Accepted Plan revisions are immutable' USING ERRCODE = '55000';
+      END IF;
+      RETURN OLD;
+    END
+  $function$`,
+  `CREATE OR REPLACE FUNCTION protect_plan_revision_parts_immutable()
+    RETURNS trigger LANGUAGE plpgsql AS $function$
+    BEGIN
+      IF TG_OP = 'UPDATE' OR EXISTS (
+        SELECT 1
+          FROM plan_revisions revision
+          JOIN build_profiles profile
+            ON profile.id = revision.profile_id
+           AND profile.tenant_id = revision.tenant_id
+         WHERE revision.id = OLD.revision_id
+           AND revision.tenant_id = OLD.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Accepted Plan revision Parts are immutable' USING ERRCODE = '55000';
+      END IF;
+      RETURN OLD;
+    END
+  $function$`,
+  `CREATE OR REPLACE FUNCTION enforce_plan_revision_part_projection_owner()
+    RETURNS trigger LANGUAGE plpgsql AS $function$
+    BEGIN
+      IF NEW.projection_part_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+          FROM parts part
+          JOIN plan_revisions revision ON revision.id = NEW.revision_id
+         WHERE part.id = NEW.projection_part_id
+           AND part.tenant_id = NEW.tenant_id
+           AND part.profile_id = revision.profile_id
+           AND revision.tenant_id = NEW.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Plan revision Part projection ownership violation'
+          USING ERRCODE = '23503';
+      END IF;
+      RETURN NEW;
+    END
+  $function$`,
+  `CREATE OR REPLACE FUNCTION invalidate_accepted_plan_revision()
+    RETURNS trigger LANGUAGE plpgsql AS $function$
+    BEGIN
+      IF TG_OP = 'DELETE' THEN
+        UPDATE build_profiles
+           SET accepted_plan_revision_id = NULL
+         WHERE id = OLD.profile_id AND tenant_id = OLD.tenant_id;
+        RETURN OLD;
+      END IF;
+      IF TG_OP = 'UPDATE' THEN
+        UPDATE build_profiles
+           SET accepted_plan_revision_id = NULL
+         WHERE id = OLD.profile_id AND tenant_id = OLD.tenant_id;
+      END IF;
+      UPDATE build_profiles
+         SET accepted_plan_revision_id = NULL
+       WHERE id = NEW.profile_id AND tenant_id = NEW.tenant_id;
+      RETURN NEW;
+    END
+  $function$`,
+  `DO $block$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_revisions_immutable') THEN
+        CREATE TRIGGER trg_plan_revisions_immutable
+          BEFORE UPDATE OR DELETE ON plan_revisions
+          FOR EACH ROW EXECUTE FUNCTION protect_plan_revisions_immutable();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_revision_parts_immutable') THEN
+        CREATE TRIGGER trg_plan_revision_parts_immutable
+          BEFORE UPDATE OR DELETE ON plan_revision_parts
+          FOR EACH ROW EXECUTE FUNCTION protect_plan_revision_parts_immutable();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_revision_part_projection_owner') THEN
+        CREATE TRIGGER trg_plan_revision_part_projection_owner
+          BEFORE INSERT ON plan_revision_parts
+          FOR EACH ROW EXECUTE FUNCTION enforce_plan_revision_part_projection_owner();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_parts_invalidate_accepted_revision') THEN
+        CREATE TRIGGER trg_parts_invalidate_accepted_revision
+          AFTER INSERT OR UPDATE OR DELETE ON parts
+          FOR EACH ROW EXECUTE FUNCTION invalidate_accepted_plan_revision();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_profile_layers_invalidate_accepted_revision') THEN
+        CREATE TRIGGER trg_profile_layers_invalidate_accepted_revision
+          AFTER INSERT OR UPDATE OR DELETE ON profile_layers
+          FOR EACH ROW EXECUTE FUNCTION invalidate_accepted_plan_revision();
+      END IF;
+    END
+  $block$`,
 ];
 
 export class PostgresDatabase {

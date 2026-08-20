@@ -114,6 +114,8 @@ export type SchemaTables = Pick<
   | "planRevisionInputSets"
   | "planRevisionInputs"
   | "planAcceptedInputSets"
+  | "planRevisions"
+  | "planRevisionParts"
   | "sourceDocs"
   | "sourceNotes"
   | "planDecisions"
@@ -157,6 +159,37 @@ export type PrintJobPartRow = typeof defaultSchema.printJobParts.$inferSelect;
 export type SourceRevisionRow = typeof defaultSchema.sourceRevisions.$inferSelect;
 export type PlanRevisionInputSetRow = typeof defaultSchema.planRevisionInputSets.$inferSelect;
 export type PlanRevisionInputRow = typeof defaultSchema.planRevisionInputs.$inferSelect;
+export type PlanRevisionRow = typeof defaultSchema.planRevisions.$inferSelect;
+export type PlanRevisionPartRow = typeof defaultSchema.planRevisionParts.$inferSelect;
+
+type AcceptedPlanRevisionIdentity = Omit<
+  PlanRevisionRow,
+  "provenanceKind" | "inputSetId"
+> &
+  (
+    | { provenanceKind: "tracked"; inputSetId: number }
+    | { provenanceKind: "legacy"; inputSetId: null }
+  );
+
+export type AcceptedPlanRevisionPart = PlanRevisionPartRow & {
+  effectiveRole: string;
+  effectiveQuantity: number;
+};
+
+export type AcceptedPlanRevision = AcceptedPlanRevisionIdentity & {
+  planVersion: number;
+  parts: AcceptedPlanRevisionPart[];
+};
+
+function acceptedPlanRevisionIdentity(row: PlanRevisionRow): AcceptedPlanRevisionIdentity {
+  if (row.provenanceKind === "tracked" && row.inputSetId != null) {
+    return { ...row, provenanceKind: "tracked", inputSetId: row.inputSetId };
+  }
+  if (row.provenanceKind === "legacy" && row.inputSetId == null) {
+    return { ...row, provenanceKind: "legacy", inputSetId: null };
+  }
+  throw new Error("Accepted Plan revision provenance is invalid");
+}
 
 export type SourceNamingCommand =
   | { readonly kind: "use_defaults" }
@@ -438,6 +471,32 @@ function partRow(row: PartDbRow): PartRow {
     quantity_auto: row.quantityAuto,
     quantity_override: row.quantityOverride,
     quantity_effective: row.quantityEffective,
+  };
+}
+
+function acceptedRevisionPartRow(row: AcceptedPlanRevisionPart): PartRow {
+  if (row.projectionPartId == null) {
+    throw new Error("Accepted Plan revision Part has no compatibility projection ID");
+  }
+  return {
+    id: row.projectionPartId,
+    match_key: row.partKey,
+    relative_path: row.relativePath,
+    filename: row.filename,
+    source_layer: row.sourceLayer,
+    status: row.status,
+    role: row.effectiveRole,
+    requirement: row.requirement,
+    option_group_id: row.optionGroupId,
+    included: row.included,
+    filament_color_id: row.filamentColorId,
+    filament_custom_hex: row.filamentCustomHex,
+    spoolman_spool_id: row.spoolmanSpoolId,
+    filament_display: "",
+    filament_hex: row.filamentCustomHex,
+    quantity_auto: row.quantityInferred,
+    quantity_override: row.quantityOverride,
+    quantity_effective: row.effectiveQuantity,
   };
 }
 
@@ -2341,6 +2400,60 @@ export class AppRepository {
       .where(eq(this.schema.parts.profileId, id))
       .get();
     return this.toProfileSummary(profile, Number(partCount?.c ?? 0));
+  }
+
+  getAcceptedPlanRevision(profileId: number): AcceptedPlanRevision | null {
+    const profile = this.db
+      .select({
+        revisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
+        planVersion: this.schema.buildProfiles.acceptedPlanVersion,
+      })
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, profileId),
+        ),
+      )
+      .get();
+    if (!profile?.revisionId) return null;
+    const revision = this.db
+      .select()
+      .from(this.schema.planRevisions)
+      .where(
+        and(
+          eq(this.schema.planRevisions.tenantId, this.tenantId),
+          eq(this.schema.planRevisions.profileId, profileId),
+          eq(this.schema.planRevisions.id, profile.revisionId),
+        ),
+      )
+      .get();
+    if (!revision) {
+      throw new Error("Accepted Plan revision is missing");
+    }
+    const identity = acceptedPlanRevisionIdentity(revision);
+    const parts = this.db
+      .select()
+      .from(this.schema.planRevisionParts)
+      .where(
+        and(
+          eq(this.schema.planRevisionParts.tenantId, this.tenantId),
+          eq(this.schema.planRevisionParts.revisionId, revision.id),
+        ),
+      )
+      .orderBy(asc(this.schema.planRevisionParts.filename), asc(this.schema.planRevisionParts.id))
+      .all()
+      .map((part) => ({
+        ...part,
+        effectiveRole: part.roleOverride ?? part.roleInferred,
+        effectiveQuantity: part.quantityEffective,
+      }));
+    return { ...identity, planVersion: profile.planVersion, parts };
+  }
+
+  getAcceptedPlanPartRows(profileId: number): PartRow[] | null {
+    const revision = this.getAcceptedPlanRevision(profileId);
+    return revision?.parts.map(acceptedRevisionPartRow) ?? null;
   }
 
   createProfile(name: string, baseProjectId?: number): ProfileSummary & {
