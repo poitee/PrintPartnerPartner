@@ -226,6 +226,114 @@ export const planRevisionParts = pgTable("plan_revision_parts", {
   artifactDigest: text("artifact_digest"),
 });
 
+export const planDrafts = pgTable(
+  "plan_drafts",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    baseRevisionId: integer("base_revision_id").references(() => planRevisions.id, {
+      onDelete: "restrict",
+    }),
+    basePlanVersion: integer("base_plan_version").notNull(),
+    state: text("state").$type<"open" | "abandoned" | "consumed">().notNull(),
+    digestFormat: text("digest_format").notNull(),
+    snapshotDigest: text("snapshot_digest").notNull(),
+    createdBy: text("created_by").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_drafts_tenant_actor_profile_key").on(
+      t.tenantId,
+      t.createdBy,
+      t.profileId,
+      t.idempotencyKey,
+    ),
+    check("chk_plan_drafts_state", sql`${t.state} IN ('open', 'abandoned', 'consumed')`),
+    check(
+      "chk_plan_drafts_base",
+      sql`(${t.baseRevisionId} IS NULL AND ${t.basePlanVersion} = 0)
+          OR (${t.baseRevisionId} IS NOT NULL AND ${t.basePlanVersion} > 0)`,
+    ),
+  ],
+);
+
+export const planDraftInputs = pgTable(
+  "plan_draft_inputs",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    draftId: integer("draft_id")
+      .notNull()
+      .references(() => planDrafts.id, { onDelete: "cascade" }),
+    sourceId: integer("source_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "restrict" }),
+    sourceLayer: text("source_layer").notNull(),
+    layerOrder: integer("layer_order").notNull(),
+    trackingKind: text("tracking_kind").$type<"revision" | "untracked">().notNull(),
+    sourceRevisionId: integer("source_revision_id").references(() => sourceRevisions.id, {
+      onDelete: "restrict",
+    }),
+    manifestDigest: text("manifest_digest"),
+    effectiveNamingDigest: text("effective_naming_digest").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_draft_inputs_tenant_draft_source").on(
+      t.tenantId,
+      t.draftId,
+      t.sourceId,
+    ),
+    check(
+      "chk_plan_draft_inputs_identity",
+      sql`(${t.trackingKind} = 'revision' AND ${t.sourceRevisionId} IS NOT NULL AND ${t.manifestDigest} IS NOT NULL)
+          OR (${t.trackingKind} = 'untracked' AND ${t.sourceRevisionId} IS NULL AND ${t.manifestDigest} IS NULL)`,
+    ),
+  ],
+);
+
+export const planDraftParts = pgTable("plan_draft_parts", {
+  id: serial("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  draftId: integer("draft_id")
+    .notNull()
+    .references(() => planDrafts.id, { onDelete: "cascade" }),
+  baseRevisionPartId: integer("base_revision_part_id").references(
+    () => planRevisionParts.id,
+    { onDelete: "restrict" },
+  ),
+  partKey: text("part_key").notNull(),
+  relativePath: text("relative_path").notNull().default(""),
+  filename: text("filename").notNull().default(""),
+  sourceLayer: text("source_layer").notNull().default(""),
+  status: text("status").notNull().default("base"),
+  roleInferred: text("role_inferred").notNull().default("primary"),
+  roleOverride: text("role_override"),
+  filamentColorId: text("filament_color_id"),
+  filamentCustomHex: text("filament_custom_hex"),
+  spoolmanSpoolId: text("spoolman_spool_id"),
+  quantityInferred: integer("quantity_inferred").notNull().default(1),
+  quantityOverride: integer("quantity_override"),
+  quantityEffective: integer("quantity_effective").notNull().default(1),
+  included: boolean("included").notNull().default(true),
+  notes: text("notes").notNull().default(""),
+  githubBlobUrl: text("github_blob_url"),
+  geometrySame: boolean("geometry_same"),
+  requirement: text("requirement"),
+  optionGroupId: text("option_group_id"),
+  manifestSource: text("manifest_source"),
+  artifactDigest: text("artifact_digest"),
+}, (t) => [
+  uniqueIndex("uq_plan_draft_parts_tenant_draft_predecessor").on(
+    t.tenantId,
+    t.draftId,
+    t.baseRevisionPartId,
+  ),
+]);
+
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),
   tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
@@ -609,4 +717,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 19;
+export const currentSchemaVersion = 20;

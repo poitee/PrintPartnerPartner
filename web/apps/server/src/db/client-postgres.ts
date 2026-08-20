@@ -681,6 +681,213 @@ export const postgresPostInitMigrations: string[] = [
       END IF;
     END
   $block$`,
+  `CREATE TABLE IF NOT EXISTS plan_drafts (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    base_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE RESTRICT,
+    base_plan_version INTEGER NOT NULL,
+    state TEXT NOT NULL CONSTRAINT chk_plan_drafts_state
+      CHECK (state IN ('open', 'abandoned', 'consumed')),
+    digest_format TEXT NOT NULL,
+    snapshot_digest TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CONSTRAINT chk_plan_drafts_base CHECK (
+      (base_revision_id IS NULL AND base_plan_version = 0)
+      OR (base_revision_id IS NOT NULL AND base_plan_version > 0)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_drafts_tenant_actor_profile_key
+    ON plan_drafts (tenant_id, created_by, profile_id, idempotency_key)`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_drafts_tenant_profile_created
+    ON plan_drafts (tenant_id, profile_id, created_at, id)`,
+  `CREATE TABLE IF NOT EXISTS plan_draft_inputs (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    draft_id INTEGER NOT NULL REFERENCES plan_drafts(id) ON DELETE CASCADE,
+    source_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    source_layer TEXT NOT NULL,
+    layer_order INTEGER NOT NULL,
+    tracking_kind TEXT NOT NULL CHECK (tracking_kind IN ('revision', 'untracked')),
+    source_revision_id INTEGER REFERENCES source_revisions(id) ON DELETE RESTRICT,
+    manifest_digest TEXT,
+    effective_naming_digest TEXT NOT NULL,
+    CONSTRAINT chk_plan_draft_inputs_identity CHECK (
+      (tracking_kind = 'revision' AND source_revision_id IS NOT NULL AND manifest_digest IS NOT NULL)
+      OR (tracking_kind = 'untracked' AND source_revision_id IS NULL AND manifest_digest IS NULL)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_draft_inputs_tenant_draft_source
+    ON plan_draft_inputs (tenant_id, draft_id, source_id)`,
+  `CREATE TABLE IF NOT EXISTS plan_draft_parts (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    draft_id INTEGER NOT NULL REFERENCES plan_drafts(id) ON DELETE CASCADE,
+    base_revision_part_id INTEGER REFERENCES plan_revision_parts(id) ON DELETE RESTRICT,
+    part_key TEXT NOT NULL,
+    relative_path TEXT NOT NULL DEFAULT '',
+    filename TEXT NOT NULL DEFAULT '',
+    source_layer TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'base',
+    role_inferred TEXT NOT NULL DEFAULT 'primary',
+    role_override TEXT,
+    filament_color_id TEXT,
+    filament_custom_hex TEXT,
+    spoolman_spool_id TEXT,
+    quantity_inferred INTEGER NOT NULL DEFAULT 1,
+    quantity_override INTEGER,
+    quantity_effective INTEGER NOT NULL DEFAULT 1,
+    included BOOLEAN NOT NULL DEFAULT TRUE,
+    notes TEXT NOT NULL DEFAULT '',
+    github_blob_url TEXT,
+    geometry_same BOOLEAN,
+    requirement TEXT,
+    option_group_id TEXT,
+    manifest_source TEXT,
+    artifact_digest TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_draft_parts_tenant_draft
+    ON plan_draft_parts (tenant_id, draft_id, id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_draft_parts_tenant_draft_predecessor
+    ON plan_draft_parts (tenant_id, draft_id, base_revision_part_id)`,
+  `CREATE OR REPLACE FUNCTION validate_plan_draft_ownership() RETURNS trigger AS $function$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM build_profiles profile
+         WHERE profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
+      ) OR (
+        NEW.base_revision_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM plan_revisions revision
+           WHERE revision.id = NEW.base_revision_id
+             AND revision.profile_id = NEW.profile_id
+             AND revision.tenant_id = NEW.tenant_id
+        )
+      ) THEN
+        RAISE EXCEPTION 'Plan draft ownership violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `DO $block$
+    BEGIN
+      DROP TRIGGER IF EXISTS trg_plan_drafts_ownership_insert ON plan_drafts;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_drafts_ownership_write') THEN
+        CREATE TRIGGER trg_plan_drafts_ownership_write
+          BEFORE INSERT OR UPDATE ON plan_drafts
+          FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_ownership();
+      END IF;
+    END
+  $block$`,
+  `CREATE OR REPLACE FUNCTION enforce_plan_draft_state_transition() RETURNS trigger AS $function$
+    BEGIN
+      IF NOT (
+        NEW.state = OLD.state
+        OR (OLD.state = 'open' AND NEW.state IN ('abandoned', 'consumed'))
+        OR (OLD.state = 'abandoned' AND NEW.state = 'open')
+      ) THEN
+        RAISE EXCEPTION 'Invalid Plan draft state transition';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `DO $block$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_drafts_state_transition') THEN
+        CREATE TRIGGER trg_plan_drafts_state_transition
+          BEFORE UPDATE OF state ON plan_drafts
+          FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_state_transition();
+      END IF;
+    END
+  $block$`,
+  `CREATE OR REPLACE FUNCTION enforce_plan_draft_identity_immutable() RETURNS trigger AS $function$
+    BEGIN
+      IF NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+        OR NEW.profile_id IS DISTINCT FROM OLD.profile_id
+        OR NEW.base_revision_id IS DISTINCT FROM OLD.base_revision_id
+        OR NEW.base_plan_version IS DISTINCT FROM OLD.base_plan_version THEN
+        RAISE EXCEPTION 'Plan draft identity is immutable';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `DO $block$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_drafts_identity_immutable') THEN
+        CREATE TRIGGER trg_plan_drafts_identity_immutable
+          BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version
+          ON plan_drafts
+          FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_identity_immutable();
+      END IF;
+    END
+  $block$`,
+  `CREATE OR REPLACE FUNCTION validate_plan_draft_input_ownership() RETURNS trigger AS $function$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM plan_drafts draft
+         WHERE draft.id = NEW.draft_id
+           AND draft.tenant_id = NEW.tenant_id
+           AND draft.state = 'open'
+      ) OR NOT EXISTS (
+        SELECT 1 FROM projects source
+         WHERE source.id = NEW.source_id AND source.tenant_id = NEW.tenant_id
+      ) OR (
+        NEW.source_revision_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM source_revisions revision
+           WHERE revision.id = NEW.source_revision_id
+             AND revision.project_id = NEW.source_id
+             AND revision.tenant_id = NEW.tenant_id
+        )
+      ) THEN
+        RAISE EXCEPTION 'Plan draft input ownership requires an open parent';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `DO $block$
+    BEGIN
+      DROP TRIGGER IF EXISTS trg_plan_draft_inputs_ownership_insert ON plan_draft_inputs;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_draft_inputs_ownership_write') THEN
+        CREATE TRIGGER trg_plan_draft_inputs_ownership_write
+          BEFORE INSERT OR UPDATE ON plan_draft_inputs
+          FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_input_ownership();
+      END IF;
+    END
+  $block$`,
+  `CREATE OR REPLACE FUNCTION validate_plan_draft_part_ownership() RETURNS trigger AS $function$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM plan_drafts draft
+         WHERE draft.id = NEW.draft_id
+           AND draft.tenant_id = NEW.tenant_id
+           AND draft.state = 'open'
+      ) OR (
+        NEW.base_revision_part_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1
+            FROM plan_revision_parts part
+            JOIN plan_drafts draft ON draft.id = NEW.draft_id
+           WHERE part.id = NEW.base_revision_part_id
+             AND part.revision_id = draft.base_revision_id
+             AND part.tenant_id = NEW.tenant_id
+             AND draft.tenant_id = NEW.tenant_id
+        )
+      ) THEN
+        RAISE EXCEPTION 'Plan draft Part ownership requires an open parent';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `DO $block$
+    BEGIN
+      DROP TRIGGER IF EXISTS trg_plan_draft_parts_ownership_insert ON plan_draft_parts;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_draft_parts_ownership_write') THEN
+        CREATE TRIGGER trg_plan_draft_parts_ownership_write
+          BEFORE INSERT OR UPDATE ON plan_draft_parts
+          FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_part_ownership();
+      END IF;
+    END
+  $block$`,
 ];
 
 export class PostgresDatabase {

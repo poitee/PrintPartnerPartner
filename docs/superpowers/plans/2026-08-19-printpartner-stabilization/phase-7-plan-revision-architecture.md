@@ -50,7 +50,9 @@ one fresh accepted baseline before it enables draft reads.
 
 ## Drafts
 
-Later Phase 7 slices add:
+Phase 7 slice 2 starts with persisted recompute snapshots and deterministic
+diffs. Later units in this slice add editing and lifecycle. Later Phase 7
+slices add Required-unit reconciliation and Apply:
 
 ```ts
 type PlanDraftState = "open" | "abandoned" | "consumed";
@@ -77,6 +79,47 @@ digest format, state, actor, timestamps, and consumed revision. Draft Source
 and part rows are normalized child tables. Source picks, selection changes,
 manifest decisions, and quantity overrides write those rows without changing
 accepted state.
+
+The draft tenant, Build, base revision, and base Plan version are immutable
+after insert in both databases. Later lifecycle commands may change only
+lifecycle metadata such as state and terminal timestamps. Ownership checks
+still validate every allowed header or child update.
+
+Schema v20 implements the first unit with `plan_drafts`,
+`plan_draft_inputs`, and `plan_draft_parts`. It writes only `open` drafts but
+keeps the complete `open | abandoned | consumed` state discriminant for later
+commands. A Build may have several open drafts. Callers list them in creation
+order by `created_at`, then draft ID, and read one by ID. There is no singular
+`readOpenDraft` rule.
+
+Draft recompute accepts `(NULL, 0)` only when the Build also has no live
+compatibility Parts. A null pointer with a nonzero version, or a null pointer
+with live Parts, returns `accepted_baseline_required`. Recompute reads matched
+planning fields from `plan_revision_parts`, never from `parts`. It rechecks
+the base pair and captured input fingerprint inside the same native SQLite
+transaction that inserts the header and every child row.
+
+The `plan-draft-v1` digest covers the base pair, canonical inputs, every part
+value, duplicate rows, and each part's deterministic accepted predecessor.
+Database row IDs, draft state, actor, and timestamps do not affect the digest.
+The v20 creation key is unique by tenant, actor, and Build. Retry lookup runs
+before baseline capture and scanning, then returns the stored snapshot. If two
+creators pass that lookup concurrently, each repeats it as the first statement
+inside the immediate SQLite transaction. The second creator waits for the
+winner to commit, then returns the complete row with the same tenant, actor,
+Build, and key before it checks the now newer base or Source state. The unique
+index remains the database enforcement for that identity.
+
+The transaction returns `base_changed` when the accepted pointer or Plan
+version moved and `inputs_changed` when the captured input fingerprint moved.
+Both are normal optimistic concurrency results and write no draft rows.
+
+PostgreSQL has matching v20 tables and ownership checks, but draft mutations
+return `transaction_unavailable` until its repository path has a real database
+transaction. Recompute measures each tracked revision STL with a fixed 64 KiB
+buffer and stores its SHA-256 in `artifact_digest`. It measures the current
+scanned path for every draft and never copies prior evidence. Untracked Source
+Parts keep a null digest and cannot claim exact-content identity.
 
 Abandon moves an open draft to `abandoned`. Resume returns it to `open` only
 while its base revision and Plan version remain current. Otherwise the user
@@ -163,8 +206,10 @@ idempotency values at the boundary.
 1. Add accepted revision tables and Build pointer fields. Backfill SQLite and
    add a parity reader. Preserve every existing behavior and byte of Checkoff
    state.
-2. Add saved drafts, draft recompute, draft edits, diff, abandon/resume, and
-   rebase. Accepted reads and Checkoff remain unchanged.
+2. Add saved drafts and draft recompute in units. Unit 2a persists complete
+   snapshots and derives accepted-versus-draft diff. Unit 2b adds draft edits.
+   Unit 2c adds abandon, resume, and rebase. Accepted reads and Checkoff remain
+   unchanged throughout this slice.
 3. Add Required-unit tokens and explicit reconciliation decisions.
 4. Add the atomic, idempotent apply command and refresh compatibility
    projections inside its transaction.

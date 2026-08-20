@@ -59,6 +59,63 @@ const V18_TABLES = ["plan_accepted_input_sets"];
 
 const V19_TABLES = ["plan_revisions", "plan_revision_parts"];
 
+const V20_TABLES = ["plan_drafts", "plan_draft_inputs", "plan_draft_parts"];
+
+const V20_COLUMNS: Record<string, string[]> = {
+  plan_drafts: [
+    "id",
+    "tenant_id",
+    "profile_id",
+    "base_revision_id",
+    "base_plan_version",
+    "state",
+    "digest_format",
+    "snapshot_digest",
+    "created_by",
+    "idempotency_key",
+    "created_at",
+  ],
+  plan_draft_inputs: [
+    "id",
+    "tenant_id",
+    "draft_id",
+    "source_id",
+    "source_layer",
+    "layer_order",
+    "tracking_kind",
+    "source_revision_id",
+    "manifest_digest",
+    "effective_naming_digest",
+  ],
+  plan_draft_parts: [
+    "id",
+    "tenant_id",
+    "draft_id",
+    "base_revision_part_id",
+    "part_key",
+    "relative_path",
+    "filename",
+    "source_layer",
+    "status",
+    "role_inferred",
+    "role_override",
+    "filament_color_id",
+    "filament_custom_hex",
+    "spoolman_spool_id",
+    "quantity_inferred",
+    "quantity_override",
+    "quantity_effective",
+    "included",
+    "notes",
+    "github_blob_url",
+    "geometry_same",
+    "requirement",
+    "option_group_id",
+    "manifest_source",
+    "artifact_digest",
+  ],
+};
+
 const V19_COLUMNS: Record<string, string[]> = {
   build_profiles: ["accepted_plan_revision_id", "accepted_plan_version"],
   plan_revisions: [
@@ -230,17 +287,23 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v19 tables and records schema version 19", () => {
+  it("creates the v15-v20 tables and records schema version 20", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
-      for (const table of [...V15_TABLES, ...V16_TABLES, ...V18_TABLES, ...V19_TABLES]) {
+      for (const table of [
+        ...V15_TABLES,
+        ...V16_TABLES,
+        ...V18_TABLES,
+        ...V19_TABLES,
+        ...V20_TABLES,
+      ]) {
         expect(tables, `missing table ${table}`).toContain(table);
       }
       expect(
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "19" });
+      ).toMatchObject({ value: "20" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -268,6 +331,39 @@ describe("schema v9-v13 (SQLite)", () => {
       for (const [table, expected] of Object.entries(V19_COLUMNS)) {
         expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
       }
+    });
+  });
+
+  it("creates every v20 saved-draft column", () => {
+    withSqlite((sqlite) => {
+      for (const [table, expected] of Object.entries(V20_COLUMNS)) {
+        expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
+      }
+    });
+  });
+
+  it("creates the v20 draft uniqueness and lifecycle declarations in SQLite", () => {
+    withSqlite((sqlite) => {
+      const raw = rawSqlite(sqlite);
+      const creationKey = raw
+        .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?")
+        .get("uq_plan_drafts_tenant_actor_profile_key") as { sql: string };
+      expect(creationKey.sql).toMatch(
+        /ON plan_drafts \(tenant_id, created_by, profile_id, idempotency_key\)/i,
+      );
+      const predecessor = raw
+        .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?")
+        .get("uq_plan_draft_parts_tenant_draft_predecessor") as { sql: string };
+      expect(predecessor.sql).toMatch(
+        /ON plan_draft_parts \(tenant_id, draft_id, base_revision_part_id\)/i,
+      );
+      expect(
+        raw
+          .prepare(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_plan_drafts_state_transition'",
+          )
+          .get(),
+      ).toBeDefined();
     });
   });
 
@@ -679,8 +775,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(19);
-    expect(pgSchema.currentSchemaVersion).toBe(19);
+    expect(sqliteSchema.currentSchemaVersion).toBe(20);
+    expect(pgSchema.currentSchemaVersion).toBe(20);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -772,6 +868,36 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
     expect(POSTGRES_DDL).toContain("trg_parts_invalidate_accepted_revision");
     expect(POSTGRES_DDL).toContain("trg_profile_layers_invalidate_accepted_revision");
     expect(POSTGRES_DDL).toContain("trg_plan_revision_part_projection_owner");
+  });
+
+  it("creates the v20 draft snapshot tables and ownership triggers in Postgres", () => {
+    for (const [table, expected] of Object.entries(V20_COLUMNS)) {
+      expect(pgCreatedColumns(table)).toEqual(expect.arrayContaining(expected));
+    }
+    expect(POSTGRES_DDL).toMatch(
+      /CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_drafts_tenant_actor_profile_key\s+ON plan_drafts \(tenant_id, created_by, profile_id, idempotency_key\)/i,
+    );
+    expect(POSTGRES_DDL).toMatch(
+      /CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_draft_parts_tenant_draft_predecessor\s+ON plan_draft_parts \(tenant_id, draft_id, base_revision_part_id\)/i,
+    );
+    expect(POSTGRES_DDL).toMatch(
+      /CREATE TRIGGER trg_plan_drafts_ownership_write\s+BEFORE INSERT OR UPDATE ON plan_drafts\s+FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_ownership\(\)/i,
+    );
+    expect(POSTGRES_DDL).toMatch(
+      /CREATE TRIGGER trg_plan_drafts_state_transition\s+BEFORE UPDATE OF state ON plan_drafts\s+FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_state_transition\(\)/i,
+    );
+    expect(POSTGRES_DDL).toMatch(
+      /CREATE TRIGGER trg_plan_drafts_identity_immutable\s+BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version\s+ON plan_drafts\s+FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_identity_immutable\(\)/i,
+    );
+    expect(POSTGRES_DDL).toMatch(
+      /CREATE TRIGGER trg_plan_draft_inputs_ownership_write\s+BEFORE INSERT OR UPDATE ON plan_draft_inputs\s+FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_input_ownership\(\)/i,
+    );
+    expect(POSTGRES_DDL).toMatch(
+      /CREATE TRIGGER trg_plan_draft_parts_ownership_write\s+BEFORE INSERT OR UPDATE ON plan_draft_parts\s+FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_part_ownership\(\)/i,
+    );
+    expect(POSTGRES_DDL).toMatch(
+      /BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version\s+ON plan_drafts/i,
+    );
   });
 
   it("adds v13 profile-sync provenance columns on slicer profile tables", () => {

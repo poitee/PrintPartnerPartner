@@ -224,6 +224,117 @@ export const planRevisionParts = sqliteTable("plan_revision_parts", {
   artifactDigest: text("artifact_digest"),
 });
 
+export const planDrafts = sqliteTable(
+  "plan_drafts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    baseRevisionId: integer("base_revision_id").references(() => planRevisions.id, {
+      onDelete: "restrict",
+    }),
+    basePlanVersion: integer("base_plan_version").notNull(),
+    state: text("state").$type<"open" | "abandoned" | "consumed">().notNull(),
+    digestFormat: text("digest_format").notNull(),
+    snapshotDigest: text("snapshot_digest").notNull(),
+    createdBy: text("created_by").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_drafts_tenant_actor_profile_key").on(
+      t.tenantId,
+      t.createdBy,
+      t.profileId,
+      t.idempotencyKey,
+    ),
+    check(
+      "chk_plan_drafts_state",
+      sql`${t.state} IN ('open', 'abandoned', 'consumed')`,
+    ),
+    check(
+      "chk_plan_drafts_base",
+      sql`(${t.baseRevisionId} IS NULL AND ${t.basePlanVersion} = 0)
+          OR (${t.baseRevisionId} IS NOT NULL AND ${t.basePlanVersion} > 0)`,
+    ),
+  ],
+);
+
+export const planDraftInputs = sqliteTable(
+  "plan_draft_inputs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+    draftId: integer("draft_id")
+      .notNull()
+      .references(() => planDrafts.id, { onDelete: "cascade" }),
+    sourceId: integer("source_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "restrict" }),
+    sourceLayer: text("source_layer").notNull(),
+    layerOrder: integer("layer_order").notNull(),
+    trackingKind: text("tracking_kind").$type<"revision" | "untracked">().notNull(),
+    sourceRevisionId: integer("source_revision_id").references(() => sourceRevisions.id, {
+      onDelete: "restrict",
+    }),
+    manifestDigest: text("manifest_digest"),
+    effectiveNamingDigest: text("effective_naming_digest").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_draft_inputs_tenant_draft_source").on(
+      t.tenantId,
+      t.draftId,
+      t.sourceId,
+    ),
+    check(
+      "chk_plan_draft_inputs_identity",
+      sql`(${t.trackingKind} = 'revision' AND ${t.sourceRevisionId} IS NOT NULL AND ${t.manifestDigest} IS NOT NULL)
+          OR (${t.trackingKind} = 'untracked' AND ${t.sourceRevisionId} IS NULL AND ${t.manifestDigest} IS NULL)`,
+    ),
+  ],
+);
+
+export const planDraftParts = sqliteTable("plan_draft_parts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  draftId: integer("draft_id")
+    .notNull()
+    .references(() => planDrafts.id, { onDelete: "cascade" }),
+  baseRevisionPartId: integer("base_revision_part_id").references(
+    () => planRevisionParts.id,
+    { onDelete: "restrict" },
+  ),
+  partKey: text("part_key").notNull(),
+  relativePath: text("relative_path").notNull().default(""),
+  filename: text("filename").notNull().default(""),
+  sourceLayer: text("source_layer").notNull().default(""),
+  status: text("status").notNull().default("base"),
+  roleInferred: text("role_inferred").notNull().default("primary"),
+  roleOverride: text("role_override"),
+  filamentColorId: text("filament_color_id"),
+  filamentCustomHex: text("filament_custom_hex"),
+  spoolmanSpoolId: text("spoolman_spool_id"),
+  quantityInferred: integer("quantity_inferred").notNull().default(1),
+  quantityOverride: integer("quantity_override"),
+  quantityEffective: integer("quantity_effective").notNull().default(1),
+  included: integer("included", { mode: "boolean" }).notNull().default(true),
+  notes: text("notes").notNull().default(""),
+  githubBlobUrl: text("github_blob_url"),
+  geometrySame: integer("geometry_same", { mode: "boolean" }),
+  requirement: text("requirement"),
+  optionGroupId: text("option_group_id"),
+  manifestSource: text("manifest_source"),
+  artifactDigest: text("artifact_digest"),
+}, (t) => [
+  uniqueIndex("uq_plan_draft_parts_tenant_draft_predecessor").on(
+    t.tenantId,
+    t.draftId,
+    t.baseRevisionPartId,
+  ),
+]);
+
 export const parts = sqliteTable("parts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
@@ -610,7 +721,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 19;
+export const currentSchemaVersion = 20;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -1174,5 +1285,210 @@ export const schemaMigrations: string[] = [
       UPDATE build_profiles
          SET accepted_plan_revision_id = NULL
        WHERE id = OLD.profile_id AND tenant_id = OLD.tenant_id;
+    END`,
+  `CREATE TABLE IF NOT EXISTS plan_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    base_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE RESTRICT,
+    base_plan_version INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('open', 'abandoned', 'consumed')),
+    digest_format TEXT NOT NULL,
+    snapshot_digest TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK (
+      (base_revision_id IS NULL AND base_plan_version = 0)
+      OR (base_revision_id IS NOT NULL AND base_plan_version > 0)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_drafts_tenant_actor_profile_key
+    ON plan_drafts (tenant_id, created_by, profile_id, idempotency_key)`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_drafts_tenant_profile_created
+    ON plan_drafts (tenant_id, profile_id, created_at, id)`,
+  `CREATE TABLE IF NOT EXISTS plan_draft_inputs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    draft_id INTEGER NOT NULL REFERENCES plan_drafts(id) ON DELETE CASCADE,
+    source_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    source_layer TEXT NOT NULL,
+    layer_order INTEGER NOT NULL,
+    tracking_kind TEXT NOT NULL CHECK (tracking_kind IN ('revision', 'untracked')),
+    source_revision_id INTEGER REFERENCES source_revisions(id) ON DELETE RESTRICT,
+    manifest_digest TEXT,
+    effective_naming_digest TEXT NOT NULL,
+    CHECK (
+      (tracking_kind = 'revision' AND source_revision_id IS NOT NULL AND manifest_digest IS NOT NULL)
+      OR (tracking_kind = 'untracked' AND source_revision_id IS NULL AND manifest_digest IS NULL)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_draft_inputs_tenant_draft_source
+    ON plan_draft_inputs (tenant_id, draft_id, source_id)`,
+  `CREATE TABLE IF NOT EXISTS plan_draft_parts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    draft_id INTEGER NOT NULL REFERENCES plan_drafts(id) ON DELETE CASCADE,
+    base_revision_part_id INTEGER REFERENCES plan_revision_parts(id) ON DELETE RESTRICT,
+    part_key TEXT NOT NULL,
+    relative_path TEXT NOT NULL DEFAULT '',
+    filename TEXT NOT NULL DEFAULT '',
+    source_layer TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'base',
+    role_inferred TEXT NOT NULL DEFAULT 'primary',
+    role_override TEXT,
+    filament_color_id TEXT,
+    filament_custom_hex TEXT,
+    spoolman_spool_id TEXT,
+    quantity_inferred INTEGER NOT NULL DEFAULT 1,
+    quantity_override INTEGER,
+    quantity_effective INTEGER NOT NULL DEFAULT 1,
+    included INTEGER NOT NULL DEFAULT 1,
+    notes TEXT NOT NULL DEFAULT '',
+    github_blob_url TEXT,
+    geometry_same INTEGER,
+    requirement TEXT,
+    option_group_id TEXT,
+    manifest_source TEXT,
+    artifact_digest TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_plan_draft_parts_tenant_draft
+    ON plan_draft_parts (tenant_id, draft_id, id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_draft_parts_tenant_draft_predecessor
+    ON plan_draft_parts (tenant_id, draft_id, base_revision_part_id)`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_ownership_insert
+    BEFORE INSERT ON plan_drafts
+    WHEN NOT EXISTS (
+      SELECT 1 FROM build_profiles profile
+       WHERE profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
+    ) OR (
+      NEW.base_revision_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM plan_revisions revision
+         WHERE revision.id = NEW.base_revision_id
+           AND revision.profile_id = NEW.profile_id
+           AND revision.tenant_id = NEW.tenant_id
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_ownership_update
+    BEFORE UPDATE ON plan_drafts
+    WHEN NOT EXISTS (
+      SELECT 1 FROM build_profiles profile
+       WHERE profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
+    ) OR (
+      NEW.base_revision_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM plan_revisions revision
+         WHERE revision.id = NEW.base_revision_id
+           AND revision.profile_id = NEW.profile_id
+           AND revision.tenant_id = NEW.tenant_id
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_identity_immutable
+    BEFORE UPDATE OF tenant_id, profile_id, base_revision_id, base_plan_version ON plan_drafts
+    WHEN NEW.tenant_id IS NOT OLD.tenant_id
+      OR NEW.profile_id IS NOT OLD.profile_id
+      OR NEW.base_revision_id IS NOT OLD.base_revision_id
+      OR NEW.base_plan_version IS NOT OLD.base_plan_version
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft identity is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_state_transition
+    BEFORE UPDATE OF state ON plan_drafts
+    WHEN NOT (
+      NEW.state = OLD.state
+      OR (OLD.state = 'open' AND NEW.state IN ('abandoned', 'consumed'))
+      OR (OLD.state = 'abandoned' AND NEW.state = 'open')
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Invalid Plan draft state transition');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_inputs_ownership_insert
+    BEFORE INSERT ON plan_draft_inputs
+    WHEN NOT EXISTS (
+      SELECT 1 FROM plan_drafts draft
+       WHERE draft.id = NEW.draft_id
+         AND draft.tenant_id = NEW.tenant_id
+         AND draft.state = 'open'
+    ) OR NOT EXISTS (
+      SELECT 1 FROM projects source
+       WHERE source.id = NEW.source_id AND source.tenant_id = NEW.tenant_id
+    ) OR (
+      NEW.source_revision_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM source_revisions revision
+         WHERE revision.id = NEW.source_revision_id
+           AND revision.project_id = NEW.source_id
+           AND revision.tenant_id = NEW.tenant_id
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft input ownership requires an open parent');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_inputs_ownership_update
+    BEFORE UPDATE ON plan_draft_inputs
+    WHEN NOT EXISTS (
+      SELECT 1 FROM plan_drafts draft
+       WHERE draft.id = NEW.draft_id
+         AND draft.tenant_id = NEW.tenant_id
+         AND draft.state = 'open'
+    ) OR NOT EXISTS (
+      SELECT 1 FROM projects source
+       WHERE source.id = NEW.source_id AND source.tenant_id = NEW.tenant_id
+    ) OR (
+      NEW.source_revision_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM source_revisions revision
+         WHERE revision.id = NEW.source_revision_id
+           AND revision.project_id = NEW.source_id
+           AND revision.tenant_id = NEW.tenant_id
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft input ownership requires an open parent');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_parts_ownership_insert
+    BEFORE INSERT ON plan_draft_parts
+    WHEN NOT EXISTS (
+      SELECT 1 FROM plan_drafts draft
+       WHERE draft.id = NEW.draft_id
+         AND draft.tenant_id = NEW.tenant_id
+         AND draft.state = 'open'
+    ) OR (
+      NEW.base_revision_part_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+          FROM plan_revision_parts part
+          JOIN plan_drafts draft ON draft.id = NEW.draft_id
+         WHERE part.id = NEW.base_revision_part_id
+           AND part.revision_id = draft.base_revision_id
+           AND part.tenant_id = NEW.tenant_id
+           AND draft.tenant_id = NEW.tenant_id
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft Part ownership requires an open parent');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_parts_ownership_update
+    BEFORE UPDATE ON plan_draft_parts
+    WHEN NOT EXISTS (
+      SELECT 1 FROM plan_drafts draft
+       WHERE draft.id = NEW.draft_id
+         AND draft.tenant_id = NEW.tenant_id
+         AND draft.state = 'open'
+    ) OR (
+      NEW.base_revision_part_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+          FROM plan_revision_parts part
+          JOIN plan_drafts draft ON draft.id = NEW.draft_id
+         WHERE part.id = NEW.base_revision_part_id
+           AND part.revision_id = draft.base_revision_id
+           AND part.tenant_id = NEW.tenant_id
+           AND draft.tenant_id = NEW.tenant_id
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft Part ownership requires an open parent');
     END`,
 ];
