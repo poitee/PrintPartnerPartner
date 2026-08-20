@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -16,9 +16,9 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  fetchSourceCategories,
-  saveSourceCategories,
-} from "../../api/engine";
+  useSaveSourceCategoriesMutation,
+  useSourceCategoriesQuery,
+} from "../../queries/sourceCategories";
 import { moveItem } from "../../lib/reorderList";
 import { cn } from "../../lib/utils";
 import { SortableDragHandle } from "../dnd/SortableDragHandle";
@@ -35,7 +35,6 @@ import { Label } from "../ui/label";
 
 type Props = {
   engineReady: boolean;
-  onSaved?: (categories: string[]) => void;
 };
 
 type SortableRowProps = {
@@ -99,43 +98,42 @@ function SortableCategoryRow({
   );
 }
 
-export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
-  const [categories, setCategories] = useState<string[]>([]);
-  const [draft, setDraft] = useState<string[]>([]);
+const EMPTY_CATEGORIES: string[] = [];
+
+function sameCategories(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+export default function SourceCategoryManager({ engineReady }: Props) {
+  const categoriesQuery = useSourceCategoriesQuery(engineReady);
+  const saveCategoriesMutation = useSaveSourceCategoriesMutation();
+  const categories = categoriesQuery.data ?? EMPTY_CATEGORIES;
+  const [draft, setDraft] = useState<string[]>(() => categories);
+  const draftDirtyRef = useRef(false);
   const [newName, setNewName] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const refresh = useCallback(async () => {
-    if (!engineReady) return;
-    setLoadError(null);
-    setLoading(true);
-    try {
-      const rows = await fetchSourceCategories();
-      setCategories(rows);
-      setDraft(rows);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
-      setDraft([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [engineReady]);
-
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (sameCategories(draft, categories)) draftDirtyRef.current = false;
+    if (!draftDirtyRef.current) setDraft(categories);
+  }, [categories, draft]);
 
-  const dirty =
-    draft.length !== categories.length ||
-    draft.some((name, i) => name !== categories[i]);
+  const queryError =
+    categoriesQuery.error instanceof Error
+      ? categoriesQuery.error.message
+      : categoriesQuery.error
+        ? String(categoriesQuery.error)
+        : null;
+  const visibleError = loadError ?? queryError;
+
+  const dirty = !sameCategories(draft, categories);
 
   const onAdd = () => {
     const name = newName.trim();
@@ -145,12 +143,14 @@ export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
       setLoadError("That category already exists.");
       return;
     }
+    draftDirtyRef.current = true;
     setDraft((prev) => [...prev, name]);
     setNewName("");
     setLoadError(null);
   };
 
   const onRename = (index: number, value: string) => {
+    draftDirtyRef.current = true;
     setDraft((prev) => prev.map((c, i) => (i === index ? value : c)));
   };
 
@@ -159,6 +159,7 @@ export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
       setLoadError("Keep at least one category.");
       return;
     }
+    draftDirtyRef.current = true;
     setDraft((prev) => prev.filter((_, i) => i !== index));
     setLoadError(null);
   };
@@ -169,6 +170,7 @@ export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
     const oldIndex = Number(String(active.id).replace(/^cat-/, ""));
     const newIndex = Number(String(over.id).replace(/^cat-/, ""));
     if (!Number.isFinite(oldIndex) || !Number.isFinite(newIndex)) return;
+    draftDirtyRef.current = true;
     setDraft((prev) => moveItem(prev, oldIndex, newIndex));
     setSaveNote(null);
   };
@@ -183,11 +185,10 @@ export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
         setLoadError("At least one category is required.");
         return;
       }
-      const saved = await saveSourceCategories(normalized);
-      setCategories(saved);
+      const saved = await saveCategoriesMutation.mutateAsync(normalized);
+      draftDirtyRef.current = false;
       setDraft(saved);
       setSaveNote("Categories saved.");
-      onSaved?.(saved);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -208,15 +209,15 @@ export default function SourceCategoryManager({ engineReady, onSaved }: Props) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+        {visibleError && <p className="text-sm text-destructive">{visibleError}</p>}
         {saveNote && <p className="text-sm text-muted-foreground">{saveNote}</p>}
         {!engineReady ? (
           <p className="text-sm text-muted-foreground">Waiting for engine…</p>
-        ) : loading ? (
+        ) : categoriesQuery.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading categories…</p>
         ) : draft.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            {loadError ? "Could not load categories." : "No categories yet. Add one below."}
+            {visibleError ? "Could not load categories." : "No categories yet. Add one below."}
           </p>
         ) : (
           <DndContext

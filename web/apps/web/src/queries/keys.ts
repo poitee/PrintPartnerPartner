@@ -3,6 +3,7 @@ export const queryKeys = {
   profiles: ["profiles"] as const,
   profile: (id: number) => ["profiles", id] as const,
   sources: ["sources"] as const,
+  sourceCategories: ["sourceCategories"] as const,
   source: (id: number) => ["sources", id] as const,
   planReviews: ["planReview"] as const,
   planReview: (profileId: number, includeExcluded?: boolean) =>

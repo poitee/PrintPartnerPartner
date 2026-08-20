@@ -4,8 +4,6 @@ import { toast } from "sonner";
 import { ChevronDown, FolderGit2, MoreHorizontal, Search } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  fetchSourceCategories,
-  saveSourceCategories,
   importReposTxt,
   importSourceArchive,
   importSourceFiles,
@@ -113,6 +111,10 @@ import {
   useSourcesQuery,
   useUpdateSourceMutation,
 } from "../queries/sources";
+import {
+  useSaveSourceCategoriesMutation,
+  useSourceCategoriesQuery,
+} from "../queries/sourceCategories";
 
 type SourceDetailTab = "docs" | "rules" | "naming";
 type SourcesLocationState = { stlSearch?: boolean };
@@ -174,9 +176,7 @@ export default function SourcesPage() {
   const { review } = usePlanWorkspace();
   const { profiles, selectedProfileId } = useProfileSelection();
   const persistedUi = useMemo(() => loadPersistedSourcesUi(), []);
-  const [categories, setCategories] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<WizardForm>(emptyForm([]));
@@ -219,6 +219,9 @@ export default function SourcesPage() {
     error: sourcesQueryError,
     refetch: refetchSources,
   } = useSourcesQuery(engineReady);
+  const categoriesQuery = useSourceCategoriesQuery(engineReady);
+  const categories = categoriesQuery.data ?? [];
+  const saveCategoriesMutation = useSaveSourceCategoriesMutation();
   const createSourceMutation = useCreateSourceMutation();
   const updateSourceMutation = useUpdateSourceMutation();
   const deleteSourceMutation = useDeleteSourceMutation();
@@ -234,6 +237,12 @@ export default function SourcesPage() {
         ? String(sourcesQueryError)
         : null;
   const pageLoadError = loadError ?? sourceQueryError;
+  const categoryError =
+    categoriesQuery.error instanceof Error
+      ? `Could not load source categories: ${categoriesQuery.error.message}`
+      : categoriesQuery.error
+        ? `Could not load source categories: ${String(categoriesQuery.error)}`
+        : null;
 
   useEffect(() => {
     const state = location.state as SourcesLocationState | null;
@@ -275,39 +284,19 @@ export default function SourcesPage() {
     };
   }, [search, viewMode, categoryFilter, syncFilter, platformFilter]);
 
-  const refreshCategories = useCallback(async () => {
-    if (!engineReady) return;
-    setCategoryError(null);
-    await fetchSourceCategories()
-      .then(setCategories)
-      .catch((e) =>
-        setCategoryError(
-          `Could not load source categories: ${e instanceof Error ? e.message : String(e)}`,
-        ),
-      );
-  }, [engineReady]);
-
-  useEffect(() => {
-    void refreshCategories();
-  }, [refreshCategories]);
-
   const refresh = useCallback(async () => {
     if (!engineReady) return;
     setLoadError(null);
-    await Promise.allSettled([refetchSources(), refreshCategories()]);
-  }, [engineReady, refetchSources, refreshCategories]);
+    await Promise.allSettled([refetchSources(), categoriesQuery.refetch()]);
+  }, [categoriesQuery, engineReady, refetchSources]);
 
   const onCategoriesReorder = useCallback(async (next: string[]) => {
-    const previous = categories;
-    setCategories(next);
     try {
-      const saved = await saveSourceCategories(next);
-      setCategories(saved);
+      await saveCategoriesMutation.mutateAsync(next);
     } catch (e) {
-      setCategories(previous);
       toast.error(e instanceof Error ? e.message : "Could not reorder categories");
     }
-  }, [categories]);
+  }, [saveCategoriesMutation]);
 
   const filtered = useMemo(
     () =>
@@ -690,7 +679,7 @@ export default function SourcesPage() {
       setReposImportOpen(false);
       setReposImportText("");
       await Promise.all([
-        refreshCategories(),
+        categoriesQuery.refetch(),
         invalidateSourceDependents(queryClient),
       ]);
       if (reposImportSyncAfter && newSources.length > 0) {
@@ -1496,9 +1485,6 @@ export default function SourcesPage() {
         open={categoriesSheetOpen}
         onOpenChange={setCategoriesSheetOpen}
         engineReady={engineReady}
-        onCategoriesChanged={(cats) => {
-          setCategories(cats);
-        }}
       />
 
       <SourceDetailSheet

@@ -81,5 +81,7 @@ The unit passes when:
 - page-local Source arrays and direct `fetchSources()` calls are gone; and
 - focused tests, web typecheck, lint, and the repository quality gate pass.
 
-Source categories remain a separate follow-up in Phase 6. Their unsaved draft
-is local UI state, while their saved baseline will move to a category query.
+Source categories use `queryKeys.sourceCategories` as their saved baseline.
+Library, Plan, and Settings subscribe to that list. The category editor keeps
+only its unsaved draft local, preserves it across background cache updates, and
+publishes a successful save to every subscriber.

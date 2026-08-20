@@ -10,14 +10,12 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   engineReady: boolean;
-  onCategoriesChanged?: (categories: string[]) => void;
 };
 
 export default function SourceCategorySheet({
   open,
   onOpenChange,
   engineReady,
-  onCategoriesChanged,
 }: Props) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -26,10 +24,7 @@ export default function SourceCategorySheet({
           <SheetTitle>Manage source categories</SheetTitle>
         </SheetHeader>
         <div className="flex-1 overflow-y-auto p-4">
-          <SourceCategoryManager
-            engineReady={engineReady}
-            onSaved={onCategoriesChanged}
-          />
+          <SourceCategoryManager engineReady={engineReady} />
         </div>
       </SheetContent>
     </Sheet>

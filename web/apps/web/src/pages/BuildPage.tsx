@@ -50,7 +50,6 @@ import {
   addProfileAddonLayer,
   deleteProfileLayer,
   fetchPlanLayers,
-  fetchSourceCategories,
   fetchStlNaming,
   replaceProfileLayer,
   setProfileBaseLayer,
@@ -65,6 +64,7 @@ import {
   useUpdateSourceMutation,
   type SourceSummary,
 } from "../queries/sources";
+import { useSourceCategoriesQuery } from "../queries/sourceCategories";
 import { buildRoute, exportRoute, libraryRoute } from "../lib/routes";
 import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { takeKitImportResult } from "../lib/kitImportStash";
@@ -122,12 +122,10 @@ function BuildPageContent() {
 
   const [layers, setLayers] = useState<ProfileLayer[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [addonSourceId, setAddonSourceId] = useState("");
   const [pendingBaseSourceId, setPendingBaseSourceId] = useState("");
   const [kitImportSetup, setKitImportSetup] = useState<KitImportJobResult | null>(null);
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
-  const [categories, setCategories] = useState<string[]>([]);
   const [filamentRefreshKey, setFilamentRefreshKey] = useState(0);
   const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
   const [namingProfile, setNamingProfile] = useState<StlNamingProfile>(DEFAULT_STL_NAMING_PROFILE);
@@ -142,12 +140,20 @@ function BuildPageContent() {
   const engineReady = engineState === "ready";
   const sourcesQuery = useSourcesQuery(engineReady);
   const sources = sourcesQuery.data ?? EMPTY_SOURCES;
+  const categoriesQuery = useSourceCategoriesQuery(engineReady);
+  const categories = categoriesQuery.data ?? [];
   const updateSourceMutation = useUpdateSourceMutation();
   const sourceQueryError =
     sourcesQuery.error instanceof Error
       ? sourcesQuery.error.message
       : sourcesQuery.error
         ? String(sourcesQuery.error)
+        : null;
+  const categoryError =
+    categoriesQuery.error instanceof Error
+      ? `Could not load source categories: ${categoriesQuery.error.message}`
+      : categoriesQuery.error
+        ? `Could not load source categories: ${String(categoriesQuery.error)}`
         : null;
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
@@ -217,15 +223,7 @@ function BuildPageContent() {
 
   const loadProfileData = useCallback(async (profileId: number) => {
     setLoadError(null);
-    setCategoryError(null);
     setProfileDataLoading(true);
-    const categoriesRequest = fetchSourceCategories()
-      .then(setCategories)
-      .catch((e) =>
-        setCategoryError(
-          `Could not load source categories: ${e instanceof Error ? e.message : String(e)}`,
-        ),
-      );
     try {
       const layerRows = await fetchPlanLayers(profileId);
       setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
@@ -235,7 +233,6 @@ function BuildPageContent() {
     } finally {
       setProfileDataLoading(false);
     }
-    await categoriesRequest;
   }, []);
 
   const assignSourceCategory = useCallback(
@@ -290,20 +287,6 @@ function BuildPageContent() {
     setProfileDataLoading(true);
     void (async () => {
       setLoadError(null);
-      setCategoryError(null);
-      const categoriesRequest = fetchSourceCategories()
-        .then((rows) => {
-          if (!cancelled) setCategories(rows);
-        })
-        .catch((e) => {
-          if (!cancelled) {
-            setCategoryError(
-              `Could not load source categories: ${
-                e instanceof Error ? e.message : String(e)
-              }`,
-            );
-          }
-        });
       try {
         const layerRows = await fetchPlanLayers(selectedProfileId);
         if (cancelled) return;
@@ -316,7 +299,6 @@ function BuildPageContent() {
       } finally {
         if (!cancelled) setProfileDataLoading(false);
       }
-      await categoriesRequest;
     })();
     return () => {
       cancelled = true;
@@ -952,18 +934,7 @@ function BuildPageContent() {
 
       <SourceCategorySheet
         open={categoriesSheetOpen}
-        onOpenChange={(open) => {
-          setCategoriesSheetOpen(open);
-          if (!open) {
-            void fetchSourceCategories()
-              .then(setCategories)
-              .catch((e) =>
-                toast.error("Could not refresh source categories", {
-                  description: e instanceof Error ? e.message : String(e),
-                }),
-              );
-          }
-        }}
+        onOpenChange={setCategoriesSheetOpen}
         engineReady={engineReady}
       />
     </div>
