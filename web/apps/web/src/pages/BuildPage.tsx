@@ -10,7 +10,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import StaleBuildBanner from "../components/StaleBuildBanner";
+import PlanFreshnessNotice from "../components/PlanFreshnessNotice";
 import MergeConflictBanner from "../components/MergeConflictBanner";
 import PlanSpecialRequestField from "../components/PlanSpecialRequestField";
 import BuildSourcesPanel from "../components/build/BuildSourcesPanel";
@@ -49,7 +49,6 @@ import {
 import {
   addProfileAddonLayer,
   deleteProfileLayer,
-  fetchAutoRecomputeSettings,
   fetchPlanLayers,
   fetchSourceCategories,
   fetchSources,
@@ -75,7 +74,6 @@ import { usePlanActions } from "../context/PlanActionsContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
-import { useAutoRecompute } from "../hooks/useAutoRecompute";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
 import { layersEqual } from "../lib/planDataStable";
@@ -128,7 +126,6 @@ function BuildPageContent() {
   const [categoriesSheetOpen, setCategoriesSheetOpen] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [filamentRefreshKey, setFilamentRefreshKey] = useState(0);
-  const [autoRecomputeEnabled, setAutoRecomputeEnabled] = useState(true);
   const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
   const [namingProfile, setNamingProfile] = useState<StlNamingProfile>(DEFAULT_STL_NAMING_PROFILE);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -142,7 +139,7 @@ function BuildPageContent() {
   const engineReady = engineState === "ready";
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
-  const buildStale = selectedProfile?.build_stale ?? false;
+  const buildStale = selectedProfile?.freshness.status === "stale";
 
   const mergeConflicts = useMemo(
     () => review?.issues.filter((i) => i.code === "merge_conflict") ?? [],
@@ -167,13 +164,6 @@ function BuildPageContent() {
 
   useEffect(() => {
     if (!health?.ok) return;
-    void fetchAutoRecomputeSettings()
-      .then((s) => setAutoRecomputeEnabled(s.enabled))
-      .catch((e) =>
-        toast.error("Could not load auto-recompute settings", {
-          description: e instanceof Error ? e.message : String(e),
-        }),
-      );
     void fetchStlNaming()
       .then(setNamingProfile)
       .catch((e) =>
@@ -410,19 +400,6 @@ function BuildPageContent() {
     await Promise.all([flushImportRules(), flushKitManifest()]);
   }, [flushImportRules, flushKitManifest]);
 
-  useAutoRecompute({
-    profileId: selectedProfileId,
-    stale: buildStale,
-    enabled: autoRecomputeEnabled,
-    beforeRecompute: flushPendingSaves,
-    onDone: () => {
-      bumpPlanRevision();
-      setFilamentRefreshKey((k) => k + 1);
-      if (selectedProfileId != null) void loadProfileData(selectedProfileId);
-      void reloadProfiles();
-    },
-  });
-
   useEffect(() => {
     return () => {
       void flushPendingSaves();
@@ -503,7 +480,7 @@ function BuildPageContent() {
       () => startRecompute(selectedProfileId, { apply_manifest: true }),
       (snap) => {
         if (snap.status === "error") {
-          toast.error(snap.message || "Update build failed");
+          toast.error(snap.message || "Plan rebuild failed");
           return;
         }
         pendingConflictCheckRef.current = true;
@@ -665,8 +642,11 @@ function BuildPageContent() {
         </p>
       )}
 
-      {workspaceReady && (
-        <StaleBuildBanner stale={buildStale} busy={busy} onUpdate={() => void onUpdateBuild()} />
+      {workspaceReady && selectedProfile && (
+        <PlanFreshnessNotice
+          freshness={selectedProfile.freshness}
+          action={{ kind: "rebuild", busy, onRebuild: () => void onUpdateBuild() }}
+        />
       )}
 
       {workspaceReady && !buildStale && mergeConflicts.length > 0 && (

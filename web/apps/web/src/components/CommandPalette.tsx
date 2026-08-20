@@ -4,7 +4,6 @@ import { toast } from "sonner";
 import {
   startExportKitBundle,
   startExportStlPack,
-  startRecompute,
   startSync,
   type StlPackGroupBy,
 } from "../api/engine";
@@ -62,7 +61,6 @@ export default function CommandPalette(_props?: Props) {
   const { openCreatePlan } = usePlanActions();
   const flushBuildSaves = useFlushBuildPageSaves();
   const importSharedBuild = useImportSharedBuild();
-  const recomputeJob = useJobRunner("recompute");
   const syncJob = useJobRunner("sync");
   const stlExportJob = useJobRunner("stl-export");
   const kitExportJob = useJobRunner("kit-export");
@@ -218,20 +216,6 @@ export default function CommandPalette(_props?: Props) {
     if (health && selectedProfileId != null) {
       list.push(
         {
-          id: "update-build",
-          label: "Update build",
-          hint: "Scan layers and merge parts",
-          group: "Workflow",
-          disabled: recomputeJob.busy,
-          run: () => {
-            void recomputeJob.runJob(() =>
-              startRecompute(selectedProfileId, { apply_manifest: false }),
-            );
-            if (!onBuild) navigate(buildRoute(selectedProfileId));
-            setOpen(false);
-          },
-        },
-        {
           id: "export-share",
           label: "Share build…",
           hint: "Export .print-partner-kit.zip",
@@ -305,18 +289,6 @@ export default function CommandPalette(_props?: Props) {
             },
           ];
         }),
-        {
-          id: "recompute",
-          label: "Recompute plan",
-          group: "Actions",
-          disabled: recomputeJob.busy,
-          run: () => {
-            void recomputeJob.runJob(() =>
-              startRecompute(selectedProfileId, { apply_manifest: false }),
-            );
-            setOpen(false);
-          },
-        },
       );
     }
 
@@ -361,7 +333,6 @@ export default function CommandPalette(_props?: Props) {
     selectedProfileId,
     remainingUnits,
     navigate,
-    recomputeJob,
     syncJob,
     stlExportJob,
     kitExportJob,

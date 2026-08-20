@@ -11,11 +11,9 @@ import {
   createCustomFilament,
   DATE_FORMAT_PRESETS,
   deleteCustomFilament,
-  fetchAutoRecomputeSettings,
   fetchCustomFilaments,
   fetchGitHubPatSettings,
   fetchSourceUpdateCheckSettings,
-  saveAutoRecomputeSettings,
   saveGitHubPat,
   saveSourceUpdateCheckInterval,
   startCheckSourceUpdates,
@@ -95,7 +93,6 @@ type SettingsResource =
   | "filaments"
   | "githubPat"
   | "sourceUpdates"
-  | "autoRecompute"
   | "discord";
 
 type SettingsResourceLoad = {
@@ -114,7 +111,6 @@ const INITIAL_SETTINGS_LOADS: Record<SettingsResource, SettingsResourceLoad> = {
   filaments: INITIAL_RESOURCE_LOAD,
   githubPat: INITIAL_RESOURCE_LOAD,
   sourceUpdates: INITIAL_RESOURCE_LOAD,
-  autoRecompute: INITIAL_RESOURCE_LOAD,
   discord: INITIAL_RESOURCE_LOAD,
 };
 
@@ -163,8 +159,6 @@ export default function SettingsPage() {
   const [deleting, setDeleting] = useState(false);
   const [updateIntervalHours, setUpdateIntervalHours] = useState("24");
   const [updateIntervalSaving, setUpdateIntervalSaving] = useState(false);
-  const [autoRecompute, setAutoRecompute] = useState(true);
-  const [autoRecomputeSaving, setAutoRecomputeSaving] = useState(false);
   const [discordSettings, setDiscordSettings] = useState<DiscordNotifySettings | null>(null);
   const [discordWebhookInput, setDiscordWebhookInput] = useState("");
   const [discordWebhookError, setDiscordWebhookError] = useState<string | null>(null);
@@ -216,9 +210,6 @@ export default function SettingsPage() {
         const settings = await fetchSourceUpdateCheckSettings();
         setUpdateIntervalHours(String(settings.interval_hours));
       }),
-      loadResource("autoRecompute", async () => {
-        setAutoRecompute((await fetchAutoRecomputeSettings()).enabled);
-      }),
       loadResource("discord", async () => {
         const settings = await fetchDiscordNotifySettings();
         setDiscordSettings(settings);
@@ -228,7 +219,6 @@ export default function SettingsPage() {
   }, [
     engineReady,
     loadResource,
-    setAutoRecompute,
     setDiscordSettings,
     setDiscordWebhookInput,
     setFilaments,
@@ -256,13 +246,11 @@ export default function SettingsPage() {
   const filamentsReady = resourceReady("filaments");
   const githubPatReady = resourceReady("githubPat");
   const sourceUpdatesReady = resourceReady("sourceUpdates");
-  const autoRecomputeReady = resourceReady("autoRecompute");
   const discordReady = resourceReady("discord");
   const recoveryToolsReady = canUseRecoveryTools(engineState);
   const filamentsDisplay = resourceDisplay("filaments");
   const githubPatDisplay = resourceDisplay("githubPat");
   const sourceUpdatesDisplay = resourceDisplay("sourceUpdates");
-  const autoRecomputeDisplay = resourceDisplay("autoRecompute");
   const discordDisplay = resourceDisplay("discord");
 
   // Scroll to hash targets (e.g. /settings#printers) after layout.
@@ -550,55 +538,6 @@ export default function SettingsPage() {
             {sourceUpdatesDisplay === "background-error" && (
               <p className="text-sm text-destructive" role="alert">
                 Could not refresh source update settings: {resourceLoads.sourceUpdates.error}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader accent>
-            <CardTitle level={3} className="text-base">Auto update build</CardTitle>
-            <CardDescription>
-              When enabled, Print Partner automatically recomputes small plans a few seconds after
-              file picks or colors change (when the stale banner appears on Build).
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {(autoRecomputeDisplay === "loading" ||
-              autoRecomputeDisplay === "initial-error") && (
-              <p
-                className={
-                  autoRecomputeDisplay === "initial-error"
-                    ? "text-sm text-destructive"
-                    : "text-sm text-muted-foreground"
-                }
-                role={autoRecomputeDisplay === "initial-error" ? "alert" : undefined}
-              >
-                {autoRecomputeDisplay === "initial-error"
-                  ? `Could not load auto-recompute settings: ${resourceLoads.autoRecompute.error}`
-                  : "Loading auto-recompute settings…"}
-              </p>
-            )}
-            <label className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
-              <span className="text-sm font-medium">Auto-recompute stale builds</span>
-              <Switch
-                checked={autoRecompute}
-                disabled={!autoRecomputeReady || autoRecomputeSaving}
-                onCheckedChange={(checked) => {
-                  setAutoRecomputeSaving(true);
-                  void saveAutoRecomputeSettings(checked)
-                    .then((s) => setAutoRecompute(s.enabled))
-                    .catch((e) =>
-                      setLoadError(e instanceof Error ? e.message : String(e)),
-                    )
-                    .finally(() => setAutoRecomputeSaving(false));
-                }}
-                aria-label="Auto-recompute stale builds"
-              />
-            </label>
-            {autoRecomputeDisplay === "background-error" && (
-              <p className="text-sm text-destructive" role="alert">
-                Could not refresh auto-recompute settings: {resourceLoads.autoRecompute.error}
               </p>
             )}
           </CardContent>

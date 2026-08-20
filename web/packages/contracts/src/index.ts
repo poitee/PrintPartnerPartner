@@ -431,13 +431,67 @@ export type ProfileSummary = {
   remaining_units: number;
   /** Included print units (quantity sum) for this plan. */
   total_units: number;
-  /** True when plan config changed since the last successful recompute. */
+  /** Compatibility flag for a definite stale Plan; use `freshness` for reasons. */
   build_stale: boolean;
+  /** Accepted Source/naming identity compared with the current Plan inputs. */
+  freshness: PlanFreshness;
   /** ISO timestamp when archived as a template; null if active. */
   archived_at: string | null;
   /** ISO timestamp of last spine selection. */
   last_used_at: string | null;
 };
+
+export type PlanStaleReason =
+  | {
+      readonly kind: "source_revision_changed";
+      readonly source_id: number;
+      readonly source_name: string;
+      readonly accepted_revision_id: number;
+      readonly current_revision_id: number;
+    }
+  | {
+      readonly kind: "source_revision_unavailable";
+      readonly source_id: number;
+      readonly source_name: string;
+      readonly accepted_revision_id: number;
+    }
+  | {
+      readonly kind: "naming_rules_changed";
+      readonly source_id: number;
+      readonly source_name: string;
+      readonly accepted_digest: string;
+      readonly current_digest: string;
+    }
+  | { readonly kind: "plan_inputs_invalid" }
+  | { readonly kind: "plan_configuration_changed" };
+
+export type PlanUntrackedReason =
+  | { readonly kind: "no_accepted_inputs" }
+  | {
+      readonly kind: "source_revision_untracked";
+      readonly source_id: number;
+      readonly source_name: string;
+    };
+
+export type PlanFreshness =
+  | {
+      readonly status: "current";
+      readonly accepted_input_set_id: number;
+      readonly accepted_at: string;
+    }
+  | {
+      readonly status: "stale";
+      readonly accepted_input_set_id: number;
+      readonly accepted_at: string;
+      readonly reasons: readonly [PlanStaleReason, ...PlanStaleReason[]];
+      readonly untracked_sources: readonly PlanUntrackedReason[];
+    }
+  | {
+      readonly status: "untracked";
+      readonly accepted_input_set_id: number | null;
+      readonly accepted_at: string | null;
+      readonly reasons: readonly [PlanUntrackedReason, ...PlanUntrackedReason[]];
+    };
 
 export type SourceSummary = {
   id: number;
@@ -475,8 +529,13 @@ export type SourceRevision = {
 };
 
 export type PlanRevisionInput = {
-  readonly source_revision_id: number;
-  readonly manifest_digest: string;
+  readonly source_id: number;
+  readonly source_layer: string;
+  readonly layer_order: number;
+  readonly tracking_kind: "revision" | "untracked";
+  readonly source_revision_id: number | null;
+  readonly manifest_digest: string | null;
+  readonly effective_naming_digest: string;
 };
 
 export type PlanRevisionInputSet = {
@@ -484,6 +543,7 @@ export type PlanRevisionInputSet = {
   readonly plan_id: number;
   readonly recorded_at: string;
   readonly published_at: string;
+  readonly format_version: 1 | 2;
   readonly inputs: readonly PlanRevisionInput[];
 };
 

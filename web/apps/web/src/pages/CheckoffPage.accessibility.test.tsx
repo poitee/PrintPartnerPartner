@@ -144,7 +144,7 @@ vi.mock("../components/SpoolRemainingBadge", () => ({
 vi.mock("../components/pwa/PwaInstallBanner", () => ({
   default: () => null,
 }));
-vi.mock("../components/StaleBuildBanner", () => ({
+vi.mock("../components/PlanFreshnessNotice", () => ({
   default: () => null,
 }));
 vi.mock("../components/PlanSpecialRequestLine", () => ({

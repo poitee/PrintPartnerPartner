@@ -454,10 +454,44 @@ export const postgresPostInitMigrations: string[] = [
     source_revision_id INTEGER NOT NULL REFERENCES source_revisions(id) ON DELETE RESTRICT,
     manifest_digest TEXT NOT NULL
   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_inputs_set_revision
-    ON plan_revision_inputs (input_set_id, source_revision_id)`,
   `CREATE INDEX IF NOT EXISTS idx_plan_revision_inputs_tenant_set
     ON plan_revision_inputs (tenant_id, input_set_id)`,
+  // v18 — explicit accepted Plan input identity and effective naming inputs.
+  `ALTER TABLE plan_revision_input_sets ADD COLUMN IF NOT EXISTS format_version INTEGER NOT NULL DEFAULT 1`,
+  `ALTER TABLE plan_revision_inputs ADD COLUMN IF NOT EXISTS source_id INTEGER REFERENCES projects(id) ON DELETE RESTRICT`,
+  `ALTER TABLE plan_revision_inputs ADD COLUMN IF NOT EXISTS source_layer TEXT`,
+  `ALTER TABLE plan_revision_inputs ADD COLUMN IF NOT EXISTS layer_order INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE plan_revision_inputs ADD COLUMN IF NOT EXISTS tracking_kind TEXT NOT NULL DEFAULT 'revision'`,
+  `ALTER TABLE plan_revision_inputs ADD COLUMN IF NOT EXISTS effective_naming_digest TEXT`,
+  `ALTER TABLE plan_revision_inputs ALTER COLUMN source_revision_id DROP NOT NULL`,
+  `ALTER TABLE plan_revision_inputs ALTER COLUMN manifest_digest DROP NOT NULL`,
+  `UPDATE plan_revision_inputs
+     SET source_id = source_revisions.project_id,
+         source_layer = 'legacy:' || source_revisions.project_id
+    FROM source_revisions
+   WHERE plan_revision_inputs.source_revision_id = source_revisions.id
+     AND (plan_revision_inputs.source_id IS NULL OR plan_revision_inputs.source_layer IS NULL)`,
+  `ALTER TABLE plan_revision_inputs ALTER COLUMN source_id SET NOT NULL`,
+  `ALTER TABLE plan_revision_inputs ALTER COLUMN source_layer SET NOT NULL`,
+  `ALTER TABLE plan_revision_inputs DROP CONSTRAINT IF EXISTS chk_plan_revision_inputs_tracking_kind`,
+  `ALTER TABLE plan_revision_inputs ADD CONSTRAINT chk_plan_revision_inputs_tracking_kind
+    CHECK (tracking_kind IN ('revision', 'untracked'))`,
+  `ALTER TABLE plan_revision_inputs DROP CONSTRAINT IF EXISTS chk_plan_revision_inputs_revision_identity`,
+  `ALTER TABLE plan_revision_inputs ADD CONSTRAINT chk_plan_revision_inputs_revision_identity
+    CHECK (
+      (tracking_kind = 'revision' AND source_revision_id IS NOT NULL AND manifest_digest IS NOT NULL)
+      OR
+      (tracking_kind = 'untracked' AND source_revision_id IS NULL AND manifest_digest IS NULL)
+    )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_inputs_v2_set_source
+    ON plan_revision_inputs (input_set_id, source_id)
+    WHERE effective_naming_digest IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS plan_accepted_input_sets (
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER PRIMARY KEY REFERENCES build_profiles(id) ON DELETE CASCADE,
+    input_set_id INTEGER NOT NULL REFERENCES plan_revision_input_sets(id) ON DELETE RESTRICT,
+    accepted_at TEXT NOT NULL
+  )`,
 ];
 
 export class PostgresDatabase {

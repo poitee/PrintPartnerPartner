@@ -25,10 +25,16 @@ describe("source revision contracts", () => {
       plan_id: 3,
       recorded_at: "2026-08-20T10:01:00.000Z",
       published_at: "2026-08-20T10:01:01.000Z",
+      format_version: 2,
       inputs: [
         {
+          source_id: 7,
+          source_layer: "base:Voron",
+          layer_order: 0,
+          tracking_kind: "revision",
           source_revision_id: 41,
           manifest_digest: "a".repeat(64),
+          effective_naming_digest: "b".repeat(64),
         },
       ],
     };

@@ -232,6 +232,12 @@ export function resolveNamingProfile(
   const { useDefaults, override } = parseSourceNamingMetadata(metadata);
   if (useDefaults) return namingProfileFromDict(globalDict);
   if (Object.keys(override).length > 0) {
+    try {
+      return namingProfileFromDict(validateNamingProfile(override));
+    } catch {
+      // Older Source metadata stored sparse overrides. Keep those readable by
+      // filling their omitted fields from the current global profile.
+    }
     return namingProfileFromDict(mergeNamingProfiles(globalDict, override));
   }
   return namingProfileFromDict(globalDict);

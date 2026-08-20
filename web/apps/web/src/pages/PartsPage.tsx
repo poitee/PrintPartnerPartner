@@ -10,7 +10,7 @@ import {
   RefreshCw,
   XCircle,
 } from "lucide-react";
-import StaleBuildBanner from "../components/StaleBuildBanner";
+import PlanFreshnessNotice from "../components/PlanFreshnessNotice";
 import StlSyncBanner from "../components/StlSyncBanner";
 import DeskNextStep from "../components/layout/DeskNextStep";
 import EmptyState from "../components/layout/EmptyState";
@@ -23,7 +23,7 @@ import ReviewPartsSheet, {
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
-import { fetchStlNaming, startRecompute, startSync } from "../api/engine";
+import { fetchStlNaming, startSync } from "../api/engine";
 import type { StlNamingFolderRule } from "../api/engine";
 import {
   exportRoute,
@@ -70,7 +70,6 @@ export default function PartsPage() {
   } = usePlanWorkspace();
   const { banner: stlBanner, runSync: runStlSync, busy: stlSyncBusy } =
     useStlAutoSync();
-  const recomputeJob = useJobRunner("recompute");
   const syncJob = useJobRunner("sync");
   const sheetRef = useRef<ReviewPartsSheetHandle>(null);
   const [folderRules, setFolderRules] = useState<StlNamingFolderRule[]>([]);
@@ -90,19 +89,6 @@ export default function PartsPage() {
       );
     }).catch(() => {/* silently ignore – filter just won't work */});
   }, []);
-  const buildStale = selectedProfile?.build_stale ?? false;
-
-  const onUpdateBuild = () => {
-    if (selectedProfileId == null) return;
-    void recomputeJob.runJob(
-      () => startRecompute(selectedProfileId, { apply_manifest: true }),
-      (snap) => {
-        if (snap.status === "error") toast.error(snap.message || "Update failed");
-      },
-      { profileId: selectedProfileId },
-    );
-  };
-
   const syncUnsyncedLayers = () => {
     const unsynced = review?.layers.filter((l) => !l.synced && l.project_id != null) ?? [];
     const ids = [...new Set(unsynced.map((l) => l.project_id!).filter(Boolean))];
@@ -225,11 +211,12 @@ export default function PartsPage() {
 
       <DeskNextStep>{partsNextStep}</DeskNextStep>
 
-      <StaleBuildBanner
-        stale={buildStale}
-        busy={recomputeJob.busy}
-        onUpdate={onUpdateBuild}
-      />
+      {selectedProfile && (
+        <PlanFreshnessNotice
+          freshness={selectedProfile.freshness}
+          action={{ kind: "review", href: planRoute(selectedProfileId) }}
+        />
+      )}
 
       {loadError && <p className="text-sm text-destructive">{loadError}</p>}
 

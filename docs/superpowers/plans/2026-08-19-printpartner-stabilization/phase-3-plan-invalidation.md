@@ -6,33 +6,31 @@
 
 Tell users when a plan no longer represents its source revisions.
 
-## Changes
+## Delivered changes
 
 - Compare a plan's recorded inputs with current source revisions.
-- Mark affected plans stale after atomic promotion.
+- Record the accepted Source revision, layer binding, naming digest, and tracking state for every Source used by a successful Plan rebuild.
+- Resolve accepted STL files from immutable Source snapshots instead of the Source's latest path.
+- Report affected Plans as stale after Source, naming, or Plan configuration changes.
 - Persist global and source-specific STL naming changes through tested routes.
-- Mark affected plans stale when their effective STL naming rules change.
-- Expose the reason through the existing plan response.
-- Add repository and route tests for affected and unaffected plans.
+- Keep unrelated Plans current.
+- Remove automatic rebuilds. Plan owns the explicit rebuild action; Parts and Progress link back to Plan.
+- Preserve an honest untracked state for Plans or Sources without revision identity.
 
 ## Data structures
 
-`PlanFreshness` is either current or stale. Stale state carries a reason
-discriminator (`source_revision_changed` or `naming_rules_changed`), the
-changed Source revision inputs, and the effective naming-rule revision or
-digest. Global and Source-specific naming changes populate the same explicit
-shape and remain visible in the existing Plan response.
+`PlanFreshness` is `current`, `stale`, or `untracked`. Stale state carries a
+reason discriminator for Source revision, naming-rule, or Plan configuration
+changes. The existing Plan response keeps `build_stale` for compatibility and
+adds the structured freshness value.
 
 ## Verification
 
-Static checks run focused repository and route tests, server typecheck, and
-lint.
+Focused tests cover dependent and unrelated Plans, A to B to A revision
+changes, global and Source naming changes, untracked Sources, refused rebuilds,
+accepted snapshot resolution, Source naming validation, and the Plan versus
+downstream action policy. The complete quality suite remains the release gate.
 
-Runtime checks sync one source used by two plans and one unrelated source. Only
-the dependent plans become stale. Change one source naming rule and confirm
-that its dependent plans also become stale with the naming-rule reason and
-digest. Recomputing produces a draft while the accepted Plan remains stale and
-pinned to its prior inputs. `Apply plan changes` atomically persists the new
-Plan revision, its Source revision inputs, naming-rule digest, and inferred
-values. Only a successful apply clears stale state; a failed apply leaves the
-accepted Plan and its freshness unchanged.
+Draft generation, diff review, explicit apply, and durable Checkoff
+reconciliation remain Phase 7 work. Phase 3 keeps the existing direct rebuild
+after the user explicitly invokes it from Plan.

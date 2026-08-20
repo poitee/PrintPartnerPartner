@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { getTableConfig as getPgTableConfig, PgTable } from "drizzle-orm/pg-core";
+import Database from "better-sqlite3";
 import { getDb, SqliteDatabase } from "./client.js";
 import { postgresPostInitMigrations } from "./client-postgres.js";
 import { AppRepository } from "./repository.js";
@@ -53,6 +54,20 @@ const V16_TABLES = [
   "plan_revision_input_sets",
   "plan_revision_inputs",
 ];
+
+const V18_TABLES = ["plan_accepted_input_sets"];
+
+const V18_COLUMNS: Record<string, string[]> = {
+  plan_revision_input_sets: ["format_version"],
+  plan_revision_inputs: [
+    "source_id",
+    "source_layer",
+    "layer_order",
+    "tracking_kind",
+    "effective_naming_digest",
+  ],
+  plan_accepted_input_sets: ["tenant_id", "profile_id", "input_set_id", "accepted_at"],
+};
 
 const V16_COLUMNS: Record<string, string[]> = {
   source_revisions: [
@@ -119,6 +134,21 @@ function rawSqlite(sqlite: SqliteDatabase) {
   return (sqlite as unknown as { sqlite: import("better-sqlite3").Database }).sqlite;
 }
 
+function replacePlanInputsWithV17Table(raw: Database.Database): void {
+  raw.pragma("foreign_keys = OFF");
+  raw.exec(`
+    DROP TABLE plan_revision_inputs;
+    CREATE TABLE plan_revision_inputs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id TEXT NOT NULL DEFAULT 'default',
+      input_set_id INTEGER NOT NULL REFERENCES plan_revision_input_sets(id) ON DELETE CASCADE,
+      source_revision_id INTEGER NOT NULL REFERENCES source_revisions(id) ON DELETE RESTRICT,
+      manifest_digest TEXT NOT NULL
+    );
+  `);
+  raw.pragma("foreign_keys = ON");
+}
+
 function sqliteTableNames(sqlite: SqliteDatabase): string[] {
   return (
     rawSqlite(sqlite)
@@ -152,17 +182,17 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v16 tables and records schema version 17", () => {
+  it("creates the v15-v18 tables and records schema version 18", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
-      for (const table of [...V15_TABLES, ...V16_TABLES]) {
+      for (const table of [...V15_TABLES, ...V16_TABLES, ...V18_TABLES]) {
         expect(tables, `missing table ${table}`).toContain(table);
       }
       expect(
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "17" });
+      ).toMatchObject({ value: "18" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -172,6 +202,14 @@ describe("schema v9-v13 (SQLite)", () => {
   it("creates every v16 revision column", () => {
     withSqlite((sqlite) => {
       for (const [table, expected] of Object.entries(V16_COLUMNS)) {
+        expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
+      }
+    });
+  });
+
+  it("creates every v18 accepted-input column", () => {
+    withSqlite((sqlite) => {
+      for (const [table, expected] of Object.entries(V18_COLUMNS)) {
         expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
       }
     });
@@ -315,6 +353,189 @@ describe("schema v9-v13 (SQLite)", () => {
     }
   });
 
+  it("rejects orphaned v17 Plan inputs before rebuilding their table", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-schema-v18-orphan-"));
+    const dbPath = join(dir, "print-partner.db");
+    try {
+      const legacy = new SqliteDatabase(dir);
+      legacy.connect();
+      const raw = rawSqlite(legacy);
+      replacePlanInputsWithV17Table(raw);
+      raw.pragma("foreign_keys = OFF");
+      raw.prepare(
+        `INSERT INTO plan_revision_inputs
+          (tenant_id, input_set_id, source_revision_id, manifest_digest)
+         VALUES ('default', 1, 999, ?)`,
+      ).run("a".repeat(64));
+      raw.pragma("foreign_keys = ON");
+      legacy.close();
+
+      const upgrade = new SqliteDatabase(dir);
+      expect(() => upgrade.connect()).toThrow(/Source revision is missing/i);
+      upgrade.close();
+
+      const inspect = new Database(dbPath);
+      expect(
+        (inspect.pragma("table_info(plan_revision_inputs)") as { name: string; notnull: number }[])
+          .find((column) => column.name === "source_revision_id")?.notnull,
+      ).toBe(1);
+      expect(
+        inspect.prepare(
+          "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'plan_revision_inputs_v17'",
+        ).get(),
+      ).toEqual({ count: 0 });
+      inspect.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves duplicate Sources in v1 history while constraining v2 inputs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-schema-v18-legacy-duplicates-"));
+    try {
+      const legacy = new SqliteDatabase(dir);
+      legacy.connect();
+      const raw = rawSqlite(legacy);
+      replacePlanInputsWithV17Table(raw);
+      const source = raw.prepare(
+        `INSERT INTO projects (tenant_id, name, url, source_type, branch, source_kind, role)
+         VALUES ('default', 'Legacy', '', 'git', 'main', 'github', 'unassigned')`,
+      ).run();
+      const profile = raw.prepare(
+        "INSERT INTO build_profiles (tenant_id, name) VALUES ('default', 'Legacy plan')",
+      ).run();
+      const inputSet = raw.prepare(
+        `INSERT INTO plan_revision_input_sets
+          (tenant_id, profile_id, input_set_digest, expected_input_count, recorded_at, published_at, format_version)
+         VALUES ('default', ?, ?, 2, ?, ?, 1)`,
+      ).run(
+        Number(profile.lastInsertRowid),
+        "c".repeat(64),
+        "2026-08-20T12:00:00.000Z",
+        "2026-08-20T12:00:00.000Z",
+      );
+      const insertRevision = raw.prepare(
+        `INSERT INTO source_revisions
+          (tenant_id, project_id, upstream_revision_key, manifest_digest, snapshot_locator, synced_at, completeness)
+         VALUES ('default', ?, ?, ?, ?, ?, 'complete')`,
+      );
+      const firstRevision = insertRevision.run(
+        Number(source.lastInsertRowid),
+        "legacy-a",
+        "a".repeat(64),
+        "1/revisions/legacy-a",
+        "2026-08-20T12:00:00.000Z",
+      );
+      const secondRevision = insertRevision.run(
+        Number(source.lastInsertRowid),
+        "legacy-b",
+        "b".repeat(64),
+        "1/revisions/legacy-b",
+        "2026-08-20T12:01:00.000Z",
+      );
+      const insertLegacyInput = raw.prepare(
+        `INSERT INTO plan_revision_inputs
+          (tenant_id, input_set_id, source_revision_id, manifest_digest)
+         VALUES ('default', ?, ?, ?)`,
+      );
+      insertLegacyInput.run(
+        Number(inputSet.lastInsertRowid),
+        Number(firstRevision.lastInsertRowid),
+        "a".repeat(64),
+      );
+      insertLegacyInput.run(
+        Number(inputSet.lastInsertRowid),
+        Number(secondRevision.lastInsertRowid),
+        "b".repeat(64),
+      );
+      legacy.close();
+
+      const upgraded = new SqliteDatabase(dir);
+      expect(() => upgraded.connect()).not.toThrow();
+      const upgradedRaw = rawSqlite(upgraded);
+      expect(
+        upgradedRaw.prepare(
+          "SELECT count(*) AS count FROM plan_revision_inputs WHERE input_set_id = ?",
+        ).get(Number(inputSet.lastInsertRowid)),
+      ).toEqual({ count: 2 });
+      const indexSql = upgradedRaw.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'uq_plan_revision_inputs_v2_set_source'",
+      ).get() as { sql: string };
+      expect(indexSql.sql).toMatch(/WHERE effective_naming_digest IS NOT NULL/i);
+      upgraded.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back the v17 Plan-input table rename when rebuilding fails", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-schema-v18-rollback-"));
+    const dbPath = join(dir, "print-partner.db");
+    try {
+      const legacy = new SqliteDatabase(dir);
+      legacy.connect();
+      const raw = rawSqlite(legacy);
+      replacePlanInputsWithV17Table(raw);
+      raw.pragma("foreign_keys = OFF");
+      const source = raw.prepare(
+        `INSERT INTO projects (tenant_id, name, url, source_type, branch, source_kind, role)
+         VALUES ('default', 'Legacy', '', 'git', 'main', 'github', 'unassigned')`,
+      ).run();
+      const revision = raw.prepare(
+        `INSERT INTO source_revisions
+          (tenant_id, project_id, upstream_revision_key, manifest_digest, snapshot_locator, synced_at, completeness)
+         VALUES ('default', ?, 'legacy', ?, '1/revisions/legacy', ?, 'complete')`,
+      ).run(Number(source.lastInsertRowid), "b".repeat(64), "2026-08-20T12:00:00.000Z");
+      const profile = raw.prepare(
+        "INSERT INTO build_profiles (tenant_id, name) VALUES ('default', 'Legacy plan')",
+      ).run();
+      const inputSet = raw.prepare(
+        `INSERT INTO plan_revision_input_sets
+          (tenant_id, profile_id, input_set_digest, expected_input_count, recorded_at, published_at, format_version)
+         VALUES ('default', ?, ?, 1, ?, ?, 1)`,
+      ).run(
+        Number(profile.lastInsertRowid),
+        "c".repeat(64),
+        "2026-08-20T12:00:00.000Z",
+        "2026-08-20T12:00:00.000Z",
+      );
+      raw.prepare(
+        `INSERT INTO plan_revision_inputs
+          (tenant_id, input_set_id, source_revision_id, manifest_digest)
+         VALUES ('default', ?, ?, ?)`,
+      ).run(Number(inputSet.lastInsertRowid), Number(revision.lastInsertRowid), "b".repeat(64));
+      raw.exec(`
+        CREATE TABLE migration_index_collision (id INTEGER PRIMARY KEY);
+        CREATE UNIQUE INDEX uq_plan_revision_inputs_v2_set_source
+          ON migration_index_collision (id);
+      `);
+      raw.pragma("foreign_keys = ON");
+      legacy.close();
+
+      const upgrade = new SqliteDatabase(dir);
+      expect(() => upgrade.connect()).toThrow(/index uq_plan_revision_inputs_v2_set_source already exists/i);
+      upgrade.close();
+
+      const inspect = new Database(dbPath);
+      const columns = inspect.pragma("table_info(plan_revision_inputs)") as {
+        name: string;
+        notnull: number;
+      }[];
+      expect(columns.find((column) => column.name === "source_revision_id")?.notnull).toBe(1);
+      expect(inspect.prepare("SELECT count(*) AS count FROM plan_revision_inputs").get()).toEqual({
+        count: 1,
+      });
+      expect(
+        inspect.prepare(
+          "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'plan_revision_inputs_v17'",
+        ).get(),
+      ).toEqual({ count: 0 });
+      inspect.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("upgrades a pre-v12 print_jobs table in place (legacy database)", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-schema-v9-legacy-"));
     try {
@@ -402,8 +623,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(17);
-    expect(pgSchema.currentSchemaVersion).toBe(17);
+    expect(sqliteSchema.currentSchemaVersion).toBe(18);
+    expect(pgSchema.currentSchemaVersion).toBe(18);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -448,6 +669,29 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
     expect(present).toContain("current_source_revision_id");
   });
 
+  it("adds every v18 accepted-input column in Postgres DDL", () => {
+    for (const [table, expected] of Object.entries(V18_COLUMNS)) {
+      const present = new Set([...pgCreatedColumns(table), ...pgAddedColumns(table)]);
+      for (const column of expected) {
+        expect(present.has(column), `Postgres ${table} never gets column ${column}`).toBe(true);
+      }
+    }
+  });
+
+  it("enforces the v18 Plan-input identity constraints in Postgres", () => {
+    expect(POSTGRES_DDL).toMatch(
+      /ALTER TABLE plan_revision_inputs ALTER COLUMN source_id SET NOT NULL/i,
+    );
+    expect(POSTGRES_DDL).toMatch(
+      /ALTER TABLE plan_revision_inputs ALTER COLUMN source_layer SET NOT NULL/i,
+    );
+    expect(POSTGRES_DDL).toMatch(/chk_plan_revision_inputs_tracking_kind/i);
+    expect(POSTGRES_DDL).toMatch(/chk_plan_revision_inputs_revision_identity/i);
+    expect(POSTGRES_DDL).toMatch(
+      /CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_inputs_v2_set_source[\s\S]*WHERE effective_naming_digest IS NOT NULL/i,
+    );
+  });
+
   it("adds v13 profile-sync provenance columns on slicer profile tables", () => {
     for (const table of ["printer_profiles", "process_profiles", "filament_profiles"]) {
       const present = new Set([...pgCreatedColumns(table), ...pgAddedColumns(table)]);
@@ -470,7 +714,13 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
       if (/^\s*CREATE\s+(TABLE|(UNIQUE\s+)?INDEX)/i.test(stmt)) {
         expect(stmt, `not idempotent: ${head}`).toMatch(/IF NOT EXISTS/i);
       } else if (/^\s*ALTER TABLE/i.test(stmt)) {
-        expect(stmt, `not idempotent: ${head}`).toMatch(/ADD COLUMN IF NOT EXISTS/i);
+        expect(stmt, `not idempotent: ${head}`).toMatch(
+          /ADD COLUMN IF NOT EXISTS|ALTER COLUMN .* (DROP|SET) NOT NULL|DROP CONSTRAINT IF EXISTS|ADD CONSTRAINT chk_plan_revision_inputs_/i,
+        );
+      } else if (/^\s*UPDATE plan_revision_inputs/i.test(stmt)) {
+        expect(stmt, `not idempotent: ${head}`).toMatch(
+          /source_id IS NULL OR plan_revision_inputs\.source_layer IS NULL/i,
+        );
       } else {
         throw new Error(`unexpected non-DDL post-init statement: ${head}`);
       }

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { appendSyncThenUpdateIfNeeded } from "./tool-loop.js";
+import { appendSyncIfNeeded } from "./tool-loop.js";
 import type { ToolContext } from "./tools.js";
 import type { AssistantProposedAction } from "@print-partner/contracts";
 
-describe("appendSyncThenUpdateIfNeeded", () => {
-  it("appends Sync → Update after tagged set_base", () => {
+describe("appendSyncIfNeeded", () => {
+  it("appends Sync after tagged set_base", () => {
     const actions: AssistantProposedAction[] = [
       {
         id: "1",
@@ -29,16 +29,14 @@ describe("appendSyncThenUpdateIfNeeded", () => {
         { id: 64, name: "LDOVoronTrident" },
       ],
     };
-    appendSyncThenUpdateIfNeeded(
+    appendSyncIfNeeded(
       { repo, activePlanId: 6 } as unknown as ToolContext,
       actions,
     );
-    expect(actions.some((a) => a.params?.workflow === "sync_then_recompute")).toBe(
-      true,
-    );
+    expect(actions.some((action) => action.type === "start_sync")).toBe(true);
   });
 
-  it("appends Sync → Update after apply_stack_preset", () => {
+  it("appends Sync after apply_stack_preset", () => {
     const actions: AssistantProposedAction[] = [
       {
         id: "1",
@@ -49,7 +47,7 @@ describe("appendSyncThenUpdateIfNeeded", () => {
         params: { preset_id: "ldo_trident_r2", base_tag: "VTr2" },
       },
     ];
-    appendSyncThenUpdateIfNeeded(
+    appendSyncIfNeeded(
       {
         repo: {
           listSources: () => [{ id: 54, name: "Voron-Trident" }],
@@ -58,7 +56,7 @@ describe("appendSyncThenUpdateIfNeeded", () => {
       } as unknown as ToolContext,
       actions,
     );
-    const sync = actions.find((a) => a.params?.workflow === "sync_then_recompute");
+    const sync = actions.find((action) => action.type === "start_sync");
     expect(sync).toBeTruthy();
     expect(sync?.params?.source_name ?? sync?.summary).toBeTruthy();
   });

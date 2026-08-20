@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { getDb, SqliteDatabase, type DrizzleDb } from "./client.js";
 import { AppRepository } from "./repository.js";
 import * as schema from "./schema.js";
+import type { PlanRevisionInput, SourceRevision } from "@print-partner/contracts";
 
 const DIGEST_A = "a".repeat(64);
 const DIGEST_B = "b".repeat(64);
@@ -34,6 +35,23 @@ function addSource(repo: AppRepository, name: string) {
     url: `https://github.com/example/${name.toLowerCase().replaceAll(" ", "-")}`,
     source_kind: "github",
   });
+}
+
+function revisionInput(
+  sourceId: number,
+  revision: SourceRevision,
+  layerOrder = 0,
+  manifestDigest = revision.manifest_digest,
+): PlanRevisionInput {
+  return {
+    source_id: sourceId,
+    source_layer: `${layerOrder === 0 ? "base" : "addon"}:source-${sourceId}`,
+    layer_order: layerOrder,
+    tracking_kind: "revision",
+    source_revision_id: revision.id,
+    manifest_digest: manifestDigest,
+    effective_naming_digest: "c".repeat(64),
+  };
 }
 
 describe("Source revision repository", () => {
@@ -114,6 +132,30 @@ describe("Source revision repository", () => {
     });
   });
 
+  it("rejects a revision locator that resolves to the repository root", () => {
+    withRepos(({ defaultRepo }) => {
+      const source = addSource(defaultRepo, "Unsafe locator");
+      const revision = defaultRepo.recordSourceRevision({
+        sourceId: source.id,
+        upstreamRevisionKey: "root",
+        manifestDigest: DIGEST_A,
+        snapshotLocator: ".",
+        syncedAt: "2026-08-20T10:00:00.000Z",
+        completeness: "complete",
+      });
+      const observed = defaultRepo.getProjectRow(source.id);
+      if (!observed) throw new Error("test Source missing");
+
+      expect(() =>
+        defaultRepo.activateSourceRevision({
+          sourceId: source.id,
+          revisionId: revision.id,
+          observed,
+        }),
+      ).toThrow(/storage-relative/i);
+    });
+  });
+
   it("keeps a published Plan pinned after a newer Source revision exists", () => {
     withRepos(({ defaultRepo }) => {
       const source = addSource(defaultRepo, "LDO Trident");
@@ -127,7 +169,7 @@ describe("Source revision repository", () => {
         completeness: "complete",
       });
       const published = defaultRepo.publishPlanRevisionInputs(plan.id, [
-        { source_revision_id: revisionA.id, manifest_digest: revisionA.manifest_digest },
+        revisionInput(source.id, revisionA),
       ]);
 
       defaultRepo.recordSourceRevision({
@@ -140,9 +182,7 @@ describe("Source revision repository", () => {
       });
 
       expect(defaultRepo.getLatestPlanRevisionInputSet(plan.id)).toEqual(published);
-      expect(published.inputs).toEqual([
-        { source_revision_id: revisionA.id, manifest_digest: DIGEST_A },
-      ]);
+      expect(published.inputs).toEqual([revisionInput(source.id, revisionA)]);
     });
   });
 
@@ -180,12 +220,12 @@ describe("Source revision repository", () => {
       expect(defaultRepo.listPlanRevisionInputSets(plan.id)).toEqual([]);
 
       const firstPublish = defaultRepo.publishPlanRevisionInputs(plan.id, [
-        { source_revision_id: second.id, manifest_digest: second.manifest_digest },
-        { source_revision_id: first.id, manifest_digest: first.manifest_digest },
+        revisionInput(secondSource.id, second, 1),
+        revisionInput(firstSource.id, first),
       ]);
       const retry = defaultRepo.publishPlanRevisionInputs(plan.id, [
-        { source_revision_id: first.id, manifest_digest: first.manifest_digest },
-        { source_revision_id: second.id, manifest_digest: second.manifest_digest },
+        revisionInput(firstSource.id, first),
+        revisionInput(secondSource.id, second, 1),
       ]);
 
       expect(retry).toEqual(firstPublish);
@@ -211,7 +251,7 @@ describe("Source revision repository", () => {
       });
       expect(() =>
         defaultRepo.publishPlanRevisionInputs(plan.id, [
-          { source_revision_id: revision.id, manifest_digest: DIGEST_B },
+          revisionInput(source.id, revision, 0, DIGEST_B),
         ]),
       ).toThrow(/digest/i);
 
@@ -227,12 +267,9 @@ describe("Source revision repository", () => {
       expect(defaultRepo.getSourceRevision(otherRevision.id)).toBeNull();
       expect(() =>
         defaultRepo.publishPlanRevisionInputs(plan.id, [
-          {
-            source_revision_id: otherRevision.id,
-            manifest_digest: otherRevision.manifest_digest,
-          },
+          revisionInput(otherSource.id, otherRevision),
         ]),
-      ).toThrow(/revision.*not found/i);
+      ).toThrow(/source not found/i);
     });
   });
 

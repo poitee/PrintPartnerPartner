@@ -57,6 +57,7 @@ import type {
   PlanDecision,
   PlanDecisionActor,
   PlanDecisionKind,
+  PlanFreshness,
   PlanRevisionInput,
   PlanRevisionInputSet,
   PlanSnapshot,
@@ -81,6 +82,14 @@ import { stockPresets } from "../services/slicer-instances.js";
 import { dockerPresetsForKind } from "../services/slicer-docker-presets.js";
 import * as defaultSchema from "./schema.js";
 import { DEFAULT_TENANT_ID } from "./schema.js";
+import {
+  canonicalPlanInputs,
+  digestEffectiveNaming,
+  digestPlanInputs,
+  evaluatePlanFreshness,
+  type AcceptedPlanInputIdentity,
+  type CurrentPlanInput,
+} from "../services/plan-freshness.js";
 
 function docTitleFromPath(path: string): string {
   const base = basename(path);
@@ -99,6 +108,7 @@ export type SchemaTables = Pick<
   | "sourceRevisions"
   | "planRevisionInputSets"
   | "planRevisionInputs"
+  | "planAcceptedInputSets"
   | "sourceDocs"
   | "sourceNotes"
   | "planDecisions"
@@ -141,6 +151,39 @@ export type PrintJobRow = typeof defaultSchema.printJobs.$inferSelect;
 export type PrintJobPartRow = typeof defaultSchema.printJobParts.$inferSelect;
 export type SourceRevisionRow = typeof defaultSchema.sourceRevisions.$inferSelect;
 export type PlanRevisionInputSetRow = typeof defaultSchema.planRevisionInputSets.$inferSelect;
+export type PlanRevisionInputRow = typeof defaultSchema.planRevisionInputs.$inferSelect;
+
+export type SourceNamingInput =
+  | { readonly kind: "use_defaults" }
+  | { readonly kind: "override"; readonly profile: StlNamingProfileDict };
+
+type CapturedPlanLayer = {
+  readonly layerId: number;
+  readonly layerOrder: number;
+  readonly layerType: string;
+  readonly projectId: number;
+  readonly sourceName: string;
+  readonly sourceLayer: string;
+  readonly localPath: string | null;
+  readonly importRules: string[] | null;
+  readonly namingProfile: StlNamingProfileDict;
+  readonly input: CurrentPlanInput;
+};
+
+type CapturedPlanInputs = {
+  readonly fingerprint: string;
+  readonly layers: readonly CapturedPlanLayer[];
+  readonly inputs: readonly CurrentPlanInput[];
+};
+
+type PlanFreshnessContext = {
+  readonly globalNaming: StlNamingProfileDict;
+  readonly layersByProfile: ReadonlyMap<number, readonly LayerRow[]>;
+  readonly sourcesById: ReadonlyMap<number, ProjectRow>;
+  readonly revisionsById: ReadonlyMap<number, SourceRevisionRow>;
+  readonly acceptedByProfile: ReadonlyMap<number, AcceptedPlanInputIdentity>;
+  readonly invalidProfiles: ReadonlySet<number>;
+};
 
 /** Slim slicer-profile projection used by the auto-slice routing layer. */
 export type SlicerProfileRow = {
@@ -317,12 +360,33 @@ function requiredText(value: string, label: string): string {
   return normalized;
 }
 
-function manifestDigest(value: string): string {
+function sha256Digest(value: string, label: string): string {
   const normalized = value.trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(normalized)) {
-    throw new Error("Manifest digest must be a SHA-256 hex digest");
+    throw new Error(`${label} must be a SHA-256 hex digest`);
   }
   return normalized;
+}
+
+function planInputTrackingKind(value: string): PlanRevisionInput["tracking_kind"] {
+  return value === "untracked" ? "untracked" : "revision";
+}
+
+function resolveStoredSnapshotPath(reposDir: string, locator: string): string | null {
+  const segments = locator.replaceAll("\\", "/").split("/");
+  if (
+    isAbsolute(locator) ||
+    locator.includes("\\") ||
+    segments.some((segment) => !segment || segment === "." || segment === "..")
+  ) {
+    return null;
+  }
+  const reposRoot = resolve(reposDir);
+  const snapshotPath = resolve(reposRoot, locator);
+  if (snapshotPath === reposRoot || !snapshotPath.startsWith(`${reposRoot}${sep}`)) {
+    return null;
+  }
+  return snapshotPath;
 }
 
 function partRow(row: PartDbRow): PartRow {
@@ -403,11 +467,16 @@ export class AppRepository {
           eq(this.schema.planRevisionInputs.inputSetId, row.id),
         ),
       )
-      .orderBy(asc(this.schema.planRevisionInputs.sourceRevisionId))
+      .orderBy(asc(this.schema.planRevisionInputs.sourceId))
       .all()
-      .map((input) => ({
+      .map((input): PlanRevisionInput => ({
+        source_id: input.sourceId,
+        source_layer: input.sourceLayer,
+        layer_order: input.layerOrder,
+        tracking_kind: planInputTrackingKind(input.trackingKind),
         source_revision_id: input.sourceRevisionId,
         manifest_digest: input.manifestDigest,
+        effective_naming_digest: input.effectiveNamingDigest ?? "",
       }));
     if (inputs.length !== row.expectedInputCount) {
       throw new Error("Published Plan revision input set is incomplete");
@@ -417,6 +486,7 @@ export class AppRepository {
       plan_id: row.profileId,
       recorded_at: row.recordedAt,
       published_at: row.publishedAt,
+      format_version: row.formatVersion === 2 ? 2 : 1,
       inputs,
     };
   }
@@ -1081,11 +1151,67 @@ export class AppRepository {
   saveGlobalNaming(profile: StlNamingProfileDict): StlNamingProfileDict {
     const normalized = validateNamingProfile(profile);
     this.setSetting(STL_NAMING_DEFAULTS_KEY, JSON.stringify(normalized));
-    const profiles = this.listProfiles();
-    for (const p of profiles) {
-      this.markProfileConfigModified(p.id);
-    }
     return normalized;
+  }
+
+  getSourceNaming(sourceId: number): {
+    use_defaults: boolean;
+    override: Partial<StlNamingProfileDict>;
+    effective: StlNamingProfileDict;
+    effective_digest: string;
+  } {
+    const row = this.getProjectRow(sourceId);
+    if (!row) throw new Error("Source not found");
+    const metadata = parseProjectMetadata(row.metadataJson);
+    const { useDefaults, override } = parseSourceNamingMetadata(metadata);
+    const effective = resolveNamingProfile(this.getGlobalNaming(), metadata).toDict();
+    return {
+      use_defaults: useDefaults,
+      override,
+      effective,
+      effective_digest: digestEffectiveNaming(effective),
+    };
+  }
+
+  saveSourceNaming(sourceId: number, input: SourceNamingInput): {
+    use_defaults: boolean;
+    override: Partial<StlNamingProfileDict>;
+    effective: StlNamingProfileDict;
+    effective_digest: string;
+  } {
+    const naming =
+      input.kind === "use_defaults"
+        ? { use_defaults: true, override: {} }
+        : { use_defaults: false, override: validateNamingProfile(input.profile) };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const row = this.getProjectRow(sourceId);
+      if (!row) throw new Error("Source not found");
+      const metadata = parseProjectMetadata(row.metadataJson) ?? {};
+      const nextMetadata = { ...metadata, naming };
+      const effective = resolveNamingProfile(this.getGlobalNaming(), nextMetadata).toDict();
+      const result = this.db
+        .update(this.schema.projects)
+        .set({ metadataJson: JSON.stringify(nextMetadata) })
+        .where(
+          and(
+            eq(this.schema.projects.tenantId, this.tenantId),
+            eq(this.schema.projects.id, sourceId),
+            row.metadataJson === null
+              ? isNull(this.schema.projects.metadataJson)
+              : eq(this.schema.projects.metadataJson, row.metadataJson),
+          ),
+        )
+        .run();
+      if (result.changes === 1) {
+        return {
+          use_defaults: naming.use_defaults,
+          override: naming.override,
+          effective,
+          effective_digest: digestEffectiveNaming(effective),
+        };
+      }
+    }
+    throw new Error("Source metadata changed repeatedly while saving naming rules");
   }
 
   getSourceCategories(): string[] {
@@ -1162,7 +1288,7 @@ export class AppRepository {
       input.upstreamRevisionKey,
       "Upstream revision key",
     );
-    const digest = manifestDigest(input.manifestDigest);
+    const digest = sha256Digest(input.manifestDigest, "Manifest digest");
     const snapshotLocator = requiredText(input.snapshotLocator, "Snapshot locator");
     const syncedAt = requiredText(input.syncedAt, "Sync time");
     if (Number.isNaN(Date.parse(syncedAt))) throw new Error("Sync time must be an ISO timestamp");
@@ -1266,18 +1392,9 @@ export class AppRepository {
     if (!revision) throw new Error("Source revision not found for source");
 
     const snapshotLocator = requiredText(revision.snapshotLocator, "Snapshot locator");
-    const locatorSegments = snapshotLocator.replaceAll("\\", "/").split("/");
-    if (
-      isAbsolute(snapshotLocator) ||
-      snapshotLocator.includes("\\") ||
-      locatorSegments.some((segment) => segment === "" || segment === "." || segment === "..")
-    ) {
+    const localPath = resolveStoredSnapshotPath(this.reposDir, snapshotLocator);
+    if (!localPath) {
       throw new Error("Snapshot locator must be a canonical storage-relative path");
-    }
-    const reposRoot = resolve(this.reposDir);
-    const localPath = resolve(reposRoot, snapshotLocator);
-    if (localPath === reposRoot || !localPath.startsWith(reposRoot + sep)) {
-      throw new Error("Snapshot locator escapes Source storage");
     }
 
     const observed = input.observed;
@@ -1372,34 +1489,164 @@ export class AppRepository {
     throw new Error("Source metadata changed repeatedly while marking revision current");
   }
 
+  private capturePlanInputs(
+    profileId: number,
+    context?: PlanFreshnessContext,
+  ): CapturedPlanInputs {
+    if (!context) this.requireProfile(profileId);
+    const layers = context
+      ? [...(context.layersByProfile.get(profileId) ?? [])]
+      : this.db
+          .select()
+          .from(this.schema.profileLayers)
+          .where(
+            and(
+              eq(this.schema.profileLayers.tenantId, this.tenantId),
+              eq(this.schema.profileLayers.profileId, profileId),
+            ),
+          )
+          .orderBy(asc(this.schema.profileLayers.layerOrder))
+          .all();
+    const globalNaming = context?.globalNaming ?? this.getGlobalNaming();
+    const seenSources = new Set<number>();
+    const capturedLayers: CapturedPlanLayer[] = [];
+
+    for (const layer of layers) {
+      if (!layer.projectId) continue;
+      if (seenSources.has(layer.projectId)) {
+        throw new Error("A Source can only be attached to a Plan once");
+      }
+      seenSources.add(layer.projectId);
+      const source = context
+        ? context.sourcesById.get(layer.projectId)
+        : this.getProjectRow(layer.projectId);
+      if (!source) throw new Error("Plan Source not found");
+      const namingProfile = resolveNamingProfile(
+        globalNaming,
+        parseProjectMetadata(source.metadataJson),
+      ).toDict();
+      const revision = source.currentSourceRevisionId
+        ? context
+          ? context.revisionsById.get(source.currentSourceRevisionId) ?? null
+          : this.db
+              .select()
+              .from(this.schema.sourceRevisions)
+              .where(
+                and(
+                  eq(this.schema.sourceRevisions.tenantId, this.tenantId),
+                  eq(this.schema.sourceRevisions.id, source.currentSourceRevisionId),
+                ),
+              )
+              .get() ?? null
+        : null;
+      if (
+        source.currentSourceRevisionId &&
+        (!revision || revision.projectId !== source.id)
+      ) {
+        throw new Error("Active Source revision not found");
+      }
+      const localPath = revision
+        ? resolveStoredSnapshotPath(this.reposDir, revision.snapshotLocator)
+        : source.localPath;
+      if (revision && !localPath) {
+        throw new Error("Active Source revision has an unsafe snapshot locator");
+      }
+      const sourceLayer = `${layer.layerType}:${source.name}`;
+      const input: CurrentPlanInput = {
+        source_id: source.id,
+        source_name: source.name,
+        source_layer: sourceLayer,
+        layer_order: layer.layerOrder,
+        tracking_kind: revision ? "revision" : "untracked",
+        source_revision_id: revision?.id ?? null,
+        manifest_digest: revision?.manifestDigest ?? null,
+        effective_naming_digest: digestEffectiveNaming(namingProfile),
+      };
+      capturedLayers.push({
+        layerId: layer.id,
+        layerOrder: layer.layerOrder,
+        layerType: layer.layerType,
+        projectId: source.id,
+        sourceName: source.name,
+        sourceLayer,
+        localPath,
+        importRules: importRulesForProject(source.importedPaths),
+        namingProfile,
+        input,
+      });
+    }
+
+    const fingerprint = createHash("sha256")
+      .update(
+        JSON.stringify(
+          capturedLayers.map((layer) => ({
+            layer_id: layer.layerId,
+            layer_order: layer.layerOrder,
+            layer_type: layer.layerType,
+            project_id: layer.projectId,
+            source_name: layer.sourceName,
+            local_path: layer.localPath,
+            import_rules: layer.importRules,
+            input: layer.input,
+          })),
+        ),
+      )
+      .digest("hex");
+    return {
+      fingerprint,
+      layers: capturedLayers,
+      inputs: capturedLayers.map((layer) => layer.input),
+    };
+  }
+
   publishPlanRevisionInputs(
     profileId: number,
     inputs: readonly PlanRevisionInput[],
   ): PlanRevisionInputSet {
     this.requireProfile(profileId);
-    const canonical = [...inputs]
-      .map((input) => ({
+    const canonical = canonicalPlanInputs(
+      inputs.map((input) => ({
+        source_id: input.source_id,
+        source_layer: requiredText(input.source_layer, "Source layer"),
+        layer_order: input.layer_order,
+        tracking_kind: input.tracking_kind,
         source_revision_id: input.source_revision_id,
-        manifest_digest: manifestDigest(input.manifest_digest),
-      }))
-      .sort((a, b) => a.source_revision_id - b.source_revision_id);
+        manifest_digest:
+          input.manifest_digest == null
+            ? null
+            : sha256Digest(input.manifest_digest, "Manifest digest"),
+        effective_naming_digest: sha256Digest(
+          input.effective_naming_digest,
+          "Effective naming digest",
+        ),
+      })),
+    );
 
     for (let index = 1; index < canonical.length; index += 1) {
-      if (canonical[index - 1]!.source_revision_id === canonical[index]!.source_revision_id) {
-        throw new Error("Plan revision inputs cannot contain duplicate Source revisions");
+      if (canonical[index - 1]!.source_id === canonical[index]!.source_id) {
+        throw new Error("Plan revision inputs cannot contain duplicate Sources");
       }
     }
     for (const input of canonical) {
-      const revision = this.getSourceRevision(input.source_revision_id);
-      if (!revision) throw new Error("Source revision not found");
-      if (revision.manifest_digest !== input.manifest_digest) {
-        throw new Error("Plan revision input digest does not match the Source revision");
+      const source = this.getSource(input.source_id);
+      if (!source) throw new Error("Source not found");
+      if (input.tracking_kind === "revision") {
+        if (input.source_revision_id == null || input.manifest_digest == null) {
+          throw new Error("Tracked Plan input requires a Source revision and manifest digest");
+        }
+        const revision = this.getSourceRevision(input.source_revision_id);
+        if (!revision || revision.source_id !== input.source_id) {
+          throw new Error("Source revision not found for Plan input Source");
+        }
+        if (revision.manifest_digest !== input.manifest_digest) {
+          throw new Error("Plan revision input digest does not match the Source revision");
+        }
+      } else if (input.source_revision_id != null || input.manifest_digest != null) {
+        throw new Error("Untracked Plan input cannot carry revision identity");
       }
     }
 
-    const inputSetDigest = createHash("sha256")
-      .update(JSON.stringify(canonical))
-      .digest("hex");
+    const inputSetDigest = digestPlanInputs(canonical);
     const recordedAt = new Date().toISOString();
     this.db
       .insert(this.schema.planRevisionInputSets)
@@ -1408,6 +1655,7 @@ export class AppRepository {
         profileId,
         inputSetDigest,
         expectedInputCount: canonical.length,
+        formatVersion: 2,
         recordedAt,
       })
       .onConflictDoNothing()
@@ -1425,7 +1673,7 @@ export class AppRepository {
       )
       .get();
     if (!setRow) throw new Error("Plan revision input set could not be created");
-    if (setRow.expectedInputCount !== canonical.length) {
+    if (setRow.expectedInputCount !== canonical.length || setRow.formatVersion !== 2) {
       throw new Error("Plan revision input set has conflicting content");
     }
 
@@ -1435,8 +1683,13 @@ export class AppRepository {
         .values({
           tenantId: this.tenantId,
           inputSetId: setRow.id,
+          sourceId: input.source_id,
+          sourceLayer: input.source_layer,
+          layerOrder: input.layer_order,
+          trackingKind: input.tracking_kind,
           sourceRevisionId: input.source_revision_id,
           manifestDigest: input.manifest_digest,
+          effectiveNamingDigest: input.effective_naming_digest,
         })
         .onConflictDoNothing()
         .run();
@@ -1451,14 +1704,19 @@ export class AppRepository {
           eq(this.schema.planRevisionInputs.inputSetId, setRow.id),
         ),
       )
-      .orderBy(asc(this.schema.planRevisionInputs.sourceRevisionId))
+      .orderBy(asc(this.schema.planRevisionInputs.sourceId))
       .all();
     const exactMatch =
       storedInputs.length === canonical.length &&
       storedInputs.every(
         (stored, index) =>
+          stored.sourceId === canonical[index]!.source_id &&
+          stored.sourceLayer === canonical[index]!.source_layer &&
+          stored.layerOrder === canonical[index]!.layer_order &&
+          stored.trackingKind === canonical[index]!.tracking_kind &&
           stored.sourceRevisionId === canonical[index]!.source_revision_id &&
-          stored.manifestDigest === canonical[index]!.manifest_digest,
+          stored.manifestDigest === canonical[index]!.manifest_digest &&
+          stored.effectiveNamingDigest === canonical[index]!.effective_naming_digest,
       );
     if (!exactMatch) throw new Error("Plan revision input set has conflicting content");
 
@@ -1488,6 +1746,100 @@ export class AppRepository {
       .get();
     if (!published) throw new Error("Plan revision input set was not published");
     return this.planRevisionInputSet(published);
+  }
+
+  private acceptPlanRevisionInputSet(
+    profileId: number,
+    inputSetId: number,
+    acceptedAt: string,
+  ): void {
+    const inputSet = this.db
+      .select()
+      .from(this.schema.planRevisionInputSets)
+      .where(
+        and(
+          eq(this.schema.planRevisionInputSets.tenantId, this.tenantId),
+          eq(this.schema.planRevisionInputSets.profileId, profileId),
+          eq(this.schema.planRevisionInputSets.id, inputSetId),
+          isNotNull(this.schema.planRevisionInputSets.publishedAt),
+        ),
+      )
+      .get();
+    if (!inputSet || inputSet.formatVersion !== 2) {
+      throw new Error("Published Plan input set cannot be accepted");
+    }
+    this.db
+      .insert(this.schema.planAcceptedInputSets)
+      .values({
+        tenantId: this.tenantId,
+        profileId,
+        inputSetId,
+        acceptedAt,
+      })
+      .onConflictDoUpdate({
+        target: this.schema.planAcceptedInputSets.profileId,
+        set: { inputSetId, acceptedAt },
+      })
+      .run();
+  }
+
+  getAcceptedPlanRevisionInputSet(profileId: number): PlanRevisionInputSet | null {
+    this.requireProfile(profileId);
+    const accepted = this.db
+      .select()
+      .from(this.schema.planAcceptedInputSets)
+      .where(
+        and(
+          eq(this.schema.planAcceptedInputSets.tenantId, this.tenantId),
+          eq(this.schema.planAcceptedInputSets.profileId, profileId),
+        ),
+      )
+      .get();
+    if (!accepted) return null;
+    const row = this.db
+      .select()
+      .from(this.schema.planRevisionInputSets)
+      .where(
+        and(
+          eq(this.schema.planRevisionInputSets.tenantId, this.tenantId),
+          eq(this.schema.planRevisionInputSets.profileId, profileId),
+          eq(this.schema.planRevisionInputSets.id, accepted.inputSetId),
+          isNotNull(this.schema.planRevisionInputSets.publishedAt),
+        ),
+      )
+      .get();
+    return row ? this.planRevisionInputSet(row) : null;
+  }
+
+  getAcceptedProfileStlRoots(
+    profileId: number,
+  ): Array<{ sourceLayer: string; rootPath: string }> | null {
+    const accepted = this.getAcceptedPlanRevisionInputSet(profileId);
+    if (!accepted || accepted.format_version !== 2) return null;
+    const roots: Array<{ sourceLayer: string; rootPath: string; layerOrder: number }> = [];
+    for (const input of accepted.inputs) {
+      let rootPath: string | null;
+      if (input.tracking_kind === "revision" && input.source_revision_id != null) {
+        const revision = this.getSourceRevision(input.source_revision_id);
+        if (!revision) throw new Error("Accepted Source revision not found");
+        rootPath = resolveStoredSnapshotPath(this.reposDir, revision.snapshot_locator);
+        if (!rootPath) {
+          throw new Error("Accepted Source revision has an unsafe snapshot locator");
+        }
+      } else {
+        rootPath = this.getProjectRow(input.source_id)?.localPath ?? null;
+      }
+      if (rootPath) {
+        roots.push({
+          sourceLayer: input.source_layer,
+          rootPath,
+          layerOrder: input.layer_order,
+        });
+      }
+    }
+    return roots
+      .sort((left, right) => left.layerOrder - right.layerOrder)
+      .map(({ sourceLayer, rootPath }) => ({ sourceLayer, rootPath }));
   }
 
   getLatestPlanRevisionInputSet(profileId: number): PlanRevisionInputSet | null {
@@ -1675,17 +2027,161 @@ export class AppRepository {
       .groupBy(this.schema.buildProfiles.id)
       .orderBy(asc(this.schema.buildProfiles.name))
       .all();
+    const freshnessContext = this.buildPlanFreshnessContext(
+      rows.map(({ profile }) => profile.id),
+    );
 
     return rows.map(({ profile, partCount }) =>
-      this.toProfileSummary(profile, Number(partCount ?? 0)),
+      this.toProfileSummary(profile, Number(partCount ?? 0), freshnessContext),
     );
+  }
+
+  private buildPlanFreshnessContext(profileIds: readonly number[]): PlanFreshnessContext {
+    const layers = profileIds.length
+      ? this.db
+          .select()
+          .from(this.schema.profileLayers)
+          .where(
+            and(
+              eq(this.schema.profileLayers.tenantId, this.tenantId),
+              inArray(this.schema.profileLayers.profileId, [...profileIds]),
+            ),
+          )
+          .orderBy(asc(this.schema.profileLayers.layerOrder))
+          .all()
+      : [];
+    const layersByProfile = new Map<number, LayerRow[]>();
+    for (const layer of layers) {
+      const profileLayers = layersByProfile.get(layer.profileId) ?? [];
+      profileLayers.push(layer);
+      layersByProfile.set(layer.profileId, profileLayers);
+    }
+
+    const sourceIds = [...new Set(layers.flatMap((layer) =>
+      layer.projectId == null ? [] : [layer.projectId],
+    ))];
+    const sources = sourceIds.length
+      ? this.db
+          .select()
+          .from(this.schema.projects)
+          .where(
+            and(
+              eq(this.schema.projects.tenantId, this.tenantId),
+              inArray(this.schema.projects.id, sourceIds),
+            ),
+          )
+          .all()
+      : [];
+    const sourcesById = new Map(sources.map((source) => [source.id, source]));
+
+    const revisionIds = [...new Set(sources.flatMap((source) =>
+      source.currentSourceRevisionId == null ? [] : [source.currentSourceRevisionId],
+    ))];
+    const revisions = revisionIds.length
+      ? this.db
+          .select()
+          .from(this.schema.sourceRevisions)
+          .where(
+            and(
+              eq(this.schema.sourceRevisions.tenantId, this.tenantId),
+              inArray(this.schema.sourceRevisions.id, revisionIds),
+            ),
+          )
+          .all()
+      : [];
+    const revisionsById = new Map(revisions.map((revision) => [revision.id, revision]));
+
+    const acceptedRows = profileIds.length
+      ? this.db
+          .select()
+          .from(this.schema.planAcceptedInputSets)
+          .where(
+            and(
+              eq(this.schema.planAcceptedInputSets.tenantId, this.tenantId),
+              inArray(this.schema.planAcceptedInputSets.profileId, [...profileIds]),
+            ),
+          )
+          .all()
+      : [];
+    const inputSetIds = [...new Set(acceptedRows.map((accepted) => accepted.inputSetId))];
+    const inputSets = inputSetIds.length
+      ? this.db
+          .select()
+          .from(this.schema.planRevisionInputSets)
+          .where(
+            and(
+              eq(this.schema.planRevisionInputSets.tenantId, this.tenantId),
+              inArray(this.schema.planRevisionInputSets.id, inputSetIds),
+              isNotNull(this.schema.planRevisionInputSets.publishedAt),
+            ),
+          )
+          .all()
+      : [];
+    const inputSetsById = new Map(inputSets.map((inputSet) => [inputSet.id, inputSet]));
+    const inputRows = inputSetIds.length
+      ? this.db
+          .select()
+          .from(this.schema.planRevisionInputs)
+          .where(
+            and(
+              eq(this.schema.planRevisionInputs.tenantId, this.tenantId),
+              inArray(this.schema.planRevisionInputs.inputSetId, inputSetIds),
+            ),
+          )
+          .all()
+      : [];
+    const inputsBySet = new Map<number, PlanRevisionInput[]>();
+    for (const row of inputRows) {
+      const inputs = inputsBySet.get(row.inputSetId) ?? [];
+      inputs.push({
+        source_id: row.sourceId,
+        source_layer: row.sourceLayer,
+        layer_order: row.layerOrder,
+        tracking_kind: planInputTrackingKind(row.trackingKind),
+        source_revision_id: row.sourceRevisionId,
+        manifest_digest: row.manifestDigest,
+        effective_naming_digest: row.effectiveNamingDigest ?? "",
+      });
+      inputsBySet.set(row.inputSetId, inputs);
+    }
+
+    const acceptedByProfile = new Map<number, AcceptedPlanInputIdentity>();
+    const invalidProfiles = new Set<number>();
+    for (const accepted of acceptedRows) {
+      const inputSet = inputSetsById.get(accepted.inputSetId);
+      const inputs = canonicalPlanInputs(inputsBySet.get(accepted.inputSetId) ?? []);
+      if (
+        !inputSet ||
+        inputSet.profileId !== accepted.profileId ||
+        inputs.length !== inputSet.expectedInputCount
+      ) {
+        invalidProfiles.add(accepted.profileId);
+      }
+      acceptedByProfile.set(accepted.profileId, {
+        id: inputSet?.id ?? accepted.inputSetId,
+        accepted_at: accepted.acceptedAt,
+        format_version: inputSet?.formatVersion ?? 2,
+        inputs,
+      });
+    }
+
+    return {
+      globalNaming: this.getGlobalNaming(),
+      layersByProfile,
+      sourcesById,
+      revisionsById,
+      acceptedByProfile,
+      invalidProfiles,
+    };
   }
 
   private toProfileSummary(
     profile: typeof this.schema.buildProfiles.$inferSelect,
     partCount: number,
+    freshnessContext?: PlanFreshnessContext,
   ): ProfileSummary {
     const { totalUnits, remainingUnits } = this.printUnitTotals(profile.id);
+    const freshness = this.planFreshness(profile, freshnessContext);
     return {
       id: profile.id,
       name: profile.name,
@@ -1694,7 +2190,8 @@ export class AppRepository {
       part_count: partCount,
       remaining_units: remainingUnits,
       total_units: totalUnits,
-      build_stale: this.isProfileStale(profile),
+      build_stale: freshness.status === "stale",
+      freshness,
       archived_at: profile.archivedAt ?? null,
       last_used_at: profile.lastUsedAt ?? null,
     };
@@ -1726,6 +2223,35 @@ export class AppRepository {
     return profile.configModifiedAt > profile.lastRecomputedAt;
   }
 
+  private planFreshness(
+    profile: ProfileRow,
+    providedContext?: PlanFreshnessContext,
+  ): PlanFreshness {
+    const context = providedContext ?? this.buildPlanFreshnessContext([profile.id]);
+    const accepted = context.acceptedByProfile.get(profile.id) ?? null;
+    let currentInputs: readonly CurrentPlanInput[] = [];
+    let inputsInvalid = context.invalidProfiles.has(profile.id);
+    try {
+      currentInputs = this.capturePlanInputs(profile.id, context).inputs;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message !== "A Source can only be attached to a Plan once" &&
+        message !== "Plan Source not found" &&
+        message !== "Active Source revision not found"
+      ) {
+        throw error;
+      }
+      inputsInvalid = true;
+    }
+    return evaluatePlanFreshness({
+      accepted,
+      current: currentInputs,
+      configurationChanged: this.isProfileStale(profile),
+      inputsInvalid,
+    });
+  }
+
   markProfileConfigModified(profileId: number): void {
     const now = new Date().toISOString();
     this.db
@@ -1744,7 +2270,12 @@ export class AppRepository {
     const layers = this.db
       .select({ profileId: this.schema.profileLayers.profileId })
       .from(this.schema.profileLayers)
-      .where(eq(this.schema.profileLayers.projectId, projectId))
+      .where(
+        and(
+          eq(this.schema.profileLayers.tenantId, this.tenantId),
+          eq(this.schema.profileLayers.projectId, projectId),
+        ),
+      )
       .all();
     const seen = new Set<number>();
     for (const layer of layers) {
@@ -1754,8 +2285,7 @@ export class AppRepository {
     }
   }
 
-  touchLastRecomputed(profileId: number): void {
-    const now = new Date().toISOString();
+  touchLastRecomputed(profileId: number, now = new Date().toISOString()): void {
     this.db
       .update(this.schema.buildProfiles)
       .set({ lastRecomputedAt: now })
@@ -2074,6 +2604,7 @@ export class AppRepository {
     if (!layer) throw new Error("Layer not found");
     const project = this.getProjectRow(projectId);
     if (!project) throw new Error("Project not found");
+    this.assertSourceNotAttached(layer.profileId, projectId, layer.id, project.name);
     this.db
       .update(this.schema.profileLayers)
       .set({ projectId })
@@ -2116,6 +2647,7 @@ export class AppRepository {
       .from(this.schema.profileLayers)
       .where(and(eq(this.schema.profileLayers.profileId, profileId), eq(this.schema.profileLayers.layerType, "base")))
       .get();
+    this.assertSourceNotAttached(profileId, projectId, existing?.id, project.name);
     if (existing) {
       this.db
         .update(this.schema.profileLayers)
@@ -2172,6 +2704,28 @@ export class AppRepository {
     this.markProfileConfigModified(profileId);
   }
 
+  private assertSourceNotAttached(
+    profileId: number,
+    projectId: number,
+    exceptLayerId: number | undefined,
+    projectName: string,
+  ): void {
+    const conditions = [
+      eq(this.schema.profileLayers.tenantId, this.tenantId),
+      eq(this.schema.profileLayers.profileId, profileId),
+      eq(this.schema.profileLayers.projectId, projectId),
+    ];
+    if (exceptLayerId != null) conditions.push(ne(this.schema.profileLayers.id, exceptLayerId));
+    const duplicate = this.db
+      .select({ id: this.schema.profileLayers.id })
+      .from(this.schema.profileLayers)
+      .where(and(...conditions))
+      .get();
+    if (duplicate) {
+      throw new Error(`Source "${projectName}" is already attached to this build`);
+    }
+  }
+
   listParts(profileId: number, limit = 10000, offset = 0): {
     parts: PartRow[];
     total: number;
@@ -2222,8 +2776,10 @@ export class AppRepository {
     layer_debug: Array<Record<string, unknown>>;
     manifest_applied?: number;
     manifest_warnings?: Array<Record<string, unknown>>;
+    accepted_input_set_id?: number;
   } {
     this.requireProfile(profileId);
+    const capture = this.capturePlanInputs(profileId);
     const layers = this.db
       .select()
       .from(this.schema.profileLayers)
@@ -2243,15 +2799,14 @@ export class AppRepository {
 
     const layerScans: Array<[string, ReturnType<typeof scanRepo>]> = [];
     const layerDebug: Array<Record<string, unknown>> = [];
-    const globalNaming = this.getGlobalNaming();
-
     for (const layer of layers) {
       if (!layer.projectId) {
         layerDebug.push({ layer_type: layer.layerType, project_id: null, skipped: "no_project" });
-        continue;
       }
-      const proj = this.getProjectRow(layer.projectId);
-      if (!proj?.localPath) {
+    }
+
+    for (const layer of capture.layers) {
+      if (!layer.localPath) {
         layerDebug.push({
           layer_type: layer.layerType,
           project_id: layer.projectId,
@@ -2259,15 +2814,17 @@ export class AppRepository {
         });
         continue;
       }
-      const label = `${layer.layerType}:${proj.name}`;
-      const rules = importRulesForProject(proj.importedPaths);
-      const metadata = parseProjectMetadata(proj.metadataJson);
-      const namingProfile = resolveNamingProfile(globalNaming, metadata);
-      const scanned = scanRepo(proj.localPath, label, rules, namingProfile);
-      layerScans.push([label, scanned]);
+      const namingProfile = resolveNamingProfile(layer.namingProfile, null);
+      const scanned = scanRepo(
+        layer.localPath,
+        layer.sourceLayer,
+        layer.importRules,
+        namingProfile,
+      );
+      layerScans.push([layer.sourceLayer, scanned]);
       layerDebug.push({
-        label,
-        local_path: proj.localPath,
+        label: layer.sourceLayer,
+        local_path: layer.localPath,
         stl_count: scanned.length,
         scan_cached: false,
       });
@@ -2284,6 +2841,16 @@ export class AppRepository {
         reason: "no_stls",
         message:
           "No STL files matched import rules for any layer. Use Import files… on each source.",
+        layer_debug: layerDebug,
+      };
+    }
+
+    if (!this.syncSqlite) {
+      return {
+        merged: false,
+        reason: "transaction_unavailable",
+        message:
+          "Plan rebuild is unavailable on PostgreSQL until accepted parts and inputs can be committed atomically.",
         layer_debug: layerDebug,
       };
     }
@@ -2364,6 +2931,7 @@ export class AppRepository {
           layer_debug: Array<Record<string, unknown>>;
           manifest_applied?: number;
           manifest_warnings?: Array<Record<string, unknown>>;
+          accepted_input_set_id?: number;
         } = {
           merged: true,
           part_count: result.parts.length,
@@ -2374,7 +2942,14 @@ export class AppRepository {
           out.manifest_applied = manifestResult.applied_rules;
           out.manifest_warnings = manifestResult.warnings;
         }
-        this.touchLastRecomputed(profileId);
+        if (this.capturePlanInputs(profileId).fingerprint !== capture.fingerprint) {
+          throw new Error("Plan inputs changed during rebuild; accepted Plan was not updated");
+        }
+        const acceptedAt = new Date().toISOString();
+        const inputSet = this.publishPlanRevisionInputs(profileId, capture.inputs);
+        this.acceptPlanRevisionInputSet(profileId, inputSet.id, acceptedAt);
+        this.touchLastRecomputed(profileId, acceptedAt);
+        out.accepted_input_set_id = inputSet.id;
         return out;
       });
     } catch (e) {

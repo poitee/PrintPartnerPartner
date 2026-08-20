@@ -10,10 +10,10 @@ completion. Current CI is healthy, but several parts of the product tell
 different stories about that workflow. Source synchronization also has
 correctness gaps that can place deleted or incomplete files into a plan.
 
-This plan preserves the August 19 review in [findings.md](findings.md). It does
-not authorize implementation. The first phase is a product discussion about
-the workflow, the site structure, and the words that PrintPartner uses. No UI
-phase starts until that discussion produces an accepted model.
+This plan preserves the August 19 review in [findings.md](findings.md). The
+workflow and site model are accepted, and Phases 1 through 3 are implemented.
+Later phase files preserve their accepted scope; implementation still proceeds
+one verified phase at a time.
 
 [Discussion notes](discussion-notes.md) preserve the product facts and open
 questions that emerge during that conversation.
@@ -133,7 +133,7 @@ need a separate program if SaaS becomes a near-term goal.
 
 ## Open decisions
 
-Phase 0 still owns these decisions:
+Later UI work still owns these decisions:
 
 1. Which Production actions stay visible at each information density?
 2. Which visual direction should the UI prototypes use?
@@ -197,6 +197,5 @@ than treating component tests as proof of the user journey.
 
 ## Current stop point
 
-Only Phase 0 is ready to begin. The other phase files preserve the technical
-work for later. They are not approval to change the product before the workflow
-and site discussion is complete.
+Phases 0 through 3 are complete. Phase 4, release identity repair, is the next
+implementation unit. Later phases remain documented but have not started.

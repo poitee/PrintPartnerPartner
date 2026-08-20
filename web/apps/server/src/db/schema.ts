@@ -5,6 +5,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 export const DEFAULT_TENANT_ID = "default";
 
@@ -98,6 +99,7 @@ export const planRevisionInputSets = sqliteTable(
       .references(() => buildProfiles.id, { onDelete: "cascade" }),
     inputSetDigest: text("input_set_digest").notNull(),
     expectedInputCount: integer("expected_input_count").notNull(),
+    formatVersion: integer("format_version").notNull().default(1),
     recordedAt: text("recorded_at").notNull(),
     publishedAt: text("published_at"),
   },
@@ -118,18 +120,35 @@ export const planRevisionInputs = sqliteTable(
     inputSetId: integer("input_set_id")
       .notNull()
       .references(() => planRevisionInputSets.id, { onDelete: "cascade" }),
-    sourceRevisionId: integer("source_revision_id")
+    sourceId: integer("source_id")
       .notNull()
-      .references(() => sourceRevisions.id, { onDelete: "restrict" }),
-    manifestDigest: text("manifest_digest").notNull(),
+      .references(() => projects.id, { onDelete: "restrict" }),
+    sourceLayer: text("source_layer").notNull(),
+    layerOrder: integer("layer_order").notNull().default(0),
+    trackingKind: text("tracking_kind").notNull().default("revision"),
+    sourceRevisionId: integer("source_revision_id").references(() => sourceRevisions.id, {
+      onDelete: "restrict",
+    }),
+    manifestDigest: text("manifest_digest"),
+    effectiveNamingDigest: text("effective_naming_digest"),
   },
   (t) => [
-    uniqueIndex("uq_plan_revision_inputs_set_revision").on(
-      t.inputSetId,
-      t.sourceRevisionId,
-    ),
+    uniqueIndex("uq_plan_revision_inputs_v2_set_source")
+      .on(t.inputSetId, t.sourceId)
+      .where(sql`${t.effectiveNamingDigest} IS NOT NULL`),
   ],
 );
+
+export const planAcceptedInputSets = sqliteTable("plan_accepted_input_sets", {
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  profileId: integer("profile_id")
+    .primaryKey()
+    .references(() => buildProfiles.id, { onDelete: "cascade" }),
+  inputSetId: integer("input_set_id")
+    .notNull()
+    .references(() => planRevisionInputSets.id, { onDelete: "restrict" }),
+  acceptedAt: text("accepted_at").notNull(),
+});
 
 export const parts = sqliteTable("parts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -517,7 +536,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 17;
+export const currentSchemaVersion = 18;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -889,8 +908,26 @@ export const schemaMigrations: string[] = [
     source_revision_id INTEGER NOT NULL REFERENCES source_revisions(id) ON DELETE RESTRICT,
     manifest_digest TEXT NOT NULL
   )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_inputs_set_revision
-    ON plan_revision_inputs (input_set_id, source_revision_id)`,
   `CREATE INDEX IF NOT EXISTS idx_plan_revision_inputs_tenant_set
     ON plan_revision_inputs (tenant_id, input_set_id)`,
+  // v18 — explicit accepted Plan input identity and effective naming inputs.
+  `ALTER TABLE plan_revision_input_sets ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1`,
+  `ALTER TABLE plan_revision_inputs ADD COLUMN source_id INTEGER REFERENCES projects(id) ON DELETE RESTRICT`,
+  `ALTER TABLE plan_revision_inputs ADD COLUMN source_layer TEXT`,
+  `ALTER TABLE plan_revision_inputs ADD COLUMN layer_order INTEGER NOT NULL DEFAULT 0`,
+  `ALTER TABLE plan_revision_inputs ADD COLUMN tracking_kind TEXT NOT NULL DEFAULT 'revision'`,
+  `ALTER TABLE plan_revision_inputs ADD COLUMN effective_naming_digest TEXT`,
+  `UPDATE plan_revision_inputs
+     SET source_id = (SELECT project_id FROM source_revisions WHERE source_revisions.id = plan_revision_inputs.source_revision_id),
+         source_layer = 'legacy:' || COALESCE((SELECT project_id FROM source_revisions WHERE source_revisions.id = plan_revision_inputs.source_revision_id), 0)
+   WHERE source_id IS NULL OR source_layer IS NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_revision_inputs_v2_set_source
+    ON plan_revision_inputs (input_set_id, source_id)
+    WHERE effective_naming_digest IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS plan_accepted_input_sets (
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    profile_id INTEGER PRIMARY KEY REFERENCES build_profiles(id) ON DELETE CASCADE,
+    input_set_id INTEGER NOT NULL REFERENCES plan_revision_input_sets(id) ON DELETE RESTRICT,
+    accepted_at TEXT NOT NULL
+  )`,
 ];

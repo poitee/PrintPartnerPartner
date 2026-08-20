@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/sortable";
 import { ClipboardCheck, CheckSquare, Printer } from "lucide-react";
 import { toast } from "sonner";
-import StaleBuildBanner from "../components/StaleBuildBanner";
+import PlanFreshnessNotice from "../components/PlanFreshnessNotice";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
@@ -49,7 +49,6 @@ import {
   fetchPrinterCheckoffLinks,
   fetchPlanPhaseManifest,
   claimUnattributedPrint,
-  startRecompute,
   fetchPrinterQueueSuggestions,
   type PrinterCheckoffLink,
   type PlanPhaseManifestResponse,
@@ -92,7 +91,6 @@ import { flattenReviewParts } from "../lib/reviewParts";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
-import { useJobRunner } from "../hooks/useJobRunner";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { cn } from "../lib/utils";
 import { waitForSheetThumbnails } from "../lib/waitForSheetThumbnails";
@@ -213,7 +211,6 @@ export default function CheckoffPage() {
     toggleAssembled,
     busyPartId,
   } = usePlanWorkspace();
-  const recomputeJob = useJobRunner("recompute");
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
   const {
     data: buildTrackingSettings,
@@ -478,22 +475,7 @@ export default function CheckoffPage() {
     "Progress";
   const specialRequest =
     profiles.find((p) => p.id === selectedProfileId)?.special_request ?? null;
-  const buildStale = profiles.find((p) => p.id === selectedProfileId)?.build_stale ?? false;
-
-  const onUpdateBuild = () => {
-    if (selectedProfileId == null) return;
-    void recomputeJob.runJob(
-      () => startRecompute(selectedProfileId, { apply_manifest: true }),
-      (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "Update failed");
-          return;
-        }
-        void reload(selectedProfileId);
-      },
-      { profileId: selectedProfileId },
-    );
-  };
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
 
   const includedParts = useMemo(() => {
     if (!review) return [];
@@ -971,11 +953,12 @@ export default function CheckoffPage() {
 
         <PlanSpecialRequestLine note={specialRequest} />
 
-        <StaleBuildBanner
-          stale={buildStale}
-          busy={recomputeJob.busy}
-          onUpdate={onUpdateBuild}
-        />
+        {selectedProfile && (
+          <PlanFreshnessNotice
+            freshness={selectedProfile.freshness}
+            action={{ kind: "review", href: planRoute(selectedProfileId) }}
+          />
+        )}
 
         {includedParts.length > 0 && (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-4">

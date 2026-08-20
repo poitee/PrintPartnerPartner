@@ -61,7 +61,7 @@ type ColorGroup = { label: string; colors: CatalogColor[] };
 type Props = {
   profileId: number;
   disabled?: boolean;
-  /** Bump after Update build so roles/part counts reload. */
+  /** Bump after a Plan rebuild so roles and part counts reload. */
   refreshKey?: number;
   onUpdated?: () => void | Promise<void>;
   /** Called whenever role color rows change (load, save, import). */
@@ -620,7 +620,7 @@ export default function RoleFilamentPicker({
       await onUpdated?.();
       bumpThumbnailCache();
       if (result.updated === 0) {
-        toast.message("Set role colors above first, then run Update build to include parts.");
+        toast.message("Set role colors above first, then rebuild the Plan to include parts.");
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -677,7 +677,7 @@ export default function RoleFilamentPicker({
   if (rows.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No included parts yet — pick STL files above and run <strong>Update build</strong> to
+        No included parts yet. Pick STL files above and <strong>rebuild the Plan</strong> to
         assign colors by role.
       </p>
     );

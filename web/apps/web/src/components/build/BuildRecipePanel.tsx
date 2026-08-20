@@ -89,7 +89,7 @@ export default function BuildRecipePanel({ profileId }: Props) {
       const result = await restorePlanSnapshotApi(profileId, sid);
       toast.success(
         result.needs_sync
-          ? "Restored — Sync sources whose refs changed, then Update build."
+          ? "Restored. Sync sources whose refs changed, then rebuild the Plan."
           : "Snapshot restored",
       );
       await bump();

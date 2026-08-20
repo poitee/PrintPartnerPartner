@@ -1,7 +1,7 @@
 import type { PlanReview, ProfileSummary, SourceSummary } from "../api/engine";
 
 /**
- * Desk-loop Plan warnings only (stale / upstream → Update build, real review
+ * Desk-loop Plan warnings only (freshness, upstream changes, and review
  * blockers). Soft role/color “worth a look” noise stays out.
  */
 export function buildPlanWarningLines(input: {
@@ -17,10 +17,10 @@ export function buildPlanWarningLines(input: {
   const upstream = attachedSources.filter((s) => s.update_status === "updates_available");
   if (upstream.length > 0) {
     lines.push(
-      `${upstream.length} source${upstream.length === 1 ? "" : "s"} updated upstream — Update build`,
+      `${upstream.length} source${upstream.length === 1 ? "" : "s"} updated upstream. Review and rebuild the Plan`,
     );
   } else if (buildStale) {
-    lines.push("Plan is stale — Update build");
+    lines.push("Plan inputs changed. Review and rebuild the Plan");
   }
 
   for (const issue of review?.issues ?? []) {

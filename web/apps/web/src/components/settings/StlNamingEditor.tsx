@@ -22,6 +22,8 @@ import {
 } from "../ui/card";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
+import { invalidateProfiles } from "../../queries/profiles";
+import { queryClient } from "../../queries/queryClient";
 
 const ROLE_LABELS: Record<StlNamingRoleId, string> = {
   primary: "Primary",
@@ -408,6 +410,7 @@ export function StlNamingSettingsCard({ engineReady }: SettingsCardProps) {
       const next = await saveStlNaming(draft);
       setSaved(next);
       setDraft(next);
+      await invalidateProfiles(queryClient);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setLoadError(msg);

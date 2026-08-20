@@ -41,7 +41,7 @@ import {
 } from "../services/plan-snapshots.js";
 import { comparePlans } from "../services/plan-compare.js";
 import { logAppliedAction } from "../services/plan-decisions.js";
-import { buildSyncThenUpdateAction } from "./sync-then-update.js";
+import { buildSyncAction } from "./sync-action.js";
 import {
   decisionFingerprint,
   isDismissedFingerprint,
@@ -253,19 +253,6 @@ export const ASSISTANT_TOOL_SPECS: AssistantToolSpec[] = [
     tier: "mutate",
   },
   {
-    name: "start_recompute",
-    description: "PROPOSE starting a recompute job for the plan. Requires user confirmation.",
-    input_schema: {
-      type: "object",
-      properties: {
-        plan_id: { type: "number" },
-        apply_manifest: { type: "boolean" },
-      },
-      required: ["plan_id"],
-    },
-    tier: "mutate",
-  },
-  {
     name: "start_sync",
     description:
       "PROPOSE syncing one or more Sources (GitHub/local trees). After tag/branch changes, propose this instead of narrating “please sync”. Requires user confirmation via Apply.",
@@ -398,21 +385,6 @@ export const ASSISTANT_TOOL_SPECS: AssistantToolSpec[] = [
       },
     },
     tier: "read",
-  },
-  {
-    name: "propose_sync_and_update",
-    description:
-      "PROPOSE a single Sync → Update build workflow card (start_sync then start_recompute). Prefer after tag/branch changes instead of narrating two separate steps. Requires user confirmation.",
-    input_schema: {
-      type: "object",
-      properties: {
-        plan_id: { type: "number" },
-        source_name: { type: "string" },
-        source_id: { type: "number" },
-        project_ids: { type: "array", items: { type: "number" } },
-      },
-    },
-    tier: "mutate",
   },
   {
     name: "get_plan_decisions",
@@ -1410,7 +1382,7 @@ export async function invokeAssistantTool(
           `Set base to ${canonicalBase}${refLabel}`,
           `Set the base layer to “${canonicalBase}”${refLabel}.${
             needsSyncNote
-              ? " After Apply, Sync this source so STLs match the tag/branch, then Update build."
+              ? " After Apply, Sync this Source, then review the Plan before rebuilding."
               : " May invalidate addon assumptions."
           }`,
           {
@@ -1551,18 +1523,6 @@ export async function invokeAssistantTool(
             .map(([k, v]) => `${k}=${v}`)
             .join(", ")}`,
           { selections: clean },
-        );
-      }
-
-      case "start_recompute": {
-        const planId = resolvePlanId(input, ctx);
-        if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
-        return proposeChecked(ctx, 
-          "start_recompute",
-          planId,
-          "Update / recompute build",
-          `Start a recompute job for plan ${planId}.`,
-          { apply_manifest: input.apply_manifest === true },
         );
       }
 
@@ -1790,56 +1750,6 @@ export async function invokeAssistantTool(
             ...(planId > 0 ? { plan_id: planId } : {}),
           },
         );
-      }
-
-      case "propose_sync_and_update": {
-        const planId = resolvePlanId(input, ctx);
-        if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
-        if (!ctx.repo.getProfile(planId)) {
-          return { content: JSON.stringify({ error: "Plan not found" }) };
-        }
-        const projectIds: number[] = [];
-        if (Array.isArray(input.project_ids)) {
-          for (const raw of input.project_ids) {
-            const id = typeof raw === "number" ? raw : Number(raw);
-            if (Number.isFinite(id) && id > 0) projectIds.push(id);
-          }
-        }
-        const byId = asInt(input.source_id);
-        if (byId != null && byId > 0) projectIds.push(byId);
-        const sourceName =
-          typeof input.source_name === "string" ? input.source_name.trim() : "";
-        if (sourceName) {
-          const src = sourceByName(ctx.repo, sourceName);
-          if (!src) {
-            return { content: sourceNotFoundError(ctx.repo, sourceName, "Use list_sources.") };
-          }
-          projectIds.push(src.id);
-        }
-        const action = buildSyncThenUpdateAction({
-          planId,
-          projectIds: [...new Set(projectIds)],
-          sourceName: sourceName || null,
-        });
-        if (isDismissedFingerprint(ctx.repo, planId, action.type, action.params ?? {})) {
-          return {
-            content: JSON.stringify({
-              error: "user_dismissed",
-              detail:
-                "User dismissed this Sync → Update workflow on this plan. Ask before re-proposing.",
-              fingerprint: decisionFingerprint(action.type, action.params ?? {}),
-              action_type: action.type,
-            }),
-          };
-        }
-        return {
-          proposedAction: action,
-          content: JSON.stringify({
-            status: "proposed",
-            note: "Not applied yet — user must confirm via Apply in the UI.",
-            action,
-          }),
-        };
       }
 
       case "get_plan_decisions": {
@@ -2714,7 +2624,7 @@ export async function applyAssistantAction(
             ...(excludeMerged ? { exclude: excludeMerged } : {}),
             ...(result.needs_sync
               ? {
-                  follow_up_action: buildSyncThenUpdateAction({
+                  follow_up_action: buildSyncAction({
                     planId,
                     projectIds: deps.repo
                       .listSources()
@@ -2760,7 +2670,7 @@ export async function applyAssistantAction(
             branch: refreshed.branch,
             ...(refChanged
               ? {
-                  follow_up_action: buildSyncThenUpdateAction({
+                  follow_up_action: buildSyncAction({
                     planId,
                     projectIds: [refreshed.id],
                     sourceName,
@@ -2790,7 +2700,7 @@ export async function applyAssistantAction(
             needs_sync: true,
             source_name: sourceName,
             message: `Ref updated. Sync “${sourceName}” before using STLs from this release.`,
-            follow_up_action: buildSyncThenUpdateAction({
+            follow_up_action: buildSyncAction({
               planId: planId > 0 ? planId : 0,
               projectIds: [source.id],
               sourceName,
@@ -2846,15 +2756,10 @@ export async function applyAssistantAction(
         break;
       }
       case "start_recompute": {
-        const job_id = await deps.jobs.start(
-          "recompute",
-          {
-            profile_id: planId,
-            apply_manifest: action.params.apply_manifest === true,
-          },
-          deps.tenantId,
-        );
-        outcome = { ok: true, job_id };
+        outcome = {
+          ok: false,
+          detail: "Open the Plan page to review changes and rebuild the plan.",
+        };
         break;
       }
       case "start_sync": {
@@ -2930,6 +2835,12 @@ export async function applyAssistantAction(
             }>)
           : [];
         if (!steps.length) return { ok: false, detail: "Recipe has no steps" };
+        if (steps.some((step) => step.type === "start_recompute")) {
+          return {
+            ok: false,
+            detail: "Open the Plan page to review changes and rebuild the plan.",
+          };
+        }
         const stepResults: unknown[] = [];
         let needsSync = false;
         let syncSource: string | undefined;
@@ -2961,35 +2872,6 @@ export async function applyAssistantAction(
               typeof (applied.result as { source_name?: unknown }).source_name === "string"
                 ? String((applied.result as { source_name: string }).source_name)
                 : syncSource;
-          }
-          // Sync → Update build: wait for sync job before enqueueing recompute.
-          if (
-            step.type === "start_sync" &&
-            applied.job_id &&
-            steps.some((s) => s.type === "start_recompute")
-          ) {
-            try {
-              const terminal = await deps.jobs.waitForTerminal(
-                applied.job_id,
-                180_000,
-                deps.tenantId ?? "default",
-              );
-              if (terminal.status !== "done") {
-                return {
-                  ok: false,
-                  detail:
-                    terminal.error ??
-                    `Sync job ${terminal.status} before Update build could start`,
-                  result: { completed_steps: stepResults, sync_status: terminal.status },
-                };
-              }
-            } catch (e) {
-              return {
-                ok: false,
-                detail: e instanceof Error ? e.message : String(e),
-                result: { completed_steps: stepResults },
-              };
-            }
           }
         }
         outcome = {
@@ -3078,8 +2960,7 @@ export async function applyAssistantAction(
           local_path,
         });
         const needsSync = source_kind !== "local" || !created.local_path;
-        // Chain Sync → Update as a follow-up card when a real plan is in context
-        // (same pattern as set_base / set_source_git_ref).
+        // Chain Sync as a follow-up card when a real plan is in context.
         const canFollowUp = needsSync && planId > 0 && Boolean(deps.repo.getProfile(planId));
         outcome = {
           ok: true,
@@ -3091,7 +2972,7 @@ export async function applyAssistantAction(
               "After Sync, use propose_source_mapping / set_base or add_addon / set_source_git_ref as needed. Then detect_build_decisions to surface variant/mod choices.",
             ...(canFollowUp
               ? {
-                  follow_up_action: buildSyncThenUpdateAction({
+                  follow_up_action: buildSyncAction({
                     planId,
                     projectIds: [created.id],
                     sourceName: created.name,

@@ -23,7 +23,7 @@ Open **Plan** for the active plan:
 - **Pick STL files** — expand each source card, check files or folders to include; selections save automatically.
 - **Role filament colors** — assign a color per role (primary, accent, clear, opaque); previews update automatically on Plan, Parts, and Progress.
 - **Kit manifest options** — apply stack presets and variant picks on the base source card when manifests are configured.
-- **Update build** — recomputes parts from your file picks. A **stale build** banner appears when sources or selections changed; click **Update build** or enable **auto-recompute stale builds** in Settings.
+- **Rebuild plan** — intentionally accepts the current source revisions, naming rules, and file picks, then rebuilds the parts list. Print Partner explains when those inputs have changed but never replaces the accepted list automatically.
 - **Docs** — read synced repo README and Markdown inline from each source card.
 - **Share build** — export a \`.print-partner-kit\` zip to share plan config (not STLs).
 - **Export STLs** — export from Plan or Parts, grouped by color only or color + source directory.
@@ -38,7 +38,7 @@ Track **per-unit print progress** on the shop floor (saved per plan). Filter to 
 
 ## Tips
 
-- **⌘K / Ctrl+K** — command palette for sync, recompute, exports, and navigation.
+- **⌘K / Ctrl+K** — command palette for sync, exports, and navigation. Rebuild the parts list from Plan after reviewing its inputs.
 - **Theme** — light, dark, or system via the sidebar or header; the left sidebar can be **collapsed** to an icon rail (toggle at the bottom).
 - **Progress widget** — the sidebar shows a first-run checklist until you complete Sources through Progress once; it then hides automatically.
 - **Save / Import colors** — export role colors as JSON on Plan; **Advanced** menu has reset and thumbnail recovery options.

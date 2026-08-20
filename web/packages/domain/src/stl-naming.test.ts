@@ -39,6 +39,19 @@ describe("stl-naming", () => {
     expect(parseStlPath("widget_qty3.stl", resolved).quantity).toBe(3);
   });
 
+  it("keeps a complete Source profile independent of later global changes", () => {
+    const sourceProfile = structuredClone(DEFAULT_NAMING_PROFILE);
+    sourceProfile.roles = [{ id: "primary", label: "Primary", markers: [] }];
+    const changedGlobal = structuredClone(DEFAULT_NAMING_PROFILE);
+    changedGlobal.roles.find((role) => role.id === "accent")!.markers = ["[new-accent]"];
+
+    const resolved = resolveNamingProfile(validateNamingProfile(changedGlobal), {
+      naming: { use_defaults: false, override: validateNamingProfile(sourceProfile) },
+    });
+
+    expect(resolved.roles).toEqual(sourceProfile.roles);
+  });
+
   it("rejects bad regex", () => {
     const bad = structuredClone(DEFAULT_NAMING_PROFILE);
     bad.quantity = { regex: "(invalid[", default: 1 };

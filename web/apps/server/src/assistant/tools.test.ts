@@ -56,6 +56,36 @@ describe("assistant tools + example builds", () => {
     expect(repo.getProfileLayers(plan.id).length).toBeGreaterThanOrEqual(1);
   });
 
+  it("refuses assistant rebuild actions before starting a job", async () => {
+    const plan = repo.createProfile("Review first");
+    let starts = 0;
+    const result = await applyAssistantAction(
+      {
+        id: "legacy-rebuild",
+        type: "start_recompute",
+        plan_id: plan.id,
+        label: "Rebuild",
+        summary: "Legacy assistant action",
+        params: {},
+      },
+      {
+        repo,
+        jobs: {
+          start: async () => {
+            starts += 1;
+            return "unexpected";
+          },
+        } as never,
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      detail: expect.stringMatching(/Plan page/),
+    });
+    expect(starts).toBe(0);
+  });
+
   it("applyAssistantAction set_base mutates after confirm", async () => {
     const base = repo.createSource({
       name: "Voron-2",
@@ -255,11 +285,12 @@ describe("assistant tools + example builds", () => {
     expect(found.hint).toMatch(/ui_highlight_part/);
   });
 
-  it("system prompt pairs ui_* with show/open and mentions sync workflow", () => {
+  it("system prompt pairs ui_* with show/open and keeps rebuild review on Plan", () => {
     const prompt = buildAssistantSystemPrompt({ repo, toolsAvailable: true });
     expect(prompt).toContain("search_plan_parts");
     expect(prompt).toContain("start_sync");
-    expect(prompt).toContain("propose_sync_and_update");
+    expect(prompt).toContain("Direct the user to Plan");
+    expect(prompt).not.toContain("propose_sync_and_update");
     expect(prompt).toContain("ui_focus_kit_option");
     expect(prompt).toMatch(/pair.*ui_\*|Always pair/i);
   });
@@ -276,7 +307,7 @@ describe("assistant tools + example builds", () => {
     expect(result.proposedAction?.params.stl_filter).toBe("extruder");
   });
 
-  it("propose_sync_and_update proposes Sync → Update build recipe", async () => {
+  it("start_sync proposes Source sync without rebuilding the Plan", async () => {
     const source = repo.createSource({
       name: "Voron-Trident",
       url: "https://example.com/trident.git",
@@ -284,14 +315,12 @@ describe("assistant tools + example builds", () => {
     });
     const plan = repo.createProfile("Sync plan", source.id);
     const result = await invokeAssistantTool(
-      "propose_sync_and_update",
+      "start_sync",
       { plan_id: plan.id, source_name: "Voron-Trident" },
       { repo },
     );
-    expect(result.proposedAction?.type).toBe("apply_build_recipe");
-    expect(result.proposedAction?.label).toBe("Sync → Update build");
-    const steps = result.proposedAction?.params.steps as Array<{ type: string }>;
-    expect(steps.map((s) => s.type)).toEqual(["start_sync", "start_recompute"]);
+    expect(result.proposedAction?.type).toBe("start_sync");
+    expect(result.proposedAction?.label).toBe("Sync Voron-Trident");
   });
 
   it("check_stack_compatibility warns on dual probes", async () => {
@@ -395,7 +424,7 @@ describe("assistant tools + example builds", () => {
     expect(repo.listSources().some((s) => s.name === "New-Mod")).toBe(true);
   });
 
-  it("propose_add_source Apply chains a Sync → Update follow-up card when a plan is active", async () => {
+  it("propose_add_source Apply chains a Sync follow-up card when a plan is active", async () => {
     const plan = repo.createProfile("Chain plan");
     const { proposedAction } = await invokeAssistantTool(
       "propose_add_source",
@@ -415,10 +444,8 @@ describe("assistant tools + example builds", () => {
     expect(result.ok).toBe(true);
     const followUp = (result.result as { follow_up_action?: { type: string; params: Record<string, unknown> } })
       .follow_up_action;
-    expect(followUp?.type).toBe("apply_build_recipe");
-    expect(followUp?.params.workflow).toBe("sync_then_recompute");
-    const steps = followUp?.params.steps as Array<{ type: string }>;
-    expect(steps.map((s) => s.type)).toEqual(["start_sync", "start_recompute"]);
+    expect(followUp?.type).toBe("start_sync");
+    expect(followUp?.params.project_ids).toHaveLength(1);
   });
 
   it("propose_add_source Apply without a plan returns needs_sync but no follow-up card", async () => {

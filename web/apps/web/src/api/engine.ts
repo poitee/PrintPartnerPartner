@@ -1977,6 +1977,7 @@ export type SourceNamingSettings = {
   use_defaults: boolean;
   override: Partial<StlNamingProfile>;
   effective: StlNamingProfile;
+  effective_digest: string;
 };
 
 export const DEFAULT_STL_NAMING_PROFILE: StlNamingProfile = {
@@ -2365,23 +2366,6 @@ export async function saveDateFormatSetting(format: DateFormatId): Promise<{ for
   return engineFetch<{ format: DateFormatId }>("/settings/date-format", {
     method: "PUT",
     body: JSON.stringify({ format }),
-  });
-}
-
-export type AutoRecomputeSettings = {
-  enabled: boolean;
-};
-
-export async function fetchAutoRecomputeSettings(): Promise<AutoRecomputeSettings> {
-  return engineFetch<AutoRecomputeSettings>("/settings/auto-recompute");
-}
-
-export async function saveAutoRecomputeSettings(
-  enabled: boolean,
-): Promise<AutoRecomputeSettings> {
-  return engineFetch<AutoRecomputeSettings>("/settings/auto-recompute", {
-    method: "PUT",
-    body: JSON.stringify({ enabled }),
   });
 }
 

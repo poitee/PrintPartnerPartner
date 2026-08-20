@@ -39,6 +39,8 @@ import {
 } from "../ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { UNCategorized_FILTER } from "./sourceLabels";
+import { invalidateProfiles } from "../../queries/profiles";
+import { queryClient } from "../../queries/queryClient";
 
 type DetailTab = "docs" | "rules" | "naming";
 type DocsSubTab = "synced" | "notes";
@@ -238,6 +240,7 @@ export default function SourceDetailSheet({
       setSavedUseDefaults(saved.use_defaults);
       setSavedOverride(saved.override);
       setOverrideDraft(mergeStlNamingProfiles(globalNaming, saved.override));
+      await invalidateProfiles(queryClient);
       setNamingNote("Naming rules saved.");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -487,7 +490,7 @@ export default function SourceDetailSheet({
               <div className="space-y-4 py-1">
                 <p className="text-sm text-muted-foreground">
                   Override how STL paths are parsed for this source. Changes apply on the next{" "}
-                  <strong>Update build</strong> for plans using this source.
+                  <strong>Rebuild the Plan</strong> after reviewing this source change.
                 </p>
                 {namingLoadError && <p className="text-sm text-destructive">{namingLoadError}</p>}
                 {namingNote && <p className="text-sm text-muted-foreground">{namingNote}</p>}

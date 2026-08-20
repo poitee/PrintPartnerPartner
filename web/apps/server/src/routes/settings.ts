@@ -12,10 +12,8 @@ import {
   DEFAULT_NAMING_PROFILE,
   mergeNamingProfiles,
   namingProfileFromDict,
-  parseSourceNamingMetadata,
   previewParse,
-  resolveNamingProfile,
-  parseProjectMetadata,
+  validateNamingProfile,
 } from "@print-partner/domain";
 import { trimmedString } from "../lib/secure-path.js";
 import { loadFilamentCatalog } from "../services/filament-catalog.js";
@@ -130,16 +128,6 @@ export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDe
   app.get("/settings/source-update-check", async () => ({
     interval_hours: Number(deps.repo.getSetting("source_update_check_hours", "24")),
   }));
-
-  app.get("/settings/auto-recompute", async () => ({
-    enabled: deps.repo.getSetting("auto_recompute", "1") !== "0",
-  }));
-
-  app.put("/settings/auto-recompute", async (request) => {
-    const body = request.body as { enabled?: boolean };
-    deps.repo.setSetting("auto_recompute", body.enabled === false ? "0" : "1");
-    return { enabled: body.enabled !== false };
-  });
 
   app.get("/settings/build-tracking", async () => ({
     assembly_tracking: deps.repo.getSetting("build_tracking_assembly", "0") !== "0",
@@ -271,17 +259,34 @@ export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDe
 export async function registerSourceNamingRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.get("/sources/:id/naming", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    const row = deps.repo.getProjectRow(id);
-    if (!row) return reply.status(404).send({ detail: "Source not found" });
-    const globalProfile = deps.repo.getGlobalNaming();
-    const metadata = parseProjectMetadata(row.metadataJson);
-    const { useDefaults, override } = parseSourceNamingMetadata(metadata);
-    const effective = resolveNamingProfile(globalProfile, metadata);
-    return {
-      use_defaults: useDefaults,
-      override,
-      effective: effective.toDict(),
-    };
+    try {
+      return deps.repo.getSourceNaming(id);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return reply.status(detail === "Source not found" ? 404 : 400).send({ detail });
+    }
+  });
+
+  app.put("/sources/:id/naming", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    try {
+      const body: unknown = request.body;
+      if (!body || typeof body !== "object") {
+        throw new Error("Naming settings must be an object");
+      }
+      const useDefaults = Reflect.get(body, "use_defaults");
+      if (useDefaults === true) {
+        return deps.repo.saveSourceNaming(id, { kind: "use_defaults" });
+      }
+      if (useDefaults !== false) {
+        throw new Error("use_defaults must be true or false");
+      }
+      const profile = validateNamingProfile(Reflect.get(body, "override"));
+      return deps.repo.saveSourceNaming(id, { kind: "override", profile });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return reply.status(detail === "Source not found" ? 404 : 400).send({ detail });
+    }
   });
 }
 

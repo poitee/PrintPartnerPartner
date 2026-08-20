@@ -7,6 +7,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const DEFAULT_TENANT_ID = "default";
 
@@ -100,6 +101,7 @@ export const planRevisionInputSets = pgTable(
       .references(() => buildProfiles.id, { onDelete: "cascade" }),
     inputSetDigest: text("input_set_digest").notNull(),
     expectedInputCount: integer("expected_input_count").notNull(),
+    formatVersion: integer("format_version").notNull().default(1),
     recordedAt: text("recorded_at").notNull(),
     publishedAt: text("published_at"),
   },
@@ -120,18 +122,35 @@ export const planRevisionInputs = pgTable(
     inputSetId: integer("input_set_id")
       .notNull()
       .references(() => planRevisionInputSets.id, { onDelete: "cascade" }),
-    sourceRevisionId: integer("source_revision_id")
+    sourceId: integer("source_id")
       .notNull()
-      .references(() => sourceRevisions.id, { onDelete: "restrict" }),
-    manifestDigest: text("manifest_digest").notNull(),
+      .references(() => projects.id, { onDelete: "restrict" }),
+    sourceLayer: text("source_layer").notNull(),
+    layerOrder: integer("layer_order").notNull().default(0),
+    trackingKind: text("tracking_kind").notNull().default("revision"),
+    sourceRevisionId: integer("source_revision_id").references(() => sourceRevisions.id, {
+      onDelete: "restrict",
+    }),
+    manifestDigest: text("manifest_digest"),
+    effectiveNamingDigest: text("effective_naming_digest"),
   },
   (t) => [
-    uniqueIndex("uq_plan_revision_inputs_set_revision").on(
-      t.inputSetId,
-      t.sourceRevisionId,
-    ),
+    uniqueIndex("uq_plan_revision_inputs_v2_set_source")
+      .on(t.inputSetId, t.sourceId)
+      .where(sql`${t.effectiveNamingDigest} IS NOT NULL`),
   ],
 );
+
+export const planAcceptedInputSets = pgTable("plan_accepted_input_sets", {
+  tenantId: text("tenant_id").notNull().default(DEFAULT_TENANT_ID),
+  profileId: integer("profile_id")
+    .primaryKey()
+    .references(() => buildProfiles.id, { onDelete: "cascade" }),
+  inputSetId: integer("input_set_id")
+    .notNull()
+    .references(() => planRevisionInputSets.id, { onDelete: "restrict" }),
+  acceptedAt: text("accepted_at").notNull(),
+});
 
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),
@@ -516,4 +535,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 17;
+export const currentSchemaVersion = 18;
