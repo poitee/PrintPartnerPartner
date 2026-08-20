@@ -4,7 +4,7 @@ End-user guide: sync sources, create a plan, apply a stack preset, and pick vari
 
 ## 1. Sync sources
 
-On **Library**, import [repos.txt](../examples/repos.txt) or add repos manually. Sync each GitHub source and verify STLs appear when you expand the import tree on Plan.
+On **Library**, add the source repositories. Sync each GitHub source and verify STLs appear when you expand the import tree on Plan.
 
 ## 2. Create a plan
 

@@ -12,4 +12,4 @@ For the **LDO Voron 2.4 golden build** (SB + Tap), see [ldo-2.4-golden-stack.md]
 
 After saving manifests to repo roots: sync on **Sources** → attach layers on **Build** → **Update build** → **Review** → **Plate**.
 
-For optional manifest apply after merge, see [WORKFLOW_2_0.md](../../WORKFLOW_2_0.md#advanced--manifest-optional).
+For manifest authoring and application, see the [stack manifest playbook](../../playbooks/author-manifest-on-stack.md).

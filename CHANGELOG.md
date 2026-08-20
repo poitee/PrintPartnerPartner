@@ -113,7 +113,7 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 - **React Build — STL preview panel** — click a part row to show a larger cached preview via `GET /parts/{id}/preview`.
 - **Community manifest browser** — `GET /manifest-registry` lists approved entries; read-only list in Help.
 - **Desktop CI** — `.github/workflows/desktop.yml` runs pytest, builds the engine on Ubuntu + macOS, and optionally runs the Vite desktop shell build on macOS.
-- **Release workflow** — `release.yml` attaches Qt archives plus `print-partner-engine` Linux/macOS tarballs; optional macOS Tauri bundle (`continue-on-error`). Manual per-OS Tauri builds: [`docs/RELEASE_DESKTOP.md`](docs/RELEASE_DESKTOP.md).
+- **Release workflow** — `release.yml` attaches Qt archives plus `print-partner-engine` Linux/macOS tarballs; optional macOS Tauri bundle (`continue-on-error`). Manual per-OS Tauri builds were documented in `docs/RELEASE_DESKTOP.md` at the time.
 - **Desktop verify script** — `packaging/verify_desktop_build.sh` checks engine binary, optional Tauri bundle, and `/health` for 5s.
 
 ### Changed
@@ -124,7 +124,7 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 
 ### Notes
 
-- Full **`npm run tauri build`** on Windows/Linux remains a **manual release step**; macOS may succeed in CI but is not required. See [`docs/RELEASE_DESKTOP.md`](docs/RELEASE_DESKTOP.md) and [`docs/RELEASE_1.0.0_CHECKLIST.md`](docs/RELEASE_1.0.0_CHECKLIST.md).
+- Full **`npm run tauri build`** on Windows/Linux remains a **manual release step**; macOS may succeed in CI but is not required. The old desktop release documents are retained in Git history.
 
 ## [1.0.0-beta.1] - 2026-05-28
 
@@ -136,12 +136,12 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 - **React Print** — assignment summary table by printer; improved printer dropdown with enabled/other groups.
 - **React Help** — workflow guide loaded from engine; OpenAPI URL shown in Help.
 - **OpenAPI client script** — `apps/desktop/scripts/generate-api-client.sh`.
-- **Legacy Qt docs** — [`docs/LEGACY_QT.md`](docs/LEGACY_QT.md) for `PRINT_PARTNER_USE_QT=1`.
+- **Legacy Qt docs** — `docs/LEGACY_QT.md` covered `PRINT_PARTNER_USE_QT=1` at the time.
 
 ### Changed
 
 - **Version** — `1.0.0-beta.1` toward v1.0 Tauri cutover (~78% Qt parity).
-- **Desktop dev docs** — launcher behavior, catalog/help endpoints, OpenAPI workflow in [`DESKTOP_DEV.md`](docs/DESKTOP_DEV.md).
+- **Desktop dev docs** — launcher behavior, catalog/help endpoints, and the OpenAPI workflow were documented in `docs/DESKTOP_DEV.md` at the time.
 
 ## [0.4.0] - 2026-05-28
 
@@ -155,7 +155,7 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 
 ### Changed
 
-- **License docs** — [PolyForm Noncommercial 1.0.0](LICENSE) with [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md) and [COMMERCIAL.md](COMMERCIAL.md); Help menu entries for overview and full license text.
+- **License docs** — [PolyForm Noncommercial 1.0.0](LICENSE) with [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md) and the former `COMMERCIAL.md`; Help menu entries for overview and full license text.
 - **Workflow guide** — manifest curation and fast recompute documented; duplicate Recompute control removed from layers panel (header + Ctrl+R remain).
 - **GitHub Pages** — static landing at `docs/index.html` deployed via `pages.yml`.
 

@@ -110,6 +110,9 @@ function budgetOrEnv(raw: unknown, envFallback: number): number {
  */
 export function parseSearchProviderOverride(raw: unknown): SearchProviderId | null {
   if (raw === undefined || raw === null || raw === "" || raw === "auto") return null;
+  // Existing installations could persist this removed provider. It previously
+  // fell through to DuckDuckGo, so preserve that behavior explicitly.
+  if (raw === "searxng") return "duckduckgo";
   if (typeof raw === "string" && isSearchProviderId(raw)) return raw;
   return null;
 }

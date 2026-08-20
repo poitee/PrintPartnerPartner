@@ -523,7 +523,6 @@ export type SearchProviderId =
   | "brave"
   | "exa"
   | "duckduckgo"
-  | "searxng"
   | "none";
 
 export type SearchSetupOption = {

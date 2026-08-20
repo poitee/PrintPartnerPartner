@@ -1,6 +1,13 @@
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,13 +36,15 @@ describe("POST /backups/restore JSON contract", () => {
     dirs.length = 0;
   });
 
-  it("restores a named backup already stored under the data directory", async () => {
+  it("passes the canonical stored backup path to the restore service", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "pp-backup-route-"));
     dirs.push(dataDir);
     const backupsDir = join(dataDir, "backups");
     const name = "print-partner-backup-2026-08-18.tar.gz";
+    const storedName = "stored-print-partner-backup-2026-08-18.tar.gz";
     mkdirSync(backupsDir);
-    writeFileSync(join(backupsDir, name), "archive");
+    writeFileSync(join(backupsDir, storedName), "archive");
+    symlinkSync(storedName, join(backupsDir, name));
     const app = Fastify();
     await app.register(multipart);
     await registerBackupRoutes(app, {
@@ -53,7 +62,7 @@ describe("POST /backups/restore JSON contract", () => {
 
       expect(response.statusCode).toBe(200);
       expect(restoreBackup).toHaveBeenCalledWith(
-        join(backupsDir, name),
+        realpathSync(join(backupsDir, storedName)),
         dataDir,
         null,
       );

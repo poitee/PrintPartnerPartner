@@ -4,7 +4,7 @@ Export a **kit bundle** (`.print-partner-kit.zip`) after applying the `ldo_2.4_s
 
 ## Prerequisites
 
-1. Sync on **Sources**: `LDOVoron2`, `Voron-Stealthburner`, `Voron-Tap` (see [repos.txt](./repos.txt)).
+1. Add and sync `LDOVoron2`, `Voron-Stealthburner`, and `Voron-Tap` on **Sources**.
 2. Set import rules on each repo (printed parts folders only).
 3. Author per-repo manifests — [cross-source Voron stack](./cross-source-voron/ldo-2.4-golden-stack.md).
 

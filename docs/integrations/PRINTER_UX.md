@@ -57,7 +57,7 @@ No new app shell. Patterns already exist:
 | Export card grid | [`web/apps/web/src/components/export/ExportActionCards.tsx`](../../web/apps/web/src/components/export/ExportActionCards.tsx) |
 | JobTray | [`web/apps/web/src/components/JobTray.tsx`](../../web/apps/web/src/components/JobTray.tsx) |
 | Progress shop-floor UI | [`web/apps/web/src/pages/CheckoffPage.tsx`](../../web/apps/web/src/pages/CheckoffPage.tsx) |
-| Offline fleet card | [`web/apps/web/src/components/settings/PrinterFleetCard.tsx`](../../web/apps/web/src/components/settings/PrinterFleetCard.tsx) |
+| Printer fleet settings | [`web/apps/web/src/components/settings/PrintersSettingsCard.tsx`](../../web/apps/web/src/components/settings/PrintersSettingsCard.tsx) |
 
 Settings page order today ([`SettingsPage.tsx`](../../web/apps/web/src/pages/SettingsPage.tsx)): **Printers / Library / Appearance / Account**. Printer hosts sit under Printers; Spoolman and other optional integrations live with Library / Account as wired — there is no Settings → AI card.
 
@@ -89,7 +89,7 @@ Spoolman stays filament inventory ([SPOOLMAN.md](SPOOLMAN.md)); hosts stay machi
 
 ### 2. Settings — Printer fleet (bind offline ↔ live)
 
-Keep bed size + filament color ids (3MF packing). Per machine row in [`PrinterFleetCard.tsx`](../../web/apps/web/src/components/settings/PrinterFleetCard.tsx), add:
+Keep bed size + filament color ids (3MF packing). Per machine row in [`PrintersSettingsCard.tsx`](../../web/apps/web/src/components/settings/PrintersSettingsCard.tsx), add:
 
 - **Link host:** Select `Shop Voron (Moonraker)` / `MK4 (PrusaLink)` / None
 - **Status pill:** Idle · Printing 42% · Offline · Error (from `getStatus` / devices)

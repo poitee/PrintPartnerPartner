@@ -8,7 +8,6 @@ const SEARCH_PROVIDER_IDS: SearchProviderId[] = [
   "brave",
   "exa",
   "duckduckgo",
-  "searxng",
   "none",
 ];
 
@@ -118,11 +117,6 @@ export type ServerConfig = {
    * Env: `SEARCH_API_KEY`, with `BRAVE_API_KEY` / `EXA_API_KEY` as fallbacks.
    */
   searchApiKey: string | null;
-  /**
-   * Base URL for the self-hosted SearXNG instance.
-   * Env: `SEARXNG_URL`. Default: http://localhost:4040.
-   */
-  searxngUrl: string;
 };
 
 const DEFAULT_DATA_DIR = process.env.PRINT_PARTNER_DATA_DIR ?? "./data";
@@ -347,6 +341,5 @@ export function loadConfig(): ServerConfig {
     })(),
     searchProvider: parseSearchProvider(process.env.SEARCH_PROVIDER),
     searchApiKey: resolveSearchApiKey(),
-    searxngUrl: process.env.SEARXNG_URL?.trim() || "http://localhost:4040",
   };
 }

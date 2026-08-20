@@ -3,9 +3,6 @@
 # Usage (with base compose):
 #   docker compose -f docker-compose.yml -f pp-compose.yml up -d
 #
-# Or standalone (self-contained; omit docker-compose.yml):
-#   docker compose -f pp-compose.yml up -d
-#
 # Local DNS: add to /etc/hosts (or your router/pihole):
 #   127.0.0.1  orca.home prusa.home
 #
@@ -114,8 +111,7 @@ services:
   # -----------------------------------------------------------------------
   # Print Partner — extend with read-only profile volumes + exchange
   # When used as an overlay (-f docker-compose.yml -f pp-compose.yml),
-  # Compose merges this definition with the base. Standalone: set the
-  # image or build key as well (see docker-compose.yml).
+  # Compose merges this definition with the base service from docker-compose.yml.
   # -----------------------------------------------------------------------
   print-partner:
     volumes:

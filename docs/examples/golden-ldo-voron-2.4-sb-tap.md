@@ -13,7 +13,7 @@ LDO is **not** layered on top of stock Voron-2 (avoids fork-duplication churn).
 
 ## Prerequisites
 
-1. **Sources** — Import [repos.txt](./repos.txt) or add manually:
+1. **Sources** — Add the required repositories:
    - `Voron-2` and/or `LDOVoron2` (pick one as base)
    - `Voron-Stealthburner`, `Voron-Tap` (addons)
 2. **Sync** each GitHub source and set import rules.
