@@ -431,6 +431,9 @@ export const postgresPostInitMigrations: string[] = [
     ON source_revisions (tenant_id, project_id, upstream_revision_key)`,
   `CREATE INDEX IF NOT EXISTS idx_source_revisions_tenant_source_synced
     ON source_revisions (tenant_id, project_id, synced_at)`,
+  // v17 — active Source pointer to one registered immutable revision.
+  `ALTER TABLE projects ADD COLUMN IF NOT EXISTS current_source_revision_id INTEGER
+    REFERENCES source_revisions(id) ON DELETE RESTRICT`,
   `CREATE TABLE IF NOT EXISTS plan_revision_input_sets (
     id SERIAL PRIMARY KEY,
     tenant_id TEXT NOT NULL DEFAULT 'default',

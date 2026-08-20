@@ -6,6 +6,7 @@ import { safeRepoPath } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
 import type { PartDbRow } from "../db/repository.js";
 import { loadKitManifest } from "./kit-manifest-store.js";
+import { findEditableSourceManifestPath } from "./source-workspace.js";
 
 export const CANONICAL_MANIFEST = "print-partner.manifest.yaml";
 
@@ -260,7 +261,11 @@ export function collectRepoManifests(
     if (!layer.project_id) continue;
     const proj = repo.getProjectRow(layer.project_id);
     if (!proj?.localPath) continue;
-    const manifestPath = findRepoManifestPath(proj.localPath);
+    const manifestPath = findEditableSourceManifestPath({
+      reposDir: repo.reposDir,
+      sourceId: proj.id,
+      contentRoot: proj.localPath,
+    });
     if (manifestPath) {
       try {
         found.push({

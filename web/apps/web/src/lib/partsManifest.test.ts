@@ -78,6 +78,7 @@ const sampleSources: SourceSummary[] = [
     local_path: "/tmp/v",
     last_synced_at: null,
     last_commit_sha: null,
+    current_source_revision_id: null,
     docs_url: null,
     manifest_community_slug: null,
     metadata: null,

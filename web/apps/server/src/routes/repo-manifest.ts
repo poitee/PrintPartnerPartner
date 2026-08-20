@@ -1,8 +1,12 @@
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { importRulesForProject, scanRepo } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
+import {
+  editableSourceManifestPath,
+  findEditableSourceManifestPath,
+} from "../services/source-workspace.js";
 
 const MANIFEST_FILE = "print-partner.manifest.yaml";
 
@@ -21,10 +25,15 @@ export async function registerRepoManifestRoutes(
   app.get("/sources/:id/repo-manifest", async (request) => {
     const id = Number((request.params as { id: string }).id);
     const row = requireLocalPath(deps.repo, id);
-    const path = join(row.localPath!, MANIFEST_FILE);
+    const path = findEditableSourceManifestPath({
+      reposDir: deps.repo.reposDir,
+      sourceId: id,
+      contentRoot: row.localPath!,
+    });
     let yaml: string;
     let exists = false;
     try {
+      if (!path) throw new Error("Manifest not found");
       yaml = readFileSync(path, "utf8");
       exists = true;
     } catch {
@@ -47,11 +56,13 @@ export async function registerRepoManifestRoutes(
 
   app.put("/sources/:id/repo-manifest", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    const row = requireLocalPath(deps.repo, id);
+    requireLocalPath(deps.repo, id);
     const body = request.body as { yaml?: string };
     const yaml = String(body.yaml ?? "");
     if (!yaml.trim()) return reply.status(400).send({ detail: "yaml is required" });
-    writeFileSync(join(row.localPath!, MANIFEST_FILE), yaml, "utf8");
+    const path = editableSourceManifestPath(deps.repo.reposDir, id);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, yaml, "utf8");
     return { source_id: id, saved: true };
   });
 

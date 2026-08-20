@@ -152,7 +152,7 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v16 tables and records schema version 16", () => {
+  it("creates the v15-v16 tables and records schema version 17", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
       for (const table of [...V15_TABLES, ...V16_TABLES]) {
@@ -162,7 +162,10 @@ describe("schema v9-v13 (SQLite)", () => {
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "16" });
+      ).toMatchObject({ value: "17" });
+      expect(sqliteColumnNames(sqlite, "projects")).toContain(
+        "current_source_revision_id",
+      );
     });
   });
 
@@ -399,8 +402,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(16);
-    expect(pgSchema.currentSchemaVersion).toBe(16);
+    expect(sqliteSchema.currentSchemaVersion).toBe(17);
+    expect(pgSchema.currentSchemaVersion).toBe(17);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -435,6 +438,14 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
         expect(present.has(column), `Postgres ${table} never gets column ${column}`).toBe(true);
       }
     }
+  });
+
+  it("adds the v17 current revision pointer in Postgres DDL", () => {
+    const present = new Set([
+      ...pgCreatedColumns("projects"),
+      ...pgAddedColumns("projects"),
+    ]);
+    expect(present).toContain("current_source_revision_id");
   });
 
   it("adds v13 profile-sync provenance columns on slicer profile tables", () => {

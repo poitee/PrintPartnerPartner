@@ -14,6 +14,7 @@ function source(partial: Partial<SourceSummary> & Pick<SourceSummary, "id" | "na
     local_path: "/tmp",
     last_synced_at: "2026-01-01T00:00:00Z",
     last_commit_sha: null,
+    current_source_revision_id: null,
     docs_url: null,
     manifest_community_slug: null,
     metadata: null,

@@ -1,4 +1,5 @@
 import {
+  type AnySQLiteColumn,
   integer,
   sqliteTable,
   text,
@@ -26,6 +27,10 @@ export const projects = sqliteTable(
     sourceKind: text("source_kind").notNull().default("github"),
     role: text("role").notNull().default("unassigned"),
     metadataJson: text("metadata_json"),
+    currentSourceRevisionId: integer("current_source_revision_id").references(
+      (): AnySQLiteColumn => sourceRevisions.id,
+      { onDelete: "restrict" },
+    ),
   },
   (t) => [uniqueIndex("uq_projects_tenant_name").on(t.tenantId, t.name)],
 );
@@ -512,7 +517,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 16;
+export const currentSchemaVersion = 17;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -861,6 +866,9 @@ export const schemaMigrations: string[] = [
     ON source_revisions (tenant_id, project_id, upstream_revision_key)`,
   `CREATE INDEX IF NOT EXISTS idx_source_revisions_tenant_source_synced
     ON source_revisions (tenant_id, project_id, synced_at)`,
+  // v17 — active Source pointer to one registered immutable revision.
+  `ALTER TABLE projects ADD COLUMN current_source_revision_id INTEGER
+    REFERENCES source_revisions(id) ON DELETE RESTRICT`,
   `CREATE TABLE IF NOT EXISTS plan_revision_input_sets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id TEXT NOT NULL DEFAULT 'default',

@@ -453,6 +453,7 @@ export type SourceSummary = {
   local_path: string | null;
   last_synced_at: string | null;
   last_commit_sha: string | null;
+  current_source_revision_id: number | null;
   docs_url: string | null;
   manifest_community_slug: string | null;
   metadata: Record<string, unknown> | null;

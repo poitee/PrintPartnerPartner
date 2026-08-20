@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { importRulesForProject, listStlRelativePaths, pathMatchesRules } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
 import {
-  findRepoManifestPath,
   loadManifestYaml,
   matchKeyMatches,
   mergeOptionGroups,
@@ -10,6 +9,7 @@ import {
 } from "./manifest-apply.js";
 import { inferOptionGroupsFromPaths } from "./path-hints.js";
 import { inferSiblingFolderOptionGroups } from "./repo-tree-summary.js";
+import { findEditableSourceManifestPath } from "./source-workspace.js";
 
 const CANONICAL_REPO_FILENAME = "print-partner.manifest.yaml";
 
@@ -59,7 +59,11 @@ export function buildPlanManifestBuilder(repo: AppRepository, profileId: number)
 
     let doc = loadManifestYaml("");
     let exists = false;
-    const manifestPath = findRepoManifestPath(proj.localPath);
+    const manifestPath = findEditableSourceManifestPath({
+      reposDir: repo.reposDir,
+      sourceId: proj.id,
+      contentRoot: proj.localPath,
+    });
     if (manifestPath) {
       try {
         doc = loadManifestYaml(readFileSync(manifestPath, "utf8"));

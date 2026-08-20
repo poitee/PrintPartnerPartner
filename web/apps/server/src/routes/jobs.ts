@@ -19,6 +19,7 @@ import { runPackPreviewJob } from "../services/plate-workspace.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import { getRequestTenantId, tenantStorage } from "../middleware/tenant-context.js";
 import { extractPendingPdfsForSource } from "../services/source-docs-index.js";
+import { sourcePdfTextStorage } from "../services/source-workspace.js";
 import { parseCheckoffUnits, parseUnlabeledNames } from "../services/printer-checkoff.js";
 import { sendProblem } from "../lib/api-error.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
@@ -472,7 +473,9 @@ export class InProcessJobRunner {
     const row = this.repo.getProjectRow(projectId);
     if (!row?.localPath) throw new Error("Source has no local path");
     this.emit(jobId, { message: "Extracting PDF text…", progress: 15 });
+    const pdfTextStorage = sourcePdfTextStorage(this.repo, projectId, row.localPath);
     const result = await extractPendingPdfsForSource(this.repo, projectId, row.localPath, {
+      ...pdfTextStorage,
       onProgress: (msg, progress) => this.emit(jobId, { message: msg, progress }),
     });
     return { project_id: projectId, ...result };

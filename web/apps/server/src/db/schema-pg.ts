@@ -1,4 +1,5 @@
 import {
+  type AnyPgColumn,
   boolean,
   integer,
   pgTable,
@@ -28,6 +29,10 @@ export const projects = pgTable(
     sourceKind: text("source_kind").notNull().default("github"),
     role: text("role").notNull().default("unassigned"),
     metadataJson: text("metadata_json"),
+    currentSourceRevisionId: integer("current_source_revision_id").references(
+      (): AnyPgColumn => sourceRevisions.id,
+      { onDelete: "restrict" },
+    ),
   },
   (t) => [uniqueIndex("uq_projects_tenant_name").on(t.tenantId, t.name)],
 );
@@ -511,4 +516,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 16;
+export const currentSchemaVersion = 17;

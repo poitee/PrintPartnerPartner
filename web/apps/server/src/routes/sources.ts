@@ -26,6 +26,7 @@ import {
   indexSourceDocsFromDisk,
 } from "../services/source-docs-index.js";
 import { PDF_BG_EXTRACT_BYTES } from "../services/pdf-text-extract.js";
+import { sourcePdfTextStorage } from "../services/source-workspace.js";
 
 const GITHUB_PAT_KEY = "github_pat";
 
@@ -496,65 +497,91 @@ export async function syncProjectById(
   doc_count: number;
   docs_downloaded: number;
   pdf_extract_job_id?: string;
+  postprocess_warning?: string;
 }> {
   const row = repo.getProjectRow(projectId);
   if (!row) throw new Error("Source not found");
-  const localPath = row.localPath ?? `${reposDir}/${projectId}`;
   const token = repo.getSetting(GITHUB_PAT_KEY);
   const maxDocsBytes = options?.maxDocsBytes ?? DEFAULT_SOURCE_DOCS_MAX_BYTES;
 
   if (row.sourceKind === "github" || row.sourceType === "git") {
-    const result = await syncGithubSource(row.url, row.branch ?? "main", localPath, token, {
-      download: true,
-      maxDownloads: 500,
-      tag: row.tag,
-      maxDocsBytes,
-      onProgress: (p) => {
-        const base = p.phase === "docs" ? 55 : 15;
-        const span = p.phase === "docs" ? 35 : 40;
-        const frac = p.total > 0 ? p.current / p.total : 0;
-        options?.onProgress?.({
-          message: p.message ?? `Syncing ${p.phase}`,
-          progress: Math.min(95, Math.round(base + span * frac)),
-        });
+    const result = await syncGithubSource({
+      url: row.url,
+      branch: row.branch ?? "main",
+      reposDir,
+      sourceId: projectId,
+      token,
+      options: {
+        maxStlFiles: 500,
+        tag: row.tag,
+        maxDocsBytes,
+        onProgress: (p) => {
+          const base = p.phase === "docs" ? 55 : 15;
+          const span = p.phase === "docs" ? 35 : 40;
+          const frac = p.total > 0 ? p.current / p.total : 0;
+          options?.onProgress?.({
+            message: p.message ?? `Syncing ${p.phase}`,
+            progress: Math.min(95, Math.round(base + span * frac)),
+          });
+        },
       },
     });
-    repo.updateSource(projectId, {
-      localPath: localPath,
-      last_synced_at: new Date().toISOString(),
-      last_commit_sha: result.commitSha,
+    const revision = repo.recordSourceRevision({
+      sourceId: projectId,
+      upstreamRevisionKey: result.commitSha,
+      manifestDigest: result.snapshot.manifestDigest,
+      snapshotLocator: result.snapshot.snapshotLocator,
+      syncedAt: new Date().toISOString(),
+      completeness: "complete",
     });
-    repo.markSourceSynced(projectId, result.commitSha);
-    const indexed = indexSourceDocsFromDisk(repo, projectId, localPath, result.docPaths);
+    const activated = repo.activateSourceRevision({
+      sourceId: projectId,
+      revisionId: revision.id,
+      observed: row,
+    });
+    repo.markSourceRevisionCurrent(projectId, revision.id);
+    const activePath = activated.local_path;
+    if (!activePath) throw new Error("Activated Source revision has no local path");
 
-    // Eagerly extract small PDFs; large ones go to a background job.
-    const docs = repo.listSourceDocs(projectId);
-    const smallPdfs = docs.filter(
-      (d) => d.kind === "pdf" && d.size_bytes < PDF_BG_EXTRACT_BYTES && d.extract_status !== "ready",
-    );
-    const largePdfs = docs.filter(
-      (d) => d.kind === "pdf" && d.size_bytes >= PDF_BG_EXTRACT_BYTES,
-    );
-    if (smallPdfs.length > 0) {
-      options?.onProgress?.({ message: "Extracting PDF text…", progress: 92 });
-      await extractPendingPdfsForSource(repo, projectId, localPath, {
-        maxSizeBytes: PDF_BG_EXTRACT_BYTES - 1,
-        onProgress: (msg, progress) =>
-          options?.onProgress?.({ message: msg, progress: 90 + Math.round(progress * 0.08) }),
-      });
-    }
-
+    let indexed = { doc_count: 0, pending_pdfs: 0 };
     let pdf_extract_job_id: string | undefined;
-    if (largePdfs.length > 0 && options?.enqueuePdfExtract) {
-      const jobId = await options.enqueuePdfExtract(projectId);
-      if (jobId) pdf_extract_job_id = jobId;
-    } else if (largePdfs.length > 0) {
-      options?.onProgress?.({ message: "Extracting large PDF manuals…", progress: 93 });
-      await extractPendingPdfsForSource(repo, projectId, localPath, {
-        minSizeBytes: PDF_BG_EXTRACT_BYTES,
-        onProgress: (msg, progress) =>
-          options?.onProgress?.({ message: msg, progress: 90 + Math.round(progress * 0.08) }),
-      });
+    let postprocess_warning: string | undefined;
+    try {
+      indexed = indexSourceDocsFromDisk(repo, projectId, activePath, result.docPaths);
+      const pdfTextStorage = sourcePdfTextStorage(repo, projectId, activePath);
+
+      // Eagerly extract small PDFs; large ones go to a background job.
+      const docs = repo.listSourceDocs(projectId);
+      const smallPdfs = docs.filter(
+        (d) => d.kind === "pdf" && d.size_bytes < PDF_BG_EXTRACT_BYTES && d.extract_status !== "ready",
+      );
+      const largePdfs = docs.filter(
+        (d) => d.kind === "pdf" && d.size_bytes >= PDF_BG_EXTRACT_BYTES,
+      );
+      if (smallPdfs.length > 0) {
+        options?.onProgress?.({ message: "Extracting PDF text…", progress: 92 });
+        await extractPendingPdfsForSource(repo, projectId, activePath, {
+          ...pdfTextStorage,
+          maxSizeBytes: PDF_BG_EXTRACT_BYTES - 1,
+          onProgress: (msg, progress) =>
+            options?.onProgress?.({ message: msg, progress: 90 + Math.round(progress * 0.08) }),
+        });
+      }
+
+      if (largePdfs.length > 0 && options?.enqueuePdfExtract) {
+        const jobId = await options.enqueuePdfExtract(projectId);
+        if (jobId) pdf_extract_job_id = jobId;
+      } else if (largePdfs.length > 0) {
+        options?.onProgress?.({ message: "Extracting large PDF manuals…", progress: 93 });
+        await extractPendingPdfsForSource(repo, projectId, activePath, {
+          ...pdfTextStorage,
+          minSizeBytes: PDF_BG_EXTRACT_BYTES,
+          onProgress: (msg, progress) =>
+            options?.onProgress?.({ message: msg, progress: 90 + Math.round(progress * 0.08) }),
+        });
+      }
+    } catch (error) {
+      postprocess_warning = error instanceof Error ? error.message : String(error);
     }
 
     const syncedRow = repo.getProjectRow(projectId);
@@ -571,6 +598,7 @@ export async function syncProjectById(
       doc_count: indexed.doc_count,
       docs_downloaded: result.docsDownloaded,
       pdf_extract_job_id,
+      postprocess_warning,
     };
   }
 

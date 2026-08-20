@@ -67,7 +67,7 @@ import type {
   SourceSummary,
 } from "@print-partner/contracts";
 import { and, asc, count, desc, eq, gte, isNotNull, isNull, ne, sql } from "drizzle-orm";
-import { join, resolve, sep, basename } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { DrizzleDb } from "./client.js";
 import {
   asSyncDb,
@@ -117,6 +117,19 @@ export type SchemaTables = Pick<
 >;
 
 export type ProjectRow = typeof defaultSchema.projects.$inferSelect;
+export type SourceActivationObservation = Readonly<
+  Pick<
+    ProjectRow,
+    | "currentSourceRevisionId"
+    | "url"
+    | "branch"
+    | "tag"
+    | "sourceKind"
+    | "sourceType"
+    | "localPath"
+    | "lastCommitSha"
+  >
+>;
 export type ProfileRow = typeof defaultSchema.buildProfiles.$inferSelect;
 export type LayerRow = typeof defaultSchema.profileLayers.$inferSelect;
 export type PartDbRow = typeof defaultSchema.parts.$inferSelect;
@@ -272,6 +285,7 @@ function sourceSummary(row: ProjectRow, docCount = 0): SourceSummary {
     local_path: row.localPath,
     last_synced_at: row.lastSyncedAt,
     last_commit_sha: row.lastCommitSha,
+    current_source_revision_id: row.currentSourceRevisionId,
     docs_url: row.docsUrl,
     manifest_community_slug: row.manifestCommunitySlug,
     metadata,
@@ -1230,6 +1244,132 @@ export class AppRepository {
       .orderBy(asc(this.schema.sourceRevisions.id))
       .all()
       .map(sourceRevision);
+  }
+
+  activateSourceRevision(input: {
+    sourceId: number;
+    revisionId: number;
+    observed: SourceActivationObservation;
+  }): SourceSummary {
+    const revision = this.db
+      .select()
+      .from(this.schema.sourceRevisions)
+      .where(
+        and(
+          eq(this.schema.sourceRevisions.tenantId, this.tenantId),
+          eq(this.schema.sourceRevisions.projectId, input.sourceId),
+          eq(this.schema.sourceRevisions.id, input.revisionId),
+          eq(this.schema.sourceRevisions.completeness, "complete"),
+        ),
+      )
+      .get();
+    if (!revision) throw new Error("Source revision not found for source");
+
+    const snapshotLocator = requiredText(revision.snapshotLocator, "Snapshot locator");
+    const locatorSegments = snapshotLocator.replaceAll("\\", "/").split("/");
+    if (
+      isAbsolute(snapshotLocator) ||
+      snapshotLocator.includes("\\") ||
+      locatorSegments.some((segment) => segment === "" || segment === "." || segment === "..")
+    ) {
+      throw new Error("Snapshot locator must be a canonical storage-relative path");
+    }
+    const reposRoot = resolve(this.reposDir);
+    const localPath = resolve(reposRoot, snapshotLocator);
+    if (localPath === reposRoot || !localPath.startsWith(reposRoot + sep)) {
+      throw new Error("Snapshot locator escapes Source storage");
+    }
+
+    const observed = input.observed;
+    const current = this.getProjectRow(input.sourceId);
+    if (
+      current?.currentSourceRevisionId === revision.id &&
+      current.url === observed.url &&
+      current.branch === observed.branch &&
+      current.tag === observed.tag &&
+      current.sourceKind === observed.sourceKind &&
+      current.sourceType === observed.sourceType &&
+      current.localPath === localPath &&
+      current.lastCommitSha === revision.upstreamRevisionKey &&
+      current.lastSyncedAt === revision.syncedAt
+    ) {
+      const alreadyActive = this.getSource(input.sourceId);
+      if (!alreadyActive) throw new Error("Active Source revision could not be read");
+      return alreadyActive;
+    }
+    const result = this.db
+      .update(this.schema.projects)
+      .set({
+        currentSourceRevisionId: revision.id,
+        localPath,
+        lastCommitSha: revision.upstreamRevisionKey,
+        lastSyncedAt: revision.syncedAt,
+      })
+      .where(
+        and(
+          eq(this.schema.projects.tenantId, this.tenantId),
+          eq(this.schema.projects.id, input.sourceId),
+          observed.currentSourceRevisionId === null
+            ? isNull(this.schema.projects.currentSourceRevisionId)
+            : eq(this.schema.projects.currentSourceRevisionId, observed.currentSourceRevisionId),
+          eq(this.schema.projects.url, observed.url),
+          eq(this.schema.projects.branch, observed.branch),
+          observed.tag === null
+            ? isNull(this.schema.projects.tag)
+            : eq(this.schema.projects.tag, observed.tag),
+          eq(this.schema.projects.sourceKind, observed.sourceKind),
+          eq(this.schema.projects.sourceType, observed.sourceType),
+          observed.localPath === null
+            ? isNull(this.schema.projects.localPath)
+            : eq(this.schema.projects.localPath, observed.localPath),
+          observed.lastCommitSha === null
+            ? isNull(this.schema.projects.lastCommitSha)
+            : eq(this.schema.projects.lastCommitSha, observed.lastCommitSha),
+        ),
+      )
+      .run();
+    if (result.changes !== 1) {
+      throw new Error("Source changed during sync; revision was not activated");
+    }
+
+    const activated = this.getSource(input.sourceId);
+    if (!activated) throw new Error("Activated Source could not be read");
+    return activated;
+  }
+
+  markSourceRevisionCurrent(
+    sourceId: number,
+    revisionId: number,
+    checkedAt = new Date().toISOString(),
+  ): void {
+    if (Number.isNaN(Date.parse(checkedAt))) {
+      throw new Error("Source update check time must be an ISO timestamp");
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const row = this.getProjectRow(sourceId);
+      if (!row || row.currentSourceRevisionId !== revisionId) {
+        throw new Error("Source revision is no longer active");
+      }
+      const metadata = parseProjectMetadata(row.metadataJson) ?? {};
+      metadata[REMOTE_UPDATE_STATUS_KEY] = "up_to_date";
+      metadata[REMOTE_CHECKED_AT_KEY] = checkedAt;
+      const result = this.db
+        .update(this.schema.projects)
+        .set({ metadataJson: JSON.stringify(metadata) })
+        .where(
+          and(
+            eq(this.schema.projects.tenantId, this.tenantId),
+            eq(this.schema.projects.id, sourceId),
+            eq(this.schema.projects.currentSourceRevisionId, revisionId),
+            row.metadataJson === null
+              ? isNull(this.schema.projects.metadataJson)
+              : eq(this.schema.projects.metadataJson, row.metadataJson),
+          ),
+        )
+        .run();
+      if (result.changes === 1) return;
+    }
+    throw new Error("Source metadata changed repeatedly while marking revision current");
   }
 
   publishPlanRevisionInputs(

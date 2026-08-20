@@ -1,8 +1,15 @@
 import { Octokit } from "@octokit/rest";
-import { createWriteStream, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { pipeline } from "node:stream/promises";
+import { resolve } from "node:path";
 import { Readable } from "node:stream";
+import {
+  LocalSourceSnapshotStore,
+  sourceRelativePath,
+  type OmittedSnapshotFile,
+  type PublishedSourceSnapshot,
+  type SnapshotFile,
+  type SnapshotFileKind,
+  type SnapshotFileResponse,
+} from "./local-source-snapshot.js";
 import { summarizeRepoTreePaths, type RepoTreeSummary } from "./repo-tree-summary.js";
 
 function safeRepoFilePath(repoDir: string, relativePath: string): string | null {
@@ -97,7 +104,8 @@ export type SyncProgress = {
 };
 
 export type SyncResult = {
-  commitSha: string | null;
+  commitSha: string;
+  snapshot: PublishedSourceSnapshot;
   stlPaths: string[];
   downloaded: number;
   docPaths: SyncDocEntry[];
@@ -114,45 +122,44 @@ function classifyDocPath(path: string): SyncDocKind | null {
   return "md";
 }
 
-/** Prefer streaming for large blobs; buffer small ones. */
-const STREAM_THRESHOLD_BYTES = 2 * 1024 * 1024;
-
-async function downloadRawFile(
+async function openRawFile(
   owner: string,
   repo: string,
-  branch: string,
+  commitSha: string,
   path: string,
-  dest: string,
   token?: string | null,
-  expectedSize?: number | null,
-): Promise<{ ok: boolean; bytes: number }> {
+  timeoutMs = 120_000,
+): Promise<SnapshotFileResponse> {
   const segments = path.split("/").map(encodeURIComponent).join("/");
-  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${segments}`;
+  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${commitSha}/${segments}`;
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(url, { headers });
-  if (!res.ok) return { ok: false, bytes: 0 };
-  mkdirSync(dirname(dest), { recursive: true });
-
-  const contentLength = Number(res.headers.get("content-length") ?? NaN);
-  const sizeHint =
-    (Number.isFinite(contentLength) && contentLength > 0 ? contentLength : null) ??
-    (expectedSize != null && expectedSize > 0 ? expectedSize : null);
-
-  if (sizeHint != null && sizeHint >= STREAM_THRESHOLD_BYTES && res.body) {
-    const nodeStream = Readable.fromWeb(res.body as import("node:stream/web").ReadableStream);
-    await pipeline(nodeStream, createWriteStream(dest));
-    return { ok: true, bytes: sizeHint };
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) {
+    throw new Error(`GitHub raw download failed for ${path}: HTTP ${res.status}`);
   }
-
-  const buf = Buffer.from(await res.arrayBuffer());
-  writeFileSync(dest, buf);
-  return { ok: true, bytes: buf.byteLength };
+  if (!res.body) throw new Error(`GitHub raw download returned no body for ${path}`);
+  const contentLengthHeader = res.headers.get("content-length")?.trim();
+  const parsedContentLength =
+    contentLengthHeader == null || contentLengthHeader === ""
+      ? null
+      : Number(contentLengthHeader);
+  const contentLengthBytes =
+    parsedContentLength != null &&
+    Number.isSafeInteger(parsedContentLength) &&
+    parsedContentLength >= 0
+      ? parsedContentLength
+      : null;
+  return {
+    stream: Readable.fromWeb(res.body as import("node:stream/web").ReadableStream),
+    contentLengthBytes,
+  };
 }
 
 type RepoTreeEntry = {
   path: string;
-  type: "blob" | "tree";
+  type: "blob" | "tree" | "commit";
+  mode: string | null;
   size: number | null;
 };
 
@@ -174,10 +181,14 @@ async function fetchGithubTreeEntries(
   });
   const entries: RepoTreeEntry[] = [];
   for (const item of tree.data.tree) {
-    if (!item.path || (item.type !== "blob" && item.type !== "tree")) continue;
+    if (
+      !item.path ||
+      (item.type !== "blob" && item.type !== "tree" && item.type !== "commit")
+    ) continue;
     entries.push({
       path: item.path,
       type: item.type,
+      mode: item.mode ?? null,
       size: typeof item.size === "number" ? item.size : null,
     });
   }
@@ -228,124 +239,176 @@ export async function fetchGithubRepoTreeSummary(
 }
 
 export type SyncGithubOptions = {
-  download?: boolean;
-  maxDownloads?: number;
+  maxStlFiles?: number;
+  /** Timeout for each raw file response and body stream. */
+  fileTimeoutMs?: number;
   tag?: string | null;
   /** Per-source docs budget (default 1 GiB). */
   maxDocsBytes?: number;
   onProgress?: (progress: SyncProgress) => void;
 };
 
-/** Fetch GitHub tree via Octokit; download STLs + markdown/PDF docs from raw.githubusercontent.com. */
-export async function syncGithubSource(
-  url: string,
-  branch: string,
-  repoDir: string,
-  token?: string | null,
-  options?: SyncGithubOptions,
-): Promise<SyncResult> {
+export type SyncGithubSourceInput = {
+  url: string;
+  branch: string;
+  reposDir: string;
+  sourceId: number;
+  token?: string | null;
+  options?: SyncGithubOptions;
+};
+
+function snapshotKind(path: string): SnapshotFileKind | null {
+  if (path.toLowerCase().endsWith(".stl")) return "stl";
+  return classifyDocPath(path);
+}
+
+function isRegularBlob(entry: RepoTreeEntry): boolean {
+  return entry.type === "blob" && (entry.mode === "100644" || entry.mode === "100755");
+}
+
+function selectedTreeFiles(entries: readonly RepoTreeEntry[]): RepoTreeEntry[] {
+  const selected: RepoTreeEntry[] = [];
+  for (const entry of entries) {
+    if (!snapshotKind(entry.path)) continue;
+    if (!isRegularBlob(entry)) {
+      throw new Error(`GitHub Source contains an unsupported selected entry: ${entry.path}`);
+    }
+    selected.push(entry);
+  }
+  return selected;
+}
+
+/** Resolve one GitHub commit and publish its selected files as an immutable snapshot. */
+export async function syncGithubSource(input: SyncGithubSourceInput): Promise<SyncResult> {
+  const { url, branch, reposDir, sourceId, token, options } = input;
   const ref = parseGithubUrl(url);
   if (!ref) throw new Error("Invalid GitHub repository URL");
   const octokit = new Octokit(token ? { auth: token } : {});
 
   const tagName = options?.tag?.trim() || null;
   const refName = tagName || branch || ref.branch;
-  const { commitSha, entries } = await fetchGithubTreeEntries(
+  const { commitSha, entries, truncated } = await fetchGithubTreeEntries(
     octokit,
     ref.owner,
     ref.repo,
     refName,
   );
+  if (truncated) {
+    throw new Error("GitHub returned a truncated repository tree; Source snapshot was not created");
+  }
+  if (!/^[a-f0-9]{40}$/i.test(commitSha)) {
+    throw new Error("GitHub returned an invalid commit SHA");
+  }
 
-  const stlBlobs = entries.filter(
-    (item) => item.type === "blob" && item.path.toLowerCase().endsWith(".stl"),
-  );
-
-  const docBlobs = entries.filter(
-    (item) => item.type === "blob" && classifyDocPath(item.path) != null,
-  );
+  const selectedEntries = selectedTreeFiles(entries);
+  const stlBlobs = selectedEntries.filter((item) => snapshotKind(item.path) === "stl");
+  const docBlobs = selectedEntries.filter((item) => snapshotKind(item.path) !== "stl");
 
   const stlPaths = stlBlobs.map((b) => b.path).sort();
-  const docEntries: SyncDocEntry[] = docBlobs
-    .map((b) => {
-      const path = b.path;
-      const kind = classifyDocPath(path)!;
-      return { path, kind, sizeBytes: b.size ?? 0 };
-    })
-    .sort((a, b) => a.path.localeCompare(b.path));
-
-  let downloaded = 0;
-  let docsDownloaded = 0;
-  let docsSkippedBytes = 0;
-  const shouldDownload = options?.download !== false;
-  const maxDownloads = options?.maxDownloads ?? 500;
-  const maxDocsBytes = options?.maxDocsBytes ?? 1024 * 1024 * 1024;
-
-  mkdirSync(repoDir, { recursive: true });
-
-  if (shouldDownload) {
-    const stlSlice = stlPaths.slice(0, maxDownloads);
-    for (let i = 0; i < stlSlice.length; i++) {
-      const path = stlSlice[i]!;
-      options?.onProgress?.({
-        phase: "stls",
-        current: i + 1,
-        total: stlSlice.length,
-        path,
-        message: `Downloading STL ${i + 1}/${stlSlice.length}`,
-      });
-      const dest = safeRepoFilePath(repoDir, path);
-      if (!dest) continue;
-      const result = await downloadRawFile(ref.owner, ref.repo, refName, path, dest, token);
-      if (result.ok) downloaded++;
-    }
-
-    let docsBudgetUsed = 0;
-    const docsToFetch: SyncDocEntry[] = [];
-    for (const entry of docEntries) {
-      const size = entry.sizeBytes > 0 ? entry.sizeBytes : 0;
-      // Always include PDFs even when size unknown; enforce total budget when size known.
-      if (size > 0 && docsBudgetUsed + size > maxDocsBytes) {
-        docsSkippedBytes += size;
-        continue;
-      }
-      docsToFetch.push(entry);
-      docsBudgetUsed += size;
-    }
-
-    for (let i = 0; i < docsToFetch.length; i++) {
-      const entry = docsToFetch[i]!;
-      options?.onProgress?.({
-        phase: "docs",
-        current: i + 1,
-        total: docsToFetch.length,
-        path: entry.path,
-        message: `Downloading doc ${i + 1}/${docsToFetch.length}: ${entry.path}`,
-      });
-      const dest = safeRepoFilePath(repoDir, entry.path);
-      if (!dest) continue;
-      const result = await downloadRawFile(
-        ref.owner,
-        ref.repo,
-        refName,
-        entry.path,
-        dest,
-        token,
-        entry.sizeBytes,
-      );
-      if (result.ok) {
-        docsDownloaded++;
-        if (result.bytes > 0) entry.sizeBytes = result.bytes;
-      }
-    }
+  const maxStlFiles = options?.maxStlFiles ?? 500;
+  if (!Number.isSafeInteger(maxStlFiles) || maxStlFiles < 0) {
+    throw new Error("STL file limit must be a non-negative safe integer");
   }
+  if (stlPaths.length > maxStlFiles) {
+    throw new Error(
+      `GitHub Source contains ${stlPaths.length} STL files, exceeding the limit of ${maxStlFiles}`,
+    );
+  }
+
+  const maxDocsBytes = options?.maxDocsBytes ?? 1024 * 1024 * 1024;
+  if (!Number.isSafeInteger(maxDocsBytes) || maxDocsBytes < 0) {
+    throw new Error("Documentation byte limit must be a non-negative safe integer");
+  }
+  const fileTimeoutMs = options?.fileTimeoutMs ?? 120_000;
+  if (!Number.isSafeInteger(fileTimeoutMs) || fileTimeoutMs <= 0) {
+    throw new Error("GitHub file timeout must be a positive safe integer");
+  }
+
+  let docsBudgetUsed = 0;
+  const selectedDocs: RepoTreeEntry[] = [];
+  const omittedFiles: OmittedSnapshotFile[] = [];
+  for (const entry of [...docBlobs].sort((a, b) => a.path.localeCompare(b.path))) {
+    const kind = classifyDocPath(entry.path);
+    if (!kind) continue;
+    if (entry.size == null) {
+      omittedFiles.push({
+        path: sourceRelativePath(entry.path),
+        kind,
+        sizeHintBytes: null,
+        reason: "unknown-document-size",
+      });
+      continue;
+    }
+    const size = entry.size;
+    if (size > 0 && docsBudgetUsed + size > maxDocsBytes) {
+      omittedFiles.push({
+        path: sourceRelativePath(entry.path),
+        kind,
+        sizeHintBytes: entry.size,
+        reason: "documentation-byte-budget",
+      });
+      continue;
+    }
+    selectedDocs.push(entry);
+    docsBudgetUsed += size;
+  }
+
+  const files: SnapshotFile[] = [...stlBlobs, ...selectedDocs].map((entry) => ({
+    path: sourceRelativePath(entry.path),
+    kind: snapshotKind(entry.path)!,
+    sizeHintBytes: entry.size,
+  }));
+  const totals = {
+    stls: stlBlobs.length,
+    docs: selectedDocs.length,
+  };
+  const progress = { stls: 0, docs: 0 };
+  const store = new LocalSourceSnapshotStore({ reposDir });
+  const snapshot = await store.materialize({
+    sourceId,
+    upstreamRevisionKey: commitSha,
+    files,
+    selection: {
+      maxStlFiles,
+      maxDocumentationBytes: maxDocsBytes,
+      omittedFiles,
+    },
+    openFile: async (file) => {
+      const phase = file.kind === "stl" ? "stls" : "docs";
+      progress[phase] += 1;
+      options?.onProgress?.({
+        phase,
+        current: progress[phase],
+        total: totals[phase],
+        path: file.path,
+        message:
+          phase === "stls"
+            ? `Downloading STL ${progress[phase]}/${totals[phase]}`
+            : `Downloading doc ${progress[phase]}/${totals[phase]}: ${file.path}`,
+      });
+      return openRawFile(ref.owner, ref.repo, commitSha, file.path, token, fileTimeoutMs);
+    },
+  });
+
+  const snapshotStls = snapshot.files.filter((file) => file.kind === "stl");
+  const snapshotDocs = snapshot.files.filter((file) => file.kind !== "stl");
+  const docEntries: SyncDocEntry[] = snapshotDocs.map((entry) => {
+    const kind = classifyDocPath(entry.path);
+    if (!kind) throw new Error(`Published snapshot has an invalid document path: ${entry.path}`);
+    return { path: entry.path, kind, sizeBytes: entry.sizeBytes };
+  });
+  const docsSkippedBytes = snapshot.selection.omittedFiles.reduce(
+    (sum, file) => sum + (file.sizeHintBytes ?? 0),
+    0,
+  );
 
   return {
     commitSha,
-    stlPaths,
-    downloaded,
+    snapshot,
+    stlPaths: snapshotStls.map((file) => file.path),
+    downloaded: snapshotStls.length,
     docPaths: docEntries,
-    docsDownloaded,
+    docsDownloaded: snapshotDocs.length,
     docsSkippedBytes,
   };
 }
