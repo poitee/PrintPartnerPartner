@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@print-partner/contracts": "*",
     "fflate": "^0.8.3"
   },
   "devDependencies": {

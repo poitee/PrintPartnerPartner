@@ -1,7 +1,11 @@
 import {
+  DEFAULT_STL_NAMING_PROFILE,
   DATE_FORMAT_DEFAULT,
   DATE_FORMAT_PRESETS,
   formatTimestamp,
+  parseSourceNamingEndpointError,
+  parseSourceNamingPutInput,
+  parseSourceNamingResponse,
   type AppUpdateCheckResponse,
   type AssistantActionApplyResponse,
   type AssistantChatMessage,
@@ -16,7 +20,15 @@ import {
   type JobSnapshot,
   type PartRow,
   type ProfileSummary,
+  type SourceNamingEndpointError,
+  type SourceNamingPutInput,
+  type SourceNamingResponse,
   type SourceSummary,
+  type StlNamingFolderRule,
+  type StlNamingProfile,
+  type StlNamingProfileOverride,
+  type StlNamingRole,
+  type StlNamingRoleId,
   type UnattributedPrint,
 } from "@print-partner/contracts";
 import {
@@ -27,8 +39,28 @@ import {
   saveTextFileWeb,
 } from "@/lib/webFilePickers";
 
-export type { AppUpdateCheckResponse, HealthResponse, JobEvent, JobSnapshot, PartRow, ProfileSummary, SourceSummary, UnattributedPrint };
-export { DATE_FORMAT_DEFAULT, DATE_FORMAT_PRESETS, formatTimestamp, type DateFormatId };
+export type {
+  AppUpdateCheckResponse,
+  HealthResponse,
+  JobEvent,
+  JobSnapshot,
+  PartRow,
+  ProfileSummary,
+  SourceSummary,
+  StlNamingFolderRule,
+  StlNamingProfile,
+  StlNamingProfileOverride,
+  StlNamingRole,
+  StlNamingRoleId,
+  UnattributedPrint,
+};
+export {
+  DATE_FORMAT_DEFAULT,
+  DATE_FORMAT_PRESETS,
+  DEFAULT_STL_NAMING_PROFILE,
+  formatTimestamp,
+  type DateFormatId,
+};
 
 export function formatSyncTime(iso: string): string {
   return formatTimestamp(iso);
@@ -1939,75 +1971,36 @@ export async function testDiscordNotify(): Promise<{ ok: boolean; error?: string
   });
 }
 
-export type StlNamingRoleId = "primary" | "accent" | "clear" | "opaque";
-
-export type StlNamingRole = {
-  id: StlNamingRoleId;
-  label: string;
-  markers: string[];
-};
-
-export type StlNamingFolderRule = {
-  path_contains: string;
-  role_id: StlNamingRoleId;
-  functional_class?: "functional" | "cosmetic";
-};
-
-export type StlNamingProfile = {
-  roles: StlNamingRole[];
-  quantity: {
-    regex: string;
-    default: number;
-  };
-  slug: {
-    strip_markers: boolean;
-    strip_quantity: boolean;
-  };
-  folder_rules: StlNamingFolderRule[];
-  export_role_order: StlNamingRoleId[];
-};
-
 export type StlNamingPreviewResult = {
   role: StlNamingRoleId;
   quantity: number;
   part_slug: string;
 };
 
-export type SourceNamingSettings = {
-  use_defaults: boolean;
-  override: Partial<StlNamingProfile>;
-  effective: StlNamingProfile;
-  effective_digest: string;
-};
-
-export const DEFAULT_STL_NAMING_PROFILE: StlNamingProfile = {
-  roles: [
-    { id: "primary", label: "Primary", markers: [] },
-    { id: "accent", label: "Accent", markers: ["[a]"] },
-    { id: "clear", label: "Clear", markers: ["[c]"] },
-    { id: "opaque", label: "Opaque", markers: ["[o]"] },
-  ],
-  quantity: {
-    regex: String.raw`[ _]x([0-9]+)\.stl$`,
-    default: 1,
-  },
-  slug: {
-    strip_markers: true,
-    strip_quantity: true,
-  },
-  folder_rules: [],
-  export_role_order: ["primary", "accent", "clear", "opaque"],
-};
+export type SourceNamingSettings = SourceNamingResponse;
 
 export const DEFAULT_QUANTITY_REGEX = DEFAULT_STL_NAMING_PROFILE.quantity.regex;
 
 export function mergeStlNamingProfiles(
   base: StlNamingProfile,
-  override: Partial<StlNamingProfile> | undefined,
+  override: StlNamingProfileOverride | undefined,
 ): StlNamingProfile {
   if (!override) return base;
+  const rolesById = new Map(base.roles.map((role) => [role.id, structuredClone(role)]));
+  for (const roleOverride of override.roles ?? []) {
+    const current = rolesById.get(roleOverride.id) ?? {
+      id: roleOverride.id,
+      label: roleOverride.id,
+      markers: [],
+    };
+    rolesById.set(roleOverride.id, {
+      id: roleOverride.id,
+      label: roleOverride.label ?? current.label,
+      markers: roleOverride.markers ?? current.markers,
+    });
+  }
   return {
-    roles: override.roles ?? base.roles,
+    roles: [...rolesById.values()],
     quantity: override.quantity ? { ...base.quantity, ...override.quantity } : base.quantity,
     slug: override.slug ? { ...base.slug, ...override.slug } : base.slug,
     folder_rules: override.folder_rules ?? base.folder_rules,
@@ -2038,18 +2031,125 @@ export async function previewStlNaming(body: {
   });
 }
 
-export async function fetchSourceNaming(sourceId: number): Promise<SourceNamingSettings> {
-  return engineFetch<SourceNamingSettings>(`/sources/${sourceId}/naming`);
+type SourceNamingMethod = "GET" | "PUT";
+
+export type SourceNamingRequestFailure =
+  | { readonly kind: "transport"; readonly method: SourceNamingMethod }
+  | { readonly kind: "unauthorized"; readonly method: SourceNamingMethod; readonly status: 401 }
+  | {
+      readonly kind: "malformed_success";
+      readonly method: SourceNamingMethod;
+      readonly status: number;
+    }
+  | {
+      readonly kind: "malformed_error";
+      readonly method: SourceNamingMethod;
+      readonly status: number;
+    }
+  | {
+      readonly kind: "endpoint";
+      readonly method: SourceNamingMethod;
+      readonly status: number;
+      readonly error: SourceNamingEndpointError;
+    };
+
+export class SourceNamingRequestError extends Error {
+  constructor(readonly failure: SourceNamingRequestFailure) {
+    const message =
+      failure.kind === "malformed_success"
+        ? "Source naming response was malformed"
+        : failure.kind === "malformed_error"
+          ? "Source naming error response was malformed"
+          : failure.kind === "endpoint"
+            ? failure.error.detail
+            : failure.kind === "unauthorized"
+              ? "Source naming request was unauthorized"
+              : "Source naming request failed";
+    super(message);
+    this.name = "SourceNamingRequestError";
+  }
+}
+
+export function isSourceNamingNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof SourceNamingRequestError &&
+    error.failure.kind === "endpoint" &&
+    error.failure.error.code === "source_not_found"
+  );
+}
+
+async function sourceNamingRequest(
+  sourceId: number,
+  method: SourceNamingMethod,
+  input?: SourceNamingPutInput,
+): Promise<SourceNamingResponse> {
+  const parsedInput = input === undefined ? undefined : parseSourceNamingPutInput(input);
+  let response: Response;
+  try {
+    response = await fetch(resolveEngineUrl(`/sources/${sourceId}/naming`), {
+      method,
+      credentials: "include",
+      headers: parsedInput === undefined ? undefined : { "Content-Type": "application/json" },
+      body: parsedInput === undefined ? undefined : JSON.stringify(parsedInput),
+    });
+  } catch {
+    throw new SourceNamingRequestError({ kind: "transport", method });
+  }
+  if (response.status === 401) {
+    unauthorizedHandler?.();
+    throw new SourceNamingRequestError({ kind: "unauthorized", method, status: 401 });
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new SourceNamingRequestError({
+      kind: response.ok ? "malformed_success" : "malformed_error",
+      method,
+      status: response.status,
+    });
+  }
+
+  if (response.ok) {
+    try {
+      return parseSourceNamingResponse(payload);
+    } catch {
+      throw new SourceNamingRequestError({
+        kind: "malformed_success",
+        method,
+        status: response.status,
+      });
+    }
+  }
+
+  try {
+    const endpointError = parseSourceNamingEndpointError(payload, response.status);
+    throw new SourceNamingRequestError({
+      kind: "endpoint",
+      method,
+      status: response.status,
+      error: endpointError,
+    });
+  } catch (error) {
+    if (error instanceof SourceNamingRequestError) throw error;
+    throw new SourceNamingRequestError({
+      kind: "malformed_error",
+      method,
+      status: response.status,
+    });
+  }
+}
+
+export async function fetchSourceNaming(sourceId: number): Promise<SourceNamingResponse> {
+  return sourceNamingRequest(sourceId, "GET");
 }
 
 export async function saveSourceNaming(
   sourceId: number,
-  body: { use_defaults: boolean; override: Partial<StlNamingProfile> },
-): Promise<SourceNamingSettings> {
-  return engineFetch<SourceNamingSettings>(`/sources/${sourceId}/naming`, {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
+  body: SourceNamingPutInput,
+): Promise<SourceNamingResponse> {
+  return sourceNamingRequest(sourceId, "PUT", body);
 }
 
 export type ManifestRegistryEntry = {

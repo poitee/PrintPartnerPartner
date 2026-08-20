@@ -9,12 +9,14 @@ import {
   fetchSourceNotes,
   fetchSourceNaming,
   fetchStlNaming,
+  isSourceNamingNotFoundError,
   mergeStlNamingProfiles,
   saveImportRules,
   saveSourceNaming,
   type SourceNote,
   type SourceSummary,
   type StlNamingProfile,
+  type StlNamingProfileOverride,
 } from "../../api/engine";
 import { StlNamingEditorEmbedded } from "../settings/StlNamingEditor";
 import ImportRulesTree from "../ImportRulesTree";
@@ -60,11 +62,6 @@ type Props = {
   runImportScan: (sourceId: number) => void;
 };
 
-function isEngineNotFoundError(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message : String(error);
-  return msg.includes("404");
-}
-
 export default function SourceDetailSheet({
   source,
   open,
@@ -96,7 +93,7 @@ export default function SourceDetailSheet({
   const [useDefaults, setUseDefaults] = useState(true);
   const [overrideDraft, setOverrideDraft] = useState<StlNamingProfile>(DEFAULT_STL_NAMING_PROFILE);
   const [savedUseDefaults, setSavedUseDefaults] = useState(true);
-  const [savedOverride, setSavedOverride] = useState<Partial<StlNamingProfile>>({});
+  const [savedOverride, setSavedOverride] = useState<StlNamingProfileOverride>({});
   const [namingLoadError, setNamingLoadError] = useState<string | null>(null);
   const [namingApiMissing, setNamingApiMissing] = useState(false);
   const [namingSaving, setNamingSaving] = useState(false);
@@ -128,9 +125,9 @@ export default function SourceDetailSheet({
       setSavedOverride(sourceNaming.override);
       setOverrideDraft(mergeStlNamingProfiles(global, sourceNaming.override));
     } catch (e) {
-      if (isEngineNotFoundError(e)) {
+      if (isSourceNamingNotFoundError(e)) {
         setNamingApiMissing(true);
-        setNamingLoadError("Unable to load naming overrides — this feature isn't available right now.");
+        setNamingLoadError("Unable to load naming overrides because this Source no longer exists.");
       } else {
         setNamingLoadError(e instanceof Error ? e.message : String(e));
       }
@@ -224,19 +221,12 @@ export default function SourceDetailSheet({
     setNamingLoadError(null);
     setNamingNote(null);
     try {
-      const overridePayload = useDefaults
-        ? {}
-        : {
-            roles: overrideDraft.roles,
-            quantity: overrideDraft.quantity,
-            slug: overrideDraft.slug,
-            folder_rules: overrideDraft.folder_rules,
-            export_role_order: overrideDraft.export_role_order,
-          };
-      const saved = await saveSourceNaming(source.id, {
-        use_defaults: useDefaults,
-        override: overridePayload,
-      });
+      const saved = await saveSourceNaming(
+        source.id,
+        useDefaults
+          ? { use_defaults: true }
+          : { use_defaults: false, override: overrideDraft },
+      );
       setSavedUseDefaults(saved.use_defaults);
       setSavedOverride(saved.override);
       setOverrideDraft(mergeStlNamingProfiles(globalNaming, saved.override));

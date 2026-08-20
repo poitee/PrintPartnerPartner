@@ -213,6 +213,28 @@ describe("Plan freshness", () => {
     });
   });
 
+  it("rejects invalid stored naming before rebuilding parts", () => {
+    withRepo((repo, reposDir) => {
+      const tracked = createTrackedSource(repo, reposDir, "Invalid naming", "a", "solid a");
+      const plan = repo.createProfile("Invalid naming plan", tracked.source.id);
+      repo.recomputeProfile(plan.id);
+      const partsBefore = repo.listParts(plan.id).parts;
+      const accepted = repo.getAcceptedPlanRevisionInputSet(plan.id);
+      repo.updateSource(tracked.source.id, {
+        metadata: {
+          naming: {
+            use_defaults: false,
+            override: { folder_rules: [{ path_contains: "mods", role_id: "other" }] },
+          },
+        },
+      });
+
+      expect(() => repo.recomputeProfile(plan.id)).toThrow(/override\.folder_rules/i);
+      expect(repo.listParts(plan.id).parts).toEqual(partsBefore);
+      expect(repo.getAcceptedPlanRevisionInputSet(plan.id)).toEqual(accepted);
+    });
+  });
+
   it("keeps malformed legacy layer assignments visible as stale", () => {
     withRepo((repo, reposDir, db) => {
       const tracked = createTrackedSource(repo, reposDir, "Malformed", "a", "solid a");

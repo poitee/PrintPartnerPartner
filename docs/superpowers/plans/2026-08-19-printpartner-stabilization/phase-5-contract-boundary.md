@@ -7,6 +7,9 @@
 Give each API response one shared definition and reject invalid external data
 at the browser boundary.
 
+The first implementation unit follows the
+[Source naming contract architecture](phase-5-source-naming-contract-architecture.md).
+
 ## Changes
 
 - Inventory duplicate types in `api/engine.ts` and shared contracts.

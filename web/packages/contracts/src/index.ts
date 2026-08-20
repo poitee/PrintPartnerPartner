@@ -1,5 +1,7 @@
 /** Shared API types between web client and server. */
 
+export * from "./source-naming.js";
+
 export type DeployMode = "self-host" | "saas";
 
 /** Global preference controlling how timestamps (e.g. "Generated …", "Last synced …") are displayed. */

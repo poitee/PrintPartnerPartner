@@ -4,7 +4,15 @@ import type { AppRepository } from "../db/repository.js";
 import {
   DATE_FORMAT_DEFAULT,
   DATE_FORMAT_PRESETS,
+  SourceNamingContractError,
+  invalidSourceNaming,
+  invalidSourceNamingState,
+  parseSourceNamingPutInput,
+  parseSourceNamingResponse,
+  sourceNamingConflict,
+  sourceNotFound,
   type DateFormatId,
+  type SourceNamingPutInput,
   validateDiscordWebhookUrl,
 } from "@print-partner/contracts";
 import { checkAppUpdate, resetAppUpdateCheckCache } from "../services/app-update-check.js";
@@ -13,7 +21,6 @@ import {
   mergeNamingProfiles,
   namingProfileFromDict,
   previewParse,
-  validateNamingProfile,
 } from "@print-partner/domain";
 import { trimmedString } from "../lib/secure-path.js";
 import { loadFilamentCatalog } from "../services/filament-catalog.js";
@@ -31,6 +38,14 @@ import { WORKFLOW_GUIDE } from "./workflow-guide.js";
 import { sendDiscordNotification } from "../services/discord-notify.js";
 
 type RouteDeps = { repo: AppRepository; dataDir: string; config?: ServerConfig };
+
+function sourceIdFromParams(params: unknown): number | null {
+  if (typeof params !== "object" || params === null || !("id" in params)) return null;
+  const value = params.id;
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+  const sourceId = Number(value);
+  return Number.isSafeInteger(sourceId) && sourceId > 0 ? sourceId : null;
+}
 
 export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.get("/settings/update-check", async (request) => {
@@ -258,34 +273,62 @@ export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDe
 
 export async function registerSourceNamingRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.get("/sources/:id/naming", async (request, reply) => {
-    const id = Number((request.params as { id: string }).id);
-    try {
-      return deps.repo.getSourceNaming(id);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      return reply.status(detail === "Source not found" ? 404 : 400).send({ detail });
+    const sourceId = sourceIdFromParams(request.params);
+    if (sourceId === null) {
+      return reply.status(400).send(invalidSourceNaming("Source id must be a positive integer"));
+    }
+    const result = deps.repo.getSourceNaming(sourceId);
+    switch (result.kind) {
+      case "found":
+        try {
+          return parseSourceNamingResponse(result.settings);
+        } catch {
+          return reply.status(500).send(invalidSourceNamingState());
+        }
+      case "source_not_found":
+        return reply.status(404).send(sourceNotFound());
+      case "invalid_state":
+        return reply.status(500).send(invalidSourceNamingState());
+      default: {
+        const exhaustive: never = result;
+        return exhaustive;
+      }
     }
   });
 
   app.put("/sources/:id/naming", async (request, reply) => {
-    const id = Number((request.params as { id: string }).id);
+    const sourceId = sourceIdFromParams(request.params);
+    if (sourceId === null) {
+      return reply.status(400).send(invalidSourceNaming("Source id must be a positive integer"));
+    }
+    let input: SourceNamingPutInput;
     try {
-      const body: unknown = request.body;
-      if (!body || typeof body !== "object") {
-        throw new Error("Naming settings must be an object");
-      }
-      const useDefaults = Reflect.get(body, "use_defaults");
-      if (useDefaults === true) {
-        return deps.repo.saveSourceNaming(id, { kind: "use_defaults" });
-      }
-      if (useDefaults !== false) {
-        throw new Error("use_defaults must be true or false");
-      }
-      const profile = validateNamingProfile(Reflect.get(body, "override"));
-      return deps.repo.saveSourceNaming(id, { kind: "override", profile });
+      input = parseSourceNamingPutInput(request.body);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      return reply.status(detail === "Source not found" ? 404 : 400).send({ detail });
+      if (!(error instanceof SourceNamingContractError)) throw error;
+      return reply.status(400).send(invalidSourceNaming(error.message));
+    }
+    const result = deps.repo.saveSourceNaming(
+      sourceId,
+      input.use_defaults
+        ? { kind: "use_defaults" }
+        : { kind: "override", profile: input.override },
+    );
+    switch (result.kind) {
+      case "saved":
+        try {
+          return parseSourceNamingResponse(result.settings);
+        } catch {
+          return reply.status(500).send(invalidSourceNamingState());
+        }
+      case "source_not_found":
+        return reply.status(404).send(sourceNotFound());
+      case "conflict":
+        return reply.status(409).send(sourceNamingConflict());
+      default: {
+        const exhaustive: never = result;
+        return exhaustive;
+      }
     }
   });
 }

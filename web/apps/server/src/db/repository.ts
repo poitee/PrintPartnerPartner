@@ -3,7 +3,10 @@ import {
   importRulesForProject,
   mergeLayers,
   MergeWouldWipeProfileError,
+  mergeNamingProfiles,
+  namingProfileFromDict,
   parseSourceNamingMetadata,
+  parseSourceNamingMetadataStrict,
   resolveNamingProfile,
   scanRepo,
   serializeImportRules,
@@ -66,6 +69,8 @@ import type {
   ProfileSummary,
   SourceRevision,
   SourceSummary,
+  SourceNamingResponse,
+  StlNamingProfileOverride,
 } from "@print-partner/contracts";
 import { and, asc, count, desc, eq, gte, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
@@ -153,9 +158,33 @@ export type SourceRevisionRow = typeof defaultSchema.sourceRevisions.$inferSelec
 export type PlanRevisionInputSetRow = typeof defaultSchema.planRevisionInputSets.$inferSelect;
 export type PlanRevisionInputRow = typeof defaultSchema.planRevisionInputs.$inferSelect;
 
-export type SourceNamingInput =
+export type SourceNamingCommand =
   | { readonly kind: "use_defaults" }
   | { readonly kind: "override"; readonly profile: StlNamingProfileDict };
+
+export type SourceNamingReadResult =
+  | { readonly kind: "found"; readonly settings: SourceNamingResponse }
+  | { readonly kind: "source_not_found" }
+  | { readonly kind: "invalid_state" };
+
+export type SourceNamingSaveResult =
+  | { readonly kind: "saved"; readonly settings: SourceNamingResponse }
+  | { readonly kind: "source_not_found" }
+  | { readonly kind: "conflict" };
+
+function sourceNamingResponse(input: {
+  readonly useDefaults: boolean;
+  readonly override: StlNamingProfileOverride;
+  readonly effective: StlNamingProfileDict;
+}): SourceNamingResponse {
+  const common = {
+    effective: input.effective,
+    effective_digest: digestEffectiveNaming(input.effective),
+  };
+  return input.useDefaults
+    ? { use_defaults: true, override: {}, ...common }
+    : { use_defaults: false, override: input.override, ...common };
+}
 
 type CapturedPlanLayer = {
   readonly layerId: number;
@@ -1154,38 +1183,34 @@ export class AppRepository {
     return normalized;
   }
 
-  getSourceNaming(sourceId: number): {
-    use_defaults: boolean;
-    override: Partial<StlNamingProfileDict>;
-    effective: StlNamingProfileDict;
-    effective_digest: string;
-  } {
+  getSourceNaming(sourceId: number): SourceNamingReadResult {
     const row = this.getProjectRow(sourceId);
-    if (!row) throw new Error("Source not found");
+    if (!row) return { kind: "source_not_found" };
     const metadata = parseProjectMetadata(row.metadataJson);
-    const { useDefaults, override } = parseSourceNamingMetadata(metadata);
-    const effective = resolveNamingProfile(this.getGlobalNaming(), metadata).toDict();
-    return {
-      use_defaults: useDefaults,
-      override,
-      effective,
-      effective_digest: digestEffectiveNaming(effective),
-    };
+    try {
+      const { useDefaults, override } = parseSourceNamingMetadataStrict(metadata);
+      const effective = resolveNamingProfile(this.getGlobalNaming(), metadata).toDict();
+      return {
+        kind: "found",
+        settings: sourceNamingResponse({
+          useDefaults,
+          override,
+          effective,
+        }),
+      };
+    } catch {
+      return { kind: "invalid_state" };
+    }
   }
 
-  saveSourceNaming(sourceId: number, input: SourceNamingInput): {
-    use_defaults: boolean;
-    override: Partial<StlNamingProfileDict>;
-    effective: StlNamingProfileDict;
-    effective_digest: string;
-  } {
+  saveSourceNaming(sourceId: number, input: SourceNamingCommand): SourceNamingSaveResult {
     const naming =
       input.kind === "use_defaults"
         ? { use_defaults: true, override: {} }
-        : { use_defaults: false, override: validateNamingProfile(input.profile) };
+        : { use_defaults: false, override: input.profile };
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const row = this.getProjectRow(sourceId);
-      if (!row) throw new Error("Source not found");
+      if (!row) return { kind: "source_not_found" };
       const metadata = parseProjectMetadata(row.metadataJson) ?? {};
       const nextMetadata = { ...metadata, naming };
       const effective = resolveNamingProfile(this.getGlobalNaming(), nextMetadata).toDict();
@@ -1204,14 +1229,16 @@ export class AppRepository {
         .run();
       if (result.changes === 1) {
         return {
-          use_defaults: naming.use_defaults,
-          override: naming.override,
-          effective,
-          effective_digest: digestEffectiveNaming(effective),
+          kind: "saved",
+          settings: sourceNamingResponse({
+            useDefaults: naming.use_defaults,
+            override: naming.override,
+            effective,
+          }),
         };
       }
     }
-    throw new Error("Source metadata changed repeatedly while saving naming rules");
+    return { kind: "conflict" };
   }
 
   getSourceCategories(): string[] {
@@ -1521,9 +1548,12 @@ export class AppRepository {
         ? context.sourcesById.get(layer.projectId)
         : this.getProjectRow(layer.projectId);
       if (!source) throw new Error("Plan Source not found");
-      const namingProfile = resolveNamingProfile(
-        globalNaming,
-        parseProjectMetadata(source.metadataJson),
+      const metadata = parseProjectMetadata(source.metadataJson);
+      const { useDefaults, override } = parseSourceNamingMetadataStrict(metadata);
+      const namingProfile = (
+        useDefaults
+          ? namingProfileFromDict(globalNaming)
+          : namingProfileFromDict(mergeNamingProfiles(globalNaming, override))
       ).toDict();
       const revision = source.currentSourceRevisionId
         ? context

@@ -64,11 +64,49 @@ describe("stl-naming", () => {
     expect(() => validateNamingProfile(bad)).toThrow(/capture group/i);
   });
 
+  it.each([
+    ["zero", 0],
+    ["negative", -1],
+    ["fractional", 1.5],
+    ["not finite", Number.POSITIVE_INFINITY],
+    ["a string", "2"],
+    ["null", null],
+  ])("rejects %s default quantity", (_label, defaultQuantity) => {
+    const bad = {
+      ...structuredClone(DEFAULT_NAMING_PROFILE),
+      quantity: {
+        ...DEFAULT_NAMING_PROFILE.quantity,
+        default: defaultQuantity,
+      },
+    };
+
+    expect(() => validateNamingProfile(bad)).toThrow(/quantity\.default/i);
+  });
+
+  it.each([
+    ["a non-object rule", "accent"],
+    ["a blank path", { path_contains: "  ", role_id: "accent" }],
+    ["an unknown role", { path_contains: "mods", role_id: "other" }],
+    [
+      "an unknown functional class",
+      { path_contains: "mods", role_id: "accent", functional_class: "structural" },
+    ],
+  ])("rejects folder_rules containing %s", (_label, rule) => {
+    const bad = {
+      ...structuredClone(DEFAULT_NAMING_PROFILE),
+      folder_rules: [rule],
+    };
+
+    expect(() => validateNamingProfile(bad)).toThrow(/folder_rules/i);
+  });
+
   it("merges partial profiles", () => {
     const merged = mergeNamingProfiles(DEFAULT_NAMING_PROFILE, {
+      roles: [{ id: "accent", markers: ["[accent]"] }],
       quantity: { regex: String.raw`_n([0-9]+)\.stl$`, default: 1 },
     });
     const profile = namingProfileFromDict(merged);
     expect(parseStlPath("part_n5.stl", profile).quantity).toBe(5);
+    expect(parseStlPath("[accent]_part.stl", profile).role).toBe("accent");
   });
 });

@@ -30,6 +30,9 @@ footprint algorithm, output limits, integration choices, and license constraint.
 [UI revamp discussion](ui-revamp-discussion.md) records the frontend baseline,
 prototype directions, component audit, and open visual decisions.
 
+[Remaining stabilization gap map](remaining-phases-gap-map.md) records the
+verified state of Phases 5 through 11 and the corrected implementation order.
+
 ## Definition of done
 
 The stabilization program is done when all of these statements are true:
@@ -199,5 +202,6 @@ than treating component tests as proof of the user journey.
 
 Phases 0 through 3 are complete. Phase 4's local release repair is implemented
 and prepared for `3.2.0`; the phase remains open until an explicitly approved
-tag push proves the public image, release asset, and runtime identity. Later
-phases remain documented but have not started.
+tag push proves the public image, release asset, and runtime identity. The
+Phase 5 through 11 audit is complete. Work starts with the Source naming
+contract unit defined in [the remaining gap map](remaining-phases-gap-map.md).
