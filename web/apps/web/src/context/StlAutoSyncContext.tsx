@@ -66,7 +66,7 @@ async function regenThumbs(profileId: number): Promise<void> {
 export function StlAutoSyncProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { selectedProfileId } = useProfileSelection();
-  const { review, reload } = usePlanWorkspace();
+  const { review, refresh } = usePlanWorkspace();
   const syncJob = useJobRunner("sync");
   const [failed, setFailed] = useState(false);
   const [localBusy, setLocalBusy] = useState(false);
@@ -116,7 +116,7 @@ export function StlAutoSyncProvider({ children }: { children: ReactNode }) {
       const finishOk = async () => {
         try {
           if (selectedProfileId != null) {
-            await reload(selectedProfileId);
+            await refresh();
             if (needThumbs) await regenThumbs(selectedProfileId);
           }
         } catch {
@@ -135,7 +135,7 @@ export function StlAutoSyncProvider({ children }: { children: ReactNode }) {
           setLocalBusy(true);
           try {
             if (needThumbs) await regenThumbs(selectedProfileId);
-            await reload(selectedProfileId);
+            await refresh();
           } catch {
             finishFail();
             return;
@@ -175,7 +175,7 @@ export function StlAutoSyncProvider({ children }: { children: ReactNode }) {
       missingCount,
       emptyThumbCount,
       syncJob,
-      reload,
+      refresh,
     ],
   );
 

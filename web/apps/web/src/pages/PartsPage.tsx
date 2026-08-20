@@ -64,9 +64,7 @@ export default function PartsPage() {
     review,
     loading,
     error: workspaceError,
-    reload,
-    revision,
-    loadedRevision,
+    refresh,
   } = usePlanWorkspace();
   const { banner: stlBanner, runSync: runStlSync, busy: stlSyncBusy } =
     useStlAutoSync();
@@ -100,17 +98,10 @@ export default function PartsPage() {
           toast.error(snap.message || "Sync failed");
           return;
         }
-        if (selectedProfileId != null) void reload(selectedProfileId);
+        if (selectedProfileId != null) void refresh();
       },
     );
   };
-
-  useEffect(() => {
-    if (!health?.ok || selectedProfileId == null) return;
-    if (review?.profile_id !== selectedProfileId || loadedRevision < revision) {
-      void reload(selectedProfileId);
-    }
-  }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
 
   const loadError = workspaceError;
   const planName =

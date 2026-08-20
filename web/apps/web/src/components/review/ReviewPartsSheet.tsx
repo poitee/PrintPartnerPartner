@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import type { PlanReview, ReviewPart, RoleFilamentRow, SpoolmanSpoolRow, StlNamingFolderRule } from "../../api/engine";
-import { fetchRoleFilaments, fetchSpoolmanSpools } from "../../api/engine";
+import { fetchSpoolmanSpools } from "../../api/engine";
 import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
 import { useSpoolmanEnabled } from "../../hooks/useSpoolmanEnabled";
 import { groupCheckoffParts } from "../../lib/checkoffGroups";
@@ -31,6 +31,8 @@ import {
 } from "../../lib/persistedReviewPartsUi";
 import { useProfileSelection } from "../../context/ProfileContext";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { usePlanReviewQuery } from "../../queries/planReview";
+import { useRoleFilamentsQuery } from "../../queries/roleFilaments";
 import { waitForSheetThumbnails } from "../../lib/waitForSheetThumbnails";
 import PartPreviewDialog from "../parts/PartPreviewDialog";
 import PartThumbExpandButton from "../parts/PartThumbExpandButton";
@@ -298,7 +300,7 @@ function ReviewSheetRow({
 }
 
 const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function ReviewPartsSheet(
-  { review, planName, disabled, folderRules },
+  { review: includedReview, planName, disabled, folderRules },
   ref,
 ) {
   const { profiles } = useProfileSelection();
@@ -307,16 +309,26 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
     setIncluded,
     setSpoolmanSpool,
     toggleUnit,
-    reload,
     busyPartId,
-    loadedRevision,
   } = usePlanWorkspace();
   const { configured: spoolmanConfigured, integrationId } = useSpoolmanEnabled();
-  const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
   const [spools, setSpools] = useState<SpoolmanSpoolRow[]>([]);
   const [spoolsLoading, setSpoolsLoading] = useState(false);
   const persisted = useMemo(() => loadPersistedReviewPartsUi(), []);
   const [ui, setUi] = useState<PersistedReviewPartsUi>(persisted);
+  const needsExcluded = ui.includedFilter !== "included";
+  const excludedReviewQuery = usePlanReviewQuery(includedReview.profile_id, {
+    includeExcluded: true,
+    enabled: needsExcluded,
+  });
+  const review = needsExcluded
+    ? excludedReviewQuery.data ?? includedReview
+    : includedReview;
+  const roleFilamentsQuery = useRoleFilamentsQuery(
+    includedReview.profile_id,
+    spoolmanConfigured && Boolean(integrationId),
+  );
+  const roleFilaments = roleFilamentsQuery.data ?? [];
   const [removeTarget, setRemoveTarget] = useState<ReviewPart | null>(null);
   const [previewPart, setPreviewPart] = useState<ReviewPart | null>(null);
   const [printPrep, setPrintPrep] = useState(false);
@@ -357,36 +369,26 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
 
   useEffect(() => {
     if (!spoolmanConfigured || !integrationId) {
-      setRoleFilaments([]);
       setSpools([]);
       setSpoolsLoading(false);
       return;
     }
     let cancelled = false;
     setSpoolsLoading(true);
-    void (async () => {
-      try {
-        const [roles, spoolRows] = await Promise.all([
-          fetchRoleFilaments(review.profile_id),
-          fetchSpoolmanSpools(integrationId),
-        ]);
-        if (!cancelled) {
-          setRoleFilaments(roles);
-          setSpools(spoolRows);
-        }
-      } catch {
-        if (!cancelled) {
-          setRoleFilaments([]);
-          setSpools([]);
-        }
-      } finally {
+    void fetchSpoolmanSpools(integrationId)
+      .then((spoolRows) => {
+        if (!cancelled) setSpools(spoolRows);
+      })
+      .catch(() => {
+        if (!cancelled) setSpools([]);
+      })
+      .finally(() => {
         if (!cancelled) setSpoolsLoading(false);
-      }
-    })();
+      });
     return () => {
       cancelled = true;
     };
-  }, [spoolmanConfigured, integrationId, review.profile_id, loadedRevision]);
+  }, [spoolmanConfigured, integrationId]);
 
   const allParts = useMemo(() => flattenReviewParts(review.part_groups), [review.part_groups]);
 
@@ -409,12 +411,6 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
     () => formatCheckoffSummary(allParts.filter((p) => p.included)),
     [allParts],
   );
-
-  const needsExcluded = ui.includedFilter !== "included";
-  useEffect(() => {
-    if (!needsExcluded || !review.profile_id) return;
-    void reload(review.profile_id, { includeExcluded: true });
-  }, [needsExcluded, review.profile_id, reload]);
 
   const patchUi = useCallback((patch: Partial<PersistedReviewPartsUi>) => {
     setUi((prev) => ({ ...prev, ...patch }));

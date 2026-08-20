@@ -33,8 +33,8 @@ snapshot restore invalidates the same Plan-structure boundary.
 ## Review projections
 
 `PlanWorkspaceContext` owns the normal included-parts review query and part
-mutation commands. Its `invalidate` command refetches that query without
-incrementing local state.
+mutation commands. Its `refresh` command invalidates both review projections
+and Plan summaries without incrementing local state.
 
 The Parts review sheet requests its own `includeExcluded: true` projection only
 when the selected filter needs excluded parts. It must not change the normal
@@ -51,6 +51,13 @@ Callers that used the counter as an unrelated refresh signal must move to the
 query that owns that data. In particular, role filament consumers use
 `queryKeys.roleFilaments(profileId)`, and recipe snapshot restore invalidates
 Plan structure explicitly.
+
+Role-filament writes publish the complete returned role list to that query.
+Recipe, decision, and snapshot reads share
+`queryKeys.planRecipeBundle(profileId)`. Recompute, layer changes, and snapshot
+restore invalidate that bundle directly. Source-changing jobs invalidate the
+review query prefix because Source sync state and freshness appear in every
+affected Plan review.
 
 ## Verification
 

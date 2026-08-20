@@ -204,9 +204,7 @@ export default function CheckoffPage() {
     review,
     loading,
     error: workspaceError,
-    reload,
-    revision,
-    loadedRevision,
+    refresh,
     toggleUnit,
     toggleAssembled,
     busyPartId,
@@ -220,8 +218,8 @@ export default function CheckoffPage() {
 
   // Re-fetch when the service worker flushes its offline checkoff queue
   useSyncComplete(useCallback(() => {
-    if (selectedProfileId != null) void reload(selectedProfileId);
-  }, [reload, selectedProfileId]));
+    if (selectedProfileId != null) void refresh();
+  }, [refresh, selectedProfileId]));
   const persistedUi = useMemo(() => loadPersistedCheckoffUi(), []);
   const [filter, setFilter] = useState<CheckoffFilterMode>(persistedUi.filter);
   const [search, setSearch] = useState("");
@@ -370,13 +368,6 @@ export default function CheckoffPage() {
     await waitForSheetThumbnails(sheet);
     window.print();
   }, []);
-
-  useEffect(() => {
-    if (!health?.ok || selectedProfileId == null) return;
-    if (review?.profile_id !== selectedProfileId || loadedRevision < revision) {
-      void reload(selectedProfileId);
-    }
-  }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
 
   useEffect(() => {
     if (!health?.ok) return;
@@ -880,7 +871,7 @@ export default function CheckoffPage() {
               size="sm"
               variant="secondary"
               onClick={() => {
-                if (selectedProfileId != null) void reload(selectedProfileId);
+                if (selectedProfileId != null) void refresh();
               }}
             >
               Retry
@@ -1036,7 +1027,7 @@ export default function CheckoffPage() {
             suppressIntegrationIds={suppressIntegrationIds}
             onQueueChange={setVerifyQueue}
             onVerified={() => {
-              if (selectedProfileId != null) void reload(selectedProfileId);
+              if (selectedProfileId != null) void refresh();
             }}
           />
           <Suspense fallback={null}>

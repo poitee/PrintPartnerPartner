@@ -25,6 +25,7 @@ export function invalidateAfterJob(
   if (SOURCE_MUTATION_KINDS.has(kind)) {
     void invalidateSources(qc);
     void invalidateProfiles(qc);
+    void qc.invalidateQueries({ queryKey: queryKeys.planReviews });
   }
 
   if (RECOMPUTE_KINDS.has(kind) && profileId != null) {
@@ -32,6 +33,7 @@ export function invalidateAfterJob(
     void invalidateProfiles(qc);
     void qc.invalidateQueries({ queryKey: queryKeys.planLayers(profileId) });
     void qc.invalidateQueries({ queryKey: queryKeys.roleFilaments(profileId) });
+    void qc.invalidateQueries({ queryKey: queryKeys.planRecipeBundle(profileId) });
     // Parts changed → the server re-packs, so plate contents and their
     // height-band labels are stale.
     void qc.invalidateQueries({ queryKey: queryKeys.plateWorkspace(profileId) });

@@ -1,8 +1,8 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -11,23 +11,21 @@ import type { PlanReview } from "../api/engine";
 import { formatCheckoffSummary } from "../lib/checkoffProgress";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import {
+  invalidatePlanReview,
   usePatchPartAssembledMutation,
   usePatchPartMutation,
   usePatchPartProgressMutation,
   usePlanReviewQuery,
 } from "../queries/planReview";
+import { invalidateProfiles } from "../queries/profiles";
 import { useProfileSelection } from "./ProfileContext";
 
 type PlanWorkspaceValue = {
   review: PlanReview | null;
   loading: boolean;
   error: string | null;
-  revision: number;
-  loadedRevision: number;
   progressSummary: string;
-  reload: (profileId: number, options?: { includeExcluded?: boolean }) => Promise<void>;
-  invalidate: () => Promise<void>;
-  bumpPlanRevision: () => Promise<void>;
+  refresh: () => Promise<void>;
   setQuantity: (partId: number, qty: number) => Promise<void>;
   setIncluded: (partId: number, included: boolean) => Promise<void>;
   setSpoolmanSpool: (partId: number, spoolman_spool_id: string | null) => Promise<void>;
@@ -53,48 +51,35 @@ function summaryFromReview(review: PlanReview | null): string {
 export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
   const { health } = useEngineHealth();
   const { selectedProfileId } = useProfileSelection();
-  const [revision, setRevision] = useState(0);
+  const queryClient = useQueryClient();
   const [busyPartId, setBusyPartId] = useState<number | null>(null);
-  const [includeExcluded, setIncludeExcluded] = useState(false);
 
   const {
     data: review = null,
     isLoading,
     error: queryError,
-    refetch,
-    dataUpdatedAt,
   } = usePlanReviewQuery(selectedProfileId, {
-    includeExcluded,
+    includeExcluded: false,
     enabled: Boolean(health?.ok),
   });
 
   const patchPartMutation = usePatchPartMutation(selectedProfileId);
   const patchProgressMutation = usePatchPartProgressMutation(
     selectedProfileId,
-    includeExcluded,
+    false,
   );
   const patchAssembledMutation = usePatchPartAssembledMutation(
     selectedProfileId,
-    includeExcluded,
+    false,
   );
 
-  const invalidate = useCallback(async () => {
-    setRevision((r) => r + 1);
-    await refetch();
-  }, [refetch]);
-
-  const reload = useCallback(
-    async (profileId: number, options?: { includeExcluded?: boolean }) => {
-      if (!health?.ok) return;
-      if (options?.includeExcluded != null) {
-        setIncludeExcluded(options.includeExcluded);
-      }
-      if (profileId === selectedProfileId) {
-        await refetch();
-      }
-    },
-    [health?.ok, selectedProfileId, refetch],
-  );
+  const refresh = useCallback(async () => {
+    if (!health?.ok || selectedProfileId == null) return;
+    await Promise.all([
+      invalidatePlanReview(queryClient, selectedProfileId),
+      invalidateProfiles(queryClient),
+    ]);
+  }, [health?.ok, queryClient, selectedProfileId]);
 
   const setQuantity = useCallback(
     async (partId: number, qty: number) => {
@@ -178,8 +163,6 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
     [review, patchAssembledMutation],
   );
 
-  const loadedRevision = revision;
-
   const value = useMemo(
     (): PlanWorkspaceValue => ({
       review,
@@ -190,12 +173,8 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
           : queryError
             ? String(queryError)
             : null,
-      revision,
-      loadedRevision: dataUpdatedAt > 0 ? revision : loadedRevision,
       progressSummary: summaryFromReview(review),
-      reload,
-      invalidate,
-      bumpPlanRevision: invalidate,
+      refresh,
       setQuantity,
       setIncluded,
       setSpoolmanSpool,
@@ -207,11 +186,7 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
       review,
       isLoading,
       queryError,
-      revision,
-      dataUpdatedAt,
-      loadedRevision,
-      reload,
-      invalidate,
+      refresh,
       setQuantity,
       setIncluded,
       setSpoolmanSpool,
@@ -230,21 +205,4 @@ export function usePlanWorkspace(): PlanWorkspaceValue {
   const ctx = useContext(PlanWorkspaceContext);
   if (!ctx) throw new Error("usePlanWorkspace requires PlanWorkspaceProvider");
   return ctx;
-}
-
-export function usePlanRevisionBump(): () => Promise<void> {
-  const ctx = useContext(PlanWorkspaceContext);
-  return ctx?.invalidate ?? (async () => {});
-}
-
-export function useReviewEnterRefetch(active: boolean) {
-  const { selectedProfileId } = useProfileSelection();
-  const { revision, loadedRevision, reload } = usePlanWorkspace();
-
-  useEffect(() => {
-    if (!active || selectedProfileId == null) return;
-    if (loadedRevision !== revision) {
-      void reload(selectedProfileId);
-    }
-  }, [active, selectedProfileId, revision, loadedRevision, reload]);
 }

@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { PlanReview } from "../../api/engine";
+import { REVIEW_PARTS_UI_STORAGE_KEY } from "../../lib/persistedReviewPartsUi";
 import ReviewPartsSheet from "./ReviewPartsSheet";
+
+const queryMocks = vi.hoisted(() => ({
+  usePlanReviewQuery: vi.fn(() => ({ data: null })),
+}));
 
 vi.mock("../../context/ProfileContext", () => ({
   useProfileSelection: () => ({ profiles: [] }),
@@ -15,10 +20,14 @@ vi.mock("../../context/PlanWorkspaceContext", () => ({
     setIncluded: vi.fn(),
     setSpoolmanSpool: vi.fn(),
     toggleUnit: vi.fn(),
-    reload: vi.fn(),
     busyPartId: null,
-    loadedRevision: 0,
   }),
+}));
+vi.mock("../../queries/planReview", () => ({
+  usePlanReviewQuery: queryMocks.usePlanReviewQuery,
+}));
+vi.mock("../../queries/roleFilaments", () => ({
+  useRoleFilamentsQuery: () => ({ data: [] }),
 }));
 vi.mock("../../hooks/useSpoolmanEnabled", () => ({
   useSpoolmanEnabled: () => ({ configured: false, integrationId: null }),
@@ -43,6 +52,11 @@ const review: PlanReview = {
 };
 
 describe("ReviewPartsSheet accessibility", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    queryMocks.usePlanReviewQuery.mockClear();
+  });
+
   it("gives the parts search control a persistent accessible name", () => {
     render(
       <MemoryRouter>
@@ -53,5 +67,23 @@ describe("ReviewPartsSheet accessibility", () => {
     expect(
       screen.getByRole("searchbox", { name: "Search review parts" }).tagName,
     ).toBe("INPUT");
+  });
+
+  it("requests excluded parts without changing the workspace projection", () => {
+    localStorage.setItem(
+      REVIEW_PARTS_UI_STORAGE_KEY,
+      JSON.stringify({ includedFilter: "excluded" }),
+    );
+
+    render(
+      <MemoryRouter>
+        <ReviewPartsSheet review={review} planName="Voron" />
+      </MemoryRouter>,
+    );
+
+    expect(queryMocks.usePlanReviewQuery).toHaveBeenCalledWith(7, {
+      includeExcluded: true,
+      enabled: true,
+    });
   });
 });

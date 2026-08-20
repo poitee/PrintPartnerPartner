@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Check, ChevronDown, Download, MoreHorizontal, Search, Upload } from "lucide-react";
 import {
@@ -41,6 +42,7 @@ import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Spinner } from "./ui/spinner";
 import { cn } from "../lib/utils";
+import { publishRoleFilaments } from "../queries/roleFilaments";
 import { filterFilamentSpools, formatSpoolOptionLabel } from "../lib/spoolPickerUtils";
 import {
   ROLE_COLOR_SAVED_CLEAR_MS,
@@ -412,6 +414,7 @@ export default function RoleFilamentPicker({
   onRolesChange,
   density = "default",
 }: Props) {
+  const queryClient = useQueryClient();
   const [rows, setRows] = useState<RoleFilamentRow[]>([]);
   const [catalog, setCatalog] = useState<FilamentCatalog | null>(null);
   const [spools, setSpools] = useState<SpoolmanSpoolRow[]>([]);
@@ -421,6 +424,14 @@ export default function RoleFilamentPicker({
   const [roleSaveStatus, setRoleSaveStatus] = useState<Record<string, RoleColorSaveStatus>>({});
   const [busyAction, setBusyAction] = useState<"import" | "regenerate" | "apply" | null>(null);
   const savedClearTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const publishRows = useCallback(
+    (nextRows: RoleFilamentRow[]) => {
+      setRows(nextRows);
+      publishRoleFilaments(queryClient, profileId, nextRows);
+    },
+    [profileId, queryClient],
+  );
 
   const markRoleSaved = useCallback((role: string) => {
     setRoleSaveStatus((prev) => ({ ...prev, [role]: "saved" }));
@@ -453,12 +464,12 @@ export default function RoleFilamentPicker({
       result: { updated: number; thumbnails_cleared: number; roles: RoleFilamentRow[] },
       role: string,
     ) => {
-      setRows(result.roles);
+      publishRows(result.roles);
       await onUpdated?.();
       bumpThumbnailCache();
       markRoleSaved(role);
     },
-    [markRoleSaved, onUpdated],
+    [markRoleSaved, onUpdated, publishRows],
   );
 
   const load = useCallback(async (signal?: { cancelled: () => boolean }) => {
@@ -469,7 +480,7 @@ export default function RoleFilamentPicker({
         fetchFilamentCatalog(),
       ]);
       if (signal?.cancelled()) return;
-      setRows(roleRows);
+      publishRows(roleRows);
       setCatalog(cat);
       const integrationId = cat.default_spoolman_integration_id?.trim();
       if (integrationId && isSpoolmanIntegrationConfigured(cat)) {
@@ -490,7 +501,7 @@ export default function RoleFilamentPicker({
     } finally {
       if (!signal?.cancelled()) setLoaded(true);
     }
-  }, [profileId]);
+  }, [profileId, publishRows]);
 
   useEffect(() => {
     setRows([]);
@@ -546,7 +557,7 @@ export default function RoleFilamentPicker({
         filament_color_id: row.filament_color_id,
         spoolman_spool_id,
       });
-      setRows(result.roles);
+      publishRows(result.roles);
       onUpdated?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -592,7 +603,7 @@ export default function RoleFilamentPicker({
       const preset = await parseColorPreset(file);
       const applied = await applyColorPreset(profileId, preset);
       const result = await applyRoleColorsToParts(profileId);
-      setRows(result.roles);
+      publishRows(result.roles);
       await onUpdated?.();
       bumpThumbnailCache();
       toast.success(
@@ -616,7 +627,7 @@ export default function RoleFilamentPicker({
     setBusyAction("apply");
     try {
       const result = await applyRoleColorsToParts(profileId);
-      setRows(result.roles);
+      publishRows(result.roles);
       await onUpdated?.();
       bumpThumbnailCache();
       if (result.updated === 0) {

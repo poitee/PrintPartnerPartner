@@ -9,6 +9,7 @@ export const queryKeys = {
   planReview: (profileId: number, includeExcluded?: boolean) =>
     ["planReview", profileId, includeExcluded ?? false] as const,
   planLayers: (profileId: number) => ["planLayers", profileId] as const,
+  planRecipeBundle: (profileId: number) => ["planRecipeBundle", profileId] as const,
   checkoff: (profileId: number) => ["checkoff", profileId] as const,
   roleFilaments: (profileId: number) => ["roleFilaments", profileId] as const,
   workflowGuide: ["workflowGuide"] as const,

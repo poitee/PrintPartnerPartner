@@ -119,7 +119,7 @@ function BuildPageContent() {
     openDeletePlan,
     openArchivePlan,
   } = usePlanActions();
-  const { review, invalidate: reloadReview } = usePlanWorkspace();
+  const { review, refresh: refreshPlan } = usePlanWorkspace();
   const { busy, runJob } = useJobRunner("recompute");
   const pendingConflictCheckRef = useRef(false);
   const previousSelectedProfileIdRef = useRef<number | null | undefined>(undefined);
@@ -213,8 +213,8 @@ function BuildPageContent() {
   );
 
   const onRoleFilamentsUpdated = useCallback(async () => {
-    await reloadReview();
-  }, [reloadReview]);
+    await refreshPlan();
+  }, [refreshPlan]);
 
   useEffect(() => {
     const state = location.state as BuildLocationState | null;

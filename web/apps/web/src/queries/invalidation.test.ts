@@ -14,11 +14,18 @@ const completedUpdateCheck: JobSnapshot = {
   error: null,
 };
 
+const completedRecompute: JobSnapshot = {
+  ...completedUpdateCheck,
+  job_id: "job-2",
+  kind: "recompute",
+};
+
 describe("job query invalidation", () => {
   it("invalidates shared Source and Plan summaries after an update check", () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(queryKeys.sources, []);
     queryClient.setQueryData(queryKeys.profiles, []);
+    queryClient.setQueryData(queryKeys.planReview(3, false), { profile_id: 3 });
 
     invalidateAfterJob(
       queryClient,
@@ -28,6 +35,9 @@ describe("job query invalidation", () => {
 
     expect(queryClient.getQueryState(queryKeys.sources)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(queryKeys.profiles)?.isInvalidated).toBe(true);
+    expect(
+      queryClient.getQueryState(queryKeys.planReview(3, false))?.isInvalidated,
+    ).toBe(true);
   });
 
   it("does not invalidate Source state when the update check fails", () => {
@@ -40,5 +50,16 @@ describe("job query invalidation", () => {
     });
 
     expect(queryClient.getQueryState(queryKeys.sources)?.isInvalidated).toBe(false);
+  });
+
+  it("invalidates recipe data after recompute", () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(queryKeys.planRecipeBundle(4), {});
+
+    invalidateAfterJob(queryClient, "recompute", completedRecompute, 4);
+
+    expect(
+      queryClient.getQueryState(queryKeys.planRecipeBundle(4))?.isInvalidated,
+    ).toBe(true);
   });
 });

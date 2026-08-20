@@ -15,6 +15,7 @@ import {
 import { queryKeys } from "./keys";
 import { invalidatePlanReview } from "./planReview";
 import { invalidateProfiles } from "./profiles";
+import { invalidatePlanRecipe } from "./planRecipe";
 
 function planLayerMutationScope(profileId: number) {
   return { id: `plan-layers:${profileId}` };
@@ -27,6 +28,7 @@ async function invalidateLayerDependents(
   await Promise.all([
     invalidatePlanReview(queryClient, profileId),
     invalidateProfiles(queryClient),
+    invalidatePlanRecipe(queryClient, profileId),
   ]);
 }
 

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FileArchive } from "lucide-react";
 import DeskNextStep from "../components/layout/DeskNextStep";
@@ -17,12 +17,12 @@ const PrinterSendPanel = lazy(() => import("../components/export/PrinterSendPane
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
-import { fetchRoleFilaments, type RoleFilamentRow } from "../api/engine";
 import { useJobContext } from "../context/JobContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useSourcesQuery } from "../queries/sources";
+import { useRoleFilamentsQuery } from "../queries/roleFilaments";
 import { checkoffUnitTotals } from "../lib/checkoffProgress";
 import { deskNextStepLine } from "../lib/deskNextStep";
 import { flattenReviewParts } from "../lib/reviewParts";
@@ -49,13 +49,23 @@ export default function ExportPage() {
     error: profilesError,
     reloadProfiles,
   } = useProfileSelection();
-  const { review, invalidate, loading, reload, revision, loadedRevision, error: planError } =
+  const { review, refresh, loading, error: planError } =
     usePlanWorkspace();
   const { data: sources = [] } = useSourcesQuery();
   const { activeJobs } = useJobContext();
   const [shareOpen, setShareOpen] = useState(false);
-  const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
-  const [roleFilamentError, setRoleFilamentError] = useState<string | null>(null);
+  const roleFilamentsQuery = useRoleFilamentsQuery(
+    selectedProfileId,
+    Boolean(health?.ok),
+  );
+  const roleFilaments = roleFilamentsQuery.data ?? [];
+  const roleFilamentError = roleFilamentsQuery.error
+    ? `Could not refresh filament assignments: ${
+        roleFilamentsQuery.error instanceof Error
+          ? roleFilamentsQuery.error.message
+          : String(roleFilamentsQuery.error)
+      }`
+    : null;
   const engineState = resolveEngineState({
     health,
     loading: healthLoading,
@@ -89,39 +99,6 @@ export default function ExportPage() {
   );
   const remainingUnits = checkoffUnitTotals(includedParts).remainingUnits;
   const exportNextStep = deskNextStepLine("export", { remainingUnits });
-
-  useEffect(() => {
-    if (!health?.ok || selectedProfileId == null) {
-      setRoleFilaments([]);
-      setRoleFilamentError(null);
-      return;
-    }
-    setRoleFilamentError(null);
-    let cancelled = false;
-    void fetchRoleFilaments(selectedProfileId)
-      .then((rows) => {
-        if (!cancelled) setRoleFilaments(rows);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setRoleFilamentError(
-            `Could not refresh filament assignments: ${
-              e instanceof Error ? e.message : String(e)
-            }`,
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [health?.ok, selectedProfileId, revision]);
-
-  useEffect(() => {
-    if (!health?.ok || selectedProfileId == null) return;
-    if (review?.profile_id !== selectedProfileId || loadedRevision < revision) {
-      void reload(selectedProfileId);
-    }
-  }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
 
   const planIdentity =
     planName && includedParts.length > 0
@@ -240,7 +217,7 @@ export default function ExportPage() {
                     size="sm"
                     variant="secondary"
                     onClick={() => {
-                      if (selectedProfileId != null) void reload(selectedProfileId);
+                      if (selectedProfileId != null) void refresh();
                     }}
                   >
                     Retry
@@ -267,7 +244,9 @@ export default function ExportPage() {
             <PartsManifestTransfer
               review={review}
               sources={sources}
-              onApplied={() => void invalidate()}
+              onApplied={async () => {
+                await Promise.all([refresh(), roleFilamentsQuery.refetch()]);
+              }}
             />
           </div>
 
