@@ -9,6 +9,8 @@ workflow indicator.
 
 The Source-list migration follows the
 [Source state ownership architecture](phase-6-source-state-architecture.md).
+Plan projections follow the
+[Plan browser-state architecture](phase-6-plan-state-architecture.md).
 
 ## Changes
 

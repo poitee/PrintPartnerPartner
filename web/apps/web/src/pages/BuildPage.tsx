@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -47,12 +48,7 @@ import {
   CardTitle,
 } from "../components/ui/card";
 import {
-  addProfileAddonLayer,
-  deleteProfileLayer,
-  fetchPlanLayers,
   fetchStlNaming,
-  replaceProfileLayer,
-  setProfileBaseLayer,
   startRecompute,
   type ProfileLayer,
   type RoleFilamentRow,
@@ -65,6 +61,14 @@ import {
   type SourceSummary,
 } from "../queries/sources";
 import { useSourceCategoriesQuery } from "../queries/sourceCategories";
+import {
+  invalidatePlanStructure,
+  useAddPlanAddonLayerMutation,
+  useDeletePlanLayerMutation,
+  usePlanLayersQuery,
+  useReplacePlanLayerMutation,
+  useSetPlanBaseLayerMutation,
+} from "../queries/planLayers";
 import { buildRoute, exportRoute, libraryRoute } from "../lib/routes";
 import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { takeKitImportResult } from "../lib/kitImportStash";
@@ -78,7 +82,6 @@ import { useImportRulesSaveRegistry } from "../context/ImportRulesSaveContext";
 import { useKitManifestSaveRegistry } from "../context/KitManifestSaveContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useJobRunner } from "../hooks/useJobRunner";
-import { layersEqual } from "../lib/planDataStable";
 import { meshColorForStlPath } from "../lib/rolePreviewColor";
 import { checkoffUnitTotals } from "../lib/checkoffProgress";
 import { canArchivePlan } from "../lib/planPickerGroups";
@@ -93,6 +96,7 @@ type BuildLocationState = {
 };
 
 const EMPTY_SOURCES: SourceSummary[] = [];
+const EMPTY_LAYERS: ProfileLayer[] = [];
 
 export default function BuildPage() {
   return <BuildPageContent />;
@@ -115,12 +119,11 @@ function BuildPageContent() {
     openDeletePlan,
     openArchivePlan,
   } = usePlanActions();
-  const { invalidate: bumpPlanRevision, review, invalidate: reloadReview } = usePlanWorkspace();
+  const { review, invalidate: reloadReview } = usePlanWorkspace();
   const { busy, runJob } = useJobRunner("recompute");
   const pendingConflictCheckRef = useRef(false);
   const previousSelectedProfileIdRef = useRef<number | null | undefined>(undefined);
 
-  const [layers, setLayers] = useState<ProfileLayer[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [addonSourceId, setAddonSourceId] = useState("");
   const [pendingBaseSourceId, setPendingBaseSourceId] = useState("");
@@ -130,18 +133,24 @@ function BuildPageContent() {
   const [roleFilaments, setRoleFilaments] = useState<RoleFilamentRow[]>([]);
   const [namingProfile, setNamingProfile] = useState<StlNamingProfile>(DEFAULT_STL_NAMING_PROFILE);
   const [attachOpen, setAttachOpen] = useState(false);
-  const [profileDataLoading, setProfileDataLoading] = useState(false);
-  const [loadedProfileId, setLoadedProfileId] = useState<number | null>(null);
   const engineState = resolveEngineState({
     health,
     loading: healthLoading,
     error: engineError,
   });
   const engineReady = engineState === "ready";
+  const queryClient = useQueryClient();
   const sourcesQuery = useSourcesQuery(engineReady);
   const sources = sourcesQuery.data ?? EMPTY_SOURCES;
   const categoriesQuery = useSourceCategoriesQuery(engineReady);
   const categories = categoriesQuery.data ?? [];
+  const layersQuery = usePlanLayersQuery(selectedProfileId, engineReady);
+  const layers = layersQuery.data ?? EMPTY_LAYERS;
+  const layerProfileId = selectedProfileId ?? 0;
+  const setBaseMutation = useSetPlanBaseLayerMutation(layerProfileId);
+  const addAddonMutation = useAddPlanAddonLayerMutation(layerProfileId);
+  const replaceLayerMutation = useReplacePlanLayerMutation(layerProfileId);
+  const deleteLayerMutation = useDeletePlanLayerMutation(layerProfileId);
   const updateSourceMutation = useUpdateSourceMutation();
   const sourceQueryError =
     sourcesQuery.error instanceof Error
@@ -155,6 +164,13 @@ function BuildPageContent() {
       : categoriesQuery.error
         ? `Could not load source categories: ${String(categoriesQuery.error)}`
         : null;
+  const layerQueryError =
+    layersQuery.error instanceof Error
+      ? layersQuery.error.message
+      : layersQuery.error
+        ? String(layersQuery.error)
+        : null;
+  const profileDataError = loadError ?? layerQueryError;
 
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
   const buildStale = selectedProfile?.freshness.status === "stale";
@@ -197,14 +213,8 @@ function BuildPageContent() {
   );
 
   const onRoleFilamentsUpdated = useCallback(async () => {
-    // Only bump plan revision (re-fetches part colour assignments).
-    // Do NOT bump filamentRefreshKey here — the picker already has fresh data
-    // from saveRoleFilament's response (setRows), so a full re-fetch just
-    // causes the picker to flash/reset while the user is still assigning colours.
-    // The refreshKey is bumped explicitly in the recompute job onDone callbacks
-    // (lines below) where the catalogue may have genuinely changed.
-    await bumpPlanRevision();
-  }, [bumpPlanRevision]);
+    await reloadReview();
+  }, [reloadReview]);
 
   useEffect(() => {
     const state = location.state as BuildLocationState | null;
@@ -220,20 +230,6 @@ function BuildPageContent() {
       if (stashed) setKitImportSetup(stashed);
     }
   }, [location.state, selectedProfileId]);
-
-  const loadProfileData = useCallback(async (profileId: number) => {
-    setLoadError(null);
-    setProfileDataLoading(true);
-    try {
-      const layerRows = await fetchPlanLayers(profileId);
-      setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
-      setLoadedProfileId(profileId);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setProfileDataLoading(false);
-    }
-  }, []);
 
   const assignSourceCategory = useCallback(
     async (sourceId: number, category: string | null) => {
@@ -265,44 +261,17 @@ function BuildPageContent() {
     previousSelectedProfileIdRef.current = selectedProfileId;
 
     if (selectedProfileId == null) {
-      setProfileDataLoading(false);
-      setLoadedProfileId(null);
-      setLayers([]);
       setAddonSourceId("");
       setPendingBaseSourceId("");
       setRoleFilaments([]);
       return;
     }
-    // Reset kit/layer UI only when the profile id actually changes (not on first mount).
     if (profileChanged) {
-      setLoadedProfileId(null);
-      setLayers([]);
       setAddonSourceId("");
       setPendingBaseSourceId("");
       setRoleFilaments([]);
       setLoadError(null);
     }
-
-    let cancelled = false;
-    setProfileDataLoading(true);
-    void (async () => {
-      setLoadError(null);
-      try {
-        const layerRows = await fetchPlanLayers(selectedProfileId);
-        if (cancelled) return;
-        setLayers((prev) => (layersEqual(prev, layerRows) ? prev : layerRows));
-        setLoadedProfileId(selectedProfileId);
-      } catch (e) {
-        if (!cancelled) {
-          setLoadError(e instanceof Error ? e.message : String(e));
-        }
-      } finally {
-        if (!cancelled) setProfileDataLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
   }, [selectedProfileId]);
 
   const baseLayer = useMemo(
@@ -438,10 +407,10 @@ function BuildPageContent() {
     error: profilesError,
     hasData: profiles.length > 0,
   });
-  const hasProfileData = loadedProfileId === selectedProfileId;
+  const hasProfileData = layersQuery.data != null;
   const profileDataState = resolveResourceState({
-    loading: profileDataLoading,
-    error: loadError,
+    loading: layersQuery.isLoading,
+    error: profileDataError,
     hasData: hasProfileData,
   });
   const sourcesState = resolveResourceState({
@@ -453,7 +422,7 @@ function BuildPageContent() {
     profilesError,
     profiles.length > 0,
   );
-  const profileDataBackgroundError = getBackgroundError(loadError, hasProfileData);
+  const profileDataBackgroundError = getBackgroundError(profileDataError, hasProfileData);
   const sourcesBackgroundError = getBackgroundError(
     sourceQueryError,
     sourcesQuery.data != null,
@@ -482,11 +451,7 @@ function BuildPageContent() {
           return;
         }
         pendingConflictCheckRef.current = true;
-        bumpPlanRevision();
         setFilamentRefreshKey((k) => k + 1);
-        void loadProfileData(selectedProfileId);
-        void reloadProfiles();
-        void reloadReview();
       },
       { profileId: selectedProfileId },
     );
@@ -494,13 +459,16 @@ function BuildPageContent() {
 
   const onChangeLayerProject = async (layer: ProfileLayer, projectId: number) => {
     if (selectedProfileId == null) return;
+    setLoadError(null);
     try {
       if (layer.layer_type === "base") {
-        await setProfileBaseLayer(selectedProfileId, projectId);
+        await setBaseMutation.mutateAsync(projectId);
       } else {
-        await replaceProfileLayer(selectedProfileId, layer.id, projectId);
+        await replaceLayerMutation.mutateAsync({
+          layerId: layer.id,
+          sourceId: projectId,
+        });
       }
-      await loadProfileData(selectedProfileId);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
@@ -508,9 +476,9 @@ function BuildPageContent() {
 
   const onRemoveLayer = async (layer: ProfileLayer) => {
     if (selectedProfileId == null) return;
+    setLoadError(null);
     try {
-      await deleteProfileLayer(selectedProfileId, layer.id);
-      await loadProfileData(selectedProfileId);
+      await deleteLayerMutation.mutateAsync(layer.id);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
@@ -518,10 +486,10 @@ function BuildPageContent() {
 
   const onAddAddon = async () => {
     if (selectedProfileId == null || !addonSourceId) return;
+    setLoadError(null);
     try {
-      await addProfileAddonLayer(selectedProfileId, Number(addonSourceId));
+      await addAddonMutation.mutateAsync(Number(addonSourceId));
       setAddonSourceId("");
-      await loadProfileData(selectedProfileId);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
@@ -529,10 +497,10 @@ function BuildPageContent() {
 
   const onSetBaseSource = async () => {
     if (selectedProfileId == null || !pendingBaseSourceId) return;
+    setLoadError(null);
     try {
-      await setProfileBaseLayer(selectedProfileId, Number(pendingBaseSourceId));
+      await setBaseMutation.mutateAsync(Number(pendingBaseSourceId));
       setPendingBaseSourceId("");
-      await loadProfileData(selectedProfileId);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
@@ -734,12 +702,15 @@ function BuildPageContent() {
         <Card className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-destructive">
-              Could not load plan: {loadError}
+              Could not load plan: {profileDataError}
             </p>
             <Button
               size="sm"
               variant="secondary"
-              onClick={() => void loadProfileData(selectedProfileId)}
+              onClick={() => {
+                setLoadError(null);
+                void layersQuery.refetch();
+              }}
             >
               Retry
             </Button>
@@ -758,7 +729,9 @@ function BuildPageContent() {
             onDismiss={() => setKitImportSetup(null)}
             onSourcesChanged={() => {
               void sourcesQuery.refetch();
-              if (selectedProfileId != null) void loadProfileData(selectedProfileId);
+              if (selectedProfileId != null) {
+                void invalidatePlanStructure(queryClient, selectedProfileId);
+              }
             }}
           />
         )}
@@ -785,8 +758,6 @@ function BuildPageContent() {
               <div className="ml-auto flex flex-wrap items-center gap-2">
                 <BuildSourcesPanel
                   profileId={selectedProfileId}
-                  layers={layers}
-                  onLayersChange={setLayers}
                   disabled={!engineReady || busy}
                 />
                 <Button
