@@ -34,6 +34,18 @@ function markAsV18(raw: Database.Database): void {
 
 function downgradeToV18(raw: Database.Database): void {
   raw.exec(`
+    DROP TRIGGER IF EXISTS trg_plan_revision_required_unit_sets_immutable_delete;
+    DROP TRIGGER IF EXISTS trg_plan_revision_required_unit_sets_immutable_update;
+    DROP TRIGGER IF EXISTS trg_plan_revision_required_unit_sets_ownership_insert;
+    DROP TRIGGER IF EXISTS trg_plan_revision_required_units_immutable_delete;
+    DROP TRIGGER IF EXISTS trg_plan_revision_required_units_immutable_update;
+    DROP TRIGGER IF EXISTS trg_plan_revision_required_units_ownership_insert;
+    DROP TRIGGER IF EXISTS trg_required_units_immutable_delete;
+    DROP TRIGGER IF EXISTS trg_required_units_immutable_update;
+    DROP TRIGGER IF EXISTS trg_required_units_ownership_insert;
+    DROP TABLE plan_revision_required_unit_sets;
+    DROP TABLE plan_revision_required_units;
+    DROP TABLE required_units;
     DROP TRIGGER IF EXISTS trg_plan_revisions_ownership_insert;
     DROP TRIGGER IF EXISTS trg_plan_revision_parts_ownership_insert;
     DROP TRIGGER IF EXISTS trg_build_profiles_revision_ownership_insert;
@@ -110,12 +122,25 @@ describe("accepted Plan revision backfill", () => {
     downgradeToV18(raw);
     database.close();
 
-    const migrated = new SqliteDatabase(dir);
+    const migrated = new SqliteDatabase(dir, {
+      now: () => "2026-08-20T12:00:00.000Z",
+      tokenFactory: () => "ppu_00000000000000000000000000000001",
+    });
     expect(() => migrated.connect()).not.toThrow();
     expect(repository(migrated).getAcceptedPlanRevision(profile.id)).toMatchObject({
       planVersion: 1,
       revisionNumber: 1,
       parts: [expect.objectContaining({ partKey: "legacy" })],
+    });
+    expect(repository(migrated).readCurrentRequiredUnitSet(profile.id)).toMatchObject({
+      kind: "ready",
+      units: [
+        expect.objectContaining({
+          unitIndex: 0,
+          required: true,
+          token: "ppu_00000000000000000000000000000001",
+        }),
+      ],
     });
     migrated.close();
   });

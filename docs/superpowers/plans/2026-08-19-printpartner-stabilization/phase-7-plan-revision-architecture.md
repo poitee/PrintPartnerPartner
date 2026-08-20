@@ -237,9 +237,25 @@ digest, revision-part ID, nor unit index is its identity.
 
 `required_units` owns the token and Build. `plan_revision_required_units` maps
 each accepted revision part and unit index to that token.
-`required_unit_progress` records completion and assembly against the token.
-Printer jobs and Checkoff links capture the accepted Plan revision,
-revision-part ID, and token that existed when work was prepared.
+`plan_revision_required_unit_sets` finalizes each complete mapping with a
+`required-unit-map-v1` digest. Unit 3a maps both included and excluded accepted
+Parts, so exclusion does not erase physical-slot identity. The Part's included
+field determines whether each mapped unit is currently required.
+
+Unit 3a tokens use the canonical `ppu_` prefix followed by 32 lowercase
+hexadecimal characters. Object names contain a sanitized STL stem and end in
+the complete token. They are immutable, case-insensitively unique, and at most
+200 characters. The SQLite v23 migration creates and verifies the complete set
+for every clean current accepted revision in one immediate transaction. It
+reuses a valid complete set without consuming tokens and fails closed on a
+partial set, an orphan unit, an invalid quantity, or a digest mismatch.
+
+Checkoff remains authoritative in `print_progress` during Unit 3a. The internal
+current-set reader verifies the immutable mapping, then reads completion and
+assembly live through each revision Part's compatibility projection ID and
+unit index. It does not copy or mirror progress. PostgreSQL has the same ledger
+schema and reader shape, but no Required-unit mutation path until native
+multi-statement transactions are available.
 
 Reconciliation uses artifact digest, path, role, and prior revision as
 evidence:
@@ -288,7 +304,9 @@ replay.
    snapshots and derives accepted-versus-draft diff. Unit 2b adds grouped
    inclusion and quantity decisions. Unit 2c adds abandon, resume, and rebase.
    Accepted reads and Checkoff remain unchanged throughout this slice.
-3. Add Required-unit tokens and explicit reconciliation decisions.
+3. Add Required-unit identity, then explicit reconciliation decisions. Unit 3a
+   creates the immutable current accepted-revision ledger without changing
+   Checkoff. Unit 3b owns reconciliation and saved decisions.
 4. Add the atomic, idempotent apply command and refresh compatibility
    projections inside its transaction.
 5. Move Plan callers to drafts, migrate accepted readers, then delete direct

@@ -9,6 +9,12 @@ import {
   ACCEPTED_PLAN_REVISION_SCHEMA_VERSION,
   backfillAcceptedPlanRevisions,
 } from "./accepted-plan-revisions.js";
+import {
+  backfillCurrentRequiredUnitSets,
+  REQUIRED_UNIT_SCHEMA_VERSION,
+  type RequiredUnitBackfillCommandResult,
+  type RequiredUnitBackfillDependencies,
+} from "./required-units.js";
 
 export type DrizzleDb = BetterSQLite3Database<typeof schema>;
 
@@ -29,7 +35,10 @@ export class SqliteDatabase {
 
   drizzle: DrizzleDb | null = null;
 
-  constructor(dataDir: string) {
+  constructor(
+    dataDir: string,
+    private readonly requiredUnitBackfillDependencies: RequiredUnitBackfillDependencies = {},
+  ) {
     this.dataDir = dataDir;
     this.dbPath = join(dataDir, "print-partner.db");
     this.reposDir = join(dataDir, "repos");
@@ -203,6 +212,9 @@ export class SqliteDatabase {
     if (!printProgressCols.some((c) => c.name === "assembled")) {
       this.sqlite.exec("ALTER TABLE print_progress ADD COLUMN assembled INTEGER NOT NULL DEFAULT 0");
     }
+    if (versionBeforeMigration < REQUIRED_UNIT_SCHEMA_VERSION) {
+      backfillCurrentRequiredUnitSets(this.sqlite, this.requiredUnitBackfillDependencies);
+    }
 
     // Performance indexes (idempotent — IF NOT EXISTS)
     this.sqlite.exec(`
@@ -241,6 +253,16 @@ export class SqliteDatabase {
     if (!this.sqlite) return false;
     this.sqlite.prepare("SELECT 1").get();
     return true;
+  }
+
+  backfillCurrentRequiredUnitSets(
+    dependencies: RequiredUnitBackfillDependencies = this.requiredUnitBackfillDependencies,
+  ): RequiredUnitBackfillCommandResult {
+    if (!this.sqlite) throw new Error("Database not connected");
+    return {
+      kind: "completed",
+      summary: backfillCurrentRequiredUnitSets(this.sqlite, dependencies),
+    };
   }
 
   close(): void {

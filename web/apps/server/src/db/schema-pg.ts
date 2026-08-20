@@ -4,6 +4,7 @@ import {
   check,
   integer,
   pgTable,
+  primaryKey,
   serial,
   text,
   uniqueIndex,
@@ -225,6 +226,84 @@ export const planRevisionParts = pgTable("plan_revision_parts", {
   manifestSource: text("manifest_source"),
   artifactDigest: text("artifact_digest"),
 });
+
+export const requiredUnits = pgTable(
+  "required_units",
+  {
+    token: text("token").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    createdInRevisionId: integer("created_in_revision_id")
+      .notNull()
+      .references(() => planRevisions.id, { onDelete: "cascade" }),
+    objectName: text("object_name").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_required_units_object_name_ci").on(sql`lower(${t.objectName})`),
+    check("chk_required_units_token", sql`${t.token} ~ '^ppu_[0-9a-f]{32}$'`),
+    check(
+      "chk_required_units_object_name",
+      sql`length(${t.objectName}) BETWEEN 1 AND 200
+          AND right(${t.objectName}, length(${t.token}) + 2) = '__' || ${t.token}`,
+    ),
+  ],
+);
+
+export const planRevisionRequiredUnitSets = pgTable(
+  "plan_revision_required_unit_sets",
+  {
+    revisionId: integer("revision_id")
+      .primaryKey()
+      .references(() => planRevisions.id, { onDelete: "cascade" }),
+    tenantId: text("tenant_id").notNull(),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    format: text("format").notNull(),
+    expectedUnitCount: integer("expected_unit_count").notNull(),
+    mappingDigest: text("mapping_digest").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    check("chk_plan_revision_required_unit_sets_format", sql`${t.format} = 'required-unit-map-v1'`),
+    check("chk_plan_revision_required_unit_sets_count", sql`${t.expectedUnitCount} >= 0`),
+  ],
+);
+
+export const planRevisionRequiredUnits = pgTable(
+  "plan_revision_required_units",
+  {
+    tenantId: text("tenant_id").notNull(),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => planRevisions.id, { onDelete: "cascade" }),
+    revisionPartId: integer("revision_part_id")
+      .notNull()
+      .references(() => planRevisionParts.id, { onDelete: "cascade" }),
+    unitIndex: integer("unit_index").notNull(),
+    requiredUnitToken: text("required_unit_token")
+      .notNull()
+      .references(() => requiredUnits.token, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({
+      name: "pk_plan_revision_required_units",
+      columns: [t.tenantId, t.revisionId, t.revisionPartId, t.unitIndex],
+    }),
+    uniqueIndex("uq_plan_revision_required_units_token").on(
+      t.tenantId,
+      t.revisionId,
+      t.requiredUnitToken,
+    ),
+    check(
+      "chk_plan_revision_required_units_index",
+      sql`${t.unitIndex} BETWEEN 0 AND 9999`,
+    ),
+  ],
+);
 
 export const planDrafts = pgTable(
   "plan_drafts",
@@ -739,4 +818,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 22;
+export const currentSchemaVersion = 23;

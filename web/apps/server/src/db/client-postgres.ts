@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import * as schema from "./schema-pg.js";
 import { currentSchemaVersion, schemaVersionKey } from "./schema-pg.js";
+import type {
+  RequiredUnitBackfillCommandResult,
+  RequiredUnitBackfillDependencies,
+} from "./required-units.js";
 import {
   POSTGRES_SYNC_MAX_RESULT_BYTES,
   POSTGRES_SYNC_MAX_RESULT_ROWS,
@@ -962,6 +966,195 @@ export const postgresPostInitMigrations: string[] = [
       END IF;
     END
   $block$`,
+  `CREATE TABLE IF NOT EXISTS required_units (
+    token TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    created_in_revision_id INTEGER NOT NULL REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    object_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CONSTRAINT chk_required_units_token CHECK (token ~ '^ppu_[0-9a-f]{32}$'),
+    CONSTRAINT chk_required_units_object_name CHECK (
+      length(object_name) BETWEEN 1 AND 200
+      AND right(object_name, length(token) + 2) = '__' || token
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_required_units_object_name_ci
+    ON required_units (lower(object_name))`,
+  `CREATE TABLE IF NOT EXISTS plan_revision_required_unit_sets (
+    revision_id INTEGER PRIMARY KEY REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    format TEXT NOT NULL CONSTRAINT chk_plan_revision_required_unit_sets_format
+      CHECK (format = 'required-unit-map-v1'),
+    expected_unit_count INTEGER NOT NULL CONSTRAINT chk_plan_revision_required_unit_sets_count
+      CHECK (expected_unit_count >= 0),
+    mapping_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS plan_revision_required_units (
+    tenant_id TEXT NOT NULL,
+    revision_id INTEGER NOT NULL REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    revision_part_id INTEGER NOT NULL REFERENCES plan_revision_parts(id) ON DELETE CASCADE,
+    unit_index INTEGER NOT NULL CONSTRAINT chk_plan_revision_required_units_index
+      CHECK (unit_index BETWEEN 0 AND 9999),
+    required_unit_token TEXT NOT NULL REFERENCES required_units(token) ON DELETE CASCADE,
+    CONSTRAINT pk_plan_revision_required_units
+      PRIMARY KEY (tenant_id, revision_id, revision_part_id, unit_index),
+    CONSTRAINT uq_plan_revision_required_units_token
+      UNIQUE (tenant_id, revision_id, required_unit_token)
+  )`,
+  `CREATE OR REPLACE FUNCTION validate_required_unit_ownership() RETURNS trigger AS $function$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+          FROM build_profiles profile
+          JOIN plan_revisions revision
+            ON revision.id = NEW.created_in_revision_id
+           AND revision.profile_id = profile.id
+           AND revision.tenant_id = profile.tenant_id
+         WHERE profile.id = NEW.profile_id
+           AND profile.tenant_id = NEW.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Required unit ownership violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION validate_plan_revision_required_unit_ownership()
+    RETURNS trigger AS $function$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM plan_revision_required_unit_sets set_header
+         WHERE set_header.revision_id = NEW.revision_id
+      ) OR NOT EXISTS (
+        SELECT 1
+          FROM plan_revisions revision
+          JOIN plan_revision_parts part
+            ON part.id = NEW.revision_part_id
+           AND part.revision_id = revision.id
+           AND part.tenant_id = revision.tenant_id
+          JOIN required_units unit
+            ON unit.token = NEW.required_unit_token
+           AND unit.profile_id = revision.profile_id
+           AND unit.tenant_id = revision.tenant_id
+         WHERE revision.id = NEW.revision_id
+           AND revision.tenant_id = NEW.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Required-unit mapping ownership violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION validate_plan_revision_required_unit_set()
+    RETURNS trigger AS $function$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM plan_revisions revision
+         WHERE revision.id = NEW.revision_id
+           AND revision.profile_id = NEW.profile_id
+           AND revision.tenant_id = NEW.tenant_id
+      ) OR NEW.expected_unit_count <> (
+        SELECT count(*) FROM plan_revision_required_units mapping
+         WHERE mapping.tenant_id = NEW.tenant_id
+           AND mapping.revision_id = NEW.revision_id
+      ) THEN
+        RAISE EXCEPTION 'Required-unit set ownership or count violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION enforce_required_unit_immutable() RETURNS trigger AS $function$
+    BEGIN
+      IF TG_OP = 'UPDATE' OR EXISTS (
+        SELECT 1 FROM build_profiles profile
+         WHERE profile.id = OLD.profile_id AND profile.tenant_id = OLD.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Required unit is immutable';
+      END IF;
+      RETURN OLD;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION enforce_plan_revision_required_unit_immutable()
+    RETURNS trigger AS $function$
+    BEGIN
+      IF TG_OP = 'UPDATE' OR EXISTS (
+        SELECT 1
+          FROM plan_revisions revision
+          JOIN build_profiles profile
+            ON profile.id = revision.profile_id
+           AND profile.tenant_id = revision.tenant_id
+         WHERE revision.id = OLD.revision_id
+           AND revision.tenant_id = OLD.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Required-unit mapping is immutable';
+      END IF;
+      RETURN OLD;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION enforce_plan_revision_required_unit_set_immutable()
+    RETURNS trigger AS $function$
+    BEGIN
+      IF TG_OP = 'UPDATE' OR EXISTS (
+        SELECT 1
+          FROM plan_revisions revision
+          JOIN build_profiles profile
+            ON profile.id = revision.profile_id
+           AND profile.tenant_id = revision.tenant_id
+         WHERE revision.id = OLD.revision_id
+           AND revision.tenant_id = OLD.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Required-unit set is immutable';
+      END IF;
+      RETURN OLD;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `DO $block$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_required_units_ownership_insert') THEN
+        CREATE TRIGGER trg_required_units_ownership_insert
+          BEFORE INSERT ON required_units
+          FOR EACH ROW EXECUTE FUNCTION validate_required_unit_ownership();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_required_units_immutable_write') THEN
+        CREATE TRIGGER trg_required_units_immutable_write
+          BEFORE UPDATE OR DELETE ON required_units
+          FOR EACH ROW EXECUTE FUNCTION enforce_required_unit_immutable();
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+         WHERE tgname = 'trg_plan_revision_required_units_ownership_insert'
+      ) THEN
+        CREATE TRIGGER trg_plan_revision_required_units_ownership_insert
+          BEFORE INSERT ON plan_revision_required_units
+          FOR EACH ROW EXECUTE FUNCTION validate_plan_revision_required_unit_ownership();
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+         WHERE tgname = 'trg_plan_revision_required_units_immutable_write'
+      ) THEN
+        CREATE TRIGGER trg_plan_revision_required_units_immutable_write
+          BEFORE UPDATE OR DELETE ON plan_revision_required_units
+          FOR EACH ROW EXECUTE FUNCTION enforce_plan_revision_required_unit_immutable();
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+         WHERE tgname = 'trg_plan_revision_required_unit_sets_ownership_insert'
+      ) THEN
+        CREATE TRIGGER trg_plan_revision_required_unit_sets_ownership_insert
+          BEFORE INSERT ON plan_revision_required_unit_sets
+          FOR EACH ROW EXECUTE FUNCTION validate_plan_revision_required_unit_set();
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+         WHERE tgname = 'trg_plan_revision_required_unit_sets_immutable_write'
+      ) THEN
+        CREATE TRIGGER trg_plan_revision_required_unit_sets_immutable_write
+          BEFORE UPDATE OR DELETE ON plan_revision_required_unit_sets
+          FOR EACH ROW EXECUTE FUNCTION enforce_plan_revision_required_unit_set_immutable();
+      END IF;
+    END
+  $block$`,
 ];
 
 export class PostgresDatabase {
@@ -1011,6 +1204,12 @@ export class PostgresDatabase {
     if (!this.pool) return false;
     await this.pool.query("SELECT 1");
     return true;
+  }
+
+  backfillCurrentRequiredUnitSets(
+    _dependencies: RequiredUnitBackfillDependencies = {},
+  ): RequiredUnitBackfillCommandResult {
+    return { kind: "transaction_unavailable" };
   }
 
   async close(): Promise<void> {

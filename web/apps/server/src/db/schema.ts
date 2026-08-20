@@ -2,6 +2,7 @@ import {
   type AnySQLiteColumn,
   check,
   integer,
+  primaryKey,
   sqliteTable,
   text,
   uniqueIndex,
@@ -223,6 +224,89 @@ export const planRevisionParts = sqliteTable("plan_revision_parts", {
   manifestSource: text("manifest_source"),
   artifactDigest: text("artifact_digest"),
 });
+
+export const requiredUnits = sqliteTable(
+  "required_units",
+  {
+    token: text("token").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    createdInRevisionId: integer("created_in_revision_id")
+      .notNull()
+      .references(() => planRevisions.id, { onDelete: "cascade" }),
+    objectName: text("object_name").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_required_units_object_name_ci").on(sql`lower(${t.objectName})`),
+    check(
+      "chk_required_units_token",
+      sql`length(${t.token}) = 36
+          AND substr(${t.token}, 1, 4) = 'ppu_'
+          AND substr(${t.token}, 5) NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check(
+      "chk_required_units_object_name",
+      sql`length(${t.objectName}) BETWEEN 1 AND 200
+          AND substr(${t.objectName}, -(length(${t.token}) + 2)) = '__' || ${t.token}`,
+    ),
+  ],
+);
+
+export const planRevisionRequiredUnitSets = sqliteTable(
+  "plan_revision_required_unit_sets",
+  {
+    revisionId: integer("revision_id")
+      .primaryKey()
+      .references(() => planRevisions.id, { onDelete: "cascade" }),
+    tenantId: text("tenant_id").notNull(),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    format: text("format").notNull(),
+    expectedUnitCount: integer("expected_unit_count").notNull(),
+    mappingDigest: text("mapping_digest").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    check("chk_plan_revision_required_unit_sets_format", sql`${t.format} = 'required-unit-map-v1'`),
+    check("chk_plan_revision_required_unit_sets_count", sql`${t.expectedUnitCount} >= 0`),
+  ],
+);
+
+export const planRevisionRequiredUnits = sqliteTable(
+  "plan_revision_required_units",
+  {
+    tenantId: text("tenant_id").notNull(),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => planRevisions.id, { onDelete: "cascade" }),
+    revisionPartId: integer("revision_part_id")
+      .notNull()
+      .references(() => planRevisionParts.id, { onDelete: "cascade" }),
+    unitIndex: integer("unit_index").notNull(),
+    requiredUnitToken: text("required_unit_token")
+      .notNull()
+      .references(() => requiredUnits.token, { onDelete: "cascade" }),
+  },
+  (t) => [
+    primaryKey({
+      name: "pk_plan_revision_required_units",
+      columns: [t.tenantId, t.revisionId, t.revisionPartId, t.unitIndex],
+    }),
+    uniqueIndex("uq_plan_revision_required_units_token").on(
+      t.tenantId,
+      t.revisionId,
+      t.requiredUnitToken,
+    ),
+    check(
+      "chk_plan_revision_required_units_index",
+      sql`${t.unitIndex} BETWEEN 0 AND 9999`,
+    ),
+  ],
+);
 
 export const planDrafts = sqliteTable(
   "plan_drafts",
@@ -743,7 +827,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 22;
+export const currentSchemaVersion = 23;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -1598,5 +1682,146 @@ export const schemaMigrations: string[] = [
     )
     BEGIN
       SELECT RAISE(ABORT, 'Plan draft Part ownership requires an open parent');
+    END`,
+  `CREATE TABLE IF NOT EXISTS required_units (
+    token TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    created_in_revision_id INTEGER NOT NULL REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    object_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    CHECK (
+      length(token) = 36
+      AND substr(token, 1, 4) = 'ppu_'
+      AND substr(token, 5) NOT GLOB '*[^0-9a-f]*'
+    ),
+    CHECK (
+      length(object_name) BETWEEN 1 AND 200
+      AND substr(object_name, -(length(token) + 2)) = '__' || token
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_required_units_object_name_ci
+    ON required_units (lower(object_name))`,
+  `CREATE TABLE IF NOT EXISTS plan_revision_required_unit_sets (
+    revision_id INTEGER PRIMARY KEY REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    format TEXT NOT NULL CHECK (format = 'required-unit-map-v1'),
+    expected_unit_count INTEGER NOT NULL CHECK (expected_unit_count >= 0),
+    mapping_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS plan_revision_required_units (
+    tenant_id TEXT NOT NULL,
+    revision_id INTEGER NOT NULL REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    revision_part_id INTEGER NOT NULL REFERENCES plan_revision_parts(id) ON DELETE CASCADE,
+    unit_index INTEGER NOT NULL CHECK (unit_index BETWEEN 0 AND 9999),
+    required_unit_token TEXT NOT NULL REFERENCES required_units(token) ON DELETE CASCADE,
+    PRIMARY KEY (tenant_id, revision_id, revision_part_id, unit_index),
+    UNIQUE (tenant_id, revision_id, required_unit_token)
+  )`,
+  `CREATE TRIGGER IF NOT EXISTS trg_required_units_ownership_insert
+    BEFORE INSERT ON required_units
+    WHEN NOT EXISTS (
+      SELECT 1
+        FROM build_profiles profile
+        JOIN plan_revisions revision
+          ON revision.id = NEW.created_in_revision_id
+         AND revision.profile_id = profile.id
+         AND revision.tenant_id = profile.tenant_id
+       WHERE profile.id = NEW.profile_id
+         AND profile.tenant_id = NEW.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required unit ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_required_units_immutable_update
+    BEFORE UPDATE ON required_units
+    BEGIN
+      SELECT RAISE(ABORT, 'Required unit is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_required_units_immutable_delete
+    BEFORE DELETE ON required_units
+    WHEN EXISTS (
+      SELECT 1 FROM build_profiles profile
+       WHERE profile.id = OLD.profile_id AND profile.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required unit is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revision_required_units_ownership_insert
+    BEFORE INSERT ON plan_revision_required_units
+    WHEN EXISTS (
+      SELECT 1 FROM plan_revision_required_unit_sets set_header
+       WHERE set_header.revision_id = NEW.revision_id
+    ) OR NOT EXISTS (
+      SELECT 1
+        FROM plan_revisions revision
+        JOIN plan_revision_parts part
+          ON part.id = NEW.revision_part_id
+         AND part.revision_id = revision.id
+         AND part.tenant_id = revision.tenant_id
+        JOIN required_units unit
+          ON unit.token = NEW.required_unit_token
+         AND unit.profile_id = revision.profile_id
+         AND unit.tenant_id = revision.tenant_id
+       WHERE revision.id = NEW.revision_id
+         AND revision.tenant_id = NEW.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit mapping ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revision_required_units_immutable_update
+    BEFORE UPDATE ON plan_revision_required_units
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit mapping is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revision_required_units_immutable_delete
+    BEFORE DELETE ON plan_revision_required_units
+    WHEN EXISTS (
+      SELECT 1
+        FROM plan_revisions revision
+        JOIN build_profiles profile
+          ON profile.id = revision.profile_id
+         AND profile.tenant_id = revision.tenant_id
+       WHERE revision.id = OLD.revision_id
+         AND revision.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit mapping is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revision_required_unit_sets_ownership_insert
+    BEFORE INSERT ON plan_revision_required_unit_sets
+    WHEN NOT EXISTS (
+      SELECT 1 FROM plan_revisions revision
+       WHERE revision.id = NEW.revision_id
+         AND revision.profile_id = NEW.profile_id
+         AND revision.tenant_id = NEW.tenant_id
+    ) OR NEW.expected_unit_count <> (
+      SELECT count(*) FROM plan_revision_required_units mapping
+       WHERE mapping.tenant_id = NEW.tenant_id
+         AND mapping.revision_id = NEW.revision_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit set ownership or count violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revision_required_unit_sets_immutable_update
+    BEFORE UPDATE ON plan_revision_required_unit_sets
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit set is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_revision_required_unit_sets_immutable_delete
+    BEFORE DELETE ON plan_revision_required_unit_sets
+    WHEN EXISTS (
+      SELECT 1
+        FROM plan_revisions revision
+        JOIN build_profiles profile
+          ON profile.id = revision.profile_id
+         AND profile.tenant_id = revision.tenant_id
+       WHERE revision.id = OLD.revision_id
+         AND revision.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit set is immutable');
     END`,
 ];

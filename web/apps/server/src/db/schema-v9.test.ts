@@ -61,6 +61,39 @@ const V19_TABLES = ["plan_revisions", "plan_revision_parts"];
 
 const V20_TABLES = ["plan_drafts", "plan_draft_inputs", "plan_draft_parts"];
 
+const V23_TABLES = [
+  "required_units",
+  "plan_revision_required_unit_sets",
+  "plan_revision_required_units",
+];
+
+const V23_COLUMNS: Record<string, string[]> = {
+  required_units: [
+    "token",
+    "tenant_id",
+    "profile_id",
+    "created_in_revision_id",
+    "object_name",
+    "created_at",
+  ],
+  plan_revision_required_unit_sets: [
+    "revision_id",
+    "tenant_id",
+    "profile_id",
+    "format",
+    "expected_unit_count",
+    "mapping_digest",
+    "created_at",
+  ],
+  plan_revision_required_units: [
+    "tenant_id",
+    "revision_id",
+    "revision_part_id",
+    "unit_index",
+    "required_unit_token",
+  ],
+};
+
 const V20_COLUMNS: Record<string, string[]> = {
   plan_drafts: [
     "id",
@@ -287,7 +320,7 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v22 tables and records schema version 22", () => {
+  it("creates the v15-v23 tables and records schema version 23", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
       for (const table of [
@@ -296,6 +329,7 @@ describe("schema v9-v13 (SQLite)", () => {
         ...V18_TABLES,
         ...V19_TABLES,
         ...V20_TABLES,
+        ...V23_TABLES,
       ]) {
         expect(tables, `missing table ${table}`).toContain(table);
       }
@@ -303,7 +337,7 @@ describe("schema v9-v13 (SQLite)", () => {
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "22" });
+      ).toMatchObject({ value: "23" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -885,8 +919,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(22);
-    expect(pgSchema.currentSchemaVersion).toBe(22);
+    expect(sqliteSchema.currentSchemaVersion).toBe(23);
+    expect(pgSchema.currentSchemaVersion).toBe(23);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -1017,6 +1051,30 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
       /source\.state = 'abandoned'[\s\S]*source\.lifecycle_version = NEW\.rebased_from_lifecycle_version[\s\S]*source\.snapshot_digest = NEW\.rebased_from_snapshot_digest/i,
     );
     expect(POSTGRES_DDL).toMatch(/source\.id <> NEW\.id/i);
+  });
+
+  it("creates the v23 Required-unit ledger and durable guards in Postgres", () => {
+    for (const [table, expected] of Object.entries(V23_COLUMNS)) {
+      expect(pgCreatedColumns(table)).toEqual(expect.arrayContaining(expected));
+    }
+    expect(POSTGRES_DDL).toMatch(/token ~ '\^ppu_\[0-9a-f\]\{32\}\$'/i);
+    expect(POSTGRES_DDL).toContain("uq_required_units_object_name_ci");
+    expect(POSTGRES_DDL).toContain("pk_plan_revision_required_units");
+    expect(POSTGRES_DDL).toContain("uq_plan_revision_required_units_token");
+    expect(POSTGRES_DDL).toContain("trg_required_units_ownership_insert");
+    expect(POSTGRES_DDL).toContain("trg_required_units_immutable_write");
+    expect(POSTGRES_DDL).toContain(
+      "trg_plan_revision_required_units_ownership_insert",
+    );
+    expect(POSTGRES_DDL).toContain(
+      "trg_plan_revision_required_units_immutable_write",
+    );
+    expect(POSTGRES_DDL).toContain(
+      "trg_plan_revision_required_unit_sets_ownership_insert",
+    );
+    expect(POSTGRES_DDL).toContain(
+      "trg_plan_revision_required_unit_sets_immutable_write",
+    );
   });
 
   it("adds v13 profile-sync provenance columns on slicer profile tables", () => {

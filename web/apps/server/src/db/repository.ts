@@ -114,6 +114,12 @@ import {
   type PlanSnapshotPart,
 } from "../services/plan-drafts.js";
 import { sha256File } from "../services/artifact-digest.js";
+import {
+  digestRequiredUnitMap,
+  parseRequiredUnitToken,
+  REQUIRED_UNIT_MAP_FORMAT,
+  validateRequiredUnitObjectName,
+} from "../services/required-units.js";
 
 function docTitleFromPath(path: string): string {
   const base = basename(path);
@@ -135,6 +141,9 @@ export type SchemaTables = Pick<
   | "planAcceptedInputSets"
   | "planRevisions"
   | "planRevisionParts"
+  | "requiredUnits"
+  | "planRevisionRequiredUnitSets"
+  | "planRevisionRequiredUnits"
   | "planDrafts"
   | "planDraftInputs"
   | "planDraftParts"
@@ -186,6 +195,28 @@ export type PlanRevisionPartRow = typeof defaultSchema.planRevisionParts.$inferS
 export type PlanDraftRow = typeof defaultSchema.planDrafts.$inferSelect;
 export type PlanDraftInputRow = typeof defaultSchema.planDraftInputs.$inferSelect;
 export type PlanDraftPartRow = typeof defaultSchema.planDraftParts.$inferSelect;
+
+export type RequiredUnitView = {
+  readonly token: string;
+  readonly objectName: string;
+  readonly revisionPartId: number;
+  readonly unitIndex: number;
+  readonly required: boolean;
+  readonly completed: boolean;
+  readonly assembled: boolean;
+};
+
+export type ReadCurrentRequiredUnitSetResult =
+  | {
+      readonly kind: "unavailable";
+      readonly reason: "no_accepted_revision" | "compatibility_dirty" | "uninitialized";
+    }
+  | {
+      readonly kind: "ready";
+      readonly revisionId: number;
+      readonly mappingDigest: string;
+      readonly units: readonly RequiredUnitView[];
+    };
 
 export type RecomputePlanDraftResult =
   | { readonly kind: "created"; readonly draft: PlanDraftSnapshot }
@@ -677,6 +708,246 @@ export class AppRepository {
       format_version: row.formatVersion === 2 ? 2 : 1,
       inputs,
     };
+  }
+
+  readCurrentRequiredUnitSet(profileId: number): ReadCurrentRequiredUnitSetResult {
+    const profile = this.db
+      .select({
+        id: this.schema.buildProfiles.id,
+        acceptedPlanRevisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
+        acceptedPlanVersion: this.schema.buildProfiles.acceptedPlanVersion,
+      })
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, profileId),
+        ),
+      )
+      .get();
+    if (!profile) throw new Error("Profile not found");
+    if (profile.acceptedPlanRevisionId == null) {
+      return {
+        kind: "unavailable",
+        reason:
+          profile.acceptedPlanVersion === 0
+            ? "no_accepted_revision"
+            : "compatibility_dirty",
+      };
+    }
+    if (profile.acceptedPlanVersion <= 0) {
+      throw new Error("Accepted Plan baseline is corrupt");
+    }
+    const revisionId = profile.acceptedPlanRevisionId;
+    const revision = this.db
+      .select({ id: this.schema.planRevisions.id })
+      .from(this.schema.planRevisions)
+      .where(
+        and(
+          eq(this.schema.planRevisions.id, revisionId),
+          eq(this.schema.planRevisions.tenantId, this.tenantId),
+          eq(this.schema.planRevisions.profileId, profileId),
+        ),
+      )
+      .get();
+    if (!revision) throw new Error("Accepted Plan revision ownership is corrupt");
+    const set = this.db
+      .select()
+      .from(this.schema.planRevisionRequiredUnitSets)
+      .where(
+        and(
+          eq(this.schema.planRevisionRequiredUnitSets.revisionId, revisionId),
+          eq(this.schema.planRevisionRequiredUnitSets.tenantId, this.tenantId),
+          eq(this.schema.planRevisionRequiredUnitSets.profileId, profileId),
+        ),
+      )
+      .get();
+    if (!set) {
+      const partialMapping = this.db
+        .select({ token: this.schema.planRevisionRequiredUnits.requiredUnitToken })
+        .from(this.schema.planRevisionRequiredUnits)
+        .where(
+          and(
+            eq(this.schema.planRevisionRequiredUnits.tenantId, this.tenantId),
+            eq(this.schema.planRevisionRequiredUnits.revisionId, revisionId),
+          ),
+        )
+        .limit(1)
+        .get();
+      const partialUnit = this.db
+        .select({ token: this.schema.requiredUnits.token })
+        .from(this.schema.requiredUnits)
+        .where(
+          and(
+            eq(this.schema.requiredUnits.tenantId, this.tenantId),
+            eq(this.schema.requiredUnits.profileId, profileId),
+            eq(this.schema.requiredUnits.createdInRevisionId, revisionId),
+          ),
+        )
+        .limit(1)
+        .get();
+      if (partialMapping || partialUnit) {
+        throw new Error("Required-unit set is partial");
+      }
+      return { kind: "unavailable", reason: "uninitialized" };
+    }
+    if (set.format !== REQUIRED_UNIT_MAP_FORMAT) {
+      throw new Error("Required-unit set format is corrupt");
+    }
+    const parts = this.db
+      .select({
+        id: this.schema.planRevisionParts.id,
+        quantityEffective: this.schema.planRevisionParts.quantityEffective,
+        included: this.schema.planRevisionParts.included,
+        projectionPartId: this.schema.planRevisionParts.projectionPartId,
+      })
+      .from(this.schema.planRevisionParts)
+      .where(
+        and(
+          eq(this.schema.planRevisionParts.tenantId, this.tenantId),
+          eq(this.schema.planRevisionParts.revisionId, revisionId),
+        ),
+      )
+      .orderBy(asc(this.schema.planRevisionParts.id))
+      .all();
+    let expectedUnitCount = 0;
+    for (const part of parts) {
+      if (part.projectionPartId == null) {
+        throw new Error("Accepted Plan revision Part has no compatibility projection ID");
+      }
+      if (
+        !Number.isSafeInteger(part.quantityEffective) ||
+        part.quantityEffective < 1 ||
+        part.quantityEffective > 10_000
+      ) {
+        throw new Error(`Accepted Plan revision Part ${part.id} has invalid quantity`);
+      }
+      expectedUnitCount += part.quantityEffective;
+    }
+    const mappings = this.db
+      .select({
+        revisionPartId: this.schema.planRevisionRequiredUnits.revisionPartId,
+        unitIndex: this.schema.planRevisionRequiredUnits.unitIndex,
+        token: this.schema.planRevisionRequiredUnits.requiredUnitToken,
+        objectName: this.schema.requiredUnits.objectName,
+        completed: this.schema.printProgress.completed,
+        assembled: this.schema.printProgress.assembled,
+      })
+      .from(this.schema.planRevisionRequiredUnits)
+      .innerJoin(
+        this.schema.requiredUnits,
+        and(
+          eq(
+            this.schema.requiredUnits.token,
+            this.schema.planRevisionRequiredUnits.requiredUnitToken,
+          ),
+          eq(this.schema.requiredUnits.tenantId, this.tenantId),
+          eq(this.schema.requiredUnits.profileId, profileId),
+        ),
+      )
+      .innerJoin(
+        this.schema.planRevisionParts,
+        and(
+          eq(
+            this.schema.planRevisionParts.id,
+            this.schema.planRevisionRequiredUnits.revisionPartId,
+          ),
+          eq(this.schema.planRevisionParts.revisionId, revisionId),
+          eq(this.schema.planRevisionParts.tenantId, this.tenantId),
+        ),
+      )
+      .leftJoin(
+        this.schema.printProgress,
+        and(
+          eq(this.schema.printProgress.tenantId, this.tenantId),
+          eq(
+            this.schema.printProgress.partId,
+            this.schema.planRevisionParts.projectionPartId,
+          ),
+          eq(
+            this.schema.printProgress.unitIndex,
+            this.schema.planRevisionRequiredUnits.unitIndex,
+          ),
+        ),
+      )
+      .where(
+        and(
+          eq(this.schema.planRevisionRequiredUnits.tenantId, this.tenantId),
+          eq(this.schema.planRevisionRequiredUnits.revisionId, revisionId),
+        ),
+      )
+      .orderBy(
+        asc(this.schema.planRevisionRequiredUnits.revisionPartId),
+        asc(this.schema.planRevisionRequiredUnits.unitIndex),
+      )
+      .all();
+    if (set.expectedUnitCount !== expectedUnitCount || mappings.length !== expectedUnitCount) {
+      throw new Error("Required-unit set is incomplete");
+    }
+    const partById = new Map(parts.map((part) => [part.id, part]));
+    const nextIndex = new Map<number, number>();
+    const units = mappings.map((mapping): RequiredUnitView => {
+      const part = partById.get(mapping.revisionPartId);
+      const expectedIndex = nextIndex.get(mapping.revisionPartId) ?? 0;
+      if (
+        !part ||
+        mapping.unitIndex !== expectedIndex ||
+        mapping.unitIndex >= part.quantityEffective
+      ) {
+        throw new Error("Required-unit set is incomplete");
+      }
+      nextIndex.set(mapping.revisionPartId, expectedIndex + 1);
+      parseRequiredUnitToken(mapping.token);
+      validateRequiredUnitObjectName(mapping.objectName, mapping.token);
+      const completed = mapping.completed ?? false;
+      const assembled = mapping.assembled ?? false;
+      if (assembled && !completed) {
+        throw new Error("Required-unit progress is corrupt");
+      }
+      return {
+        token: mapping.token,
+        objectName: mapping.objectName,
+        revisionPartId: mapping.revisionPartId,
+        unitIndex: mapping.unitIndex,
+        required: part.included,
+        completed,
+        assembled,
+      };
+    });
+    for (const part of parts) {
+      if ((nextIndex.get(part.id) ?? 0) !== part.quantityEffective) {
+        throw new Error("Required-unit set is incomplete");
+      }
+    }
+    const createdTokens = this.db
+      .select({ token: this.schema.requiredUnits.token })
+      .from(this.schema.requiredUnits)
+      .where(
+        and(
+          eq(this.schema.requiredUnits.tenantId, this.tenantId),
+          eq(this.schema.requiredUnits.profileId, profileId),
+          eq(this.schema.requiredUnits.createdInRevisionId, revisionId),
+        ),
+      )
+      .all();
+    const mappedTokens = new Set(units.map((unit) => unit.token));
+    if (createdTokens.some(({ token }) => !mappedTokens.has(token))) {
+      throw new Error("Required-unit set contains an orphan unit");
+    }
+    const digest = digestRequiredUnitMap({
+      revisionId,
+      expectedUnitCount,
+      rows: units.map((unit) => ({
+        revisionPartId: unit.revisionPartId,
+        unitIndex: unit.unitIndex,
+        token: unit.token,
+        objectName: unit.objectName,
+      })),
+    });
+    if (digest !== set.mappingDigest) {
+      throw new Error("Required-unit set digest is corrupt");
+    }
+    return { kind: "ready", revisionId, mappingDigest: digest, units };
   }
 
   async ping(): Promise<boolean> {
