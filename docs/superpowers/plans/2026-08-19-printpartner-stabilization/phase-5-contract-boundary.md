@@ -9,6 +9,8 @@ at the browser boundary.
 
 The first implementation unit follows the
 [Source naming contract architecture](phase-5-source-naming-contract-architecture.md).
+The parsed browser boundary follows the
+[browser contract transport architecture](phase-5-browser-transport-architecture.md).
 
 ## Changes
 
@@ -28,12 +30,14 @@ Each change should cover one feature group and two or three files.
 
 ## Data structures
 
-Each endpoint has a shared input schema, output schema, and inferred TypeScript
-type. `engineFetch<T>()` receives the endpoint's success schema and shared error
-schema. It parses successful and error JSON before returning or throwing; it
-never casts response bodies to `T`. Malformed success bodies, malformed error
-bodies, non-2xx responses, and transport failures all map to one discriminated
-boundary error type while preserving safe status and request details.
+Each migrated endpoint has a shared input schema, output schema, and inferred
+TypeScript type. Its endpoint descriptor supplies success and error parsers to
+the contract request runner. The runner parses successful and error JSON before
+returning or throwing; it never casts response bodies to `T`. Malformed success
+bodies, malformed error bodies, non-2xx responses, and transport failures all
+map to one discriminated boundary error type while preserving safe status and
+request details. The old `engineFetch<T>()` remains visibly unvalidated until
+its callers migrate by feature family.
 The retained request-detail allowlist is method, route template, status,
 request ID, and correlation ID. Never retain or expose raw headers, query
 strings, request bodies, credentials, or provider payloads in this error.

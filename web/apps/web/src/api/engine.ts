@@ -3,9 +3,6 @@ import {
   DATE_FORMAT_DEFAULT,
   DATE_FORMAT_PRESETS,
   formatTimestamp,
-  parseSourceNamingEndpointError,
-  parseSourceNamingPutInput,
-  parseSourceNamingResponse,
   type AppUpdateCheckResponse,
   type AssistantActionApplyResponse,
   type AssistantChatMessage,
@@ -20,9 +17,6 @@ import {
   type JobSnapshot,
   type PartRow,
   type ProfileSummary,
-  type SourceNamingEndpointError,
-  type SourceNamingPutInput,
-  type SourceNamingResponse,
   type SourceSummary,
   type StlNamingFolderRule,
   type StlNamingProfile,
@@ -38,6 +32,11 @@ import {
   pickZipArchiveFileWeb,
   saveTextFileWeb,
 } from "@/lib/webFilePickers";
+import {
+  getEngineBaseUrl,
+  notifyEngineUnauthorized,
+  resolveEngineUrl,
+} from "./contractRequest";
 
 export type {
   AppUpdateCheckResponse,
@@ -61,22 +60,18 @@ export {
   formatTimestamp,
   type DateFormatId,
 };
+export { setEngineUnauthorizedHandler } from "./contractRequest";
+export {
+  fetchSourceNaming,
+  isSourceNamingNotFoundError,
+  saveSourceNaming,
+  sourceNamingErrorMessage,
+  SourceNamingRequestError,
+  type SourceNamingSettings,
+} from "./endpoints/sourceNaming";
 
 export function formatSyncTime(iso: string): string {
   return formatTimestamp(iso);
-}
-
-const API_BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
-const API_PREFIX = (import.meta.env.VITE_API_PREFIX ?? "").replace(/\/$/, "");
-
-function resolveEngineUrl(path: string): string {
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  const withPrefix = API_PREFIX ? `${API_PREFIX}${normalized}` : normalized;
-  if (API_BASE) return `${API_BASE}${withPrefix}`;
-  if (typeof window !== "undefined") {
-    return `${window.location.origin.replace(/\/$/, "")}${withPrefix}`;
-  }
-  return withPrefix;
 }
 
 export type SourceUpdateCheckSettings = {
@@ -606,13 +601,7 @@ export type ExportStlPackOptions = {
 };
 
 export async function engineBaseUrl(): Promise<string> {
-  return API_BASE;
-}
-
-let unauthorizedHandler: (() => void) | null = null;
-
-export function setEngineUnauthorizedHandler(fn: (() => void) | null): void {
-  unauthorizedHandler = fn;
+  return getEngineBaseUrl();
 }
 
 export type AuthUser = {
@@ -650,7 +639,7 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const res = await fetch(resolveEngineUrl(path), { ...init, headers, credentials: "include" });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     throw new Error(`Engine ${path} failed: 401`);
   }
   if (!res.ok) {
@@ -679,7 +668,7 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
 async function engineFetchText(path: string): Promise<string> {
   const res = await fetch(resolveEngineUrl(path), { credentials: "include" });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     throw new Error(`Engine ${path} failed: 401`);
   }
   if (!res.ok) {
@@ -1492,7 +1481,7 @@ export async function enqueuePrinterSend(options: {
     credentials: "include",
   });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     throw new Error("Queue failed: 401");
   }
   if (!res.ok) {
@@ -1592,7 +1581,7 @@ export async function startBambuConnectHandoff(options: {
     credentials: "include",
   });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     throw new Error("Bambu Connect handoff failed: 401");
   }
   if (!res.ok) {
@@ -1639,7 +1628,7 @@ export async function startPrinterUpload(options: {
     credentials: "include",
   });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     throw new Error("Printer upload failed: 401");
   }
   if (!res.ok) {
@@ -1977,8 +1966,6 @@ export type StlNamingPreviewResult = {
   part_slug: string;
 };
 
-export type SourceNamingSettings = SourceNamingResponse;
-
 export const DEFAULT_QUANTITY_REGEX = DEFAULT_STL_NAMING_PROFILE.quantity.regex;
 
 export function mergeStlNamingProfiles(
@@ -2029,127 +2016,6 @@ export async function previewStlNaming(body: {
     method: "POST",
     body: JSON.stringify(body),
   });
-}
-
-type SourceNamingMethod = "GET" | "PUT";
-
-export type SourceNamingRequestFailure =
-  | { readonly kind: "transport"; readonly method: SourceNamingMethod }
-  | { readonly kind: "unauthorized"; readonly method: SourceNamingMethod; readonly status: 401 }
-  | {
-      readonly kind: "malformed_success";
-      readonly method: SourceNamingMethod;
-      readonly status: number;
-    }
-  | {
-      readonly kind: "malformed_error";
-      readonly method: SourceNamingMethod;
-      readonly status: number;
-    }
-  | {
-      readonly kind: "endpoint";
-      readonly method: SourceNamingMethod;
-      readonly status: number;
-      readonly error: SourceNamingEndpointError;
-    };
-
-export class SourceNamingRequestError extends Error {
-  constructor(readonly failure: SourceNamingRequestFailure) {
-    const message =
-      failure.kind === "malformed_success"
-        ? "Source naming response was malformed"
-        : failure.kind === "malformed_error"
-          ? "Source naming error response was malformed"
-          : failure.kind === "endpoint"
-            ? failure.error.detail
-            : failure.kind === "unauthorized"
-              ? "Source naming request was unauthorized"
-              : "Source naming request failed";
-    super(message);
-    this.name = "SourceNamingRequestError";
-  }
-}
-
-export function isSourceNamingNotFoundError(error: unknown): boolean {
-  return (
-    error instanceof SourceNamingRequestError &&
-    error.failure.kind === "endpoint" &&
-    error.failure.error.code === "source_not_found"
-  );
-}
-
-async function sourceNamingRequest(
-  sourceId: number,
-  method: SourceNamingMethod,
-  input?: SourceNamingPutInput,
-): Promise<SourceNamingResponse> {
-  const parsedInput = input === undefined ? undefined : parseSourceNamingPutInput(input);
-  let response: Response;
-  try {
-    response = await fetch(resolveEngineUrl(`/sources/${sourceId}/naming`), {
-      method,
-      credentials: "include",
-      headers: parsedInput === undefined ? undefined : { "Content-Type": "application/json" },
-      body: parsedInput === undefined ? undefined : JSON.stringify(parsedInput),
-    });
-  } catch {
-    throw new SourceNamingRequestError({ kind: "transport", method });
-  }
-  if (response.status === 401) {
-    unauthorizedHandler?.();
-    throw new SourceNamingRequestError({ kind: "unauthorized", method, status: 401 });
-  }
-
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new SourceNamingRequestError({
-      kind: response.ok ? "malformed_success" : "malformed_error",
-      method,
-      status: response.status,
-    });
-  }
-
-  if (response.ok) {
-    try {
-      return parseSourceNamingResponse(payload);
-    } catch {
-      throw new SourceNamingRequestError({
-        kind: "malformed_success",
-        method,
-        status: response.status,
-      });
-    }
-  }
-
-  try {
-    const endpointError = parseSourceNamingEndpointError(payload, response.status);
-    throw new SourceNamingRequestError({
-      kind: "endpoint",
-      method,
-      status: response.status,
-      error: endpointError,
-    });
-  } catch (error) {
-    if (error instanceof SourceNamingRequestError) throw error;
-    throw new SourceNamingRequestError({
-      kind: "malformed_error",
-      method,
-      status: response.status,
-    });
-  }
-}
-
-export async function fetchSourceNaming(sourceId: number): Promise<SourceNamingResponse> {
-  return sourceNamingRequest(sourceId, "GET");
-}
-
-export async function saveSourceNaming(
-  sourceId: number,
-  body: SourceNamingPutInput,
-): Promise<SourceNamingResponse> {
-  return sourceNamingRequest(sourceId, "PUT", body);
 }
 
 export type ManifestRegistryEntry = {
@@ -3293,7 +3159,7 @@ export async function streamAssistantChat(
     signal,
   });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     handlers.onError("Authentication required");
     return;
   }

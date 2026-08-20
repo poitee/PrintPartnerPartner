@@ -41,7 +41,7 @@ describe("Source naming API boundary", () => {
       ),
     );
 
-    await expect(fetchSourceNaming(7)).rejects.toThrow(/source naming response/i);
+    await expect(fetchSourceNaming(7)).rejects.toThrow(/invalid response/i);
   });
 
   it("parses a valid response", async () => {
@@ -56,6 +56,20 @@ describe("Source naming API boundary", () => {
     );
 
     await expect(fetchSourceNaming(7)).resolves.toEqual(responseBody);
+  });
+
+  it("rejects an invalid Source id before fetch", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSourceNaming(0)).rejects.toMatchObject({
+      failure: {
+        kind: "invalid_request",
+        method: "GET",
+        route: "/sources/:sourceId/naming",
+      },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each(writeInputs)("serializes exactly one valid write variant", async (input) => {
@@ -87,6 +101,8 @@ describe("Source naming API boundary", () => {
     const request = fetchSourceNaming(7);
     await expect(request).rejects.toBeInstanceOf(SourceNamingRequestError);
     await expect(request).rejects.toSatisfy(isSourceNamingNotFoundError);
+    const error = await request.catch((value: unknown) => value);
+    expect(JSON.stringify(error)).not.toContain("Source not found");
   });
 
   it("rejects an endpoint error whose code does not match its HTTP status", async () => {

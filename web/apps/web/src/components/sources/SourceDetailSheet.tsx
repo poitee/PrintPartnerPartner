@@ -13,6 +13,7 @@ import {
   mergeStlNamingProfiles,
   saveImportRules,
   saveSourceNaming,
+  sourceNamingErrorMessage,
   type SourceNote,
   type SourceSummary,
   type StlNamingProfile,
@@ -129,7 +130,7 @@ export default function SourceDetailSheet({
         setNamingApiMissing(true);
         setNamingLoadError("Unable to load naming overrides because this Source no longer exists.");
       } else {
-        setNamingLoadError(e instanceof Error ? e.message : String(e));
+        setNamingLoadError(sourceNamingErrorMessage(e));
       }
     }
   }, []);
@@ -233,7 +234,7 @@ export default function SourceDetailSheet({
       await invalidateProfiles(queryClient);
       setNamingNote("Naming rules saved.");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = sourceNamingErrorMessage(e);
       setNamingLoadError(msg);
       toast.error(msg);
     } finally {
