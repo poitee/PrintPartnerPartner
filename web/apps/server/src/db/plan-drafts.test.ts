@@ -4,10 +4,31 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
 import { getDb, SqliteDatabase } from "./client.js";
 import { AppRepository } from "./repository.js";
 
 const tempDirs: string[] = [];
+
+const ACCEPTED_STATE_TABLES = [
+  "parts",
+  "print_progress",
+  "profile_layers",
+  "projects",
+  "plan_revisions",
+  "plan_revision_parts",
+  "plan_revision_input_sets",
+  "plan_revision_inputs",
+  "plan_accepted_input_sets",
+  "build_profiles",
+  "app_settings",
+];
+
+function snapshotTables(raw: Database.Database, tables: readonly string[]) {
+  return new Map(
+    tables.map((table) => [table, raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()]),
+  );
+}
 
 function fixture(): {
   database: SqliteDatabase;
@@ -58,6 +79,50 @@ function trackedSource(input: {
   });
   input.repo.activateSourceRevision({ sourceId: source.id, revisionId: revision.id, observed });
   return { source, revision, snapshotRoot };
+}
+
+function editableDraftFixture() {
+  const context = fixture();
+  const sourceRoot = join(context.database.reposDir, "editable-source");
+  mkdirSync(sourceRoot, { recursive: true });
+  writeFileSync(join(sourceRoot, "bracket.stl"), "solid bracket");
+  writeFileSync(join(sourceRoot, "gear.stl"), "solid gear");
+  const source = context.repo.createSource({
+    name: "Editable source",
+    source_kind: "local",
+    local_path: sourceRoot,
+  });
+  const profile = context.repo.createProfile("Editable Build", source.id);
+  const insertPart = context.raw.prepare(
+    `INSERT INTO parts (
+      tenant_id, profile_id, match_key, relative_path, filename, source_layer,
+      status, role, quantity_auto, quantity_effective, included, notes
+    ) VALUES ('default', ?, ?, ?, ?, 'base:Editable source',
+      'base', 'primary', ?, ?, 1, '')`,
+  );
+  const bracket = insertPart.run(
+    profile.id,
+    "bracket.stl",
+    "bracket.stl",
+    "bracket.stl",
+    1,
+    1,
+  );
+  insertPart.run(profile.id, "gear.stl", "gear.stl", "gear.stl", 2, 2);
+  context.raw
+    .prepare(
+      `INSERT INTO print_progress (tenant_id, part_id, unit_index, completed, assembled)
+       VALUES ('default', ?, 0, 1, 1)`,
+    )
+    .run(Number(bracket.lastInsertRowid));
+  backfillAcceptedPlanRevisions(context.raw, "2026-08-20T12:00:00.000Z");
+  const created = context.repo.recomputePlanDraft({
+    profileId: profile.id,
+    actor: "test:user",
+    idempotencyKey: "editable-draft",
+  });
+  if (created.kind !== "created") throw new Error("editable test draft was not created");
+  return { ...context, profile, source, draft: created.draft };
 }
 
 afterEach(() => {
@@ -768,6 +833,302 @@ describe("saved Plan drafts", () => {
       }),
     ).toEqual({ kind: "inputs_changed" });
     expect(raw.prepare("SELECT count(*) AS count FROM plan_drafts").get()).toEqual({ count: 0 });
+    database.close();
+  });
+
+  it("edits grouped draft Parts, updates the digest and diff, and persists across restart", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    const partIds = draft.parts.map((part) => part.id);
+    const acceptedBefore = snapshotTables(raw, ACCEPTED_STATE_TABLES);
+
+    const included = repo.editPlanDraftParts({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: draft.snapshotDigest,
+      decision: { kind: "set_included", partIds, value: false },
+    });
+
+    expect(included.kind).toBe("updated");
+    if (included.kind !== "updated") throw new Error("draft inclusion edit was not applied");
+    expect(included.draft.parts.every((part) => !part.included)).toBe(true);
+    expect(included.draft.snapshotDigest).not.toBe(draft.snapshotDigest);
+    const result = repo.editPlanDraftParts({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: included.draft.snapshotDigest,
+      decision: { kind: "set_quantity_override", partIds, value: 4 },
+    });
+    expect(result.kind).toBe("updated");
+    if (result.kind !== "updated") throw new Error("draft quantity edit was not applied");
+    expect(
+      result.draft.parts.map((part) => [part.quantityOverride, part.quantityEffective]),
+    ).toEqual([
+      [4, 4],
+      [4, 4],
+    ]);
+    const diff = repo.diffPlanDraft(profile.id, draft.id);
+    expect(diff.parts.changed).toHaveLength(2);
+    expect(diff.parts.changed.every((change) => change.fields.includes("included"))).toBe(true);
+    expect(
+      diff.parts.changed.every(
+        (change) =>
+          change.fields.includes("quantityOverride") &&
+          change.fields.includes("quantityEffective"),
+      ),
+    ).toBe(true);
+    for (const table of ACCEPTED_STATE_TABLES) {
+      expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(
+        acceptedBefore.get(table),
+      );
+    }
+
+    const root = database.dataDir;
+    database.close();
+    const reopened = new SqliteDatabase(root);
+    reopened.connect();
+    const reopenedRepo = new AppRepository(getDb(reopened), "default", reopened.reposDir);
+    expect(reopenedRepo.getPlanDraft(profile.id, draft.id)).toEqual(result.draft);
+    reopened.close();
+  });
+
+  it("updates only unsatisfied targets, converges an exact retry, and rejects a stale change", () => {
+    const { database, profile, repo, draft } = editableDraftFixture();
+    const firstId = draft.parts[0]?.id;
+    const secondId = draft.parts[1]?.id;
+    if (!firstId || !secondId) throw new Error("editable draft Parts are missing");
+    const first = repo.editPlanDraftParts({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: draft.snapshotDigest,
+      decision: { kind: "set_included", partIds: [firstId], value: false },
+    });
+    expect(first.kind).toBe("updated");
+    if (first.kind !== "updated") throw new Error("first draft edit was not applied");
+
+    const grouped = repo.editPlanDraftParts({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: first.draft.snapshotDigest,
+      decision: { kind: "set_included", partIds: [firstId, secondId], value: false },
+    });
+    expect(grouped.kind).toBe("updated");
+    if (grouped.kind !== "updated") throw new Error("grouped draft edit was not applied");
+
+    expect(
+      repo.editPlanDraftParts({
+        profileId: profile.id,
+        draftId: draft.id,
+        expectedSnapshotDigest: first.draft.snapshotDigest,
+        decision: { kind: "set_included", partIds: [secondId, firstId], value: false },
+      }),
+    ).toEqual({ kind: "unchanged", draft: grouped.draft });
+    expect(
+      repo.editPlanDraftParts({
+        profileId: profile.id,
+        draftId: draft.id,
+        expectedSnapshotDigest: draft.snapshotDigest,
+        decision: { kind: "set_included", partIds: [firstId], value: true },
+      }),
+    ).toEqual({ kind: "conflict", draft: grouped.draft });
+    database.close();
+  });
+
+  it("distinguishes a dirty accepted baseline from a different valid base", () => {
+    const dirty = editableDraftFixture();
+    dirty.raw
+      .prepare(
+        `UPDATE build_profiles
+            SET accepted_plan_revision_id = NULL, accepted_plan_version = 0
+          WHERE tenant_id = 'default' AND id = ?`,
+      )
+      .run(dirty.profile.id);
+    expect(
+      dirty.repo.editPlanDraftParts({
+        profileId: dirty.profile.id,
+        draftId: dirty.draft.id,
+        expectedSnapshotDigest: dirty.draft.snapshotDigest,
+        decision: {
+          kind: "set_included",
+          partIds: [dirty.draft.parts[0]?.id ?? 0],
+          value: false,
+        },
+      }),
+    ).toEqual({ kind: "accepted_baseline_required" });
+    expect(dirty.repo.getPlanDraft(dirty.profile.id, dirty.draft.id)).toEqual(dirty.draft);
+    dirty.database.close();
+
+    const moved = editableDraftFixture();
+    const acceptedId = moved.draft.baseRevisionId;
+    if (!acceptedId) throw new Error("accepted test revision is missing");
+    const nextRevision = moved.raw
+      .prepare(
+        `INSERT INTO plan_revisions (
+          tenant_id, profile_id, revision_number, parent_revision_id, input_set_id,
+          provenance_kind, digest_format, snapshot_digest, created_by, accepted_by,
+          created_at, accepted_at
+        ) VALUES ('default', ?, 2, ?, NULL, 'legacy', 'plan-revision-parts-v1', ?,
+          'test', 'test', ?, ?)`,
+      )
+      .run(
+        moved.profile.id,
+        acceptedId,
+        "9".repeat(64),
+        "2026-08-20T13:00:00.000Z",
+        "2026-08-20T13:00:00.000Z",
+      );
+    moved.raw
+      .prepare(
+        `UPDATE build_profiles
+            SET accepted_plan_revision_id = ?, accepted_plan_version = 2
+          WHERE tenant_id = 'default' AND id = ?`,
+      )
+      .run(Number(nextRevision.lastInsertRowid), moved.profile.id);
+    expect(
+      moved.repo.editPlanDraftParts({
+        profileId: moved.profile.id,
+        draftId: moved.draft.id,
+        expectedSnapshotDigest: moved.draft.snapshotDigest,
+        decision: {
+          kind: "set_included",
+          partIds: [moved.draft.parts[0]?.id ?? 0],
+          value: false,
+        },
+      }),
+    ).toEqual({ kind: "base_changed", draft: moved.draft });
+    moved.database.close();
+  });
+
+  it("rejects closed drafts and draft identities outside the tenant and Build", () => {
+    const abandoned = editableDraftFixture();
+    abandoned.raw
+      .prepare("UPDATE plan_drafts SET state = 'abandoned' WHERE id = ?")
+      .run(abandoned.draft.id);
+    expect(
+      abandoned.repo.editPlanDraftParts({
+        profileId: abandoned.profile.id,
+        draftId: abandoned.draft.id,
+        expectedSnapshotDigest: abandoned.draft.snapshotDigest,
+        decision: {
+          kind: "set_included",
+          partIds: [abandoned.draft.parts[0]?.id ?? 0],
+          value: false,
+        },
+      }),
+    ).toEqual({ kind: "not_open", state: "abandoned" });
+    abandoned.database.close();
+
+    const consumed = editableDraftFixture();
+    consumed.raw
+      .prepare("UPDATE plan_drafts SET state = 'consumed' WHERE id = ?")
+      .run(consumed.draft.id);
+    expect(
+      consumed.repo.editPlanDraftParts({
+        profileId: consumed.profile.id,
+        draftId: consumed.draft.id,
+        expectedSnapshotDigest: consumed.draft.snapshotDigest,
+        decision: {
+          kind: "set_included",
+          partIds: [consumed.draft.parts[0]?.id ?? 0],
+          value: false,
+        },
+      }),
+    ).toEqual({ kind: "not_open", state: "consumed" });
+
+    const firstId = consumed.draft.parts[0]?.id;
+    if (!firstId) throw new Error("editable draft Part is missing");
+    const otherTenant = new AppRepository(
+      getDb(consumed.database),
+      "farm-b",
+      consumed.database.reposDir,
+    );
+    expect(
+      otherTenant.editPlanDraftParts({
+        profileId: consumed.profile.id,
+        draftId: consumed.draft.id,
+        expectedSnapshotDigest: consumed.draft.snapshotDigest,
+        decision: { kind: "set_included", partIds: [firstId], value: false },
+      }),
+    ).toEqual({ kind: "not_found" });
+    const otherProfile = consumed.repo.createProfile("Other edit Build");
+    expect(
+      consumed.repo.editPlanDraftParts({
+        profileId: otherProfile.id,
+        draftId: consumed.draft.id,
+        expectedSnapshotDigest: consumed.draft.snapshotDigest,
+        decision: { kind: "set_included", partIds: [firstId], value: false },
+      }),
+    ).toEqual({ kind: "not_found" });
+    consumed.database.close();
+
+    const wrongPart = editableDraftFixture();
+    expect(
+      wrongPart.repo.editPlanDraftParts({
+        profileId: wrongPart.profile.id,
+        draftId: wrongPart.draft.id,
+        expectedSnapshotDigest: wrongPart.draft.snapshotDigest,
+        decision: { kind: "set_included", partIds: [999_999], value: false },
+      }),
+    ).toEqual({ kind: "not_found" });
+    wrongPart.database.close();
+  });
+
+  it("rolls back the draft digest when a selected Part update fails", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    const acceptedBefore = snapshotTables(raw, ACCEPTED_STATE_TABLES);
+    raw.exec(
+      `CREATE TRIGGER reject_draft_part_edit
+       BEFORE UPDATE OF included ON plan_draft_parts
+       BEGIN
+         SELECT RAISE(ABORT, 'injected draft Part edit failure');
+       END`,
+    );
+
+    expect(() =>
+      repo.editPlanDraftParts({
+        profileId: profile.id,
+        draftId: draft.id,
+        expectedSnapshotDigest: draft.snapshotDigest,
+        decision: {
+          kind: "set_included",
+          partIds: draft.parts.map((part) => part.id),
+          value: false,
+        },
+      }),
+    ).toThrow(/injected draft Part edit failure/i);
+    expect(repo.getPlanDraft(profile.id, draft.id)).toEqual(draft);
+    for (const table of ACCEPTED_STATE_TABLES) {
+      expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(
+        acceptedBefore.get(table),
+      );
+    }
+    database.close();
+  });
+
+  it("rejects an oversized quantity without changing draft or accepted state", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    const tables = [
+      ...ACCEPTED_STATE_TABLES,
+      "plan_drafts",
+      "plan_draft_inputs",
+      "plan_draft_parts",
+    ];
+    const before = snapshotTables(raw, tables);
+
+    expect(() =>
+      repo.editPlanDraftParts({
+        profileId: profile.id,
+        draftId: draft.id,
+        expectedSnapshotDigest: draft.snapshotDigest,
+        decision: {
+          kind: "set_quantity_override",
+          partIds: draft.parts.map((part) => part.id),
+          value: 10_001,
+        },
+      }),
+    ).toThrow(/quantity/i);
+    for (const table of tables) {
+      expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(before.get(table));
+    }
     database.close();
   });
 

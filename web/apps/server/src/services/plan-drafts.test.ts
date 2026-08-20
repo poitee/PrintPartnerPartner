@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { digestPlanDraft } from "./plan-drafts.js";
+import {
+  applyPlanDraftPartDecision,
+  digestPlanDraft,
+  MAX_PLAN_DRAFT_PART_QUANTITY,
+  type PlanDraftPartDecision,
+  type PlanDraftSnapshot,
+} from "./plan-drafts.js";
 
 type DigestInput = Parameters<typeof digestPlanDraft>[0];
 
@@ -59,6 +65,36 @@ function firstPart(value: DigestInput): DigestInput["parts"][number] {
   return part;
 }
 
+function draftFixture(): PlanDraftSnapshot {
+  const input = fixture();
+  const parts = [
+    { ...firstPart(input), id: 31, draftId: 5 },
+    {
+      ...firstPart(input),
+      id: 32,
+      draftId: 5,
+      baseRevisionPartId: 24,
+      partKey: "parts/gear.stl",
+      relativePath: "parts/gear.stl",
+      filename: "gear.stl",
+    },
+  ];
+  return {
+    id: 5,
+    profileId: 9,
+    baseRevisionId: input.baseRevisionId,
+    basePlanVersion: input.basePlanVersion,
+    state: "open",
+    digestFormat: "plan-draft-v1",
+    snapshotDigest: digestPlanDraft({ ...input, parts }),
+    createdBy: "test:user",
+    idempotencyKey: "draft-5",
+    createdAt: "2026-08-20T12:00:00.000Z",
+    inputs: input.inputs.map((row, index) => ({ ...row, id: index + 1, draftId: 5 })),
+    parts,
+  };
+}
+
 describe("Plan draft digest", () => {
   it("covers every semantic base, input, Part, and predecessor field", () => {
     const mutations: Array<{
@@ -104,5 +140,125 @@ describe("Plan draft digest", () => {
       mutation.mutate(changed);
       expect(digestPlanDraft(changed), mutation.label).not.toBe(original);
     }
+  });
+});
+
+describe("Plan draft Part decisions", () => {
+  it("applies grouped inclusion without mutating the complete input snapshot", () => {
+    const draft = draftFixture();
+    const before = structuredClone(draft);
+
+    const next = applyPlanDraftPartDecision({
+      draft,
+      decision: { kind: "set_included", partIds: [32, 31], value: false },
+    });
+
+    expect(next.parts.map((part) => ({ id: part.id, included: part.included }))).toEqual([
+      { id: 31, included: false },
+      { id: 32, included: false },
+    ]);
+    expect(next.snapshotDigest).not.toBe(draft.snapshotDigest);
+    expect(draft).toEqual(before);
+  });
+
+  it("sets and clears grouped quantity overrides and derives effective quantity", () => {
+    const draft = draftFixture();
+    const set = applyPlanDraftPartDecision({
+      draft,
+      decision: { kind: "set_quantity_override", partIds: [31, 32], value: 4 },
+    });
+    expect(
+      set.parts.map((part) => ({
+        id: part.id,
+        quantityOverride: part.quantityOverride,
+        quantityEffective: part.quantityEffective,
+      })),
+    ).toEqual([
+      { id: 31, quantityOverride: 4, quantityEffective: 4 },
+      { id: 32, quantityOverride: 4, quantityEffective: 4 },
+    ]);
+
+    const cleared = applyPlanDraftPartDecision({
+      draft: set,
+      decision: { kind: "set_quantity_override", partIds: [32, 31], value: null },
+    });
+    expect(
+      cleared.parts.map((part) => ({
+        id: part.id,
+        quantityOverride: part.quantityOverride,
+        quantityEffective: part.quantityEffective,
+      })),
+    ).toEqual([
+      { id: 31, quantityOverride: null, quantityEffective: 2 },
+      { id: 32, quantityOverride: null, quantityEffective: 2 },
+    ]);
+  });
+
+  it("accepts the quantity ceiling and rejects unsafe or oversized values", () => {
+    const draft = draftFixture();
+    expect(MAX_PLAN_DRAFT_PART_QUANTITY).toBe(10_000);
+    const capped = applyPlanDraftPartDecision({
+      draft,
+      decision: { kind: "set_quantity_override", partIds: [31], value: 10_000 },
+    });
+    expect(capped.parts[0]).toMatchObject({
+      quantityOverride: 10_000,
+      quantityEffective: 10_000,
+    });
+
+    for (const value of [10_001, Number.MAX_SAFE_INTEGER + 1, 1e100]) {
+      expect(() =>
+        applyPlanDraftPartDecision({
+          draft,
+          decision: { kind: "set_quantity_override", partIds: [31], value },
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("rejects invalid, duplicate, and missing Part IDs and invalid quantities", () => {
+    const draft = draftFixture();
+    const decisions: PlanDraftPartDecision[] = [
+      { kind: "set_included", partIds: [], value: false },
+      { kind: "set_included", partIds: [31, 31], value: false },
+      { kind: "set_included", partIds: [0], value: false },
+      { kind: "set_included", partIds: [31.5], value: false },
+      { kind: "set_included", partIds: [99], value: false },
+      { kind: "set_quantity_override", partIds: [31], value: 0 },
+      { kind: "set_quantity_override", partIds: [31], value: 1.5 },
+    ];
+
+    for (const decision of decisions) {
+      expect(() => applyPlanDraftPartDecision({ draft, decision })).toThrow();
+    }
+    const foreign = structuredClone(draft);
+    const first = foreign.parts[0];
+    if (!first) throw new Error("draft fixture Part is missing");
+    first.draftId = 6;
+    expect(() =>
+      applyPlanDraftPartDecision({
+        draft: foreign,
+        decision: { kind: "set_included", partIds: [first.id], value: false },
+      }),
+    ).toThrow(/belong/i);
+  });
+
+  it("is deterministic across target order and returns an equal no-op snapshot", () => {
+    const draft = draftFixture();
+    const left = applyPlanDraftPartDecision({
+      draft,
+      decision: { kind: "set_included", partIds: [31, 32], value: false },
+    });
+    const right = applyPlanDraftPartDecision({
+      draft,
+      decision: { kind: "set_included", partIds: [32, 31], value: false },
+    });
+    expect(right).toEqual(left);
+
+    const noOp = applyPlanDraftPartDecision({
+      draft: left,
+      decision: { kind: "set_included", partIds: [32, 31], value: false },
+    });
+    expect(noOp).toEqual(left);
   });
 });

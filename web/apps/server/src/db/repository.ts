@@ -96,11 +96,14 @@ import {
   type CurrentPlanInput,
 } from "../services/plan-freshness.js";
 import {
+  applyPlanDraftPartDecision,
   diffPlanDraftSnapshot,
   digestPlanDraft,
   PLAN_DRAFT_DIGEST_FORMAT,
   type PlanDraftDiff,
+  type PlanDraftPartDecision,
   type PlanDraftSnapshot,
+  PlanDraftPartNotFoundError,
   type PlanSnapshotInput,
   type PlanSnapshotPart,
 } from "../services/plan-drafts.js";
@@ -188,6 +191,16 @@ export type RecomputePlanDraftResult =
   | { readonly kind: "no_layers" }
   | { readonly kind: "no_stls" }
   | { readonly kind: "would_wipe" };
+
+export type EditPlanDraftPartsResult =
+  | { readonly kind: "updated"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "unchanged"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "conflict"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "accepted_baseline_required" }
+  | { readonly kind: "base_changed"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "not_open"; readonly state: "abandoned" | "consumed" }
+  | { readonly kind: "not_found" }
+  | { readonly kind: "transaction_unavailable" };
 
 type AcceptedPlanRevisionIdentity = Omit<
   PlanRevisionRow,
@@ -2873,6 +2886,142 @@ export class AppRepository {
     const draft = this.getPlanDraft(input.profileId, writeResult.draftId);
     if (!draft) throw new Error("Created Plan draft is missing");
     return { kind: writeResult.kind, draft };
+  }
+
+  editPlanDraftParts(input: {
+    readonly profileId: number;
+    readonly draftId: number;
+    readonly expectedSnapshotDigest: string;
+    readonly decision: PlanDraftPartDecision;
+  }): EditPlanDraftPartsResult {
+    const expectedSnapshotDigest = sha256Digest(
+      input.expectedSnapshotDigest,
+      "Expected Plan draft snapshot digest",
+    );
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+
+    return this.transaction((): EditPlanDraftPartsResult => {
+      const header = this.db
+        .select({ id: this.schema.planDrafts.id })
+        .from(this.schema.planDrafts)
+        .where(
+          and(
+            eq(this.schema.planDrafts.tenantId, this.tenantId),
+            eq(this.schema.planDrafts.profileId, input.profileId),
+            eq(this.schema.planDrafts.id, input.draftId),
+          ),
+        )
+        .get();
+      if (!header) return { kind: "not_found" };
+      const current = this.getPlanDraft(input.profileId, input.draftId);
+      if (!current) return { kind: "not_found" };
+      if (current.state !== "open") return { kind: "not_open", state: current.state };
+
+      const profile = this.db
+        .select({
+          baseRevisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
+          basePlanVersion: this.schema.buildProfiles.acceptedPlanVersion,
+        })
+        .from(this.schema.buildProfiles)
+        .where(
+          and(
+            eq(this.schema.buildProfiles.tenantId, this.tenantId),
+            eq(this.schema.buildProfiles.id, input.profileId),
+          ),
+        )
+        .get();
+      if (!profile) return { kind: "not_found" };
+      if (this.planDraftNeedsAcceptedBaseline(input.profileId, profile)) {
+        return { kind: "accepted_baseline_required" };
+      }
+      if (
+        profile.baseRevisionId !== current.baseRevisionId ||
+        profile.basePlanVersion !== current.basePlanVersion
+      ) {
+        return { kind: "base_changed", draft: current };
+      }
+
+      let next: PlanDraftSnapshot;
+      try {
+        next = applyPlanDraftPartDecision({ draft: current, decision: input.decision });
+      } catch (error) {
+        if (error instanceof PlanDraftPartNotFoundError) return { kind: "not_found" };
+        throw error;
+      }
+      if (next.snapshotDigest === current.snapshotDigest) {
+        return { kind: "unchanged", draft: current };
+      }
+      if (current.snapshotDigest !== expectedSnapshotDigest) {
+        return { kind: "conflict", draft: current };
+      }
+
+      const changedPartIds = current.parts
+        .filter((part) => {
+          if (!input.decision.partIds.includes(part.id)) return false;
+          switch (input.decision.kind) {
+            case "set_included":
+              return part.included !== input.decision.value;
+            case "set_quantity_override":
+              return (
+                part.quantityOverride !== input.decision.value ||
+                part.quantityEffective !==
+                  (input.decision.value ?? part.quantityInferred)
+              );
+            default: {
+              const exhaustive: never = input.decision;
+              throw new Error(`Unsupported Plan draft decision: ${String(exhaustive)}`);
+            }
+          }
+        })
+        .map((part) => part.id);
+      if (changedPartIds.length === 0) {
+        return { kind: "unchanged", draft: current };
+      }
+
+      const headerWrite = this.db
+        .update(this.schema.planDrafts)
+        .set({ snapshotDigest: next.snapshotDigest })
+        .where(
+          and(
+            eq(this.schema.planDrafts.tenantId, this.tenantId),
+            eq(this.schema.planDrafts.profileId, input.profileId),
+            eq(this.schema.planDrafts.id, input.draftId),
+            eq(this.schema.planDrafts.state, "open"),
+            eq(this.schema.planDrafts.snapshotDigest, expectedSnapshotDigest),
+          ),
+        )
+        .run();
+      if (headerWrite.changes !== 1) return { kind: "conflict", draft: current };
+
+      const partScope = and(
+        eq(this.schema.planDraftParts.tenantId, this.tenantId),
+        eq(this.schema.planDraftParts.draftId, input.draftId),
+        inArray(this.schema.planDraftParts.id, changedPartIds),
+      );
+      const partWrite =
+        input.decision.kind === "set_included"
+          ? this.db
+              .update(this.schema.planDraftParts)
+              .set({ included: input.decision.value })
+              .where(partScope)
+              .run()
+          : this.db
+              .update(this.schema.planDraftParts)
+              .set({
+                quantityOverride: input.decision.value,
+                quantityEffective: sql`COALESCE(${input.decision.value}, ${this.schema.planDraftParts.quantityInferred})`,
+              })
+              .where(partScope)
+              .run();
+      if (partWrite.changes !== changedPartIds.length) {
+        throw new Error("Plan draft Part edit did not update every selected row");
+      }
+      const persisted = this.getPlanDraft(input.profileId, input.draftId);
+      if (!persisted || persisted.snapshotDigest !== next.snapshotDigest) {
+        throw new Error("Edited Plan draft could not be verified");
+      }
+      return { kind: "updated", draft: persisted };
+    }, "immediate");
   }
 
   diffPlanDraft(profileId: number, draftId: number): PlanDraftDiff {

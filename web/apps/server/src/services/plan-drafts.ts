@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 export const PLAN_DRAFT_DIGEST_FORMAT = "plan-draft-v1";
+export const MAX_PLAN_DRAFT_PART_QUANTITY = 10_000;
 
 export type PlanDraftState = "open" | "abandoned" | "consumed";
 
@@ -59,6 +60,20 @@ export type PlanDraftSnapshot = {
   inputs: PlanDraftInput[];
   parts: PlanDraftPart[];
 };
+
+export type PlanDraftPartDecision =
+  | {
+      readonly kind: "set_included";
+      readonly partIds: readonly number[];
+      readonly value: boolean;
+    }
+  | {
+      readonly kind: "set_quantity_override";
+      readonly partIds: readonly number[];
+      readonly value: number | null;
+    };
+
+export class PlanDraftPartNotFoundError extends Error {}
 
 type BasePart = PlanSnapshotPart & { id: number };
 
@@ -148,6 +163,71 @@ export function digestPlanDraft(input: {
     parts: canonicalParts(input.parts),
   });
   return createHash("sha256").update(canonical).digest("hex");
+}
+
+function validatedDecisionPartIds(partIds: readonly number[]): ReadonlySet<number> {
+  if (partIds.length === 0) throw new Error("Plan draft decision requires at least one Part");
+  const unique = new Set<number>();
+  for (const partId of partIds) {
+    if (!Number.isInteger(partId) || partId <= 0) {
+      throw new Error("Plan draft Part IDs must be positive integers");
+    }
+    if (unique.has(partId)) throw new Error("Plan draft decision Part IDs must be unique");
+    unique.add(partId);
+  }
+  return unique;
+}
+
+export function applyPlanDraftPartDecision(input: {
+  readonly draft: PlanDraftSnapshot;
+  readonly decision: PlanDraftPartDecision;
+}): PlanDraftSnapshot {
+  const targetIds = validatedDecisionPartIds(input.decision.partIds);
+  if (
+    input.decision.kind === "set_quantity_override" &&
+    input.decision.value !== null &&
+    (!Number.isSafeInteger(input.decision.value) ||
+      input.decision.value <= 0 ||
+      input.decision.value > MAX_PLAN_DRAFT_PART_QUANTITY)
+  ) {
+    throw new Error(
+      `Plan draft quantity override must be null or a positive safe integer no greater than ${MAX_PLAN_DRAFT_PART_QUANTITY}`,
+    );
+  }
+  const foundIds = new Set<number>();
+  const parts = input.draft.parts.map((part): PlanDraftPart => {
+    if (!targetIds.has(part.id)) return { ...part };
+    if (part.draftId !== input.draft.id) {
+      throw new PlanDraftPartNotFoundError(
+        "Plan draft decision Part does not belong to this draft",
+      );
+    }
+    foundIds.add(part.id);
+    switch (input.decision.kind) {
+      case "set_included":
+        return { ...part, included: input.decision.value };
+      case "set_quantity_override":
+        return {
+          ...part,
+          quantityOverride: input.decision.value,
+          quantityEffective: input.decision.value ?? part.quantityInferred,
+        };
+      default: {
+        const exhaustive: never = input.decision;
+        throw new Error(`Unsupported Plan draft decision: ${String(exhaustive)}`);
+      }
+    }
+  });
+  if (foundIds.size !== targetIds.size) {
+    throw new PlanDraftPartNotFoundError("Plan draft decision Part not found in this draft");
+  }
+  const next = {
+    ...input.draft,
+    inputs: input.draft.inputs.map((row) => ({ ...row })),
+    parts,
+    snapshotDigest: input.draft.snapshotDigest,
+  };
+  return { ...next, snapshotDigest: digestPlanDraft(next) };
 }
 
 function changedFields(before: PlanSnapshotPart, after: PlanSnapshotPart): string[] {

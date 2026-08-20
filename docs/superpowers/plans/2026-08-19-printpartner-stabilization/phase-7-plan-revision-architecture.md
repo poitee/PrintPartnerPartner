@@ -51,8 +51,8 @@ one fresh accepted baseline before it enables draft reads.
 ## Drafts
 
 Phase 7 slice 2 starts with persisted recompute snapshots and deterministic
-diffs. Later units in this slice add editing and lifecycle. Later Phase 7
-slices add Required-unit reconciliation and Apply:
+diffs. Unit 2b adds bounded Part decisions. Later units in this slice add
+lifecycle. Later Phase 7 slices add Required-unit reconciliation and Apply:
 
 ```ts
 type PlanDraftState = "open" | "abandoned" | "consumed";
@@ -120,6 +120,28 @@ transaction. Recompute measures each tracked revision STL with a fixed 64 KiB
 buffer and stores its SHA-256 in `artifact_digest`. It measures the current
 scanned path for every draft and never copies prior evidence. Untracked Source
 Parts keep a null digest and cannot claim exact-content identity.
+
+Unit 2b adds one `editPlanDraftParts` command. Its decision discriminant is
+either grouped inclusion or grouped quantity override. Quantity edits derive
+effective quantity from the override or the saved inferred quantity. An
+override must be a positive safe integer no greater than 10,000. This matches
+the existing planning row limit and bounds later per-unit work. The command
+cannot edit Source identity, inferred values, artifact evidence, filament,
+role, notes, or manifest fields.
+
+The caller supplies the saved snapshot digest as a whole-draft optimistic
+concurrency token. SQLite verifies the stored digest, open state, accepted
+baseline, and current base pair inside one `IMMEDIATE` transaction. It updates
+the header digest and only the selected child rows whose values differ, then
+re-reads the complete draft after both writes. An exact retry whose targets
+already have the requested value returns the current draft as unchanged even
+when the supplied digest is old. A different edit from an old digest returns a
+conflict. PostgreSQL returns `transaction_unavailable` before mutation.
+
+Unit 2b does not mutate accepted Parts, profile layers, Checkoff, accepted
+inputs, Build acceptance metadata, or recompute timestamps. It does not add
+routes, UI, lifecycle commands, rebase, manifest application, Required-unit
+tokens, or Apply.
 
 Abandon moves an open draft to `abandoned`. Resume returns it to `open` only
 while its base revision and Plan version remain current. Otherwise the user
@@ -207,9 +229,9 @@ idempotency values at the boundary.
    add a parity reader. Preserve every existing behavior and byte of Checkoff
    state.
 2. Add saved drafts and draft recompute in units. Unit 2a persists complete
-   snapshots and derives accepted-versus-draft diff. Unit 2b adds draft edits.
-   Unit 2c adds abandon, resume, and rebase. Accepted reads and Checkoff remain
-   unchanged throughout this slice.
+   snapshots and derives accepted-versus-draft diff. Unit 2b adds grouped
+   inclusion and quantity decisions. Unit 2c adds abandon, resume, and rebase.
+   Accepted reads and Checkoff remain unchanged throughout this slice.
 3. Add Required-unit tokens and explicit reconciliation decisions.
 4. Add the atomic, idempotent apply command and refresh compatibility
    projections inside its transaction.
