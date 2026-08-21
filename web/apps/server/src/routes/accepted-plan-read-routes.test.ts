@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("accepted Plan read routes", () => {
-  it("serves Checkoff and assembled state through one accepted read per request", async () => {
+  it("uses one accepted read per Checkoff and assembled request and redacts failures", async () => {
     const directory = mkdtempSync(join(tmpdir(), "pp-accepted-read-routes-"));
     directories.push(directory);
     const ports = createSelfHostPorts(directory);
@@ -69,6 +69,13 @@ describe("accepted Plan read routes", () => {
     };
 
     const app = await buildApp(loadConfig(), ports);
+    const capturedErrors: unknown[][] = [];
+    app.addHook("onRequest", (request, _reply, done) => {
+      request.log.error = (...args: unknown[]) => {
+        capturedErrors.push(args);
+      };
+      done();
+    });
     try {
       const checkoff = await app.inject({
         method: "GET",
@@ -198,7 +205,7 @@ describe("accepted Plan read routes", () => {
 
       repo.readAcceptedPlanOperationalSnapshot = () => {
         acceptedReadCount += 1;
-        throw new Error("private failure detail");
+        throw new Error(`private failure detail ${directory} ${"e".repeat(64)}`);
       };
       const unexpected = await app.inject({
         method: "GET",
@@ -210,7 +217,7 @@ describe("accepted Plan read routes", () => {
 
       const getProfile = repo.getProfile.bind(repo);
       repo.getProfile = () => {
-        throw new Error("private profile lookup failure");
+        throw new Error(`private profile lookup failure ${directory}`);
       };
       const profileLookupFailure = await app.inject({
         method: "GET",
@@ -223,7 +230,7 @@ describe("accepted Plan read routes", () => {
       repo.getProfile = getProfile;
 
       repo.getPartRow = () => {
-        throw new Error("private Part lookup failure");
+        throw new Error(`private Part lookup failure ${directory}`);
       };
       const partLookupFailure = await app.inject({
         method: "GET",
@@ -246,6 +253,15 @@ describe("accepted Plan read routes", () => {
           .all(),
       ).toEqual(progressBeforeRequests);
       progressAfterFailures.close();
+      const serializedErrors = JSON.stringify(capturedErrors, (_key, value: unknown) =>
+        value instanceof Error ? { message: value.message, stack: value.stack } : value,
+      );
+      expect(serializedErrors).not.toContain("private failure detail");
+      expect(serializedErrors).not.toContain("private profile lookup failure");
+      expect(serializedErrors).not.toContain("private Part lookup failure");
+      expect(serializedErrors).not.toContain(directory);
+      expect(serializedErrors).not.toContain("e".repeat(64));
+      expect(serializedErrors).not.toContain("accepted-plan-read-routes.test.ts");
     } finally {
       await app.close();
     }

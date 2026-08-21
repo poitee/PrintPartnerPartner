@@ -357,7 +357,10 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
         );
         return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
       }
-      request.log.error({ err: error, profileId: id }, "Accepted Plan read failed");
+      request.log.error(
+        { failure: "unexpected", profileId: id },
+        "Accepted Plan read failed",
+      );
       return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
