@@ -56,7 +56,7 @@ Cleanup is complete when:
 | `docs/research/` and `web/apps/server/src/data/assistant-domain/` | 130 files are byte-identical. One tree is authoring material and one is shipped runtime data, but there is no generator that names the authority. Choose the authority before removing duplication. |
 | Old `.superpowers/sdd` reports and August 17 to 18 implementation plans | They have no runtime callers and several contradict the shipped product. Git already preserves them, but deleting historical work records is a repository policy choice. |
 | Golden-stack examples and old playbooks | Several links are broken and the text uses old workflow names. Rewrite them against the accepted Source and Build model or remove the examples after confirming they are not published user documentation. |
-| `capture-digest-fixtures.ts` and `e2e/verify_auto_slice.ts` | They are standalone maintainer tools, not imported modules. The first is undocumented. The second supports the deferred auto-slicer. |
+| `capture-digest-fixtures.ts` | It is a standalone maintainer tool, not an imported module, and its accepted-state fixture contract is not yet documented for maintainers. |
 | `scripts/import-sqlite.ts` | Knip reports it as unused, but it is a standalone data migration command. Removing it requires a supported Postgres import decision. |
 | `printerNameMap` | No reader caller or writer exists, but installed databases can contain rows. Remove only with a versioned migration after checking real database counts. |
 | `slicer_folder` integration | Its adapter always returns `not implemented yet`, but persisted integrations may use the type. Migrate stored rows before deleting the contract value. |
@@ -84,7 +84,7 @@ The following dependency majors remain deferred because they change a runtime or
 - Automatic printer selection, loaded-filament scoring, and first-printer fallback.
 - Custom filament management when Spoolman is absent.
 - Printer-owned slicer, process, and filament profile assignment.
-- Auto-slice jobs, Docker slicer controls, and profile synchronization after local 3MF handoff covers the accepted workflow.
+- Docker slicer controls and profile synchronization after local 3MF handoff covers the accepted workflow.
 - Printer controls embedded in Checkoff after Production owns them.
 - Settings copies of Printer and Source Library management after their global sections own setup.
 

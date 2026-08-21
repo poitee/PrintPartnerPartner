@@ -48,9 +48,18 @@ afterEach(() => {
 });
 
 describe("InProcessJobRunner tenant ownership", () => {
+  it("rejects an unknown internal job kind without retaining a snapshot", async () => {
+    const runner = createRunner();
+
+    await expect(
+      Reflect.apply(runner.start, runner, ["removed-job", {}, "tenant-a"]),
+    ).rejects.toThrow("Unsupported job kind: removed-job");
+    expect(runner.listJobs({}, "tenant-a")).toEqual([]);
+  });
+
   it("hides get, list, and subscribe from a different tenant", async () => {
     const runner = createRunner();
-    const jobId = await runner.start("tenant-test", {}, "tenant-a");
+    const jobId = await runner.start("sync", {}, "tenant-a");
     await waitForTerminal(runner, jobId, "tenant-a");
 
     expect(await runner.get(jobId, "tenant-a")).not.toBeNull();
@@ -66,9 +75,9 @@ describe("InProcessJobRunner tenant ownership", () => {
       completedJobMax: 2,
       completedJobRetentionMs: 60_000,
     });
-    const first = await runner.start("first", {}, "tenant-a");
-    const second = await runner.start("second", {}, "tenant-a");
-    const third = await runner.start("third", {}, "tenant-a");
+    const first = await runner.start("sync", {}, "tenant-a");
+    const second = await runner.start("sync", {}, "tenant-a");
+    const third = await runner.start("sync", {}, "tenant-a");
     await waitForTerminal(runner, third, "tenant-a");
 
     const retained = runner.listJobs({}, "tenant-a");
@@ -101,22 +110,22 @@ describe("InProcessJobRunner tenant ownership", () => {
         ) => Promise<void>;
       }
     ).runJob = async (jobId, kind, payload) => {
-      if (kind === "active") return new Promise<void>(() => undefined);
+      if (payload.active === true) return new Promise<void>(() => undefined);
       return originalRunJob(jobId, kind, payload);
     };
 
-    const activeA = await runner.start("active", {}, "tenant-a");
-    const activeB = await runner.start("active", {}, "tenant-b");
+    const activeA = await runner.start("sync", { active: true }, "tenant-a");
+    const activeB = await runner.start("sync", { active: true }, "tenant-b");
     const completedA = await Promise.all([
-      runner.start("a-1", {}, "tenant-a"),
-      runner.start("a-2", {}, "tenant-a"),
-      runner.start("a-3", {}, "tenant-a"),
+      runner.start("sync", {}, "tenant-a"),
+      runner.start("sync", {}, "tenant-a"),
+      runner.start("sync", {}, "tenant-a"),
     ]);
     await waitForTerminal(runner, completedA[2]!, "tenant-a");
     const completedB = await Promise.all([
-      runner.start("b-1", {}, "tenant-b"),
-      runner.start("b-2", {}, "tenant-b"),
-      runner.start("b-3", {}, "tenant-b"),
+      runner.start("sync", {}, "tenant-b"),
+      runner.start("sync", {}, "tenant-b"),
+      runner.start("sync", {}, "tenant-b"),
     ]);
     await waitForTerminal(runner, completedB[2]!, "tenant-b");
 
@@ -124,10 +133,10 @@ describe("InProcessJobRunner tenant ownership", () => {
     const tenantB = runner.listJobs({}, "tenant-b");
     expect(tenantA).toHaveLength(3);
     expect(tenantA.map((job) => job.job_id)).toContain(activeA);
-    expect(tenantA.filter((job) => job.status === "done")).toHaveLength(2);
+    expect(tenantA.filter((job) => job.status === "error")).toHaveLength(2);
     expect(tenantB).toHaveLength(3);
     expect(tenantB.map((job) => job.job_id)).toContain(activeB);
-    expect(tenantB.filter((job) => job.status === "done")).toHaveLength(2);
+    expect(tenantB.filter((job) => job.status === "error")).toHaveLength(2);
   });
 
   it("applies the per-tenant cap to jobs with an empty tenant id", async () => {
@@ -137,9 +146,9 @@ describe("InProcessJobRunner tenant ownership", () => {
       completedJobRetentionMs: 60_000,
     });
     const jobs = await Promise.all([
-      runner.start("empty-1", {}, ""),
-      runner.start("empty-2", {}, ""),
-      runner.start("empty-3", {}, ""),
+      runner.start("sync", {}, ""),
+      runner.start("sync", {}, ""),
+      runner.start("sync", {}, ""),
     ]);
     await waitForTerminal(runner, jobs[2]!, "");
 
@@ -154,13 +163,13 @@ describe("InProcessJobRunner tenant ownership", () => {
       completedJobRetentionMs: 60_000,
     });
     const tenantA = await Promise.all([
-      runner.start("a-1", {}, "tenant-a"),
-      runner.start("a-2", {}, "tenant-a"),
+      runner.start("sync", {}, "tenant-a"),
+      runner.start("sync", {}, "tenant-a"),
     ]);
     await waitForTerminal(runner, tenantA[1]!, "tenant-a");
     const tenantB = await Promise.all([
-      runner.start("b-1", {}, "tenant-b"),
-      runner.start("b-2", {}, "tenant-b"),
+      runner.start("sync", {}, "tenant-b"),
+      runner.start("sync", {}, "tenant-b"),
     ]);
     await waitForTerminal(runner, tenantB[1]!, "tenant-b");
 

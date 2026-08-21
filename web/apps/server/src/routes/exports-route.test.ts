@@ -20,13 +20,6 @@ import {
 import { tenantExportDirectory } from "../lib/secure-path.js";
 import { registerExportRoutes } from "./exports.js";
 
-/**
- * GET /exports/* serves the files export jobs produce. Auto-slice writes a
- * plate thumbnail (gcode/thumbnails/plate_NN.png) that the UI renders with an
- * <img src>, so a PNG must come back inline with image/png — an
- * octet-stream attachment would download instead of render.
- */
-
 let cleanup: Array<() => void> = [];
 
 afterEach(() => {
@@ -174,15 +167,15 @@ describe("GET /exports/*", () => {
     expect(crossTenant.statusCode).toBe(404);
   });
 
-  it("serves an auto-slice plate thumbnail inline as image/png", async () => {
+  it("serves a PNG export inline as image/png", async () => {
     const { app, dir } = await makeApp();
-    const thumbDir = join(dir, "exports", "tenant-default", "my_plan", "gcode", "thumbnails");
+    const thumbDir = join(dir, "exports", "tenant-default", "previews");
     mkdirSync(thumbDir, { recursive: true });
     writeFileSync(join(thumbDir, "plate_01.png"), PNG);
 
     const res = await app.inject({
       method: "GET",
-      url: "/exports/my_plan/gcode/thumbnails/plate_01.png",
+      url: "/exports/previews/plate_01.png",
     });
 
     expect(res.statusCode).toBe(200);

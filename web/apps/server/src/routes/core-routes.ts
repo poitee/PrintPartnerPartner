@@ -8,7 +8,6 @@ import { registerLegalRoutes } from "./legal.js";
 import { registerManifestRoutes } from "./manifest.js";
 import { registerPartRoutes } from "./parts.js";
 import { registerPlanRoutes, type PlanSummaryContract } from "./plans.js";
-import { registerPrintPlanRoutes } from "./print-plan.js";
 import { registerPrinterRoutes } from "./printers.js";
 import { registerSlicerInstanceRoutes } from "./slicer-instances.js";
 import { registerSlicerHandoffRoutes } from "./slicer-handoff.js";
@@ -101,7 +100,6 @@ export async function registerCoreRoutes(
     reposDir: deps.reposDir,
   });
   await registerProfileLibraryRoutes(app, { repo: deps.repo });
-  await registerPrintPlanRoutes(app, { repo: deps.repo });
   await registerManifestRoutes(app, { repo: deps.repo });
 
   const authStore = options.authStore ?? deps.authStore;

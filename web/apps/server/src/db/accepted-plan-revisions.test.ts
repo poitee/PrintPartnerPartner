@@ -996,7 +996,7 @@ describe("accepted Plan revision backfill", () => {
     expect(utf8Bytes(Object.values(revision))).toBe(MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES);
     expect(
       migratedRaw.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get(),
-    ).toEqual({ value: "27" });
+    ).toEqual({ value: "28" });
     migrated.close();
   });
 
@@ -1191,7 +1191,7 @@ describe("accepted Plan revision backfill", () => {
     upgraded.close();
   });
 
-  it("repairs a layer race before removing invalidation and stamping v27", () => {
+  it("repairs a layer race before removing invalidation and stamping v28", () => {
     const { dir, database } = createDatabase();
     const raw = rawDatabase(database);
     const profile = repository(database).createProfile("Layer cutover race");
@@ -1235,7 +1235,7 @@ describe("accepted Plan revision backfill", () => {
       rawDatabase(upgraded)
         .prepare("SELECT value FROM app_settings WHERE key = 'schema_version'")
         .get(),
-    ).toEqual({ value: "27" });
+    ).toEqual({ value: "28" });
     expect(
       rawDatabase(upgraded)
         .prepare(

@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Accepted Plate workflow** - accepted Plans now publish immutable Plate
+  revisions with explicit Printer allocation, saved fixed-point placement,
+  deterministic Required-unit 3MF identity, revision-keyed downloads, and
+  local slicer handoff. The Export page uses this state on desktop and mobile.
+
+### Removed
+
+- **Legacy Plate and auto-slice APIs** - removed mutable `print-plan`,
+  `print-groups`, `print-assignments`, `plate-workspace`,
+  `print-plan/prepare-missing`, `pack-preview`, `export-3mf`, `auto-slice`, and
+  `open-plates` routes from flat and `/api/v1` surfaces.
+  Automation must use `export-accepted-plate-3mf` with an observed Plate
+  revision. Schema v28 deletes only persisted `print_plan:<Build id>` layout
+  keys; it does not translate match-key layouts into accepted identity.
+
 ## [3.2.0] - 2026-08-20
 
 ### Added

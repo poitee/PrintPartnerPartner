@@ -5,6 +5,7 @@ import {
   parseAcceptedPlateWorkspace,
   parseMoveAcceptedPlateUnitRequest,
 } from "./accepted-plates.js";
+import { JOB_KINDS } from "./index.js";
 
 const digest = "a".repeat(64);
 const token = `ppu_${"b".repeat(32)}`;
@@ -38,6 +39,21 @@ const setupUnit = {
 };
 
 describe("accepted Plate contracts", () => {
+  it("defines every startable job kind", () => {
+    expect(JOB_KINDS).toEqual([
+      "sync",
+      "recompute",
+      "import-scan",
+      "extract-source-docs",
+      "check-source-updates",
+      "export-stl-pack",
+      "export-checklist-html",
+      "export-kit-bundle",
+      "export-accepted-plate-3mf",
+      "printer-upload",
+    ]);
+  });
+
   it("parses strict setup and ready workspace variants", () => {
     expect(parseAcceptedPlateWorkspace({
       kind: "setup",

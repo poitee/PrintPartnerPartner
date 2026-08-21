@@ -1165,10 +1165,8 @@ export async function patchPart(
 }
 
 /**
- * Absolute URL for a server-served asset path returned by a job result (e.g.
- * an auto-slice plate's `thumbnail_url`, "/exports/<key>"). Unlike
- * {@link downloadExport} this does not trigger a download — it is the value to
- * put in an `<img src>`.
+ * Absolute URL for a server-served asset path returned by a job result.
+ * Unlike {@link downloadExport}, this returns a value suitable for `<img src>`.
  */
 export function engineAssetUrl(path: string): string {
   return /^https?:\/\//i.test(path) ? path : resolveEngineUrl(path);

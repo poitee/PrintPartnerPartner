@@ -7,8 +7,6 @@ import {
   namingProfileFromDict,
   parseSourceNamingMetadata,
   parseSourceNamingMetadataStrict,
-  kitPrintPlanFromDict,
-  kitPrintPlanToDict,
   resolveNamingProfile,
   scanRepo,
   serializeImportRules,
@@ -678,7 +676,6 @@ type PlanFreshnessContext = {
   readonly invalidProfiles: ReadonlySet<number>;
 };
 
-/** Slim slicer-profile projection used by the auto-slice routing layer. */
 export type SlicerProfileRow = {
   id: number;
   name: string;
@@ -5367,25 +5364,6 @@ export class AppRepository {
     return { checkoffLinkCount, sendQueueItemCount };
   }
 
-  private clearedPlatePlan(profileId: number): string | null {
-    const value = this.getSetting(`print_plan:${profileId}`);
-    if (value == null || value.trim() === "") return null;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(value) as unknown;
-    } catch {
-      throw new Error("Stored Print Plan is corrupt");
-    }
-    const record = applyJsonRecord(parsed, "Stored Print Plan");
-    let decoded: ReturnType<typeof kitPrintPlanFromDict>;
-    try {
-      decoded = kitPrintPlanFromDict(record);
-    } catch {
-      throw new Error("Stored Print Plan is corrupt");
-    }
-    return JSON.stringify({ ...kitPrintPlanToDict(decoded), plate_layout: null }, null, 2);
-  }
-
   applyPlanChanges(command: ApplyPlanChangesCommand): ApplyPlanChangesResult {
     const profileId = positiveSafeId(command.profileId, "Build ID");
     const draftId = positiveSafeId(command.draftId, "Plan draft ID");
@@ -5710,7 +5688,6 @@ export class AppRepository {
       if (production.checkoffLinkCount > 0 || production.sendQueueItemCount > 0) {
         return { kind: "production_active", ...production };
       }
-      const clearedPlatePlan = this.clearedPlatePlan(profileId);
       const prepared = preparePlanPublication({
         draft,
         assignments: reconciliation.assignments,
@@ -6020,7 +5997,6 @@ export class AppRepository {
           .run();
       }
       this.acceptPlanRevisionInputSet(profileId, inputSet.id, appliedAt);
-      if (clearedPlatePlan != null) this.setSetting(`print_plan:${profileId}`, clearedPlatePlan);
       const pointed = this.db
         .update(this.schema.buildProfiles)
         .set({

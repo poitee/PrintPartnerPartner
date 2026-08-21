@@ -3,10 +3,12 @@ import { rmSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import {
   DATE_FORMAT_DEFAULT,
+  JOB_KINDS,
   parseAcceptedPlateId,
   type AcceptedPlateExportJobResult,
   type DateFormatId,
   type JobSnapshot,
+  type JobKind,
   type StartAcceptedPlateExportRequest,
 } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
@@ -21,8 +23,6 @@ import { zipDirectoryToFile } from "../services/zip-dir.js";
 import { exportProfileHtml } from "../services/export-html.js";
 import { exportKitBundle } from "../services/export-kit.js";
 import { checkAllSourceUpdates } from "../services/source-update-check.js";
-import { runExport3mfJob } from "../services/export-3mf-job.js";
-import { runPackPreviewJob } from "../services/plate-workspace.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import { getRequestTenantId, tenantStorage } from "../middleware/tenant-context.js";
 import { extractPendingPdfsForSource } from "../services/source-docs-index.js";
@@ -35,7 +35,6 @@ import { loadFleet } from "../services/printer-fleet.js";
 import { parsePrinterUploadMultipart } from "../services/printer-upload-multipart.js";
 import { runPrinterUploadJob } from "../services/printer-upload-job.js";
 import { reconcileSendQueueJobResult } from "../services/printer-send-queue.js";
-import { runAutoSliceJob, autoSliceJobMessage } from "../services/auto-slice-job.js";
 import { getLogger } from "../services/logger.js";
 import {
   ACCEPTED_PLATE_EXPORT_LIMITS,
@@ -72,6 +71,7 @@ export const COMPLETED_JOB_MAX = 1_000;
 export const COMPLETED_JOB_GLOBAL_MAX = 10_000;
 export const COMPLETED_JOB_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const EMPTY_TENANT_JOB_BUCKET = Symbol("empty-tenant-job-bucket");
+const STARTABLE_JOB_KINDS = new Set<string>(JOB_KINDS);
 
 const ACCEPTED_PLATE_EXPORT_ERRORS = {
   plate_revision_changed: "Plate layout changed. Refresh and export again.",
@@ -264,7 +264,6 @@ export class InProcessJobRunner {
         "export-stl-pack",
         "export-checklist-html",
         "export-kit-bundle",
-        "export-3mf",
         "export-accepted-plate-3mf",
       ]);
       if (event.status === "done" && EXPORT_KINDS.has(event.kind)) {
@@ -281,10 +280,13 @@ export class InProcessJobRunner {
   }
 
   async start(
-    kind: string,
+    kind: JobKind,
     payload: Record<string, unknown>,
     tenantId = "default",
   ): Promise<string> {
+    if (!STARTABLE_JOB_KINDS.has(kind)) {
+      throw new Error(`Unsupported job kind: ${kind}`);
+    }
     this.pruneCompletedJobs();
     const jobId = crypto.randomUUID();
     const snap: JobSnapshot = {
@@ -365,7 +367,7 @@ export class InProcessJobRunner {
     return key ? `/exports/${key}` : null;
   }
 
-  private async runJob(jobId: string, kind: string, payload: Record<string, unknown>): Promise<void> {
+  private async runJob(jobId: string, kind: JobKind, payload: Record<string, unknown>): Promise<void> {
     const tenantId = String(payload._tenant_id ?? "default");
     await tenantStorage.run(tenantId, async () => {
       this.emit(jobId, { status: "running", message: "Running…", progress: 10 });
@@ -393,27 +395,20 @@ export class InProcessJobRunner {
           result = await this.runExportChecklistHtml(payload);
         } else if (kind === "export-kit-bundle") {
           result = await this.runExportKitBundle(payload);
-        } else if (kind === "export-3mf") {
-          result = await this.runExport3mf(payload);
         } else if (kind === "export-accepted-plate-3mf") {
           result = await this.runAcceptedPlateExport(payload);
-        } else if (kind === "pack-preview") {
-          result = await this.runPackPreview(payload);
         } else if (kind === "printer-upload") {
           result = await this.runPrinterUpload(jobId, payload);
-        } else if (kind === "auto-slice") {
-          result = await this.runAutoSlice(jobId, payload);
         } else {
-          result = { stub: true, kind, payload };
+          const unsupported: never = kind;
+          throw new Error(`Unsupported job kind: ${unsupported}`);
         }
         const doneMessage =
           kind === "export-stl-pack"
             ? exportStlPackJobMessage(result)
             : kind === "printer-upload" && typeof result.message === "string"
               ? result.message
-              : kind === "auto-slice"
-                ? autoSliceJobMessage(result)
-                : kind === "sync" && Number(result.failed ?? 0) > 0
+              : kind === "sync" && Number(result.failed ?? 0) > 0
               ? `Synced ${result.synced ?? 0}, ${result.failed} failed — check Settings → GitHub PAT if rate-limited`
               : "Complete";
         this.emit(jobId, {
@@ -620,32 +615,6 @@ export class InProcessJobRunner {
     };
   }
 
-  private async runExport3mf(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    // Yield once more so concurrent health checks / requests can run before STL packing.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    const profileId = Number(payload.profile_id);
-    const result = runExport3mfJob(this.repo, profileId, this.getExportsDir(), {
-      layout_mode: String(payload.layout_mode ?? "per_plate"),
-      spacing_mm: Number(payload.spacing_mm ?? 4),
-      missing_only: Boolean(payload.missing_only),
-      enabled_printer_ids: Array.isArray(payload.enabled_printer_ids)
-        ? (payload.enabled_printer_ids as string[])
-        : undefined,
-    });
-    return {
-      primary_path: result.primary_path,
-      download_url: this.downloadUrlForPath(result.primary_path),
-      paths: result.paths.map((p) => ({
-        path: p,
-        download_url: this.downloadUrlForPath(p),
-      })),
-      object_count: result.object_count,
-      plate_count: result.plate_count,
-      warnings: result.warnings,
-      printer_summaries: result.printer_summaries,
-    };
-  }
-
   private async runAcceptedPlateExport(
     payload: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
@@ -714,19 +683,6 @@ export class InProcessJobRunner {
       }
       return unexpectedFailure();
     }
-  }
-
-  private async runPackPreview(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const profileId = Number(payload.profile_id);
-    return runPackPreviewJob(this.repo, profileId, {
-      enabled_printer_ids: Array.isArray(payload.enabled_printer_ids)
-        ? (payload.enabled_printer_ids as string[])
-        : undefined,
-      assignments: payload.assignments as Record<string, string> | undefined,
-      auto_assign: Boolean(payload.auto_assign),
-      spacing_mm: payload.spacing_mm != null ? Number(payload.spacing_mm) : undefined,
-      grouping_strategy: payload.grouping_strategy === "height_band" ? "height_band" : undefined,
-    });
   }
 
   private async runPrinterUpload(
@@ -802,56 +758,6 @@ export class InProcessJobRunner {
         resolve(existing);
       }
     });
-  }
-
-  private async runAutoSlice(
-    jobId: string,
-    payload: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    const profileId = Number(payload.profile_id);
-    const result = await runAutoSliceJob(
-      this.repo,
-      this.getExportsDir(),
-      {
-        profile_id: profileId,
-        layout_mode: typeof payload.layout_mode === "string" ? payload.layout_mode : "per_plate",
-        spacing_mm: payload.spacing_mm != null ? Number(payload.spacing_mm) : undefined,
-        missing_only: Boolean(payload.missing_only),
-        enabled_printer_ids: Array.isArray(payload.enabled_printer_ids)
-          ? (payload.enabled_printer_ids as string[])
-          : undefined,
-        timeout_s: payload.timeout_s != null ? Number(payload.timeout_s) : undefined,
-      },
-      (patch) => this.emit(jobId, patch),
-    );
-    return {
-      profile_id: profileId,
-      ok: result.ok,
-      plate_count: result.plate_count,
-      attempted_count: result.attempted_count,
-      failed_count: result.failed_count,
-      gcode_paths: result.gcode_paths.map((p) => ({
-        path: p,
-        download_url: this.downloadUrlForPath(p),
-      })),
-      plates: result.plates.map((pl) => ({
-        printer_id: pl.printer_id,
-        printer_name: pl.printer_name,
-        plate_index: pl.plate_index,
-        slicer: pl.slicer,
-        status: pl.status,
-        gcode_path: pl.gcode_path,
-        thumbnail_path: pl.thumbnail_path,
-        error: pl.error,
-        error_code: pl.error_code,
-        stderr: pl.stderr,
-        exit_code: pl.exit_code,
-        settings_keys: pl.settings_keys,
-        download_url: pl.gcode_path ? this.downloadUrlForPath(pl.gcode_path) : null,
-        thumbnail_url: pl.thumbnail_path ? this.downloadUrlForPath(pl.thumbnail_path) : null,
-      })),
-      warnings: result.warnings,
-    };
   }
 
   async cancel(jobId: string, tenantId: string): Promise<boolean> {
@@ -969,31 +875,6 @@ export async function registerJobRoutes(
     return { job_id };
   });
 
-  app.post("/jobs/export-3mf", limited, async (request, reply) => {
-    const body = request.body as {
-      profile_id?: number;
-      layout_mode?: string;
-      spacing_mm?: number;
-      missing_only?: boolean;
-      enabled_printer_ids?: string[];
-    };
-    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
-      return sendProblem(reply, 404, "Not Found", "Profile not found");
-    }
-    const job_id = await jobs.start(
-      "export-3mf",
-      {
-        profile_id: body.profile_id,
-        layout_mode: body.layout_mode ?? "per_plate",
-        spacing_mm: body.spacing_mm ?? 4,
-        missing_only: body.missing_only ?? false,
-        enabled_printer_ids: body.enabled_printer_ids,
-      },
-      request.tenantId,
-    );
-    return { job_id };
-  });
-
   app.post("/jobs/export-accepted-plate-3mf", limited, async (request, reply) => {
     if (!isRecord(request.body)) {
       return reply.status(400).send({
@@ -1017,61 +898,6 @@ export async function registerJobRoutes(
       expected_plate_revision_id: expectedPlateRevisionId,
     };
     const job_id = await jobs.start("export-accepted-plate-3mf", payload, request.tenantId);
-    return { job_id };
-  });
-
-  app.post("/jobs/auto-slice", limited, async (request, reply) => {
-    const body = request.body as {
-      profile_id?: number;
-      spacing_mm?: number;
-      missing_only?: boolean;
-      enabled_printer_ids?: string[];
-      timeout_s?: number;
-    };
-    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
-      return sendProblem(reply, 404, "Not Found", "Profile not found");
-    }
-    const job_id = await jobs.start(
-      "auto-slice",
-      {
-        profile_id: body.profile_id,
-        // Auto-slice always exports one 3MF per plate; a zip would be
-        // unsliceable by the sidecar.
-        layout_mode: "per_plate",
-        spacing_mm: body.spacing_mm ?? 4,
-        missing_only: body.missing_only ?? false,
-        enabled_printer_ids: body.enabled_printer_ids,
-        timeout_s: body.timeout_s,
-      },
-      request.tenantId,
-    );
-    return { job_id };
-  });
-
-  app.post("/jobs/pack-preview", async (request, reply) => {
-    const body = request.body as {
-      profile_id?: number;
-      enabled_printer_ids?: string[];
-      assignments?: Record<string, string>;
-      auto_assign?: boolean;
-      spacing_mm?: number;
-      grouping_strategy?: string;
-    };
-    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
-      return sendProblem(reply, 404, "Not Found", "Profile not found");
-    }
-    const job_id = await jobs.start(
-      "pack-preview",
-      {
-        profile_id: body.profile_id,
-        enabled_printer_ids: body.enabled_printer_ids,
-        assignments: body.assignments,
-        auto_assign: body.auto_assign ?? false,
-        spacing_mm: body.spacing_mm,
-        grouping_strategy: body.grouping_strategy,
-      },
-      request.tenantId,
-    );
     return { job_id };
   });
 

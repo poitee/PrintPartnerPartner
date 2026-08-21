@@ -19,7 +19,7 @@ Self-host Docker serves the API on **http://localhost:8080**. The SPA uses flat 
 {
   "ok": true,
   "api_version": "v1",
-  "capabilities": ["kit_planning", "jobs_ws", "fleet_presets", "integrations_api"]
+  "capabilities": ["kit_planning", "accepted_plate_revisions", "accepted_plate_export", "jobs_ws", "fleet_presets", "integrations_api"]
 }
 ```
 
@@ -85,6 +85,39 @@ The unavailable reasons are `compatibility_dirty`, `uninitialized`, `integrity`,
 { "detail": "Duplicate this Plan through /api/v2" }
 ```
 
+## Accepted Plates
+
+The first-party flat routes and `/api/v2` expose the same accepted Plate
+workspace:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/plans/:id/plates` | Read setup, ready, or blocked accepted Plate state |
+| `POST` | `/plans/:id/plates/initialize` | Publish a complete explicit Printer allocation against an accepted Plan basis |
+| `PATCH` | `/plans/:id/plates/:plateId/units/:token` | Move one Required unit using the expected Plate revision |
+
+Accepted Plate mutations carry the complete accepted Plan basis and the
+expected Plate revision. The server does not translate legacy match keys,
+choose a Printer, rotate a mesh, or silently retry against a newer revision.
+
+Accepted 3MF delivery uses the existing job transport:
+
+```http
+POST /api/v1/jobs/export-accepted-plate-3mf
+Content-Type: application/json
+
+{ "profile_id": 1, "expected_plate_revision_id": 17 }
+```
+
+The result contains tenant-scoped download URLs for the deterministic manifest,
+bundle, and Plate files. It does not contain server filesystem paths.
+
+This release intentionally removes the legacy `print-plan`, `print-groups`,
+`print-assignments`, `plate-workspace`, `print-plan/prepare-missing`,
+`pack-preview`, `export-3mf`, `auto-slice`, and `open-plates` routes from flat
+and `/api/v1` registrations. These paths now return the framework's normal 404.
+There is no match-key translator or 410 compatibility handler.
+
 ## Slicer / export poll flow
 
 Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
@@ -148,7 +181,9 @@ Settings → Printers uses these same-origin routes (not under `/api/v1`):
 | `GET` | `/printers/:id/profile-assignment` | Assigned machine + slot filaments, compatible processes, last synced |
 | `PUT` | `/printers/:id/profile-assignment` | Save `{ profile_source, machine_profile_id, filament_slots }` |
 
-`profile_source` is `assigned` (use pinned profiles for auto-slice) or `auto_match` (name-based heuristic). When `assigned`, auto-slice fails clearly if machine or slot filaments are missing.
+`profile_source` is `assigned` or `auto_match`. These fields retain imported
+profile preferences for slicer setup and future integrations. Accepted Plate
+export and handoff do not choose machine, process, or filament profiles.
 
 The Export **Profile library** panel was removed; sync status and assignments live on Settings → Printers.
 
@@ -183,9 +218,12 @@ Containers must carry label `printpartner.slicer_instance_id=<instance id>`. Saa
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/slicer-handoff/exchange-status` | Whether `PP_EXCHANGE_DIR` is writable |
-| `POST` | `/slicer-instances/:id/open-plates` | Export plates, stage into exchange inbox, return `gui_url` + staged paths |
+| `POST` | `/slicer-instances/:id/open-accepted-plates` | Stage one requested accepted Plate revision into the exchange inbox |
 
-Body: `{ profile_id, layout_mode?, missing_only?, enabled_printer_ids? }`. Does not change 3MF object names. Managed open requires a writable exchange dir; otherwise use Download via `/jobs/export-3mf`.
+Body: `{ profile_id, expected_plate_revision_id }`. The handoff uses the same
+verified files as accepted export and returns only relative or tenant-scoped
+locations. Managed open requires a writable exchange directory; otherwise use
+the accepted Plate download.
 
 ## Integrations (v1 only)
 

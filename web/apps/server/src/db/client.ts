@@ -20,12 +20,17 @@ import {
   repairCompatibilityDirtyBuilds,
   type CompatibilityDirtyRepairDependencies,
 } from "./compatibility-dirty-repair.js";
+import {
+  LEGACY_PRINT_PLAN_REMOVAL_SCHEMA_VERSION,
+  removeLegacyPrintPlansAndStampSqlite,
+} from "./legacy-print-plan-removal.js";
 
 export type DrizzleDb = BetterSQLite3Database<typeof schema>;
 
 type SqliteMigrationDependencies = RequiredUnitBackfillDependencies &
   CompatibilityDirtyRepairDependencies & {
     readonly beforeCompatibilityCutover?: () => void;
+    readonly afterLegacyPrintPlanRemoval?: (sqlite: Database.Database) => void;
   };
 
 function parseSchemaVersion(value: string | undefined): number {
@@ -288,6 +293,12 @@ export class SqliteDatabase {
           );
       });
       finalizeCompatibilityCutover.immediate();
+    }
+    if (versionBeforeMigration < LEGACY_PRINT_PLAN_REMOVAL_SCHEMA_VERSION) {
+      removeLegacyPrintPlansAndStampSqlite(
+        this.sqlite,
+        this.requiredUnitBackfillDependencies.afterLegacyPrintPlanRemoval,
+      );
     }
     const row = this.sqlite
       .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")

@@ -8,9 +8,17 @@ import Database from "better-sqlite3";
 import { getDb, SqliteDatabase } from "./client.js";
 import { postgresPostInitMigrations } from "./client-postgres.js";
 import { AppRepository } from "./repository.js";
+import { acceptedPlanBasis } from "./accepted-plan-progress.js";
+import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
+import { backfillCurrentRequiredUnitSets } from "./required-units.js";
 import * as pgSchema from "./schema-pg.js";
 import * as sqliteSchema from "./schema.js";
 import { currentSchemaVersion, schemaMigrations } from "./schema.js";
+import {
+  POSTGRES_LEGACY_PRINT_PLAN_REMOVAL,
+  SQLITE_LEGACY_PRINT_PLAN_REMOVAL,
+  removeLegacyPrintPlansAndStampPostgres,
+} from "./legacy-print-plan-removal.js";
 
 /**
  * Cumulative SQLite migration and PostgreSQL DDL parity checks.
@@ -434,7 +442,7 @@ describe("database schema migrations (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v27 tables and records schema version 27", () => {
+  it("creates the v15-v27 tables and records schema version 28", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
       for (const table of [
@@ -454,7 +462,7 @@ describe("database schema migrations (SQLite)", () => {
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "27" });
+      ).toMatchObject({ value: "28" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -838,8 +846,149 @@ describe("database schema migrations (SQLite)", () => {
         rawSqlite(upgraded)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = 'default' AND key = 'schema_version'")
           .get(),
-      ).toEqual({ value: "27" });
+      ).toEqual({ value: "28" });
       upgraded.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("removes only exact legacy print Plan keys while upgrading schema 27 to 28", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-schema-v28-print-plan-removal-"));
+    try {
+      const legacy = new SqliteDatabase(dir);
+      legacy.connect();
+      const raw = rawSqlite(legacy);
+      const repo = new AppRepository(getDb(legacy), "default", legacy.reposDir);
+      const profile = repo.createProfile("Accepted Plate v28 migration");
+      raw.prepare(
+        `INSERT INTO parts (
+          tenant_id, profile_id, match_key, relative_path, filename, source_layer,
+          status, role, quantity_auto, quantity_effective, included, notes
+        ) VALUES ('default', ?, 'bracket.stl', 'bracket.stl', 'bracket.stl',
+          'base:test', 'base', 'primary', 1, 1, 1, '')`,
+      ).run(profile.id);
+      backfillAcceptedPlanRevisions(raw, "2026-08-21T18:00:00.000Z");
+      backfillCurrentRequiredUnitSets(raw, {
+        now: () => "2026-08-21T18:01:00.000Z",
+        tokenFactory: () => "ppu_00000000000000000000000000000001",
+      });
+      const accepted = repo.readAcceptedPlanOperationalSnapshot(profile.id);
+      if (accepted.kind !== "ready") throw new Error("accepted migration fixture is unavailable");
+      const unit = accepted.snapshot.parts.flatMap((part) => part.units).find((candidate) => candidate.required);
+      if (!unit) throw new Error("accepted migration fixture has no Required unit");
+      const published = repo.publishAcceptedPlates({
+        profileId: profile.id,
+        expected: acceptedPlanBasis(accepted.snapshot),
+        expectedPlateRevisionId: null,
+        plates: [{
+          plateId: "plate-v28",
+          printerId: "printer-v28",
+          printerName: "Printer v28",
+          printerModel: "Model v28",
+          bedWidthUm: 250_000,
+          bedDepthUm: 210_000,
+          bedHeightUm: 200_000,
+          marginUm: 4_000,
+          units: [{
+            token: unit.token,
+            xUm: 4_000,
+            yUm: 4_000,
+            widthUm: 30_000,
+            depthUm: 20_000,
+            heightUm: 10_000,
+          }],
+        }],
+      });
+      if (published.kind !== "published") throw new Error("accepted migration Plate was not published");
+      const rows = [
+        ["default", "print_plan:42", "{broken"],
+        ["tenant-two", "print_plan:7", "legacy"],
+        ["default", "printXplan:42", "lookalike"],
+        ["default", "print_plan:", "empty"],
+        ["default", "print_plan:42:backup", "backup"],
+        ["default", "unrelated", "keep"],
+      ] as const;
+      const insert = raw.prepare(
+        `INSERT INTO app_settings (tenant_id, key, value) VALUES (?, ?, ?)
+         ON CONFLICT(tenant_id, key) DO UPDATE SET value = excluded.value`,
+      );
+      for (const row of rows) insert.run(...row);
+      raw.prepare(
+        "UPDATE app_settings SET value = '27' WHERE tenant_id = 'default' AND key = 'schema_version'",
+      ).run();
+      const acceptedBefore = Object.fromEntries(
+        V27_TABLES.map((table) => [table, raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()]),
+      );
+      for (const table of V27_TABLES) {
+        expect(acceptedBefore[table]).toHaveLength(1);
+      }
+      legacy.close();
+
+      const upgraded = new SqliteDatabase(dir);
+      upgraded.connect();
+      const upgradedRaw = rawSqlite(upgraded);
+      expect(
+        upgradedRaw.prepare("SELECT tenant_id, key, value FROM app_settings ORDER BY tenant_id, key").all(),
+      ).toEqual(expect.arrayContaining([
+        { tenant_id: "default", key: "printXplan:42", value: "lookalike" },
+        { tenant_id: "default", key: "print_plan:", value: "empty" },
+        { tenant_id: "default", key: "print_plan:42:backup", value: "backup" },
+        { tenant_id: "default", key: "unrelated", value: "keep" },
+      ]));
+      expect(
+        upgradedRaw.prepare("SELECT tenant_id, key FROM app_settings WHERE key IN ('print_plan:42', 'print_plan:7')").all(),
+      ).toEqual([]);
+      expect(
+        upgradedRaw.prepare("SELECT value FROM app_settings WHERE tenant_id = 'default' AND key = 'schema_version'").get(),
+      ).toEqual({ value: "28" });
+      expect(Object.fromEntries(
+        V27_TABLES.map((table) => [table, upgradedRaw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()]),
+      )).toEqual(acceptedBefore);
+      upgraded.close();
+
+      const rerun = new SqliteDatabase(dir);
+      expect(() => rerun.connect()).not.toThrow();
+      rerun.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back legacy print Plan deletion and the v28 stamp together", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-schema-v28-print-plan-failure-"));
+    const dbPath = join(dir, "print-partner.db");
+    try {
+      const legacy = new SqliteDatabase(dir);
+      legacy.connect();
+      const legacyRaw = rawSqlite(legacy);
+      legacyRaw.prepare(
+        "UPDATE app_settings SET value = '27' WHERE tenant_id = 'default' AND key = 'schema_version'",
+      ).run();
+      legacyRaw.prepare(
+        "INSERT INTO app_settings (tenant_id, key, value) VALUES ('tenant-two', 'print_plan:7', 'legacy')",
+      ).run();
+      legacy.close();
+
+      const failed = new SqliteDatabase(dir, {
+        afterLegacyPrintPlanRemoval: (database) => {
+          expect(
+            database.prepare("SELECT key FROM app_settings WHERE key = 'print_plan:7'").get(),
+          ).toBeUndefined();
+          throw new Error("injected legacy print Plan cleanup failure");
+        },
+      });
+      expect(() => failed.connect()).toThrow("injected legacy print Plan cleanup failure");
+      failed.close();
+
+      const inspect = new Database(dbPath);
+      expect(
+        inspect.prepare("SELECT value FROM app_settings WHERE tenant_id = 'default' AND key = 'schema_version'").get(),
+      ).toEqual({ value: "27" });
+      expect(
+        inspect.prepare("SELECT value FROM app_settings WHERE tenant_id = 'tenant-two' AND key = 'print_plan:7'").get(),
+      ).toEqual({ value: "legacy" });
+      inspect.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1115,8 +1264,56 @@ function pgAddedColumns(table: string): string[] {
 
 describe("database schema migrations (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(27);
-    expect(pgSchema.currentSchemaVersion).toBe(27);
+    expect(sqliteSchema.currentSchemaVersion).toBe(28);
+    expect(pgSchema.currentSchemaVersion).toBe(28);
+  });
+
+  it("uses the same exact legacy print Plan key grammar in SQLite and Postgres", () => {
+    expect(SQLITE_LEGACY_PRINT_PLAN_REMOVAL).toContain("substr(key, 1, 11) = 'print_plan:'");
+    expect(SQLITE_LEGACY_PRINT_PLAN_REMOVAL).toContain("substr(key, 12) NOT GLOB '*[^0-9]*'");
+    expect(POSTGRES_LEGACY_PRINT_PLAN_REMOVAL).toBe(
+      "DELETE FROM app_settings WHERE key ~ '^print_plan:[0-9]+$'",
+    );
+    expect(postgresPostInitMigrations).not.toContain(POSTGRES_LEGACY_PRINT_PLAN_REMOVAL);
+  });
+
+  it("deletes legacy print Plans and stamps v28 in one PostgreSQL transaction", async () => {
+    const queries: Array<{ sql: string; params?: unknown[] }> = [];
+    await removeLegacyPrintPlansAndStampPostgres({
+      query: async (sql, params) => {
+        queries.push({ sql, params });
+        return {};
+      },
+    });
+
+    expect(queries).toEqual([
+      { sql: "BEGIN", params: undefined },
+      { sql: POSTGRES_LEGACY_PRINT_PLAN_REMOVAL, params: undefined },
+      {
+        sql: expect.stringContaining("INSERT INTO app_settings"),
+        params: ["default", "schema_version", "28"],
+      },
+      { sql: "COMMIT", params: undefined },
+    ]);
+  });
+
+  it("rolls back PostgreSQL legacy print Plan cleanup when the v28 stamp fails", async () => {
+    const queries: string[] = [];
+    const migration = removeLegacyPrintPlansAndStampPostgres({
+      query: async (sql) => {
+        queries.push(sql);
+        if (sql.includes("INSERT INTO app_settings")) throw new Error("injected stamp failure");
+        return {};
+      },
+    });
+
+    await expect(migration).rejects.toThrow("injected stamp failure");
+    expect(queries).toEqual([
+      "BEGIN",
+      POSTGRES_LEGACY_PRINT_PLAN_REMOVAL,
+      expect.stringContaining("INSERT INTO app_settings"),
+      "ROLLBACK",
+    ]);
   });
 
   it("creates every table declared in schema-pg.ts", () => {

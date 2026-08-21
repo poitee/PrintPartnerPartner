@@ -140,6 +140,46 @@ describe("accepted Plate routes", () => {
     expect(v2.statusCode).toBe(200);
     expect(v2.json()).toEqual(browser.json());
     expect(v1.statusCode).toBe(404);
+
+    const removed = [
+      { method: "GET" as const, path: `/plans/${profile.id}/print-plan` },
+      { method: "PUT" as const, path: `/plans/${profile.id}/print-plan` },
+      { method: "GET" as const, path: `/plans/${profile.id}/print-groups` },
+      { method: "PUT" as const, path: `/plans/${profile.id}/print-assignments` },
+      { method: "GET" as const, path: `/plans/${profile.id}/plate-workspace` },
+      { method: "POST" as const, path: `/plans/${profile.id}/print-plan/prepare-missing` },
+      { method: "POST" as const, path: "/jobs/export-3mf" },
+      { method: "POST" as const, path: "/jobs/pack-preview" },
+      { method: "POST" as const, path: "/jobs/auto-slice" },
+      { method: "POST" as const, path: "/slicer-instances/missing/open-plates" },
+    ];
+    for (const route of removed) {
+      for (const prefix of ["", "/api/v1"]) {
+        const response = await app.inject({ method: route.method, url: `${prefix}${route.path}` });
+        expect(response.statusCode, `${route.method} ${prefix}${route.path}`).toBe(404);
+      }
+    }
+
+    const openapi = await app.inject({ method: "GET", url: "/api/v1/openapi.json" });
+    const paths = Object.keys(openapi.json().paths as Record<string, unknown>);
+    for (const route of removed) {
+      expect(paths).not.toContain(route.path);
+      expect(paths).not.toContain(`/api/v1${route.path}`);
+    }
+    expect(paths).toContain("/jobs/export-accepted-plate-3mf");
+    expect(paths).toContain("/slicer-instances/{id}/open-accepted-plates");
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    const capabilities = health.json().capabilities as string[];
+    expect(capabilities).toEqual(expect.arrayContaining([
+      "accepted_plate_revisions",
+      "accepted_plate_export",
+    ]));
+    expect(capabilities).not.toEqual(expect.arrayContaining([
+      "export-3mf",
+      "pack-preview",
+      "auto-slice",
+    ]));
   });
 
   it("returns stable boundary codes for missing and malformed Plan IDs", async () => {

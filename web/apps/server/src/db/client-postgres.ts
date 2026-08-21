@@ -6,11 +6,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import * as schema from "./schema-pg.js";
-import { currentSchemaVersion, schemaVersionKey } from "./schema-pg.js";
 import type {
   RequiredUnitBackfillCommandResult,
   RequiredUnitBackfillDependencies,
 } from "./required-units.js";
+import { removeLegacyPrintPlansAndStampPostgres } from "./legacy-print-plan-removal.js";
 import {
   POSTGRES_SYNC_MAX_RESULT_BYTES,
   POSTGRES_SYNC_MAX_RESULT_ROWS,
@@ -1912,13 +1912,12 @@ export class PostgresDatabase {
     for (const stmt of postgresPostInitMigrations) {
       await this.pool.query(stmt);
     }
-    // Stamp the version LAST: if any DDL above throws, the recorded schema
-    // version must not claim a migration level the database never reached.
-    await this.pool.query(
-      `INSERT INTO app_settings (tenant_id, key, value) VALUES ($1, $2, $3)
-       ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value`,
-      ["default", schemaVersionKey, String(currentSchemaVersion)],
-    );
+    const client = await this.pool.connect();
+    try {
+      await removeLegacyPrintPlansAndStampPostgres(client);
+    } finally {
+      client.release();
+    }
   }
 
   async ping(): Promise<boolean> {

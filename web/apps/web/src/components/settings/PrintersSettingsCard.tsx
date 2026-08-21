@@ -837,7 +837,7 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
                     Remove
                   </Button>
                   <label className="flex items-center gap-2 text-sm">
-                    <span className="text-xs text-muted-foreground">Slicer:</span>
+                    <span className="text-xs text-muted-foreground">Preferred slicer:</span>
                     <Select
                       value={printer.preferred_slicer ?? "auto"}
                       onValueChange={(v) =>
@@ -859,6 +859,10 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
                     </Select>
                   </label>
                 </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Accepted Plate export does not choose slicer profiles.
+                </p>
 
                 {printer.loaded_filaments.length > 0 && (
                   <div className="grid gap-2 sm:grid-cols-2">

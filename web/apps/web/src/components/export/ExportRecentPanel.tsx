@@ -10,7 +10,6 @@ import {
 export const EXPORT_JOB_KINDS = new Set([
   "stl-export",
   "export",
-  "export-3mf",
   "export-accepted-plate-3mf",
   "kit-export",
   "export-checklist-html",

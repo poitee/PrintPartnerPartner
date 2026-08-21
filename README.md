@@ -58,7 +58,7 @@
 | **Plan** | Attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), recompute when stale, kit/manifest options, inline repo **Docs**. |
 | **Parts** | Confirm validation by role and filament, browse included parts with 3D previews, edit quantities. |
 | **Progress** | Track **print checkoff** (per-unit progress, assembled toggles, filters, printable checklist). |
-| **Export** | Plate workspace, height-band packing, slicer links, profile library, STL/3MF packs, printer bind / send, Spoolman deduct when configured. |
+| **Export** | Assign Required units to Printers, arrange accepted Plates, download revision-bound 3MFs, open a local slicer, send G-code, and deduct Spoolman when configured. |
 
 **Plans** (not a pipeline step): create, rename, duplicate, archive, and delete plans from **Create plan** or the **Plans** page. The active plan is shared across Plan, Parts, Progress, and Export.
 
@@ -70,7 +70,7 @@ Optional integrations:
 
 - **[Spoolman](docs/integrations/SPOOLMAN.md)** — pick filaments from inventory on Plan; read-only remaining weights in Parts; optional deduct on send.
 - **Live printers** — **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload with verify-first Progress; **Bambu** LAN MQTT is status-only (send deferred). See **[Printer setup](docs/integrations/PRINTER_SETUP.md)**.
-- **Slicer sidecar** — optional Orca/Prusa/Bambu CLI companion for auto-slice (`slicer-sidecar/`, `pp-compose.yml`).
+- **Local slicers** - optional Orca/Prusa/Bambu GUI containers with profile watch volumes (`pp-compose.yml`). Print Partner hands off accepted 3MFs; profile and slicing choices stay in the slicer.
 - **Discord digest / Home Assistant** — optional overnight farm digest and HA hooks when configured.
 - **Backups, metrics, rate limits, API keys** — see [`OPERATIONS.md`](OPERATIONS.md).
 
@@ -173,7 +173,7 @@ docker compose up --build
 5. Add a source on **Library**, create a plan with **Create plan** or **Plans**, then walk **Plan → Parts → Progress → Export**.
 6. For MCP attach on Docker (`HOST=0.0.0.0`): set `PRINT_PARTNER_API_KEY`, prefer HTTPS via a reverse proxy, then connect via [`docs/assistant-mcp.md`](docs/assistant-mcp.md).
 
-Optional slicer GUI + sidecar stack (profiles + auto-slice): `docker compose -f docker-compose.yml -f pp-compose.yml up -d` — see comments in `pp-compose.yml`.
+Optional local slicer GUI stack with profile watch volumes: `docker compose -f docker-compose.yml -f pp-compose.yml up -d`. See comments in `pp-compose.yml`.
 
 ### Environment variables (self-host)
 
@@ -275,7 +275,7 @@ The application lives in the `web/` TypeScript monorepo; the `Dockerfile` and Co
     └── packages/              # contracts, domain
 ```
 
-The server uses a **ports/adapters** design: a `self-host` adapter (SQLite + local disk) and a `saas` adapter (Postgres + S3) implement the same ports. STL rendering happens client-side with Three.js, and long-running work (sync, recompute, exports, auto-slice) runs in a background job runner that streams progress over a WebSocket. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for details.
+The server uses a **ports/adapters** design: a `self-host` adapter (SQLite + local disk) and a `saas` adapter (Postgres + S3) implement the same ports. STL rendering happens client-side with Three.js, and long-running work such as sync, recompute, and accepted Plate export runs in a background job runner that streams progress over a WebSocket. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for details.
 
 ---
 

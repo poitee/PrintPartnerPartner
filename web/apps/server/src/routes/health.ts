@@ -45,6 +45,8 @@ export async function registerHealthRoutes(
       api_version: "v1",
       capabilities: [
         "kit_planning",
+        "accepted_plate_revisions",
+        "accepted_plate_export",
         "jobs_ws",
         "fleet_presets",
         "integrations_api",

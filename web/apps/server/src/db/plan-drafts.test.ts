@@ -2474,7 +2474,7 @@ describe("saved Plan drafts", () => {
             WHERE tenant_id = 'default' AND key = 'schema_version'`,
         )
         .get(),
-    ).toEqual({ value: "27" });
+    ).toEqual({ value: "28" });
     migrated.close();
   });
 
@@ -2553,7 +2553,7 @@ describe("saved Plan drafts", () => {
       (reopened as unknown as { sqlite: Database.Database }).sqlite
         .prepare("SELECT value FROM app_settings WHERE key = 'schema_version'")
         .get(),
-    ).toEqual({ value: "27" });
+    ).toEqual({ value: "28" });
     reopened.close();
   });
 
@@ -3109,7 +3109,7 @@ describe("saved Plan drafts", () => {
     database.close();
   });
 
-  it("blocks active production, rejects corrupt state, and clears only Plate layout", () => {
+  it("blocks active production, rejects corrupt state, and preserves print_plan settings during Apply", () => {
     const { database, raw, profile, repo, command } = readyApplyFixture();
     const oldPartId = raw
       .prepare("SELECT id FROM parts WHERE profile_id = ? ORDER BY id LIMIT 1")
@@ -3163,9 +3163,13 @@ describe("saved Plan drafts", () => {
     expect(repo.applyPlanChanges(command)).toMatchObject({ kind: "applied" });
     expect(JSON.parse(repo.getSetting(`print_plan:${profile.id}`) ?? "null")).toEqual({
       enabled_printer_ids: ["voron"],
-      group_assignments: { "bracket.stl": "hardware" },
       grouping_strategy: "height_band",
-      plate_layout: null,
+      group_assignments: { "bracket.stl": "hardware" },
+      plate_layout: {
+        spacing_mm: 6,
+        pool: [{ match_key: "bracket.stl", unit: 1 }],
+        printers: [],
+      },
     });
     database.close();
   });

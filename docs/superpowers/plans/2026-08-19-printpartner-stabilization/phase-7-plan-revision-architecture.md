@@ -900,9 +900,9 @@ tests, and the domain suite passed 150 tests. In the full server suite, 170 test
 files passed, 1 test file was skipped, 1385 tests passed, and 3 tests were
 skipped. Monorepo typecheck, lint, and build passed. CodeRabbit found no
 tracked-file findings. Independent review, the no-comments audit, and diff
-checks passed. The browser still uses the legacy export controls.
-`auto-slice-job.ts` still imports `runExport3mfJob`, so that exporter cannot be
-deleted yet.
+checks passed. At this checkpoint the browser still used legacy export
+controls and auto-slice still imported `runExport3mfJob`. The browser and
+server cutovers below subsequently removed both paths.
 
 ## Accepted Plate browser cutover
 
@@ -935,9 +935,8 @@ directory or caught filesystem error.
 The browser no longer calls the legacy `plate-workspace`, `print-plan`,
 `print-assignments`, `export-3mf`, `auto-slice`, or `open-plates` paths. Their
 browser components, query modules, parsers, and helpers were deleted in the
-same cutover. The server still exposes the legacy export job and `open-plates`
-handoff. Auto-slice also still calls `runExport3mfJob`; the next unit migrates
-auto-slice and deletes those server paths.
+same cutover. The following server cutover removes the corresponding handlers
+and implementations.
 
 Independent review closed thirteen findings covering response and log path
 redaction, popup recovery, recent-job lifecycle, shared error variants, group
@@ -958,6 +957,56 @@ empty accepted Plate state rendered without horizontal overflow, requested
 paths. Component, query, contract, and server route tests cover populated
 initialize, movement, export, and handoff behavior. The live fixture covered
 only the empty state.
+
+## Accepted Plate server cutover
+
+The server now exposes only the accepted Plate workspace, revision-keyed 3MF
+job, and accepted slicer handoff. Legacy `print-plan`, `print-groups`,
+`print-assignments`, `plate-workspace`, `prepare-missing`, `pack-preview`,
+`export-3mf`, `auto-slice`, and `open-plates` handlers are absent on flat and
+`/api/v1` registrations. Removed routes use the framework's normal 404. The
+accepted workspace remains flat and `/api/v2`; accepted export and handoff
+remain flat and `/api/v1` on the existing job and automation transports.
+
+Auto-slice was deleted rather than translated. It inferred a Printer from a
+filename, could fall back to the first fleet entry, and selected mutable
+machine, process, and filament profiles. None of those choices belongs to an
+accepted Plan or Plate revision. Local handoff therefore ends at the verified
+accepted 3MF, and the user chooses slicing profiles in the slicer. Persisted
+slicer instances, profile synchronization, Printer preferences, Docker
+controls, and the `slicer_sidecar` integration remain for their separate live
+Settings contracts.
+
+The startable job union no longer includes `export-3mf`, `pack-preview`, or
+`auto-slice`. Dispatch is exhaustive, and an unsupported kind fails before a
+job snapshot is retained. Accepted export still requires the observed Plate
+revision ID. Known failures retain fixed public messages and coarse logs.
+
+Schema v28 deletes only keys matching `print_plan:<digits>`. It does not parse
+or translate match-key JSON. SQLite performs the exact-key deletion and v28
+stamp in one immediate transaction. PostgreSQL uses one acquired client and a
+single begin, delete, stamp, commit sequence. Both rollback paths preserve the
+old key and version when stamping fails. A populated migration fixture proves
+that accepted Plate heads, revisions, Plates, and units remain byte-identical.
+
+The removed server and domain graph includes the legacy print-plan store,
+packing workspace, 3MF exporter, auto-slice orchestrator, route adapters,
+maintainer sidecar fixtures, and their match-key domain model. `PrinterMachine`
+and persisted slicer integration types remain live. `buildMergePartsForProfile`
+and `printUnitsByPartId` also remain because STL bundle, checklist HTML, and kit
+bundle exports still own non-Plate callers; their accepted-state migration is a
+separate unit.
+
+Red proofs captured the old startable job kinds, live legacy routes, stub job
+success, non-atomic Apply setting rewrite, absent v28 migration, and legacy
+caller graph. Review then captured a real post-delete migration rollback gap in
+both database paths before commit. The corrected migration rollback and
+populated accepted Plate preservation bracket passed 73 tests. The full
+contracts suite passed 4 files and 33 tests; the domain suite passed 13 files
+and 74 tests; the server suite passed 161 files, 1305 tests, and skipped 1 test;
+the browser suite passed 105 files and 422 tests. Monorepo typecheck, lint, and
+build passed. Independent review, retained-feature checks, no-comments review,
+route and caller inventories, and diff checks passed.
 
 ## Module shape
 

@@ -146,7 +146,7 @@ export default function PrinterProfileAssignmentSection({
         </Select>
         {!assignedMode && (
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Profiles are matched by name when auto-slicing.
+            Saves name matching as a preference for future integrations.
           </p>
         )}
       </label>
@@ -237,8 +237,8 @@ export default function PrinterProfileAssignmentSection({
                 ))}
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Process is still chosen by heuristic when auto-slicing; pick settings in the slicer
-                when exporting plates manually.
+                Compatible processes are reference metadata. Accepted Plate export and handoff do
+                not choose a process profile.
               </p>
             </div>
           )}

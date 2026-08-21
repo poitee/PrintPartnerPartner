@@ -28,21 +28,6 @@ interface ProcessProfileDef {
 // ---------------------------------------------------------------------------
 // Printer (machine) profile definitions
 // Each entry maps to one row in printer_profiles.
-//
-// Root cause this fixes: printer_profiles started out completely unseeded —
-// only process/filament starters existed. With no machine document at all,
-// resolveFlatConfigsForPrinter() never produces a "machine" key, so no
-// --load-settings machine.json is ever sent to OrcaSlicer. Orca then slices
-// against its own bundled default printer preset while the process/filament
-// docs still carry `compatible_printers: ["<printer> machine"]` (see
-// slicer-settings.ts buildSettingsDocs), a name that was never loaded — hence
-// "The selected printer is not compatible with the process preset in the
-// 3mf." These starter machine profiles close that gap so auto-slice always
-// has *some* real, loadable machine preset to pair against.
-//
-// `printable_area` is intentionally omitted: buildSettingsDocs() synthesizes
-// it per-printer from the PP printer's real bed_width_mm/bed_depth_mm, which
-// is more accurate than a fixed bed size baked in here.
 // ---------------------------------------------------------------------------
 
 interface PrinterProfileDef {
@@ -53,8 +38,6 @@ interface PrinterProfileDef {
 
 const PRINTER_PROFILES: PrinterProfileDef[] = [
   {
-    // Klipper/Voron machines route to OrcaSlicer (see slicer-routing.ts); tag
-    // this "orca" so it outranks the generic pp_native row for that slicer.
     name: "Generic Klipper Machine",
     slicerFormat: "orca",
     resolvedFlatConfig: {
