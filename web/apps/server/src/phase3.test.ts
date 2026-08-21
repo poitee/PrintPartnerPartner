@@ -9,11 +9,50 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { buildStlTreePayload, progressSummary } from "@print-partner/domain";
-import { exportProfileStlPack, exportStlPackJobMessage, STL_EXPORT_MISSING_HINT } from "./services/export-stl-pack.js";
+import { exportStlPackJobMessage, STL_EXPORT_MISSING_HINT } from "./services/export-stl-pack.js";
 import { backfillAcceptedPlanRevisions } from "./db/accepted-plan-revisions.js";
 import { backfillCurrentRequiredUnitSets } from "./db/required-units.js";
 import { acceptedPlanBasis } from "./db/accepted-plan-progress.js";
 import { parseRequiredUnitToken } from "./services/required-units.js";
+
+function applyTrackedPlan(repo: AppRepository, sourceId: number, profileId: number): void {
+  const observed = repo.getProjectRow(sourceId);
+  if (!observed) throw new Error("Source is missing");
+  const revision = repo.recordSourceRevision({
+    sourceId,
+    upstreamRevisionKey: `phase3-${profileId}`,
+    manifestDigest: "d".repeat(64),
+    snapshotLocator: String(sourceId),
+    syncedAt: "2026-08-21T12:00:00.000Z",
+    completeness: "complete",
+  });
+  repo.activateSourceRevision({ sourceId, revisionId: revision.id, observed });
+  const draft = repo.recomputePlanDraft({
+    profileId,
+    actor: "test:user",
+    idempotencyKey: `phase3-draft-${profileId}`,
+  });
+  if (draft.kind !== "created") throw new Error("Plan draft was not created");
+  const reconciled = repo.savePlanDraftRequiredUnitReconciliation({
+    profileId,
+    draftId: draft.draft.id,
+    expectedSnapshotDigest: draft.draft.snapshotDigest,
+    decisions: [],
+    actorId: "test:user",
+    idempotencyKey: `phase3-reconcile-${profileId}`,
+  });
+  if (reconciled.kind !== "saved") throw new Error("Plan reconciliation failed");
+  const applied = repo.applyPlanChanges({
+    profileId,
+    draftId: draft.draft.id,
+    expectedSnapshotDigest: reconciled.draft.snapshotDigest,
+    expectedLifecycleVersion: 0,
+    expectedBase: { kind: "empty", planVersion: 0 },
+    actorId: "test:user",
+    idempotencyKey: `phase3-apply-${profileId}`,
+  });
+  if (applied.kind !== "applied") throw new Error("Plan was not applied");
+}
 
 describe("Phase 3 APIs", () => {
   it("builds STL tree from repo folder", () => {
@@ -197,7 +236,7 @@ describe("Phase 3 APIs", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["p/"]);
     const plan = repo.createProfile("ExportPlan", source.id);
-    repo.recomputeProfile(plan.id);
+    applyTrackedPlan(repo, source.id, plan.id);
 
     const app = await buildApp(config, ports);
     const res = await app.inject({
@@ -232,7 +271,7 @@ describe("Phase 3 APIs", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["p/"]);
     const plan = repo.createProfile("RemainingFresh", source.id);
-    await repo.recomputeProfile(plan.id);
+    applyTrackedPlan(repo, source.id, plan.id);
 
     const app = await buildApp(config, ports);
     const res = await app.inject({
@@ -272,7 +311,7 @@ describe("Phase 3 APIs", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["p/"]);
     const plan = repo.createProfile("BlockerFresh", source.id);
-    await repo.recomputeProfile(plan.id);
+    applyTrackedPlan(repo, source.id, plan.id);
     rmSync(join(repoPath, "p", "gone.stl"));
 
     const app = await buildApp(config, ports);
@@ -310,7 +349,7 @@ describe("Phase 3 APIs", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["alpha/", "beta/"]);
     const plan = repo.createProfile("ExportFlat", source.id);
-    await repo.recomputeProfile(plan.id);
+    applyTrackedPlan(repo, source.id, plan.id);
 
     const app = await buildApp(config, ports);
     const res = await app.inject({
@@ -338,180 +377,6 @@ describe("Phase 3 APIs", () => {
 
     await app.close();
     await ports.db.close();
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("exportProfileStlPack copies files", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-"));
-    const stl = join(dir, "part.stl");
-    writeFileSync(stl, "solid");
-    const { rootPath, fileCounts } = exportProfileStlPack(
-      "Test",
-      [
-        {
-          matchKey: "part.stl",
-          relativePath: "part.stl",
-          filename: "part.stl",
-          sourceLayer: "base:R",
-          status: "base",
-          role: "primary",
-          quantityAuto: 1,
-          quantityOverride: null,
-          partSlug: "part",
-          included: true,
-          notes: "",
-          geometrySame: null,
-          absolutePath: stl,
-        },
-      ],
-      join(dir, "exports"),
-    );
-    expect(rootPath).toContain("stl");
-    expect(fileCounts.primary).toBe(1);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("exportProfileStlPack groups by color + directory by default", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-dir-"));
-    mkdirSync(join(dir, "alpha"), { recursive: true });
-    mkdirSync(join(dir, "beta"), { recursive: true });
-    const stlA = join(dir, "alpha", "part.stl");
-    const stlB = join(dir, "beta", "part.stl");
-    writeFileSync(stlA, "solidA");
-    writeFileSync(stlB, "solidB");
-    const part = (relativePath: string, absolutePath: string) => ({
-      matchKey: relativePath,
-      relativePath,
-      filename: "part.stl",
-      sourceLayer: "base:R",
-      status: "base",
-      role: "primary",
-      quantityAuto: 1,
-      quantityOverride: null,
-      partSlug: "part",
-      included: true,
-      notes: "",
-      geometrySame: null,
-      absolutePath,
-    });
-    const { rootPath, fileCounts } = exportProfileStlPack(
-      "Test",
-      [part("alpha/part.stl", stlA), part("beta/part.stl", stlB)],
-      join(dir, "exports"),
-    );
-    expect(fileCounts.primary).toBe(2);
-    expect(existsSync(join(rootPath, "primary", "alpha", "part_01.stl"))).toBe(true);
-    expect(existsSync(join(rootPath, "primary", "beta", "part_01.stl"))).toBe(true);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("exportProfileStlPack flattens by color and de-dupes collisions", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-flat-"));
-    mkdirSync(join(dir, "alpha"), { recursive: true });
-    mkdirSync(join(dir, "beta"), { recursive: true });
-    const stlA = join(dir, "alpha", "part.stl");
-    const stlB = join(dir, "beta", "part.stl");
-    writeFileSync(stlA, "solidA");
-    writeFileSync(stlB, "solidB");
-    const part = (relativePath: string, absolutePath: string) => ({
-      matchKey: relativePath,
-      relativePath,
-      filename: "part.stl",
-      sourceLayer: "base:R",
-      status: "base",
-      role: "primary",
-      quantityAuto: 1,
-      quantityOverride: null,
-      partSlug: "part",
-      included: true,
-      notes: "",
-      geometrySame: null,
-      absolutePath,
-    });
-    const { rootPath, fileCounts } = exportProfileStlPack(
-      "Test",
-      [part("alpha/part.stl", stlA), part("beta/part.stl", stlB)],
-      join(dir, "exports"),
-      { groupBy: "color" },
-    );
-    expect(fileCounts.primary).toBe(2);
-    const roleDir = join(rootPath, "primary");
-    const files = readdirSync(roleDir);
-    expect(files).toHaveLength(2);
-    expect(files).toContain("part_01.stl");
-    // Second same-named file is de-duped with a directory prefix.
-    expect(files.some((f) => f !== "part_01.stl" && f.endsWith("part_01.stl"))).toBe(true);
-    // No nested directory folders were created in flat mode.
-    expect(existsSync(join(roleDir, "alpha"))).toBe(false);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("exportProfileStlPack warns with sync hint when STL paths missing", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-missing-"));
-    const { warnings } = exportProfileStlPack(
-      "Test",
-      [
-        {
-          matchKey: "missing.stl",
-          relativePath: "parts/missing.stl",
-          filename: "missing.stl",
-          sourceLayer: "base:R",
-          status: "base",
-          role: "primary",
-          quantityAuto: 1,
-          quantityOverride: null,
-          partSlug: "missing",
-          included: true,
-          notes: "",
-          geometrySame: null,
-          absolutePath: null,
-        },
-      ],
-      join(dir, "exports"),
-    );
-    expect(warnings[0]).toContain("Missing STL: parts/missing.stl");
-    expect(warnings[0]).toContain(STL_EXPORT_MISSING_HINT);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("missing_only with no included parts does not claim everything is printed", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-empty-missing-"));
-    const { warnings, fileCounts } = exportProfileStlPack("Empty", [], join(dir, "exports"), {
-      missingOnly: true,
-      completedByMatchKey: {},
-    });
-    expect(Object.values(fileCounts).reduce((a, b) => a + b, 0)).toBe(0);
-    expect(warnings.some((w) => /already marked printed/i.test(w))).toBe(false);
-    expect(warnings[0]).toMatch(/no included parts/i);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("missing_only with only missing STL paths does not claim everything is printed", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-all-missing-"));
-    const { warnings } = exportProfileStlPack(
-      "Missing",
-      [
-        {
-          matchKey: "missing.stl",
-          relativePath: "parts/missing.stl",
-          filename: "missing.stl",
-          sourceLayer: "base:R",
-          status: "base",
-          role: "primary",
-          quantityAuto: 1,
-          quantityOverride: null,
-          partSlug: "missing",
-          included: true,
-          notes: "",
-          geometrySame: null,
-          absolutePath: null,
-        },
-      ],
-      join(dir, "exports"),
-      { missingOnly: true, completedByMatchKey: {} },
-    );
-    expect(warnings.some((w) => /already marked printed/i.test(w))).toBe(false);
-    expect(warnings.some((w) => /Missing STL/i.test(w))).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
 

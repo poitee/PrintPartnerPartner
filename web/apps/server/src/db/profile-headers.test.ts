@@ -68,10 +68,6 @@ describe("Profile headers", () => {
           included: true,
         })
         .run();
-      repo.printUnitsByPartId = () => {
-        throw new Error("Progress rows must not be read");
-      };
-
       expect(repo.getProfileHeader(profile.id)?.part_count).toBe(1);
       expect(repo.listProfileHeaders()).toHaveLength(1);
     });

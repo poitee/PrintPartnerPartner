@@ -140,6 +140,35 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
      - `"color"` — `role/file.stl` (flattens all directories into one folder per
        color/role; same-named files are de-duplicated with a directory prefix).
 
+   STL bundle and checklist jobs read exactly one accepted Plan snapshot. The
+   exported Parts, quantities, roles, unit completion, artifact identity, and
+   thumbnail identity all come from that snapshot. Working Build edits do not
+   affect these jobs until **Apply plan changes** succeeds.
+
+   Start checklist and kit jobs through the same transport:
+
+   ```http
+   POST /api/v1/jobs/export-checklist-html
+   { "profile_id": 1 }
+
+   POST /api/v1/jobs/export-kit-bundle
+   { "profile_id": 1, "include_print_progress": true }
+   ```
+
+   A kit job without `include_print_progress: true` remains an editable export
+   of current working Parts. An explicit Progress export writes the complete
+   accepted `parts` array and each Part's adjacent `print_units` from one
+   accepted snapshot. The same rule applies to
+   `POST /plans/:id/shares`.
+
+   A successful non-empty accepted export can add `plan_version` and
+   `revision_id` to the existing job result. If accepted state is unavailable,
+   the job fails with this fixed message:
+
+   ```text
+   Accepted Plan state is unavailable. Apply or repair the Plan, then export again.
+   ```
+
    Response: `{ "job_id": "…" }`
 
 2. **Poll job status** (or use WebSocket `GET /ws/jobs/:id` on the flat path)

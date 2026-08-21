@@ -1,16 +1,18 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { globalThumbnailPath } from "../lib/thumbnails.js";
-import {
-  exportPathForChecklist,
-  folderKeyFromRelativePath,
-  isFullyPrinted,
-  type MergePart,
-} from "@print-partner/domain";
-import { DATE_FORMAT_DEFAULT, formatTimestamp, type DateFormatId } from "@print-partner/contracts";
+import { createHash } from "node:crypto";
+import { folderKeyFromRelativePath, safePlanSlug } from "@print-partner/domain";
+import { formatTimestamp, type DateFormatId } from "@print-partner/contracts";
+import type { AcceptedPlanBasis } from "../db/accepted-plan-progress.js";
+import { readAcceptedMediaPng } from "../lib/accepted-media-cache.js";
+import { acceptedPartMediaIdentity } from "./accepted-part-media.js";
+import type {
+  AcceptedExportPart,
+  CaptureAcceptedOperationalExportResult,
+} from "./accepted-operational-export.js";
+import { getColorById } from "./filament-catalog.js";
+import { writeAcceptedExportFile } from "./accepted-export-publication.js";
 
-function escapeHtml(s: string): string {
-  return s
+function escapeHtml(value: string): string {
+  return value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -22,76 +24,130 @@ function repoSortKey(sourceLayer: string): [number, string] {
   return sourceLayer.startsWith("base:") ? [0, lower] : [1, lower];
 }
 
-export function exportProfileHtml(
-  profileName: string,
-  orderNumber: string | null,
-  parts: MergePart[],
-  exportsDir: string,
-  profileId: number,
-  completedByMatchKey: Record<string, boolean[]>,
-  thumbsDir?: string,
-  dateFormat: DateFormatId = DATE_FORMAT_DEFAULT,
-): { path: string; partCount: number; thumbCount: number } {
-  const outPath = exportPathForChecklist(profileName, exportsDir);
-  mkdirSync(dirname(outPath), { recursive: true });
+function renderHex(part: AcceptedExportPart): string | null {
+  const custom = part.filamentCustomHex?.trim() ?? "";
+  if (/^#[0-9a-f]{6}$/i.test(custom)) return custom.toLowerCase();
+  const catalog = part.filamentColorId ? getColorById(part.filamentColorId) : null;
+  const catalogHex = catalog?.hex.trim() ?? "";
+  return /^#[0-9a-f]{6}$/i.test(catalogHex) ? catalogHex.toLowerCase() : null;
+}
 
-  const included = parts.filter((p) => p.included);
+function thumbnail(part: AcceptedExportPart, thumbsDir: string): Buffer | null {
+  if (part.artifact.kind !== "tracked") return null;
+  const { basis } = acceptedPartMediaIdentity(
+    {
+      artifact: part.artifact,
+      effectiveRole: part.role,
+      filamentColorId: part.filamentColorId,
+      filamentCustomHex: part.filamentCustomHex,
+    },
+    "thumbnail",
+  );
+  return readAcceptedMediaPng({ thumbsDir, basis });
+}
 
-  const byRepo = new Map<string, Map<string, MergePart[]>>();
-  for (const p of included) {
-    const repoKey = p.sourceLayer || "unknown";
-    const folder = folderKeyFromRelativePath(p.relativePath);
-    if (!byRepo.has(repoKey)) byRepo.set(repoKey, new Map());
-    const folders = byRepo.get(repoKey)!;
-    if (!folders.has(folder)) folders.set(folder, []);
-    folders.get(folder)!.push(p);
+function renderChecklist(input: Readonly<{
+  profile: Readonly<{ id: number; name: string; orderNumber: string | null }>;
+  parts: readonly AcceptedExportPart[];
+  thumbsDir: string;
+  dateFormat: DateFormatId;
+  generatedAt: string;
+}>): { html: string; partCount: number; thumbCount: number } {
+  const included = input.parts.filter((part) => part.included);
+  const byRepo = new Map<string, Map<string, AcceptedExportPart[]>>();
+  for (const part of included) {
+    const repoKey = part.sourceLayer || "unknown";
+    const folder = folderKeyFromRelativePath(part.relativePath);
+    const folders = byRepo.get(repoKey) ?? new Map<string, AcceptedExportPart[]>();
+    byRepo.set(repoKey, folders);
+    const parts = folders.get(folder) ?? [];
+    folders.set(folder, parts);
+    parts.push(part);
   }
 
-  const generatedAt = formatTimestamp(new Date().toISOString(), dateFormat);
+  const generatedAt = formatTimestamp(input.generatedAt, input.dateFormat);
   let thumbCount = 0;
-  let body = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(profileName)} checklist</title>
+  let html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(input.profile.name)} checklist</title>
 <style>body{font-family:system-ui,sans-serif;margin:1.5rem;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:.4rem .6rem;text-align:left;}
 .swatch{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:.35rem;vertical-align:middle;}
 .thumb{width:48px;height:48px;object-fit:contain;vertical-align:middle;margin-right:.35rem;}</style></head><body>`;
-  body += `<h1>${escapeHtml(profileName)}</h1>`;
-  if (orderNumber) body += `<p><strong>Order #</strong> ${escapeHtml(orderNumber)}</p>`;
-  body += `<p>${included.length} part(s) · Generated ${escapeHtml(generatedAt)}</p>`;
+  html += `<h1>${escapeHtml(input.profile.name)}</h1>`;
+  if (input.profile.orderNumber) {
+    html += `<p><strong>Order #</strong> ${escapeHtml(input.profile.orderNumber)}</p>`;
+  }
+  html += `<p>${included.length} part(s) · Generated ${escapeHtml(generatedAt)}</p>`;
 
-  const repos = [...byRepo.entries()].sort((a, b) => {
-    const ka = repoSortKey(a[0]);
-    const kb = repoSortKey(b[0]);
-    return ka[0] - kb[0] || ka[1].localeCompare(kb[1]);
+  const repos = [...byRepo.entries()].sort((left, right) => {
+    const leftKey = repoSortKey(left[0]);
+    const rightKey = repoSortKey(right[0]);
+    return leftKey[0] - rightKey[0] || leftKey[1].localeCompare(rightKey[1]);
   });
 
   for (const [repoLabel, folders] of repos) {
-    body += `<h2>${escapeHtml(repoLabel)}</h2>`;
-    for (const [folder, folderParts] of [...folders.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      body += `<h3>${escapeHtml(folder)}</h3><table><thead><tr><th>Part</th><th>Qty</th><th>Printed</th><th>Notes</th></tr></thead><tbody>`;
-      for (const p of folderParts) {
-        const qty = Math.max(1, p.quantityOverride ?? p.quantityAuto ?? 1);
-        const units = completedByMatchKey[p.matchKey] ?? [];
-        const row = {
-          quantity_effective: qty,
-          printed_count: units.filter(Boolean).length,
-        };
-        const done = isFullyPrinted(row);
-        const hex = (p as MergePart & { filamentHex?: string | null }).filamentHex ?? "";
-        let thumbHtml = "";
-        if (thumbsDir && p.absolutePath) {
-          const thumbPath = globalThumbnailPath(thumbsDir, p.absolutePath, p.role, hex);
-          if (existsSync(thumbPath)) {
-            const b64 = readFileSync(thumbPath).toString("base64");
-            thumbHtml = `<img class="thumb" alt="" src="data:image/png;base64,${b64}"/>`;
-            thumbCount += 1;
-          }
-        }
-        body += `<tr><td>${thumbHtml}${hex ? `<span class="swatch" style="background:${escapeHtml(hex)}"></span>` : ""}${escapeHtml(p.filename)} <small>${escapeHtml(p.role)}</small></td>`;
-        body += `<td>${qty}</td><td>${done ? "✓" : "—"}</td><td>${escapeHtml(p.notes ?? "")}</td></tr>`;
+    html += `<h2>${escapeHtml(repoLabel)}</h2>`;
+    for (const [folder, folderParts] of [...folders.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+      html += `<h3>${escapeHtml(folder)}</h3><table><thead><tr><th>Part</th><th>Qty</th><th>Printed</th><th>Notes</th></tr></thead><tbody>`;
+      for (const part of folderParts) {
+        const done = part.units.length === part.quantityEffective && part.units.every((unit) => unit.completed);
+        const hex = renderHex(part) ?? "";
+        const png = thumbnail(part, input.thumbsDir);
+        const thumbHtml = png
+          ? `<img class="thumb" alt="" src="data:image/png;base64,${png.toString("base64")}"/>`
+          : "";
+        if (png) thumbCount += 1;
+        html += `<tr><td>${thumbHtml}${hex ? `<span class="swatch" style="background:${escapeHtml(hex)}"></span>` : ""}${escapeHtml(part.filename)} <small>${escapeHtml(part.role)}</small></td>`;
+        html += `<td>${part.quantityEffective}</td><td>${done ? "✓" : "—"}</td><td>${escapeHtml(part.notes)}</td></tr>`;
       }
-      body += `</tbody></table>`;
+      html += "</tbody></table>";
     }
   }
-  body += `<p class="no-print"><small>Print Partner · profile ${profileId}</small></p></body></html>`;
-  writeFileSync(outPath, body, "utf8");
-  return { path: outPath, partCount: included.length, thumbCount };
+  html += `<p class="no-print"><small>Print Partner · profile ${input.profile.id}</small></p></body></html>`;
+  return { html, partCount: included.length, thumbCount };
+}
+
+export function materializeAcceptedChecklistHtml(input: Readonly<{
+  capture: Extract<CaptureAcceptedOperationalExportResult, { readonly kind: "ready" | "empty" }>;
+  tenantExportsDir: string;
+  thumbsDir: string;
+  dateFormat: DateFormatId;
+  generatedAt: string;
+}>):
+  | {
+      readonly kind: "materialized";
+      readonly path: string;
+      readonly partCount: number;
+      readonly thumbCount: number;
+      readonly basis: AcceptedPlanBasis | null;
+    }
+  | { readonly kind: "output_failure" } {
+  const profile = input.capture.kind === "ready" ? input.capture.export.profile : input.capture.profile;
+  const parts = input.capture.kind === "ready" ? input.capture.export.parts : [];
+  const basis = input.capture.kind === "ready" ? input.capture.export.basis : null;
+  try {
+    const rendered = renderChecklist({
+      profile,
+      parts,
+      thumbsDir: input.thumbsDir,
+      dateFormat: input.dateFormat,
+      generatedAt: input.generatedAt,
+    });
+    const path = writeAcceptedExportFile({
+      root: input.tenantExportsDir,
+      directorySegments: [
+        `profile-${profile.id}-${safePlanSlug(profile.name).slice(0, 80)}`,
+        "checklist",
+      ],
+      filename: `checklist-${createHash("sha256").update(rendered.html).digest("hex")}.html`,
+      bytes: Buffer.from(rendered.html, "utf8"),
+    });
+    return {
+      kind: "materialized",
+      path,
+      partCount: rendered.partCount,
+      thumbCount: rendered.thumbCount,
+      basis,
+    };
+  } catch {
+    return { kind: "output_failure" };
+  }
 }

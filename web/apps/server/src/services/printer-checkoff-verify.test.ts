@@ -59,6 +59,14 @@ function setupPlan() {
   return { dir, sqlite, repo, plan, bracket, frame };
 }
 
+function acceptedPrintUnits(repo: AppRepository, profileId: number, partId: number): boolean[] {
+  const accepted = repo.readAcceptedPlanOperationalSnapshot(profileId);
+  if (accepted.kind !== "ready") throw new Error("accepted fixture is unavailable");
+  return accepted.snapshot.parts
+    .find((part) => part.projectionPartId === partId)
+    ?.units.map((unit) => unit.completed) ?? [];
+}
+
 describe("printer checkoff verify-first flow", () => {
   it("returns unavailable before any PostgreSQL link or accepted-state query", () => {
     const postgres = drizzle({} as Pool, { schema: pgSchema });
@@ -87,8 +95,9 @@ describe("printer checkoff verify-first flow", () => {
 
   it("complete queues awaiting_verify without ticking Progress", () => {
     const { dir, sqlite, repo, plan, bracket, frame } = setupPlan();
-    const before = repo.printUnitsByPartId(plan.id);
-    expect(before.get(bracket.id)?.every((u) => !u)).toBe(true);
+    const beforeBracket = acceptedPrintUnits(repo, plan.id, bracket.id);
+    const beforeFrame = acceptedPrintUnits(repo, plan.id, frame.id);
+    expect(beforeBracket.every((unit) => !unit)).toBe(true);
 
     const link = createPrinterCheckoffLink(repo, {
       profile_id: plan.id,
@@ -121,9 +130,8 @@ describe("printer checkoff verify-first flow", () => {
     expect(queued?.host_outcome).toBe("success");
     expect(listAwaitingVerifyPrinterCheckoffLinks(repo, plan.id)).toHaveLength(1);
 
-    const after = repo.printUnitsByPartId(plan.id);
-    expect(after.get(bracket.id)).toEqual(before.get(bracket.id));
-    expect(after.get(frame.id)).toEqual(before.get(frame.id));
+    expect(acceptedPrintUnits(repo, plan.id, bracket.id)).toEqual(beforeBracket);
+    expect(acceptedPrintUnits(repo, plan.id, frame.id)).toEqual(beforeFrame);
 
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
@@ -155,9 +163,8 @@ describe("printer checkoff verify-first flow", () => {
     expect(confirmed.units_confirmed).toBeGreaterThanOrEqual(1);
     expect(confirmed.link.state).toBe("awaiting_verify");
 
-    const units = repo.printUnitsByPartId(plan.id);
-    expect(units.get(bracket.id)?.[0]).toBe(true);
-    expect(units.get(frame.id)?.[0]).toBe(false);
+    expect(acceptedPrintUnits(repo, plan.id, bracket.id)[0]).toBe(true);
+    expect(acceptedPrintUnits(repo, plan.id, frame.id)[0]).toBe(false);
 
     const rejected = verifyPrinterCheckoff(repo, link!.id, [
       {
@@ -173,8 +180,7 @@ describe("printer checkoff verify-first flow", () => {
     expect(rejected.units_rejected).toBe(1);
     expect(rejected.link.state).toBe("verified");
 
-    const afterReject = repo.printUnitsByPartId(plan.id);
-    expect(afterReject.get(frame.id)?.[0]).toBe(false);
+    expect(acceptedPrintUnits(repo, plan.id, frame.id)[0]).toBe(false);
 
     const summary = summarizePrintOutcomes(repo, plan.id);
     expect(summary.total_confirmed).toBe(1);
@@ -250,7 +256,7 @@ describe("printer checkoff verify-first flow", () => {
         { part_id: bracket.id, unit_index: 0, result: "confirmed" },
       ]),
     ).toThrowError(/private outcome failure/);
-    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([false, false]);
+    expect(acceptedPrintUnits(repo, plan.id, bracket.id)).toEqual([false, false]);
     expect(getPrinterCheckoffLink(repo, link!.id)).toEqual(beforeLink);
     expect(summarizePrintOutcomes(repo, plan.id).total_confirmed).toBe(0);
     sqlite.close();
@@ -336,7 +342,7 @@ describe("printer checkoff verify-first flow", () => {
       error: "Confirm must include lower incomplete units first (Progress fills from the left)",
       status: 400,
     });
-    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([false, false]);
+    expect(acceptedPrintUnits(repo, plan.id, bracket.id)).toEqual([false, false]);
     expect(getPrinterCheckoffLink(repo, link!.id)?.state).toBe("awaiting_verify");
 
     sqlite.close();
@@ -365,7 +371,7 @@ describe("printer checkoff verify-first flow", () => {
     });
     expect(updates[0]?.event).toBe("host_failed");
     expect(getPrinterCheckoffLink(repo, link!.id)?.state).toBe("host_failed");
-    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)?.[0]).toBe(false);
+    expect(acceptedPrintUnits(repo, plan.id, bracket.id)[0]).toBe(false);
 
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });

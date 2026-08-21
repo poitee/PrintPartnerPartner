@@ -96,11 +96,18 @@ function response(body: unknown, status = 200) {
   });
 }
 
+function acceptedPrintUnits(repo: AppRepository, profileId: number, partId: number): boolean[] {
+  const accepted = repo.readAcceptedPlanOperationalSnapshot(profileId);
+  if (accepted.kind !== "ready") throw new Error("accepted fixture is unavailable");
+  return accepted.snapshot.parts
+    .find((part) => part.projectionPartId === partId)
+    ?.units.map((unit) => unit.completed) ?? [];
+}
+
 describe("printer progress route", () => {
   it("maps a currently printing Required-unit Object name without mutable Part reads", async () => {
     const { app, repo, plan, acceptedPart } = await setup();
     const mutableParts = vi.spyOn(repo, "getProfilePartRows");
-    const mutableProgress = vi.spyOn(repo, "printUnitsByPartId");
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("/api/v1/status")) {
@@ -152,7 +159,6 @@ describe("printer progress route", () => {
       }],
     });
     expect(mutableParts).not.toHaveBeenCalled();
-    expect(mutableProgress).not.toHaveBeenCalled();
   });
 
   it("durably repairs a legacy zero-unit awaiting card before returning it", async () => {
@@ -289,7 +295,6 @@ describe("printer progress route", () => {
       filename: "unknown.bgcode",
     });
     const getProfilePartRows = vi.spyOn(repo, "getProfilePartRows");
-    const printUnitsByPartId = vi.spyOn(repo, "printUnitsByPartId");
     const setSetting = vi.spyOn(repo, "setSetting");
     let now = Date.now();
     const dateNow = vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -308,7 +313,6 @@ describe("printer progress route", () => {
     expect(first.json().links[0]).toMatchObject({ id: link.id, units: [] });
     expect(second.json().links[0]).toMatchObject({ id: link.id, units: [] });
     expect(getProfilePartRows).not.toHaveBeenCalled();
-    expect(printUnitsByPartId).not.toHaveBeenCalled();
     expect(setSetting).not.toHaveBeenCalled();
   });
 
@@ -346,7 +350,7 @@ describe("printer progress route", () => {
     });
     expect(verify.statusCode).toBe(200);
     expect(verify.json()).toMatchObject({ units_confirmed: 1 });
-    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([true]);
+    expect(acceptedPrintUnits(repo, plan.id, bracket.id)).toEqual([true]);
   });
 
   it("persists Progress when the same API receives a valid mapped unit", async () => {
@@ -374,7 +378,7 @@ describe("printer progress route", () => {
     });
     expect(verify.statusCode).toBe(200);
     expect(verify.json()).toMatchObject({ units_confirmed: 1 });
-    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([true]);
+    expect(acceptedPrintUnits(repo, plan.id, bracket.id)).toEqual([true]);
   });
 
   it("does not attribute repeated complete polls for a linked print", async () => {
@@ -443,7 +447,7 @@ describe("printer progress route", () => {
       },
     });
     expect(verify.statusCode).toBe(200);
-    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([true]);
+    expect(acceptedPrintUnits(repo, plan.id, bracket.id)).toEqual([true]);
 
     const completeAfterVerify = await app.inject({
       method: "POST",
@@ -552,7 +556,7 @@ describe("printer progress route", () => {
     expect(storedPrint?.claimed_profile_id).toBeUndefined();
     expect(storedPrint?.claimed_at).toBeUndefined();
     expect(getPrinterCheckoffLink(repo, link.id)?.state).toBe("awaiting_verify");
-    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([false]);
+    expect(acceptedPrintUnits(repo, plan.id, bracket.id)).toEqual([false]);
   });
 
   it("creates an unattributed print for an unlinked external completion", async () => {

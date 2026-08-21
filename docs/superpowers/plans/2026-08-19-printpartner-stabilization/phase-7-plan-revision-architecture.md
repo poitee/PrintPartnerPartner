@@ -581,8 +581,10 @@ The cut deletes `patchPartProgress`, `patchPartAssembled`,
 `ensureProgressForPart`, `getCheckoff`, `archiveProfile`,
 `applyCheckoffUnits`, and the prefix compatibility helper. Later summary work
 also deletes `printUnitTotals`. Merge export remains the only
-`printUnitsByPartId` caller after the printer attribution cut described below.
-Plate, printer queue and link schema, and the filesystem remain deferred.
+`printUnitsByPartId` caller at this checkpoint, after the printer attribution
+cut described below. The accepted operational export cutover later in this
+document deletes that final caller and the method. Plate, printer queue and link
+schema, and the filesystem remain deferred here.
 
 The accepted Progress summary foundation adds one private bounded batch reader
 without changing routes, contracts, callers, or UI. It accepts at most 64
@@ -992,10 +994,10 @@ that accepted Plate heads, revisions, Plates, and units remain byte-identical.
 The removed server and domain graph includes the legacy print-plan store,
 packing workspace, 3MF exporter, auto-slice orchestrator, route adapters,
 maintainer sidecar fixtures, and their match-key domain model. `PrinterMachine`
-and persisted slicer integration types remain live. `buildMergePartsForProfile`
-and `printUnitsByPartId` also remain because STL bundle, checklist HTML, and kit
-bundle exports still own non-Plate callers; their accepted-state migration is a
-separate unit.
+and persisted slicer integration types remain live. At this checkpoint,
+`buildMergePartsForProfile` and `printUnitsByPartId` remained for STL bundle,
+checklist HTML, and kit bundle exports. The accepted operational export cutover
+below deletes both methods and their callers.
 
 Red proofs captured the old startable job kinds, live legacy routes, stub job
 success, non-atomic Apply setting rewrite, absent v28 migration, and legacy
@@ -1007,6 +1009,77 @@ and 74 tests; the server suite passed 161 files, 1305 tests, and skipped 1 test;
 the browser suite passed 105 files and 422 tests. Monorepo typecheck, lint, and
 build passed. Independent review, retained-feature checks, no-comments review,
 route and caller inventories, and diff checks passed.
+
+## Accepted operational export cutover
+
+`captureAcceptedOperationalExport` owns the accepted export read. It checks
+Build ownership, reads one accepted operational snapshot, and returns a typed
+ready, empty, unavailable, missing, or integrity result. A ready result carries
+the accepted Plan basis, profile, provenance, Parts, verified artifact identity,
+and ordered Required units. An empty accepted Build has no fabricated revision
+identity, so added revision metadata remains absent.
+
+STL bundle and checklist jobs now consume only that captured value. An explicit
+`include_print_progress` kit job or share also consumes it. Default kit jobs and
+shares remain editable exports. They read current layers, Sources, manifest
+data, and working Parts without reading accepted Progress. Explicit Progress
+exports serialize the complete accepted `parts` array and each Part's adjacent
+`print_units` from the same accepted snapshot. Import still creates editable
+compatibility Progress. It does not create Required-unit tokens.
+
+The STL materializer opens each accepted artifact through
+`openVerifiedAcceptedArtifact`. It streams one descriptor into a private staged
+file and verifies the byte count and SHA-256 before use. It streams each unit
+copy from that verified app-owned file and verifies every copy. An in-place
+source mutation becomes the same stable partial warning as another unavailable
+accepted artifact. Verified peer Parts still publish.
+
+STL limits cover 10,000 selected units, 256 MiB of distinct accepted source
+descriptors, and 512 MiB for the complete published tree, including the ZIP.
+Distinct-source accounting includes Source ID, Source revision ID, snapshot
+root, relative path, and digest. ZIP output streams with the portable accepted
+Plate DOS epoch. Role and folder values become safe path segments.
+
+Each STL tree lives below its accepted revision, selection, and grouping. Its
+final content key covers every file, the ZIP, and sorted warning state. A
+partial export therefore cannot block a restored artifact, and a Checkoff
+change within one accepted revision publishes beside the prior missing-only
+tree. Retries accept only an exact file, directory, size, and digest match.
+
+Checklist HTML reads thumbnails only through accepted media identity and PNG
+validation. Checklist and kit files use the numeric Build ID in their directory
+identity, with a readable slug suffix. Their filenames include a digest of the
+complete HTML or ZIP bytes. Later revisions, Checkoff snapshots, same-second kit
+modes, and slug-colliding Build names cannot overwrite prior job results. A
+shared publisher creates each directory segment without following symlinks and
+writes through an exclusive sibling file before rename. Dot-only slugs collapse
+to `export` at the domain boundary.
+
+Jobs preserve their kinds and existing result keys. Ready results may also
+include `plan_version` and `revision_id`. Known capture, integrity, limit, and
+publication failures use fixed public messages. Unexpected logs contain only
+the operation, a coarse failure kind, the Build ID, and an optional revision
+ID. Job snapshots and webhooks contain no caught exception text. An explicit
+Progress share builds the complete bundle before `createPlanShare`, so any
+capture or serialization failure writes no share.
+
+The cutover deletes `buildMergePartsForProfile`, `printUnitsByPartId`, the
+private Progress map helper, and the old STL and kit materializer entry points.
+It also deletes the unused export-path helpers that keyed output by lossy Build
+names. SQLite keeps its deferred accepted snapshot. PostgreSQL keeps the bounded
+terminal-identity retry for reads and still rejects accepted mutations without
+a native transaction. This unit adds no route, job kind, queue, link, table,
+browser, or `/api/v2` contract.
+
+Red proofs covered working-state blindness, Apply coherence, descriptor replace,
+append, and in-place mutation, accepted thumbnail basis, kit no-overlay and
+round-trip import, zero-write share failure, public error and log redaction,
+PostgreSQL stable and twice-changing reads, source and output limits, traversal,
+symlink rejection, immutable result retention, and caller deletion. The focused
+matrix passed 160 tests and skipped 1 platform test. The domain suite passed 14
+files and 76 tests. The contracts suite passed 4 files and 33 tests. The full
+server suite passed 166 files, passed 1334 tests, and skipped 1 test. Monorepo
+typecheck, lint, build, and diff checks passed.
 
 ## Module shape
 

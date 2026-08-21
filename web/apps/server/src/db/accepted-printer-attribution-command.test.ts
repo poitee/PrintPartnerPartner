@@ -95,7 +95,6 @@ describe("accepted printer attribution repository command", () => {
   it("creates a watching link from one accepted snapshot without mutable Part reads", () => {
     const { repo, plan, bracket, acceptedPart } = setup();
     const mutableParts = vi.spyOn(repo, "getProfilePartRows");
-    const mutableProgress = vi.spyOn(repo, "printUnitsByPartId");
     const transaction = vi.spyOn(repo, "transaction");
 
     const result = repo.materializeAcceptedPrinterLink({
@@ -117,7 +116,6 @@ describe("accepted printer attribution repository command", () => {
       link: { units: [{ part_id: bracket.id, unit_index: 0 }], state: "watching" },
     });
     expect(mutableParts).not.toHaveBeenCalled();
-    expect(mutableProgress).not.toHaveBeenCalled();
     expect(transaction).toHaveBeenCalledWith(expect.any(Function), "immediate");
   });
 

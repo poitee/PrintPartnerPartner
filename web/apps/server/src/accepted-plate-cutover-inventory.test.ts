@@ -60,14 +60,9 @@ describe("accepted Plate server cutover inventory", () => {
     }
   });
 
-  it("pins the retained non-Plate repository projection callers", () => {
-    expect(callers(serverRoot, "buildMergePartsForProfile")).toEqual([
-      { file: "db/repository.ts", count: 1 },
-      { file: "routes/jobs.ts", count: 2 },
-    ]);
-    expect(callers(serverRoot, "printUnitsByPartId")).toEqual([
-      { file: "db/repository.ts", count: 1 },
-    ]);
+  it("has no retained operational export compatibility projection callers", () => {
+    expect(callers(serverRoot, "buildMergePartsForProfile")).toEqual([]);
+    expect(callers(serverRoot, "printUnitsByPartId")).toEqual([]);
   });
 
   it("keeps browser, assistant, and MCP production code off removed interfaces", () => {

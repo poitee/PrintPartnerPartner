@@ -1,4 +1,4 @@
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import { rmSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import {
@@ -15,13 +15,12 @@ import type { AppRepository } from "../db/repository.js";
 import { exportDownloadKey, tenantExportDirectory } from "../lib/secure-path.js";
 import { syncProjectById } from "./sources.js";
 import {
-  exportProfileStlPack,
   exportStlPackJobMessage,
+  materializeAcceptedStlBundle,
   type StlPackGroupBy,
 } from "../services/export-stl-pack.js";
-import { zipDirectoryToFile } from "../services/zip-dir.js";
-import { exportProfileHtml } from "../services/export-html.js";
-import { exportKitBundle } from "../services/export-kit.js";
+import { materializeAcceptedChecklistHtml } from "../services/export-html.js";
+import { buildKitBundleData, writeKitBundleData } from "../services/export-kit.js";
 import { checkAllSourceUpdates } from "../services/source-update-check.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import { getRequestTenantId, tenantStorage } from "../middleware/tenant-context.js";
@@ -41,6 +40,11 @@ import {
   materializeAcceptedPlateExport,
   type MaterializeAcceptedPlateExportResult,
 } from "../services/accepted-plate-export-delivery.js";
+import {
+  AcceptedOperationalExportPublicError,
+  acceptedOperationalExportPublicError,
+  captureAcceptedOperationalExport,
+} from "../services/accepted-operational-export.js";
 
 export type JobHandler = (
   jobId: string,
@@ -544,75 +548,175 @@ export class InProcessJobRunner {
     return this.repo.recomputeProfile(profileId, { apply_manifest });
   }
 
+  private acceptedOperationalExportFailure(
+    error: unknown,
+    operation: "accepted_stl_export" | "accepted_checklist_export" | "accepted_kit_progress_export",
+    profileId: number,
+    revisionId?: number,
+  ): never {
+    if (error instanceof AcceptedOperationalExportPublicError) throw error;
+    getLogger().log("error", "Accepted operational export failed unexpectedly", {
+      operation,
+      failure: "unexpected",
+      profileId,
+      ...(revisionId == null ? {} : { revisionId }),
+    });
+    throw new AcceptedOperationalExportPublicError("unexpected");
+  }
+
   private async runExportStlPack(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const profileId = Number(payload.profile_id);
-    const missingOnly = Boolean(payload.missing_only);
-    const groupBy: StlPackGroupBy = payload.group_by === "color" ? "color" : "color_dir";
-    const { name, parts, completedByMatchKey } = this.repo.buildMergePartsForProfile(profileId);
-    const naming = this.repo.getGlobalNaming();
-    const { rootPath, fileCounts, warnings } = exportProfileStlPack(name, parts, this.getExportsDir(), {
-      missingOnly,
-      completedByMatchKey: missingOnly ? completedByMatchKey : undefined,
-      roleOrder: naming.export_role_order,
-      groupBy,
-    });
-    const fileTotal = Object.values(fileCounts).reduce((a, b) => a + b, 0);
-
-    let downloadUrl: string | null = null;
-    if (fileTotal > 0) {
-      const zipPath = join(dirname(rootPath), `${basename(rootPath)}.zip`);
-      try {
-        zipDirectoryToFile(rootPath, zipPath);
-        downloadUrl = this.downloadUrlForPath(zipPath);
-      } catch {
-        downloadUrl = null;
+    let revisionId: number | undefined;
+    try {
+      const missingOnly = Boolean(payload.missing_only);
+      const groupBy: StlPackGroupBy = payload.group_by === "color" ? "color" : "color_dir";
+      const capture = captureAcceptedOperationalExport({ repository: this.repo, profileId });
+      if (capture.kind !== "ready" && capture.kind !== "empty") {
+        throw acceptedOperationalExportPublicError(capture);
       }
+      revisionId = capture.kind === "ready" ? capture.export.basis.revisionId : undefined;
+      const naming = this.repo.getGlobalNaming();
+      const materialized = await materializeAcceptedStlBundle({
+        capture,
+        reposDir: this.deps.reposDir,
+        tenantExportsDir: this.getExportsDir(),
+        selection: missingOnly ? "missing" : "all",
+        groupBy,
+        roleOrder: naming.export_role_order,
+      });
+      if (materialized.kind === "limit_exceeded") {
+        throw new AcceptedOperationalExportPublicError("export_limit_exceeded");
+      }
+      if (materialized.kind === "output_failure") {
+        throw new AcceptedOperationalExportPublicError("export_output_failure");
+      }
+      const fileTotal = Object.values(materialized.fileCounts).reduce((a, b) => a + b, 0);
+      const warnings = materialized.warnings.map(
+        (warning) =>
+          `A verified accepted STL is unavailable: ${warning.relativePath} (${warning.sourceLayer}).`,
+      );
+      return {
+        root_path: materialized.rootPath,
+        download_url: materialized.bundlePath
+          ? this.downloadUrlForPath(materialized.bundlePath)
+          : null,
+        file_counts: materialized.fileCounts,
+        zip_counts: materialized.fileCounts,
+        warnings,
+        missing_only: missingOnly,
+        file_total: fileTotal,
+        ...(materialized.basis
+          ? {
+              plan_version: materialized.basis.planVersion,
+              revision_id: materialized.basis.revisionId,
+            }
+          : {}),
+      };
+    } catch (error) {
+      return this.acceptedOperationalExportFailure(
+        error,
+        "accepted_stl_export",
+        profileId,
+        revisionId,
+      );
     }
-
-    return {
-      root_path: rootPath,
-      download_url: downloadUrl,
-      file_counts: fileCounts,
-      zip_counts: fileCounts,
-      warnings,
-      missing_only: missingOnly,
-      file_total: fileTotal,
-    };
   }
 
   private async runExportChecklistHtml(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const profileId = Number(payload.profile_id);
-    const { name, orderNumber, parts, completedByMatchKey } =
-      this.repo.buildMergePartsForProfile(profileId);
-    const thumbsDir = join(this.deps.dataDir, "thumbs");
-    const dateFormat = (this.repo.getSetting("date_format") as DateFormatId | null) ?? DATE_FORMAT_DEFAULT;
-    const { path, partCount, thumbCount } = exportProfileHtml(
-      name,
-      orderNumber,
-      parts,
-      this.getExportsDir(),
-      profileId,
-      completedByMatchKey,
-      thumbsDir,
-      dateFormat,
-    );
-    return {
-      path,
-      download_url: this.downloadUrlForPath(path),
-      part_count: partCount,
-      thumb_count: thumbCount,
-    };
+    let revisionId: number | undefined;
+    try {
+      const capture = captureAcceptedOperationalExport({ repository: this.repo, profileId });
+      if (capture.kind !== "ready" && capture.kind !== "empty") {
+        throw acceptedOperationalExportPublicError(capture);
+      }
+      revisionId = capture.kind === "ready" ? capture.export.basis.revisionId : undefined;
+      const dateFormat = (this.repo.getSetting("date_format") as DateFormatId | null) ?? DATE_FORMAT_DEFAULT;
+      const materialized = materializeAcceptedChecklistHtml({
+        capture,
+        tenantExportsDir: this.getExportsDir(),
+        thumbsDir: join(this.deps.dataDir, "thumbs"),
+        dateFormat,
+        generatedAt: new Date().toISOString(),
+      });
+      if (materialized.kind === "output_failure") {
+        throw new AcceptedOperationalExportPublicError("export_output_failure");
+      }
+      return {
+        path: materialized.path,
+        download_url: this.downloadUrlForPath(materialized.path),
+        part_count: materialized.partCount,
+        thumb_count: materialized.thumbCount,
+        ...(materialized.basis
+          ? {
+              plan_version: materialized.basis.planVersion,
+              revision_id: materialized.basis.revisionId,
+            }
+          : {}),
+      };
+    } catch (error) {
+      return this.acceptedOperationalExportFailure(
+        error,
+        "accepted_checklist_export",
+        profileId,
+        revisionId,
+      );
+    }
   }
 
   private async runExportKitBundle(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const profileId = Number(payload.profile_id);
     const includePrintProgress = Boolean(payload.include_print_progress);
-    const path = exportKitBundle(this.repo, profileId, this.getExportsDir(), includePrintProgress);
-    return {
-      path,
-      download_url: this.downloadUrlForPath(path),
-      profile_id: profileId,
-    };
+    let revisionId: number | undefined;
+    try {
+      const accepted = includePrintProgress
+        ? captureAcceptedOperationalExport({ repository: this.repo, profileId })
+        : null;
+      if (accepted && accepted.kind !== "ready" && accepted.kind !== "empty") {
+        throw acceptedOperationalExportPublicError(accepted);
+      }
+      revisionId = accepted?.kind === "ready" ? accepted.export.basis.revisionId : undefined;
+      const recipe = this.repo.readEditableKitRecipe(profileId);
+      const data = buildKitBundleData({
+        mode: accepted
+          ? {
+              kind: "accepted_progress",
+              recipe,
+              accepted: accepted.kind === "ready" ? accepted.export : null,
+            }
+          : { kind: "editable", recipe },
+        exportedAt: new Date().toISOString(),
+      });
+      let path: string;
+      try {
+        path = writeKitBundleData({
+          data,
+          profileId: recipe.profile.id,
+          profileName: recipe.profile.name,
+          exportsDir: this.getExportsDir(),
+        });
+      } catch {
+        throw new AcceptedOperationalExportPublicError("export_output_failure");
+      }
+      return {
+        path,
+        download_url: this.downloadUrlForPath(path),
+        profile_id: profileId,
+        ...(accepted?.kind === "ready"
+          ? {
+              plan_version: accepted.export.basis.planVersion,
+              revision_id: accepted.export.basis.revisionId,
+            }
+          : {}),
+      };
+    } catch (error) {
+      return this.acceptedOperationalExportFailure(
+        error,
+        "accepted_kit_progress_export",
+        profileId,
+        revisionId,
+      );
+    }
   }
 
   private async runAcceptedPlateExport(

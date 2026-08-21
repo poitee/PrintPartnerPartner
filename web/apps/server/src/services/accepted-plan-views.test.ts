@@ -337,8 +337,6 @@ describe("accepted Plan views", () => {
       expect(productionCallers(symbol)).toEqual([]);
     }
     expect(productionCallers("printUnitTotals")).toEqual([]);
-    expect(productionCallers("printUnitsByPartId")).toEqual([
-      { file: "db/repository.ts", count: 1 },
-    ]);
+    expect(productionCallers("printUnitsByPartId")).toEqual([]);
   });
 });

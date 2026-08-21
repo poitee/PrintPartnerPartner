@@ -7,6 +7,7 @@ import { AppRepository } from "./db/repository.js";
 import { AuthStore } from "./services/auth-store.js";
 import { hashPassword, verifyPassword } from "./services/password.js";
 import { tenantStorage } from "./middleware/tenant-context.js";
+import { buildKitBundleData } from "./services/export-kit.js";
 
 describe("password hashing", () => {
   it("hashes and verifies passwords", () => {
@@ -77,7 +78,11 @@ describe("AuthStore", () => {
       const repo = new AppRepository(db, sender.id, sqlite.reposDir);
       const src = repo.createSource({ name: "Kit", url: "https://github.com/a/b" });
       const plan = repo.createProfile("Voron", src.id);
-      bundleJson = JSON.stringify(repo.buildKitBundle(plan.id, false).data);
+      const recipe = repo.readEditableKitRecipe(plan.id);
+      bundleJson = JSON.stringify(buildKitBundleData({
+        mode: { kind: "editable", recipe },
+        exportedAt: new Date().toISOString(),
+      }));
     });
 
     const share = auth.createPlanShare({

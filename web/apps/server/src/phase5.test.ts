@@ -7,11 +7,30 @@ import { AppRepository } from "./db/repository.js";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { matchKeyMatches } from "./services/manifest-apply.js";
-import { exportKitBundle, loadKitBundleBytes, parseKitBundleBuffer, KIT_FORMAT } from "./services/export-kit.js";
+import {
+  buildKitBundleData,
+  loadKitBundleBytes,
+  parseKitBundleBuffer,
+  writeKitBundleData,
+  KIT_FORMAT,
+} from "./services/export-kit.js";
 import { loadKitManifest, saveKitManifest } from "./services/kit-manifest-store.js";
 import { setRequestTenantId } from "./middleware/tenant-context.js";
 import { SaasS3StoragePort } from "./adapters/saas/storage-s3.js";
 import { fetchPrintablesMetadata } from "./services/source-adapters.js";
+
+function exportEditableKitBundle(repo: AppRepository, profileId: number, exportsDir: string): string {
+  const recipe = repo.readEditableKitRecipe(profileId);
+  return writeKitBundleData({
+    data: buildKitBundleData({
+      mode: { kind: "editable", recipe },
+      exportedAt: new Date().toISOString(),
+    }),
+    profileId: recipe.profile.id,
+    profileName: recipe.profile.name,
+    exportsDir,
+  });
+}
 
 describe("Phase 5", () => {
   it("matchKeyMatches supports globs", () => {
@@ -56,7 +75,7 @@ describe("Phase 5", () => {
     const plan = repo.createProfile("KitPlan", source.id);
     saveKitManifest(repo, plan.id, { selections: { toolhead: "stealthburner" }, include: ["p/"] });
     repo.recomputeProfile(plan.id);
-    const bundlePath = exportKitBundle(repo, plan.id, join(dir, "exports"), false);
+    const bundlePath = exportEditableKitBundle(repo, plan.id, join(dir, "exports"));
     const data = loadKitBundleBytes(bundlePath);
     expect(data.format).toBe(KIT_FORMAT);
     // Simulate a recipient who has the repo but different local import rules.
@@ -102,7 +121,7 @@ describe("Phase 5", () => {
     });
     repo.recomputeProfile(plan.id);
 
-    const data = loadKitBundleBytes(exportKitBundle(repo, plan.id, join(dir, "exports"), false));
+    const data = loadKitBundleBytes(exportEditableKitBundle(repo, plan.id, join(dir, "exports")));
     expect(data.sources).toBeTruthy();
     const exportedSource = (data.sources as Array<Record<string, unknown>>)[0];
     expect(exportedSource?.manifest_community_slug).toBe("ldo-2.4-sb-tap");
@@ -165,7 +184,7 @@ describe("Phase 5", () => {
     const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
     const source = repo.createSource({ name: "R", url: "https://github.com/a/b" });
     const plan = repo.createProfile("KitPlan", source.id);
-    const bundlePath = exportKitBundle(repo, plan.id, join(dir, "exports"), false);
+    const bundlePath = exportEditableKitBundle(repo, plan.id, join(dir, "exports"));
     const data = parseKitBundleBuffer(readFileSync(bundlePath), bundlePath);
     expect(data.format).toBe(KIT_FORMAT);
     sqlite.close();

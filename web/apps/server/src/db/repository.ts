@@ -12,7 +12,6 @@ import {
   serializeImportRules,
   STL_NAMING_DEFAULTS_KEY,
   ensureProgressRows,
-  getPrintUnits,
   type MergePart,
   type ProgressRow,
   type StlNamingProfileDict,
@@ -36,7 +35,6 @@ import {
   kitUnmatchedSourceFromRef,
   type KitBundleUnmatchedSource,
 } from "../services/kit-bundle-share.js";
-import { resolvePartStl } from "../services/part-paths.js";
 import { normalizePartRole } from "../services/role-filament.js";
 import {
   canonicalRoleOrder,
@@ -46,6 +44,7 @@ import {
   type RoleFilamentDefault,
 } from "../services/role-filament-store.js";
 import { getColorById, resolvePartFilamentHex } from "../services/filament-catalog.js";
+import type { EditableKitRecipe } from "../services/export-kit.js";
 import { REMOTE_CHECKED_AT_KEY, REMOTE_UPDATE_STATUS_KEY } from "../services/source-update-check.js";
 import type {
   PartRow,
@@ -379,6 +378,7 @@ function acceptedProfileProgress(
 export type OwnedProfileIdentity = {
   readonly id: number;
   readonly name: string;
+  readonly orderNumber: string | null;
   readonly archivedAt: string | null;
 };
 export type LayerRow = typeof defaultSchema.profileLayers.$inferSelect;
@@ -3607,6 +3607,7 @@ export class AppRepository {
       .select({
         id: this.schema.buildProfiles.id,
         name: this.schema.buildProfiles.name,
+        orderNumber: this.schema.buildProfiles.orderNumber,
         archivedAt: this.schema.buildProfiles.archivedAt,
       })
       .from(this.schema.buildProfiles)
@@ -7400,47 +7401,6 @@ export class AppRepository {
     this.transaction(mutate, "immediate");
   }
 
-  printUnitsByPartId(profileId: number): Map<number, boolean[]> {
-    const partRows = this.listPartRows(profileId);
-    return this.printUnitsForPartRows(partRows);
-  }
-
-  private printUnitsForPartRows(partRows: PartDbRow[]): Map<number, boolean[]> {
-    const partIds = partRows.map((p) => p.id);
-    if (!partIds.length) return new Map();
-
-    const allProgress = this.db
-      .select()
-      .from(this.schema.printProgress)
-      .where(
-        and(
-          eq(this.schema.printProgress.tenantId, this.tenantId),
-          inArray(this.schema.printProgress.partId, partIds),
-        ),
-      )
-      .all();
-
-    const byPart = new Map<number, ProgressRow[]>();
-    for (const r of allProgress) {
-      const list = byPart.get(r.partId) ?? [];
-      list.push({
-        id: r.id,
-        partId: r.partId,
-        unitIndex: r.unitIndex,
-        completed: r.completed,
-        assembled: (r as Record<string, unknown>).assembled ? true : false,
-      });
-      byPart.set(r.partId, list);
-    }
-
-    const out = new Map<number, boolean[]>();
-    for (const part of partRows) {
-      const qty = Math.max(1, part.quantityEffective);
-      out.set(part.id, getPrintUnits(byPart.get(part.id) ?? [], qty));
-    }
-    return out;
-  }
-
   patchPart(
     partId: number,
     patch: {
@@ -7492,63 +7452,6 @@ export class AppRepository {
     row.filament_display = color?.combo_label ?? "";
     row.filament_hex = resolvePartFilamentHex(updated);
     return row;
-  }
-
-  buildMergePartsForProfile(profileId: number): {
-    name: string;
-    orderNumber: string | null;
-    parts: MergePart[];
-    completedByMatchKey: Record<string, boolean[]>;
-  } {
-    const profile = this.db
-      .select()
-      .from(this.schema.buildProfiles)
-      .where(
-        and(
-          eq(this.schema.buildProfiles.tenantId, this.tenantId),
-          eq(this.schema.buildProfiles.id, profileId),
-        ),
-      )
-      .get();
-    if (!profile) throw new Error("Profile not found");
-    const partRows = this.listPartRows(profileId);
-    const unitsById = this.printUnitsByPartId(profileId);
-    const mergeParts: MergePart[] = [];
-    const completedByMatchKey: Record<string, boolean[]> = {};
-
-    for (const row of partRows) {
-      const color = row.filamentColorId ? getColorById(row.filamentColorId) : null;
-      const mp: MergePart & {
-        quantityEffective?: number;
-        filamentDisplay?: string;
-        filamentHex?: string | null;
-      } = {
-        matchKey: row.matchKey,
-        relativePath: row.relativePath,
-        filename: row.filename,
-        sourceLayer: row.sourceLayer,
-        status: row.status,
-        role: row.role,
-        quantityAuto: row.quantityAuto,
-        quantityOverride: row.quantityOverride,
-        partSlug: row.filename,
-        included: row.included,
-        notes: row.notes ?? "",
-        geometrySame: row.geometrySame,
-        absolutePath: resolvePartStl(this, row),
-        quantityEffective: row.quantityEffective,
-        filamentDisplay: color?.combo_label ?? "",
-        filamentHex: resolvePartFilamentHex(row),
-      };
-      mergeParts.push(mp);
-      completedByMatchKey[row.matchKey] = unitsById.get(row.id) ?? [];
-    }
-    return {
-      name: profile.name,
-      orderNumber: profile.orderNumber,
-      parts: mergeParts,
-      completedByMatchKey,
-    };
   }
 
   getRoleFilaments(profileId: number) {
@@ -7707,9 +7610,22 @@ export class AppRepository {
     return updated;
   }
 
-  buildKitBundle(profileId: number, includePrintProgress: boolean) {
-    const { name, orderNumber, completedByMatchKey } =
-      this.buildMergePartsForProfile(profileId);
+  readEditableKitRecipe(profileId: number): EditableKitRecipe {
+    const profile = this.db
+      .select({
+        id: this.schema.buildProfiles.id,
+        name: this.schema.buildProfiles.name,
+        orderNumber: this.schema.buildProfiles.orderNumber,
+      })
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, profileId),
+        ),
+      )
+      .get();
+    if (!profile) throw new Error("Profile not found");
     const layers = this.getProfileLayers(profileId);
     const layersOut = layers.map((layer) => {
       const proj = layer.project_id ? this.getProjectRow(layer.project_id) : null;
@@ -7721,31 +7637,25 @@ export class AppRepository {
     });
 
     const partRows = this.listPartRows(profileId);
-    const partsOut = partRows.map((p) => {
-      const row: Record<string, unknown> = {
-        match_key: p.matchKey,
-        relative_path: p.relativePath,
-        filename: p.filename,
-        source_layer: p.sourceLayer,
-        status: p.status,
-        role: p.role,
-        filament_color_id: p.filamentColorId,
-        filament_custom_hex: p.filamentCustomHex,
-        quantity_auto: p.quantityAuto,
-        quantity_override: p.quantityOverride,
-        quantity_effective: p.quantityEffective,
-        included: p.included,
-        notes: p.notes ?? "",
-        geometry_same: p.geometrySame,
-        requirement: p.requirement,
-        option_group_id: p.optionGroupId,
-        manifest_source: p.manifestSource,
-      };
-      if (includePrintProgress && completedByMatchKey[p.matchKey]) {
-        row.print_units = completedByMatchKey[p.matchKey];
-      }
-      return row;
-    });
+    const workingParts = partRows.map((part) => ({
+      matchKey: part.matchKey,
+      relativePath: part.relativePath,
+      filename: part.filename,
+      sourceLayer: part.sourceLayer,
+      status: part.status,
+      role: part.role,
+      filamentColorId: part.filamentColorId,
+      filamentCustomHex: part.filamentCustomHex,
+      quantityInferred: part.quantityAuto,
+      quantityOverride: part.quantityOverride,
+      quantityEffective: part.quantityEffective,
+      included: part.included,
+      notes: part.notes ?? "",
+      geometrySame: part.geometrySame,
+      requirement: part.requirement,
+      optionGroupId: part.optionGroupId,
+      manifestSource: part.manifestSource,
+    }));
 
     const sourcesOut: Array<Record<string, unknown>> = [];
     const seen = new Set<number>();
@@ -7760,17 +7670,11 @@ export class AppRepository {
     const kitManifest = loadKitManifest(this, profileId);
 
     return {
-      profile: { name, orderNumber },
-      data: {
-        format: "print-partner-kit",
-        version: 3,
-        exported_at: new Date().toISOString(),
-        profile: { name, order_number: orderNumber },
-        layers: layersOut,
-        parts: partsOut,
-        kit_manifest: kitManifest,
-        sources: sourcesOut,
-      },
+      profile,
+      layers: layersOut,
+      sources: sourcesOut,
+      kitManifest,
+      workingParts,
     };
   }
 

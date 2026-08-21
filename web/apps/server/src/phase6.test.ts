@@ -99,8 +99,7 @@ describe("Phase 6 tenant isolation", () => {
       });
       expect(() => repo.listParts(profileId)).toThrow("Profile not found");
       expect(() => repo.recomputeProfile(profileId)).toThrow("Profile not found");
-      expect(() => repo.buildMergePartsForProfile(profileId)).toThrow("Profile not found");
-      expect(() => repo.buildKitBundle(profileId, false)).toThrow("Profile not found");
+      expect(() => repo.readEditableKitRecipe(profileId)).toThrow("Profile not found");
       expect(() =>
         repo.createPlanDecision({
           planId: profileId,
