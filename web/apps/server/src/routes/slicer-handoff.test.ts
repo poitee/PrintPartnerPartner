@@ -53,11 +53,17 @@ describe("slicer handoff exchange-status", () => {
 
     const res = await app.inject({ method: "GET", url: "/slicer-handoff/exchange-status" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ ready: true, configured: true });
+    expect(res.json()).toEqual({ ready: true, code: "ready" });
   });
 
   it("reports not ready when exchange dir is missing", async () => {
-    const app = Fastify();
+    const logLines: string[] = [];
+    const app = Fastify({
+      logger: {
+        level: "warn",
+        stream: { write: (line) => logLines.push(line) },
+      },
+    });
     const sqliteDir = mkdtempSync(join(tmpdir(), "pp-handoff-db2-"));
     const sqlite = new SqliteDatabase(sqliteDir);
     sqlite.connect();
@@ -77,7 +83,9 @@ describe("slicer handoff exchange-status", () => {
 
     const res = await app.inject({ method: "GET", url: "/slicer-handoff/exchange-status" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({ ready: false });
+    expect(res.json()).toEqual({ ready: false, code: "unavailable" });
+    expect(res.body).not.toContain("/definitely/missing/exchange-pp");
+    expect(logLines.join("\n")).not.toContain("/definitely/missing/exchange-pp");
   });
 });
 

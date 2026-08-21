@@ -14,6 +14,7 @@ import {
   type JobSnapshot,
 } from "../api/engine";
 import { invalidateAfterJob } from "../queries/invalidation";
+import { invalidateAcceptedPlateExportJobs } from "../queries/acceptedPlates";
 
 export type ActiveJob = {
   jobId: string;
@@ -21,6 +22,7 @@ export type ActiveJob = {
   status: string;
   message: string;
   progress: number | null;
+  profileId: number | null;
   /** When set, scopes busy UI to these source IDs; omit = all sources. */
   sourceIds?: number[];
 };
@@ -51,6 +53,7 @@ type JobContextValue = {
 const JobContext = createContext<JobContextValue | null>(null);
 
 const JOB_TERMINAL = new Set(["done", "error", "cancelled"]);
+let localFailureSequence = 0;
 
 async function pollJobUntilTerminal(
   jobId: string,
@@ -128,14 +131,27 @@ export function JobProvider({ children }: { children: ReactNode }) {
       let disconnect: (() => void) | null = null;
       let finished = false;
       const sourceIds = options?.sourceIds;
+      const profileId = options?.profileId ?? null;
+      const removeAfterTerminalDisplay = (jobId: string) => {
+        setTimeout(() => {
+          setActiveJobs((prev) => prev.filter((job) => job.jobId !== jobId));
+        }, 2500);
+      };
+      const refreshAcceptedExportHistory = () => {
+        if (kind === "export-accepted-plate-3mf" && profileId != null) {
+          void invalidateAcceptedPlateExportJobs(qc, profileId);
+        }
+      };
       try {
         const jobId = await start();
+        refreshAcceptedExportHistory();
         const initial: ActiveJob = {
           jobId,
           kind,
           status: "pending",
           message: "Starting…",
           progress: null,
+          profileId,
           sourceIds,
         };
         setActiveJobs((prev) => upsertJob(prev, initial));
@@ -153,12 +169,11 @@ export function JobProvider({ children }: { children: ReactNode }) {
               status: snap.status,
               message: snap.message,
               progress: snap.progress,
+              profileId,
               sourceIds,
             }),
           );
-          setTimeout(() => {
-            setActiveJobs((prev) => prev.filter((j) => j.jobId !== jobId));
-          }, 2500);
+          removeAfterTerminalDisplay(jobId);
         };
 
         const onProgress = (ev: JobEvent | JobSnapshot) => {
@@ -169,6 +184,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
               status: ev.status,
               message: ev.message,
               progress: ev.progress,
+              profileId,
               sourceIds,
             }),
           );
@@ -196,21 +212,28 @@ export function JobProvider({ children }: { children: ReactNode }) {
               status: "error",
               message: e instanceof Error ? e.message : String(e),
               progress: null,
+              profileId,
               sourceIds,
             }),
           );
+          refreshAcceptedExportHistory();
+          removeAfterTerminalDisplay(jobId);
         });
       } catch (e) {
+        localFailureSequence += 1;
+        const failureJobId = `local-failure-${localFailureSequence}`;
         setActiveJobs((prev) =>
           upsertJob(prev, {
-            jobId: "",
+            jobId: failureJobId,
             kind,
             status: "error",
             message: e instanceof Error ? e.message : String(e),
             progress: null,
+            profileId: options?.profileId ?? null,
             sourceIds,
           }),
         );
+        removeAfterTerminalDisplay(failureJobId);
       }
     },
     [qc],

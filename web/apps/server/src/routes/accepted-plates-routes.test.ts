@@ -288,6 +288,22 @@ describe("accepted Plate routes", () => {
       plates: [{ units: [{ token, x_um: 50_000, y_um: 40_000 }] }],
     });
 
+    const missingUnit = await app.inject({
+      method: "PATCH",
+      url: `/plans/${profile.id}/plates/${plate.plate_id}/units/ppu_${"f".repeat(32)}`,
+      payload: {
+        expected,
+        expected_plate_revision_id: moved.json().plate_revision_id,
+        x_um: 50_000,
+        y_um: 40_000,
+      },
+    });
+    expect(missingUnit.statusCode).toBe(422);
+    expect(missingUnit.json()).toEqual({
+      detail: "Accepted Plate unit is invalid",
+      code: "unit_not_found",
+    });
+
     const outside = await app.inject({
       method: "PATCH",
       url: `/plans/${profile.id}/plates/${plate.plate_id}/units/${token}`,

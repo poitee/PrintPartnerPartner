@@ -2,7 +2,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AcceptedPlateExportJobResult, JobSnapshot } from "@print-partner/contracts";
+import {
+  parseAcceptedPlateExportJobResult,
+  type JobSnapshot,
+} from "@print-partner/contracts";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
 import { buildApp } from "../app.js";
 import { loadConfig } from "../config.js";
@@ -18,64 +21,6 @@ import { dispatchWebhooks } from "../services/webhook-store.js";
 import { getLogger } from "../services/logger.js";
 
 const cleanups: Array<() => Promise<void>> = [];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseAcceptedPlateExportJobResult(value: unknown): AcceptedPlateExportJobResult {
-  if (
-    !isRecord(value) ||
-    value.format !== "accepted-plate-export-job-v1" ||
-    !Number.isSafeInteger(value.profile_id) ||
-    !isRecord(value.basis) ||
-    !Number.isSafeInteger(value.basis.profile_id) ||
-    !Number.isSafeInteger(value.basis.plan_version) ||
-    !Number.isSafeInteger(value.basis.plan_revision_id) ||
-    typeof value.basis.plan_revision_digest !== "string" ||
-    typeof value.basis.required_unit_mapping_digest !== "string" ||
-    !Number.isSafeInteger(value.plate_revision_id) ||
-    !Number.isSafeInteger(value.plate_revision_number) ||
-    typeof value.layout_digest !== "string" ||
-    typeof value.download_url !== "string" ||
-    typeof value.manifest_download_url !== "string" ||
-    typeof value.bundle_download_url !== "string" ||
-    !Array.isArray(value.plates)
-  ) throw new Error("accepted Plate export result is invalid");
-  const plates = value.plates.map((plate) => {
-    if (
-      !isRecord(plate) ||
-      typeof plate.plate_id !== "string" ||
-      !Number.isSafeInteger(plate.ordinal) ||
-      typeof plate.filename !== "string" ||
-      typeof plate.download_url !== "string"
-    ) throw new Error("accepted Plate export file is invalid");
-    return {
-      plate_id: plate.plate_id,
-      ordinal: Number(plate.ordinal),
-      filename: plate.filename,
-      download_url: plate.download_url,
-    };
-  });
-  return {
-    format: value.format,
-    profile_id: Number(value.profile_id),
-    basis: {
-      profile_id: Number(value.basis.profile_id),
-      plan_version: Number(value.basis.plan_version),
-      plan_revision_id: Number(value.basis.plan_revision_id),
-      plan_revision_digest: value.basis.plan_revision_digest,
-      required_unit_mapping_digest: value.basis.required_unit_mapping_digest,
-    },
-    plate_revision_id: Number(value.plate_revision_id),
-    plate_revision_number: Number(value.plate_revision_number),
-    layout_digest: value.layout_digest,
-    download_url: value.download_url,
-    manifest_download_url: value.manifest_download_url,
-    bundle_download_url: value.bundle_download_url,
-    plates,
-  };
-}
 
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -166,7 +111,7 @@ endsolid accepted`);
     expected: acceptedPlanBasis(accepted.snapshot),
     expectedPlateRevisionId: null,
     plates: [{
-      plateId: "accepted-plate-one",
+      plateId: `plate_${"c".repeat(32)}`,
       printerId: "printer-one",
       printerName: "Printer One",
       printerModel: "Model One",
@@ -363,6 +308,7 @@ describe("accepted Plate export delivery routes", () => {
       payload: { profile_id: 999_999, expected_plate_revision_id: plateRevisionId },
     });
     expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toMatchObject({ code: "profile_not_found" });
 
     const stale = await app.inject({
       method: "POST",
@@ -440,6 +386,7 @@ describe("accepted Plate export delivery routes", () => {
       payload,
     });
     expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toMatchObject({ code: "slicer_instance_not_found" });
     expect(existsSync(finalDirectory)).toBe(false);
 
     repo.upsertSlicerInstance({
@@ -457,6 +404,7 @@ describe("accepted Plate export delivery routes", () => {
       payload,
     });
     expect(disabled.statusCode).toBe(400);
+    expect(disabled.json()).toMatchObject({ code: "slicer_instance_disabled" });
     expect(existsSync(finalDirectory)).toBe(false);
 
     repo.upsertSlicerInstance({
@@ -475,6 +423,7 @@ describe("accepted Plate export delivery routes", () => {
       payload,
     });
     expect(unavailable.statusCode).toBe(400);
+    expect(unavailable.json()).toMatchObject({ code: "slicer_exchange_unavailable" });
     expect(existsSync(finalDirectory)).toBe(false);
   });
 
@@ -509,7 +458,10 @@ describe("accepted Plate export delivery routes", () => {
     });
 
     expect(response.statusCode).toBe(500);
-    expect(response.json()).toEqual({ detail: "Accepted Plate handoff failed." });
+    expect(response.json()).toEqual({
+      detail: "Accepted Plate handoff failed.",
+      code: "internal_error",
+    });
     expect(capturedErrors).toEqual([[
       {
         operation: "accepted_plate_slicer_handoff",
@@ -567,6 +519,7 @@ describe("accepted Plate export delivery routes", () => {
     expect(conflict.statusCode).toBe(409);
     expect(conflict.json()).toEqual({
       detail: "The slicer inbox for this Plate revision failed integrity verification.",
+      code: "output_conflict",
     });
     expect(readFileSync(stagedPath, "utf8")).toBe("tampered");
   });

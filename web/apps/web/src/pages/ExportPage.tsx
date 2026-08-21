@@ -5,19 +5,16 @@ import DeskNextStep from "../components/layout/DeskNextStep";
 import PageHeader from "../components/layout/PageHeader";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import ExportActionCards from "../components/export/ExportActionCards";
-import ExportRecentPanel, { hasExportJobs } from "../components/export/ExportRecentPanel";
+import ExportRecentPanel from "../components/export/ExportRecentPanel";
 import PartsManifestTransfer from "../components/export/PartsManifestTransfer";
-import KitPrinterSelectPanel from "../components/export/KitPrinterSelectPanel";
-import ManualAssignmentPanel from "../components/export/ManualAssignmentPanel";
-import PlatePreviewPanel from "../components/export/PlatePreviewPanel";
 import SlicerLinksPanel from "../components/export/SlicerLinksPanel";
 import SlicerHandoffPanel from "../components/export/SlicerHandoffPanel";
+import AcceptedPlateSection from "../components/export/accepted-plates/AcceptedPlateSection";
 // Lazy: PrinterSendPanel pulls in heavy printer integration + dnd-kit
 const PrinterSendPanel = lazy(() => import("../components/export/PrinterSendPanel"));
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
-import { useJobContext } from "../context/JobContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
@@ -52,7 +49,6 @@ export default function ExportPage() {
   const { review, refresh, loading, error: planError } =
     usePlanWorkspace();
   const { data: sources = [] } = useSourcesQuery();
-  const { activeJobs } = useJobContext();
   const [shareOpen, setShareOpen] = useState(false);
   const roleFilamentsQuery = useRoleFilamentsQuery(
     selectedProfileId,
@@ -81,8 +77,6 @@ export default function ExportPage() {
     profiles.length > 0,
   );
   const planToolsReady = shouldMountPlanTools(engineState, selectedProfileId);
-
-  const showRecent = hasExportJobs(activeJobs);
 
   const planName =
     selectedProfileId != null
@@ -184,22 +178,10 @@ export default function ExportPage() {
             </h2>
 
             <SlicerLinksPanel />
+            {selectedProfileId != null ? (
+              <AcceptedPlateSection profileId={selectedProfileId} enabled={engineState === "ready"} />
+            ) : null}
             <SlicerHandoffPanel />
-
-            <KitPrinterSelectPanel
-              profileId={selectedProfileId}
-              engineReady={engineState === "ready"}
-            />
-
-            <ManualAssignmentPanel
-              profileId={selectedProfileId}
-              engineReady={engineState === "ready"}
-            />
-
-            <PlatePreviewPanel
-              profileId={selectedProfileId}
-              engineReady={engineState === "ready"}
-            />
 
             {loading && !review ? (
               <Card>
@@ -228,7 +210,7 @@ export default function ExportPage() {
               <div
                 className={cn(
                   "grid gap-4",
-                  showRecent && "lg:grid-cols-[minmax(0,1fr)_minmax(16rem,18.75rem)]",
+                  "lg:grid-cols-[minmax(0,1fr)_minmax(16rem,18.75rem)]",
                 )}
               >
                 <div className="min-w-0">
@@ -237,7 +219,7 @@ export default function ExportPage() {
                     roleFilaments={roleFilaments}
                   />
                 </div>
-                {showRecent ? <ExportRecentPanel /> : null}
+                <ExportRecentPanel />
               </div>
             )}
 

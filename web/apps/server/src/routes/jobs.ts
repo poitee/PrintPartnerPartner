@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import {
   DATE_FORMAT_DEFAULT,
+  parseAcceptedPlateId,
   type AcceptedPlateExportJobResult,
   type DateFormatId,
   type JobSnapshot,
@@ -682,7 +683,7 @@ export class InProcessJobRunner {
         return url;
       };
       const plates = materialized.plates.map((plate) => ({
-        plate_id: plate.plateId,
+        plate_id: parseAcceptedPlateId(plate.plateId),
         ordinal: plate.ordinal,
         filename: plate.filename,
         download_url: downloadUrl(plate.absolutePath),
@@ -995,15 +996,21 @@ export async function registerJobRoutes(
 
   app.post("/jobs/export-accepted-plate-3mf", limited, async (request, reply) => {
     if (!isRecord(request.body)) {
-      return sendProblem(reply, 400, "Bad Request", "profile_id and expected_plate_revision_id are required");
+      return reply.status(400).send({
+        detail: "profile_id and expected_plate_revision_id are required",
+        code: "invalid_request",
+      });
     }
     const profileId = positiveSafeInteger(request.body.profile_id);
     const expectedPlateRevisionId = positiveSafeInteger(request.body.expected_plate_revision_id);
     if (profileId == null || expectedPlateRevisionId == null) {
-      return sendProblem(reply, 400, "Bad Request", "profile_id and expected_plate_revision_id must be positive integers");
+      return reply.status(400).send({
+        detail: "profile_id and expected_plate_revision_id must be positive integers",
+        code: "invalid_request",
+      });
     }
     if (!jobs.getRepo().getOwnedProfileIdentity(profileId)) {
-      return sendProblem(reply, 404, "Not Found", "Profile not found");
+      return reply.status(404).send({ detail: "Profile not found", code: "profile_not_found" });
     }
     const payload: StartAcceptedPlateExportRequest = {
       profile_id: profileId,

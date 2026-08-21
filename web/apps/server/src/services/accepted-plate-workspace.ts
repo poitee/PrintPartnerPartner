@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
-import type {
-  AcceptedPlanBasisContract,
-  AcceptedPlatePlacedUnit,
-  AcceptedPlatePrinter,
-  AcceptedPlateSetupUnit as AcceptedPlateSetupUnitContract,
-  AcceptedPlateView,
-  AcceptedPlateWorkspace,
+import {
+  parseAcceptedPlateId,
+  parseRequiredUnitTokenContract,
+  type AcceptedPlanBasisContract,
+  type AcceptedPlatePlacedUnit,
+  type AcceptedPlatePrinter,
+  type AcceptedPlateSetupUnit as AcceptedPlateSetupUnitContract,
+  type AcceptedPlateView,
+  type AcceptedPlateWorkspace,
 } from "@print-partner/contracts";
 import {
   packAcceptedUnits,
@@ -147,7 +149,7 @@ function currentPrinters(dependencies: AcceptedPlateWorkspaceDependencies): Acce
 
 function setupUnit(unit: AcceptedPlateSetupUnit): AcceptedPlateSetupUnitContract {
   return {
-    token: unit.token,
+    token: parseRequiredUnitTokenContract(unit.token),
     object_name: unit.objectName,
     filename: unit.filename,
     source_layer: unit.sourceLayer,
@@ -175,7 +177,7 @@ function plateView(
   setupByToken: ReadonlyMap<string, AcceptedPlateSetupUnit>,
 ): AcceptedPlateView {
   return {
-    plate_id: plate.plateId,
+    plate_id: parseAcceptedPlateId(plate.plateId),
     ordinal: plate.ordinal,
     printer: {
       id: plate.printerId,
@@ -210,7 +212,7 @@ function publishedWorkspace(input: Readonly<{
     basis: basisContract(input.basis),
     plate_revision_id: input.plateRevisionId,
     plate_revision_number: input.plateRevisionNumber,
-    printers: input.printers,
+    printers: [...input.printers],
     plates: input.plates.map((plate, index) => plateView({
       ...plate,
       ordinal: index + 1,

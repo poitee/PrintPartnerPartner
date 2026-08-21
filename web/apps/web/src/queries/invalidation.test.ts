@@ -62,4 +62,18 @@ describe("job query invalidation", () => {
       queryClient.getQueryState(queryKeys.planRecipeBundle(4))?.isInvalidated,
     ).toBe(true);
   });
+
+  it("refreshes accepted export history after a terminal export failure", () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(queryKeys.acceptedPlateExportJobs(7), []);
+
+    invalidateAfterJob(queryClient, "export-accepted-plate-3mf", {
+      ...completedUpdateCheck,
+      kind: "export-accepted-plate-3mf",
+      status: "error",
+      error: "Export failed",
+    }, 7);
+
+    expect(queryClient.getQueryState(queryKeys.acceptedPlateExportJobs(7))?.isInvalidated).toBe(true);
+  });
 });

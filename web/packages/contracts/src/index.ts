@@ -1,6 +1,7 @@
 /** Shared API types between web client and server. */
 
 export * from "./source-naming.js";
+export * from "./accepted-plates.js";
 
 export type DeployMode = "self-host" | "saas";
 
@@ -87,116 +88,6 @@ export type ApiError = {
   status?: number;
   type?: string;
 };
-
-export type AcceptedPlanBasisContract = Readonly<{
-  profile_id: number;
-  plan_version: number;
-  plan_revision_id: number;
-  plan_revision_digest: string;
-  required_unit_mapping_digest: string;
-}>;
-
-export type AcceptedPlatePrinter = Readonly<{
-  id: string;
-  name: string;
-  model: string;
-  bed_width_um: number;
-  bed_depth_um: number;
-  bed_height_um: number;
-  margin_um: number;
-}>;
-
-export type AcceptedPlateSetupUnit = Readonly<{
-  token: string;
-  object_name: string;
-  filename: string;
-  source_layer: string;
-  role: string;
-  filament_color_id: string | null;
-}>;
-
-export type AcceptedPlatePlacedUnit = AcceptedPlateSetupUnit & Readonly<{
-  x_um: number;
-  y_um: number;
-  width_um: number;
-  depth_um: number;
-  height_um: number;
-}>;
-
-export type AcceptedPlateView = Readonly<{
-  plate_id: string;
-  ordinal: number;
-  printer: AcceptedPlatePrinter;
-  units: readonly AcceptedPlatePlacedUnit[];
-}>;
-
-export type AcceptedPlateWorkspace =
-  | { readonly kind: "empty_plan" }
-  | {
-      readonly kind: "setup";
-      readonly basis: AcceptedPlanBasisContract;
-      readonly expected_plate_revision_id: number | null;
-      readonly printers: readonly AcceptedPlatePrinter[];
-      readonly units: readonly AcceptedPlateSetupUnit[];
-    }
-  | {
-      readonly kind: "ready";
-      readonly basis: AcceptedPlanBasisContract;
-      readonly plate_revision_id: number;
-      readonly plate_revision_number: number;
-      readonly printers: readonly AcceptedPlatePrinter[];
-      readonly plates: readonly AcceptedPlateView[];
-    };
-
-export type InitializeAcceptedPlatesRequest = Readonly<{
-  expected: AcceptedPlanBasisContract;
-  expected_plate_revision_id: number | null;
-  assignments: readonly Readonly<{
-    token: string;
-    printer_id: string | null;
-  }>[];
-}>;
-
-export type MoveAcceptedPlateUnitRequest = Readonly<{
-  expected: AcceptedPlanBasisContract;
-  expected_plate_revision_id: number;
-  x_um: number;
-  y_um: number;
-}>;
-
-export type StartAcceptedPlateExportRequest = Readonly<{
-  profile_id: number;
-  expected_plate_revision_id: number;
-}>;
-
-export type AcceptedPlateExportJobResult = Readonly<{
-  format: "accepted-plate-export-job-v1";
-  profile_id: number;
-  basis: AcceptedPlanBasisContract;
-  plate_revision_id: number;
-  plate_revision_number: number;
-  layout_digest: string;
-  download_url: string;
-  manifest_download_url: string;
-  bundle_download_url: string;
-  plates: readonly Readonly<{
-    plate_id: string;
-    ordinal: number;
-    filename: string;
-    download_url: string;
-  }>[];
-}>;
-
-export type AcceptedPlateSlicerHandoffResult = Readonly<{
-  gui_url: string;
-  plate_revision_id: number;
-  plate_revision_number: number;
-  layout_digest: string;
-  inbox_relative_path: string;
-  staged: readonly Readonly<{ ordinal: number; filename: string }>[];
-  download_url: string;
-  local_app: { scheme_attempt: null; note: string };
-}>;
 
 /**
  * Validates a Discord incoming-webhook URL: must be

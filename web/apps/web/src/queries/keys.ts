@@ -14,6 +14,6 @@ export const queryKeys = {
   roleFilaments: (profileId: number) => ["roleFilaments", profileId] as const,
   workflowGuide: ["workflowGuide"] as const,
   buildTrackingSettings: ["buildTrackingSettings"] as const,
-  plateWorkspace: (profileId: number) => ["plateWorkspace", profileId] as const,
-  printGroups: (profileId: number) => ["printGroups", profileId] as const,
+  acceptedPlateWorkspace: (profileId: number) => ["acceptedPlateWorkspace", profileId] as const,
+  acceptedPlateExportJobs: (profileId: number) => ["acceptedPlateExportJobs", profileId] as const,
 };

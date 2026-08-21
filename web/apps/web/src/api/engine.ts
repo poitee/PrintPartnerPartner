@@ -424,61 +424,6 @@ export type PrinterPreset = {
   max_filament_slots: number;
 };
 
-export type PlateFootprint = {
-  match_key: string;
-  unit: number;
-  filename: string;
-  x_mm: number;
-  y_mm: number;
-  width_mm: number;
-  depth_mm: number;
-  height_mm: number;
-  group_key?: string;
-  /** Height band classification ("flat" | "short" | "medium" | "tall" | "very-tall") attached by the packer core; absent for parts whose STL failed to load. */
-  height_band?: string;
-};
-
-export type PlatePreview = {
-  index: number;
-  group_label: string;
-  items: PlateFootprint[];
-};
-
-export type PrinterBedPreview = {
-  printer_id: string;
-  bed_width_mm: number;
-  bed_depth_mm: number;
-  margin_mm: number;
-  plates: PlatePreview[];
-};
-
-export type PlateWorkspace = {
-  profile_id: number;
-  plan: PrintPlan;
-  printers: PrinterMachine[];
-  groups: PrintGroup[];
-  preview: PrinterBedPreview[];
-  unassigned_group_count: number;
-  plate_count: number;
-  warnings: string[];
-};
-
-export type PrintGroup = {
-  group_key: string;
-  filament_key: string;
-  filament_label: string;
-  filament_hex: string | null;
-  repo: string;
-  folder: string;
-  part_count: number;
-  parts?: string[];
-  label: string;
-  printer_id: string | null;
-  suggested_printer_id?: string | null;
-  suggested_printer_name: string | null;
-  warning: string | null;
-};
-
 export type RoleFilamentRow = {
   role: string;
   part_count: number;
@@ -494,24 +439,6 @@ export type SpoolmanSpoolRow = {
   filament_id: number;
   remaining_weight: number | null;
   location?: string | null;
-};
-
-/** Active strategy for grouping parts into plates. "location" (default) buckets by filament + source repo/folder; "height_band" buckets by classifyHeightBand(part height). */
-export type GroupingStrategy = "location" | "height_band";
-
-export type PrintPlan = {
-  enabled_printer_ids: string[];
-  group_assignments?: Record<string, string>;
-  grouping_strategy?: GroupingStrategy;
-  plate_layout?: {
-    spacing_mm: number;
-    pool: Array<{ match_key: string; unit: number }>;
-    printers: Array<{
-      printer_id: string;
-      plates: Array<Array<{ match_key: string; unit: number }>>;
-      unassigned: Array<{ match_key: string; unit: number }>;
-    }>;
-  } | null;
 };
 
 /** @deprecated Use ReviewPart — checkoff data is merged into plan review. */
@@ -539,53 +466,6 @@ export type CustomFilament = {
   product_line: string;
   notes: string;
   created_at: string;
-};
-
-export type Export3mfOptions = {
-  profile_id: number;
-  layout_mode?: string;
-  spacing_mm?: number;
-  missing_only?: boolean;
-  enabled_printer_ids?: string[];
-};
-
-export type AutoSliceOptions = {
-  profile_id: number;
-  spacing_mm?: number;
-  missing_only?: boolean;
-  enabled_printer_ids?: string[];
-  /** Per-plate slice timeout handed to the sidecar (seconds). */
-  timeout_s?: number;
-};
-
-/** One plate's outcome in an auto-slice job result. */
-export type AutoSlicePlate = {
-  printer_id: string;
-  printer_name: string;
-  plate_index: number;
-  slicer: "orca" | "prusa" | "bambu";
-  status: "ok" | "error";
-  gcode_path: string | null;
-  thumbnail_path: string | null;
-  error: string | null;
-  error_code: string | null;
-  /** Slicer CLI stderr for a failed slice — the actual cause of the failure. */
-  stderr: string | null;
-  /** Slicer CLI exit code when the sidecar reported one. */
-  exit_code: number | null;
-  settings_keys: string[];
-  download_url: string | null;
-  thumbnail_url: string | null;
-};
-
-export type AutoSliceJobResultBody = {
-  profile_id: number;
-  ok: boolean;
-  plate_count: number;
-  attempted_count: number;
-  failed_count: number;
-  plates: AutoSlicePlate[];
-  warnings: string[];
 };
 
 /**
@@ -1193,23 +1073,6 @@ export async function startExportKitBundle(
     }),
   });
   return body.job_id;
-}
-
-export async function fetchPrintGroups(profileId: number): Promise<PrintGroup[]> {
-  const body = await engineFetch<{ groups: PrintGroup[] }>(
-    `/plans/${profileId}/print-groups`,
-  );
-  return body.groups;
-}
-
-export async function savePrintAssignments(
-  profileId: number,
-  assignments: Record<string, string>,
-): Promise<{ plan: PrintPlan; groups: PrintGroup[] }> {
-  return engineFetch(`/plans/${profileId}/print-assignments`, {
-    method: "PUT",
-    body: JSON.stringify({ assignments }),
-  });
 }
 
 export async function savePrinterFleet(
@@ -2366,10 +2229,6 @@ export async function fetchPrinterPresets(): Promise<PrinterPreset[]> {
   return body.presets;
 }
 
-export async function fetchPlateWorkspace(profileId: number): Promise<PlateWorkspace> {
-  return engineFetch<PlateWorkspace>(`/plans/${profileId}/plate-workspace`);
-}
-
 export async function startExportStlPack(
   profileId: number,
   options?: Pick<ExportStlPackOptions, "missing_only" | "group_by">,
@@ -2566,27 +2425,6 @@ export async function fetchProfileLibrary(): Promise<ProfileLibraryRow[]> {
   return body.profiles;
 }
 
-export async function fetchPrintPlan(profileId: number): Promise<PrintPlan> {
-  const body = await engineFetch<{ plan: PrintPlan }>(
-    `/plans/${profileId}/print-plan`,
-  );
-  return body.plan;
-}
-
-export async function savePrintPlan(
-  profileId: number,
-  plan: Partial<PrintPlan>,
-): Promise<PrintPlan> {
-  const body = await engineFetch<{ plan: PrintPlan }>(
-    `/plans/${profileId}/print-plan`,
-    {
-      method: "PUT",
-      body: JSON.stringify(plan),
-    },
-  );
-  return body.plan;
-}
-
 export async function fetchRoleFilaments(profileId: number): Promise<RoleFilamentRow[]> {
   const body = await engineFetch<{ roles: RoleFilamentRow[] }>(
     `/plans/${profileId}/role-filaments`,
@@ -2627,16 +2465,6 @@ export async function fetchSpoolmanSpools(integrationId: string): Promise<Spoolm
     `/integrations/${encodeURIComponent(integrationId)}/spoolman/spools`,
   );
   return body.spools;
-}
-
-export async function prepareMissingPrintPlan(profileId: number): Promise<{
-  copy_count: number;
-  plan: PrintPlan;
-}> {
-  return engineFetch(`/plans/${profileId}/print-plan/prepare-missing`, {
-    method: "POST",
-    body: "{}",
-  });
 }
 
 export async function fetchCheckoff(profileId: number): Promise<{
@@ -2701,55 +2529,6 @@ export async function saveBuildTrackingSettings(
     method: "PUT",
     body: JSON.stringify(settings),
   });
-}
-
-export async function startExport3mf(options: Export3mfOptions): Promise<string> {
-  const body = await engineFetch<{ job_id: string }>("/jobs/export-3mf", {
-    method: "POST",
-    body: JSON.stringify(options),
-  });
-  return body.job_id;
-}
-
-export type SlicerOpenPlatesResult = {
-  gui_url: string;
-  inbox_dir: string;
-  staged: Array<{ filename: string; dest: string }>;
-  download_paths: string[];
-  object_count: number;
-  warnings: string[];
-  local_app: { scheme_attempt: string | null; note: string };
-};
-
-export async function openPlatesInSlicer(
-  instanceId: string,
-  options: Export3mfOptions,
-): Promise<SlicerOpenPlatesResult> {
-  return engineFetch<SlicerOpenPlatesResult>(
-    `/slicer-instances/${encodeURIComponent(instanceId)}/open-plates`,
-    {
-      method: "POST",
-      body: JSON.stringify(options),
-    },
-  );
-}
-
-export async function fetchSlicerExchangeStatus(): Promise<{
-  configured: boolean;
-  exchange_dir: string;
-  ready: boolean;
-  detail: string | null;
-}> {
-  return engineFetch("/slicer-handoff/exchange-status");
-}
-
-/** Export plates and slice each one on the sidecar matching its printer's slicer. */
-export async function startAutoSlice(options: AutoSliceOptions): Promise<string> {
-  const body = await engineFetch<{ job_id: string }>("/jobs/auto-slice", {
-    method: "POST",
-    body: JSON.stringify(options),
-  });
-  return body.job_id;
 }
 
 export async function startExportChecklistHtml(profileId: number): Promise<string> {

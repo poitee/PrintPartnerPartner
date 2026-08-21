@@ -4,6 +4,10 @@ import { queryKeys } from "./keys";
 import { invalidatePlanReview } from "./planReview";
 import { invalidateProfiles } from "./profiles";
 import { invalidateSources } from "./sources";
+import {
+  invalidateAcceptedPlateExportJobs,
+  invalidateAcceptedPlateWorkspace,
+} from "./acceptedPlates";
 
 const SYNC_KINDS = new Set(["sync", "sync-all", "check-source-updates", "import-scan"]);
 const RECOMPUTE_KINDS = new Set(["recompute", "apply-manifest"]);
@@ -20,6 +24,10 @@ export function invalidateAfterJob(
   snapshot: JobSnapshot,
   profileId?: number | null,
 ) {
+  if (kind === "export-accepted-plate-3mf" && profileId != null) {
+    void invalidateAcceptedPlateExportJobs(qc, profileId);
+  }
+
   if (snapshot.status !== "done") return;
 
   if (SOURCE_MUTATION_KINDS.has(kind)) {
@@ -34,15 +42,7 @@ export function invalidateAfterJob(
     void qc.invalidateQueries({ queryKey: queryKeys.planLayers(profileId) });
     void qc.invalidateQueries({ queryKey: queryKeys.roleFilaments(profileId) });
     void qc.invalidateQueries({ queryKey: queryKeys.planRecipeBundle(profileId) });
-    // Parts changed → the server re-packs, so plate contents and their
-    // height-band labels are stale.
-    void qc.invalidateQueries({ queryKey: queryKeys.plateWorkspace(profileId) });
-  }
-
-  // A pack preview re-packs on the server with the requested strategy; refresh
-  // the plate cards so their height bands match what was just packed.
-  if (kind === "pack-preview" && profileId != null) {
-    void qc.invalidateQueries({ queryKey: queryKeys.plateWorkspace(profileId) });
+    void invalidateAcceptedPlateWorkspace(qc, profileId);
   }
 
   if (kind === "stl-export" || kind === "export-kit-bundle" || kind === "export-checklist-html") {

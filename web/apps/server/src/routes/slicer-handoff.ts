@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { existsSync, accessSync, constants } from "node:fs";
-import type { AcceptedPlateSlicerHandoffResult } from "@print-partner/contracts";
+import type {
+  AcceptedPlateEndpointErrorCode,
+  AcceptedPlateSlicerHandoffResult,
+} from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import type { ServerConfig } from "../config.js";
 import { runExport3mfJob } from "../services/export-3mf-job.js";
@@ -33,40 +36,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function acceptedHandoffFailure(
   result: Exclude<MaterializeAcceptedPlateExportResult, { readonly kind: "materialized" }>,
-): Readonly<{ status: number; detail: string }> {
+): Readonly<{ status: number; code: AcceptedPlateEndpointErrorCode; detail: string }> {
   switch (result.kind) {
     case "plate_revision_changed":
-      return { status: 409, detail: "Plate layout changed. Refresh and try again." };
+      return { status: 409, code: "plate_revision_changed", detail: "Plate layout changed. Refresh and try again." };
     case "output_conflict":
-      return { status: 409, detail: "The stored export for this Plate revision failed integrity verification." };
+      return { status: 409, code: "output_conflict", detail: "The stored export for this Plate revision failed integrity verification." };
     case "transaction_unavailable":
-      return { status: 503, detail: "Accepted Plate export is temporarily unavailable." };
+      return { status: 503, code: "accepted_plate_update_unavailable", detail: "Accepted Plate export is temporarily unavailable." };
     case "artifact_unavailable":
     case "invalid_stl":
     case "artifact_geometry_mismatch":
-      return { status: 422, detail: "A verified accepted artifact is unavailable." };
+      return { status: 422, code: "accepted_artifact_unavailable", detail: "A verified accepted artifact is unavailable." };
     case "limit_exceeded":
-      return { status: 422, detail: "Accepted Plate export exceeds the configured limit." };
+      return { status: 422, code: "limit_exceeded", detail: "Accepted Plate export exceeds the configured limit." };
     case "profile_not_found":
+      return { status: 404, code: "profile_not_found", detail: "Profile not found." };
     case "empty_plan":
     case "plates_not_published":
     case "stale_accepted_plan":
+      return { status: 409, code: "accepted_plan_changed", detail: "Accepted Plan state is unavailable. Refresh the Plan." };
     case "accepted_state_unavailable":
-      return { status: 409, detail: "Accepted Plan state is unavailable. Refresh the Plan." };
+      return { status: 409, code: "accepted_state_unavailable", detail: "Accepted Plan state is unavailable. Refresh the Plan." };
   }
 }
 
-function exchangeReady(exchangeDir: string): string | null {
-  if (!exchangeDir.trim()) return "PP_EXCHANGE_DIR is not configured";
+type ExchangeState =
+  | { readonly code: "ready" }
+  | { readonly code: "not_configured" }
+  | { readonly code: "unavailable" };
+
+function exchangeState(exchangeDir: string): ExchangeState {
+  if (!exchangeDir.trim()) {
+    return { code: "not_configured" };
+  }
   try {
     if (!existsSync(exchangeDir)) {
-      return `Exchange directory missing: ${exchangeDir}`;
+      return { code: "unavailable" };
     }
     accessSync(exchangeDir, constants.W_OK);
   } catch {
-    return `Exchange directory not writable: ${exchangeDir}`;
+    return { code: "unavailable" };
   }
-  return null;
+  return { code: "ready" };
 }
 
 export async function registerSlicerHandoffRoutes(
@@ -85,10 +97,11 @@ export async function registerSlicerHandoffRoutes(
       return reply.status(400).send({ detail: "Instance needs a valid http(s) gui_url" });
     }
 
-    const exchangeErr = exchangeReady(deps.config.exchangeDir);
-    if (exchangeErr) {
+    const exchange = exchangeState(deps.config.exchangeDir);
+    if (exchange.code !== "ready") {
+      request.log.warn({ operation: "slicer_handoff", code: exchange.code }, "Slicer exchange unavailable");
       return reply.status(400).send({
-        detail: `${exchangeErr}. Use Download 3MF instead, or mount PP_EXCHANGE_DIR.`,
+        detail: "Slicer exchange is unavailable. Use Download 3MF instead.",
       });
     }
 
@@ -165,30 +178,33 @@ export async function registerSlicerHandoffRoutes(
 
   app.post("/slicer-instances/:id/open-accepted-plates", async (request, reply) => {
     if (!isRecord(request.body)) {
-      return reply.status(400).send({ detail: "profile_id and expected_plate_revision_id are required" });
+      return reply.status(400).send({ detail: "profile_id and expected_plate_revision_id are required", code: "invalid_request" });
     }
     const profileId = positiveSafeInteger(request.body.profile_id);
     const expectedPlateRevisionId = positiveSafeInteger(request.body.expected_plate_revision_id);
     if (profileId == null || expectedPlateRevisionId == null) {
-      return reply.status(400).send({ detail: "profile_id and expected_plate_revision_id must be positive integers" });
+      return reply.status(400).send({ detail: "profile_id and expected_plate_revision_id must be positive integers", code: "invalid_request" });
     }
     if (!deps.repo.getOwnedProfileIdentity(profileId)) {
-      return reply.status(404).send({ detail: "Profile not found" });
+      return reply.status(404).send({ detail: "Profile not found", code: "profile_not_found" });
     }
     if (!isRecord(request.params) || typeof request.params.id !== "string") {
-      return reply.status(400).send({ detail: "Slicer instance id is invalid" });
+      return reply.status(400).send({ detail: "Slicer instance id is invalid", code: "invalid_request" });
     }
     const id = request.params.id;
     const instance = deps.repo.getSlicerInstance(id);
-    if (!instance) return reply.status(404).send({ detail: "Slicer instance not found" });
-    if (!instance.enabled) return reply.status(400).send({ detail: "Slicer instance is disabled" });
+    if (!instance) return reply.status(404).send({ detail: "Slicer instance not found", code: "slicer_instance_not_found" });
+    if (!instance.enabled) return reply.status(400).send({ detail: "Slicer instance is disabled", code: "slicer_instance_disabled" });
     const guiErr = validateSlicerGuiUrl(instance.guiUrl);
     if (guiErr || !instance.guiUrl.trim()) {
-      return reply.status(400).send({ detail: "Instance needs a valid http(s) gui_url" });
+      return reply.status(400).send({ detail: "Instance needs a valid http(s) gui_url", code: "invalid_slicer_gui_url" });
     }
-    if (exchangeReady(deps.config.exchangeDir)) {
+    const exchange = exchangeState(deps.config.exchangeDir);
+    if (exchange.code !== "ready") {
+      request.log.warn({ operation: "accepted_plate_slicer_handoff", code: exchange.code }, "Slicer exchange unavailable");
       return reply.status(400).send({
         detail: "Slicer exchange is unavailable. Use Download 3MF instead.",
+        code: "slicer_exchange_unavailable",
       });
     }
 
@@ -201,7 +217,7 @@ export async function registerSlicerHandoffRoutes(
       }, { profileId, expectedPlateRevisionId });
       if (materialized.kind !== "materialized") {
         const failure = acceptedHandoffFailure(materialized);
-        return reply.status(failure.status).send({ detail: failure.detail });
+        return reply.status(failure.status).send({ detail: failure.detail, code: failure.code });
       }
       const staged = await stageAcceptedPlateExport({
         materialized,
@@ -211,13 +227,14 @@ export async function registerSlicerHandoffRoutes(
       if (staged.kind === "output_conflict") {
         return reply.status(409).send({
           detail: "The slicer inbox for this Plate revision failed integrity verification.",
+          code: "output_conflict",
         });
       }
       const primary = materialized.plates.length === 1
         ? materialized.plates[0]
         : materialized.bundle;
       if (!primary) {
-        return reply.status(500).send({ detail: "Accepted Plate handoff failed." });
+        return reply.status(500).send({ detail: "Accepted Plate handoff failed.", code: "internal_error" });
       }
       const downloadKey = exportDownloadKey(
         deps.dataDir,
@@ -225,7 +242,7 @@ export async function registerSlicerHandoffRoutes(
         primary.absolutePath,
       );
       if (!downloadKey) {
-        return reply.status(500).send({ detail: "Accepted Plate handoff failed." });
+        return reply.status(500).send({ detail: "Accepted Plate handoff failed.", code: "internal_error" });
       }
       const result: AcceptedPlateSlicerHandoffResult = {
         gui_url: instance.guiUrl.trim(),
@@ -233,7 +250,7 @@ export async function registerSlicerHandoffRoutes(
         plate_revision_number: materialized.plateRevisionNumber,
         layout_digest: materialized.layoutDigest,
         inbox_relative_path: staged.inboxRelativePath,
-        staged: staged.staged,
+        staged: [...staged.staged],
         download_url: `/exports/${downloadKey}`,
         local_app: {
           scheme_attempt: null,
@@ -252,17 +269,17 @@ export async function registerSlicerHandoffRoutes(
         },
         "Accepted Plate slicer handoff failed unexpectedly",
       );
-      return reply.status(500).send({ detail: "Accepted Plate handoff failed." });
+      return reply.status(500).send({ detail: "Accepted Plate handoff failed.", code: "internal_error" });
     }
   });
 
-  app.get("/slicer-handoff/exchange-status", async () => {
-    const err = exchangeReady(deps.config.exchangeDir);
-    return {
-      configured: Boolean(deps.config.exchangeDir.trim()),
-      exchange_dir: deps.config.exchangeDir,
-      ready: !err,
-      detail: err,
-    };
+  app.get("/slicer-handoff/exchange-status", async (request) => {
+    const exchange = exchangeState(deps.config.exchangeDir);
+    if (exchange.code !== "ready") {
+      request.log.warn({ operation: "slicer_exchange_status", code: exchange.code }, "Slicer exchange unavailable");
+    }
+    return exchange.code === "ready"
+      ? { ready: true, code: exchange.code }
+      : { ready: false, code: exchange.code };
   });
 }

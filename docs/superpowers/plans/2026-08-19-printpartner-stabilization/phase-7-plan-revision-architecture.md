@@ -904,6 +904,61 @@ checks passed. The browser still uses the legacy export controls.
 `auto-slice-job.ts` still imports `runExport3mfJob`, so that exporter cannot be
 deleted yet.
 
+## Accepted Plate browser cutover
+
+The Export page now reads the accepted Plate workspace directly. TanStack
+Query owns the accepted server state, while setup assignments and position
+drafts stay local to the component that edits them. A Build-scoped mutation
+scope serializes initialize and move commands. Each command carries the full
+accepted Plan basis and expected Plate revision. Initialize replaces the cached
+workspace with the server response. A successful move patches the submitted
+coordinates and returned revision fields into the cache. It then invalidates
+the query for a canonical read.
+
+Setup requires an explicit Printer assignment for every Required-unit token.
+The form supports Source-layer and role group fills without inventing an
+Unassigned Plate. Ready workspaces support deliberate Printer reassignment
+through the same initialize command. Plate movement preserves server fixed-point
+coordinates. Users can drag a unit or enter exact millimetre fields. The browser
+keeps the selected unit and focus across immutable Plate revision changes.
+Assignment draft identity includes every accepted basis field, including the
+Plan revision digest.
+
+Accepted exports use the saved Plate revision. Recent exports merge active job
+observation with the tenant job history and retain terminal revision metadata.
+If live observation fails, the browser marks its active observation as failed
+instead of completed. The browser branches on stable handoff error codes and
+drops server detail. Handoff paths are relative or tenant-scoped. A blocked
+popup leaves a manual link. Server diagnostics do not include the raw exchange
+directory or caught filesystem error.
+
+The browser no longer calls the legacy `plate-workspace`, `print-plan`,
+`print-assignments`, `export-3mf`, `auto-slice`, or `open-plates` paths. Their
+browser components, query modules, parsers, and helpers were deleted in the
+same cutover. The server still exposes the legacy export job and `open-plates`
+handoff. Auto-slice also still calls `runExport3mfJob`; the next unit migrates
+auto-slice and deletes those server paths.
+
+Independent review closed thirteen findings covering response and log path
+redaction, popup recovery, recent-job lifecycle, shared error variants, group
+fills, focus preservation, revision labels, duplicate setup identity, rejected
+drag handling, initial history errors, and complete accepted basis identity.
+The contracts regression passed 5 tests and the focused server regression
+passed 4 tests. The full browser suite passed 105 files and 422 tests. In the
+full server suite, 170 files passed, 1 file was skipped, 1385 tests passed, and 3
+tests were skipped. Monorepo typecheck, lint, and build passed. The no-comments
+review and diff checks passed. The privacy and legacy caller inventories were
+clean.
+
+An isolated live browser run created an empty Build through the running app. It
+opened the Export page at a desktop size and a 390 by 844 mobile viewport. The
+empty accepted Plate state rendered without horizontal overflow, requested
+`/plans/1/plates`, and made no request to the legacy `plate-workspace`,
+`print-assignments`, `print-plan`, `export-3mf`, `auto-slice`, or `open-plates`
+paths. Component, query, contract, and server route tests cover populated
+initialize, movement, export, and handoff behavior. The live fixture covered
+only the empty state.
+
 ## Module shape
 
 ```ts
