@@ -325,6 +325,12 @@ export const planDrafts = pgTable(
     ),
     rebasedFromLifecycleVersion: integer("rebased_from_lifecycle_version"),
     rebasedFromSnapshotDigest: text("rebased_from_snapshot_digest"),
+    currentRequiredUnitReconciliationId: integer(
+      "current_required_unit_reconciliation_id",
+    ).references(
+      (): AnyPgColumn => planDraftRequiredUnitReconciliations.id,
+      { onDelete: "set null" },
+    ),
     digestFormat: text("digest_format").notNull(),
     snapshotDigest: text("snapshot_digest").notNull(),
     createdBy: text("created_by").notNull(),
@@ -434,6 +440,132 @@ export const planDraftParts = pgTable("plan_draft_parts", {
     t.baseRevisionPartId,
   ),
 ]);
+
+export const planDraftRequiredUnitReconciliations = pgTable(
+  "plan_draft_required_unit_reconciliations",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    draftId: integer("draft_id")
+      .notNull()
+      .references(() => planDrafts.id, { onDelete: "cascade" }),
+    format: text("format").notNull(),
+    planningDigest: text("planning_digest").notNull(),
+    baseRevisionId: integer("base_revision_id").references(() => planRevisions.id, {
+      onDelete: "restrict",
+    }),
+    baseMappingDigest: text("base_mapping_digest"),
+    selectionBasisDigest: text("selection_basis_digest").notNull(),
+    selectionBasisJson: text("selection_basis_json").notNull(),
+    decisionDigest: text("decision_digest").notNull(),
+    resultKind: text("result_kind").$type<"unresolved" | "ready">().notNull(),
+    resultDigest: text("result_digest").notNull(),
+    resultJson: text("result_json").notNull(),
+    reconciliationDigest: text("reconciliation_digest").notNull(),
+    expectedAssignmentCount: integer("expected_assignment_count").notNull(),
+    actorId: text("actor_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    createdAt: text("created_at").notNull(),
+    finalizedAt: text("finalized_at"),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_draft_required_unit_reconciliations_key").on(
+      t.tenantId,
+      t.actorId,
+      t.draftId,
+      t.idempotencyKey,
+    ),
+    check(
+      "chk_plan_draft_required_unit_reconciliations_format",
+      sql`${t.format} = 'required-unit-reconciliation-v1'`,
+    ),
+    check(
+      "chk_plan_draft_required_unit_reconciliations_result",
+      sql`${t.resultKind} IN ('unresolved', 'ready')`,
+    ),
+    check(
+      "chk_plan_draft_required_unit_reconciliations_count",
+      sql`${t.expectedAssignmentCount} >= 0`,
+    ),
+  ],
+);
+
+export const planDraftRequiredUnitDecisions = pgTable(
+  "plan_draft_required_unit_decisions",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
+    reconciliationId: integer("reconciliation_id")
+      .notNull()
+      .references(() => planDraftRequiredUnitReconciliations.id, { onDelete: "cascade" }),
+    targetDraftPartId: integer("target_draft_part_id")
+      .notNull()
+      .references(() => planDraftParts.id, { onDelete: "cascade" }),
+    kind: text("kind")
+      .$type<"select_exact_predecessor" | "accept_prior_completion" | "replace">()
+      .notNull(),
+    predecessorRevisionPartId: integer("predecessor_revision_part_id").references(
+      () => planRevisionParts.id,
+      { onDelete: "restrict" },
+    ),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_draft_required_unit_decisions_target").on(
+      t.tenantId,
+      t.reconciliationId,
+      t.targetDraftPartId,
+    ),
+    uniqueIndex("uq_plan_draft_required_unit_decisions_predecessor")
+      .on(t.tenantId, t.reconciliationId, t.predecessorRevisionPartId)
+      .where(sql`${t.predecessorRevisionPartId} IS NOT NULL`),
+    check(
+      "chk_plan_draft_required_unit_decisions_kind",
+      sql`(${t.kind} = 'replace' AND ${t.predecessorRevisionPartId} IS NULL)
+          OR (${t.kind} IN ('select_exact_predecessor', 'accept_prior_completion')
+            AND ${t.predecessorRevisionPartId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const planDraftRequiredUnitAssignments = pgTable(
+  "plan_draft_required_unit_assignments",
+  {
+    tenantId: text("tenant_id").notNull(),
+    reconciliationId: integer("reconciliation_id")
+      .notNull()
+      .references(() => planDraftRequiredUnitReconciliations.id, { onDelete: "cascade" }),
+    targetDraftPartId: integer("target_draft_part_id")
+      .notNull()
+      .references(() => planDraftParts.id, { onDelete: "cascade" }),
+    unitIndex: integer("unit_index").notNull(),
+    kind: text("kind").$type<"reuse" | "create">().notNull(),
+    requiredUnitToken: text("required_unit_token").references(() => requiredUnits.token, {
+      onDelete: "restrict",
+    }),
+  },
+  (t) => [
+    primaryKey({
+      name: "pk_plan_draft_required_unit_assignments",
+      columns: [t.tenantId, t.reconciliationId, t.targetDraftPartId, t.unitIndex],
+    }),
+    uniqueIndex("uq_plan_draft_required_unit_assignments_token")
+      .on(t.tenantId, t.reconciliationId, t.requiredUnitToken)
+      .where(sql`${t.requiredUnitToken} IS NOT NULL`),
+    check(
+      "chk_plan_draft_required_unit_assignments_index",
+      sql`${t.unitIndex} BETWEEN 0 AND 9999`,
+    ),
+    check(
+      "chk_plan_draft_required_unit_assignments_kind",
+      sql`(${t.kind} = 'reuse' AND ${t.requiredUnitToken} IS NOT NULL)
+          OR (${t.kind} = 'create' AND ${t.requiredUnitToken} IS NULL)`,
+    ),
+  ],
+);
 
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),
@@ -818,4 +950,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 23;
+export const currentSchemaVersion = 24;

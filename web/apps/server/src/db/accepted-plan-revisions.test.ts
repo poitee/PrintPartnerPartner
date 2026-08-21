@@ -34,6 +34,20 @@ function markAsV18(raw: Database.Database): void {
 
 function downgradeToV18(raw: Database.Database): void {
   raw.exec(`
+    DROP TRIGGER IF EXISTS trg_plan_drafts_required_unit_selection_update;
+    DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_assignments_immutable_delete;
+    DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_assignments_immutable_update;
+    DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_assignments_ownership_insert;
+    DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_decisions_immutable_delete;
+    DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_decisions_immutable_update;
+    DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_decisions_ownership_insert;
+    DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_reconciliations_immutable_delete;
+    DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_reconciliations_finalize;
+    DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_reconciliations_ownership_insert;
+    DROP TABLE plan_draft_required_unit_assignments;
+    DROP TABLE plan_draft_required_unit_decisions;
+    DROP TABLE plan_draft_required_unit_reconciliations;
+    ALTER TABLE plan_drafts DROP COLUMN current_required_unit_reconciliation_id;
     DROP TRIGGER IF EXISTS trg_plan_revision_required_unit_sets_immutable_delete;
     DROP TRIGGER IF EXISTS trg_plan_revision_required_unit_sets_immutable_update;
     DROP TRIGGER IF EXISTS trg_plan_revision_required_unit_sets_ownership_insert;

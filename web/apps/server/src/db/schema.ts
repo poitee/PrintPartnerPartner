@@ -328,6 +328,12 @@ export const planDrafts = sqliteTable(
     ),
     rebasedFromLifecycleVersion: integer("rebased_from_lifecycle_version"),
     rebasedFromSnapshotDigest: text("rebased_from_snapshot_digest"),
+    currentRequiredUnitReconciliationId: integer(
+      "current_required_unit_reconciliation_id",
+    ).references(
+      (): AnySQLiteColumn => planDraftRequiredUnitReconciliations.id,
+      { onDelete: "set null" },
+    ),
     digestFormat: text("digest_format").notNull(),
     snapshotDigest: text("snapshot_digest").notNull(),
     createdBy: text("created_by").notNull(),
@@ -440,6 +446,132 @@ export const planDraftParts = sqliteTable("plan_draft_parts", {
     t.baseRevisionPartId,
   ),
 ]);
+
+export const planDraftRequiredUnitReconciliations = sqliteTable(
+  "plan_draft_required_unit_reconciliations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull(),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    draftId: integer("draft_id")
+      .notNull()
+      .references(() => planDrafts.id, { onDelete: "cascade" }),
+    format: text("format").notNull(),
+    planningDigest: text("planning_digest").notNull(),
+    baseRevisionId: integer("base_revision_id").references(() => planRevisions.id, {
+      onDelete: "restrict",
+    }),
+    baseMappingDigest: text("base_mapping_digest"),
+    selectionBasisDigest: text("selection_basis_digest").notNull(),
+    selectionBasisJson: text("selection_basis_json").notNull(),
+    decisionDigest: text("decision_digest").notNull(),
+    resultKind: text("result_kind").$type<"unresolved" | "ready">().notNull(),
+    resultDigest: text("result_digest").notNull(),
+    resultJson: text("result_json").notNull(),
+    reconciliationDigest: text("reconciliation_digest").notNull(),
+    expectedAssignmentCount: integer("expected_assignment_count").notNull(),
+    actorId: text("actor_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    payloadDigest: text("payload_digest").notNull(),
+    createdAt: text("created_at").notNull(),
+    finalizedAt: text("finalized_at"),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_draft_required_unit_reconciliations_key").on(
+      t.tenantId,
+      t.actorId,
+      t.draftId,
+      t.idempotencyKey,
+    ),
+    check(
+      "chk_plan_draft_required_unit_reconciliations_format",
+      sql`${t.format} = 'required-unit-reconciliation-v1'`,
+    ),
+    check(
+      "chk_plan_draft_required_unit_reconciliations_result",
+      sql`${t.resultKind} IN ('unresolved', 'ready')`,
+    ),
+    check(
+      "chk_plan_draft_required_unit_reconciliations_count",
+      sql`${t.expectedAssignmentCount} >= 0`,
+    ),
+  ],
+);
+
+export const planDraftRequiredUnitDecisions = sqliteTable(
+  "plan_draft_required_unit_decisions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull(),
+    reconciliationId: integer("reconciliation_id")
+      .notNull()
+      .references(() => planDraftRequiredUnitReconciliations.id, { onDelete: "cascade" }),
+    targetDraftPartId: integer("target_draft_part_id")
+      .notNull()
+      .references(() => planDraftParts.id, { onDelete: "cascade" }),
+    kind: text("kind")
+      .$type<"select_exact_predecessor" | "accept_prior_completion" | "replace">()
+      .notNull(),
+    predecessorRevisionPartId: integer("predecessor_revision_part_id").references(
+      () => planRevisionParts.id,
+      { onDelete: "restrict" },
+    ),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_draft_required_unit_decisions_target").on(
+      t.tenantId,
+      t.reconciliationId,
+      t.targetDraftPartId,
+    ),
+    uniqueIndex("uq_plan_draft_required_unit_decisions_predecessor")
+      .on(t.tenantId, t.reconciliationId, t.predecessorRevisionPartId)
+      .where(sql`${t.predecessorRevisionPartId} IS NOT NULL`),
+    check(
+      "chk_plan_draft_required_unit_decisions_kind",
+      sql`(${t.kind} = 'replace' AND ${t.predecessorRevisionPartId} IS NULL)
+          OR (${t.kind} IN ('select_exact_predecessor', 'accept_prior_completion')
+            AND ${t.predecessorRevisionPartId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+export const planDraftRequiredUnitAssignments = sqliteTable(
+  "plan_draft_required_unit_assignments",
+  {
+    tenantId: text("tenant_id").notNull(),
+    reconciliationId: integer("reconciliation_id")
+      .notNull()
+      .references(() => planDraftRequiredUnitReconciliations.id, { onDelete: "cascade" }),
+    targetDraftPartId: integer("target_draft_part_id")
+      .notNull()
+      .references(() => planDraftParts.id, { onDelete: "cascade" }),
+    unitIndex: integer("unit_index").notNull(),
+    kind: text("kind").$type<"reuse" | "create">().notNull(),
+    requiredUnitToken: text("required_unit_token").references(() => requiredUnits.token, {
+      onDelete: "restrict",
+    }),
+  },
+  (t) => [
+    primaryKey({
+      name: "pk_plan_draft_required_unit_assignments",
+      columns: [t.tenantId, t.reconciliationId, t.targetDraftPartId, t.unitIndex],
+    }),
+    uniqueIndex("uq_plan_draft_required_unit_assignments_token")
+      .on(t.tenantId, t.reconciliationId, t.requiredUnitToken)
+      .where(sql`${t.requiredUnitToken} IS NOT NULL`),
+    check(
+      "chk_plan_draft_required_unit_assignments_index",
+      sql`${t.unitIndex} BETWEEN 0 AND 9999`,
+    ),
+    check(
+      "chk_plan_draft_required_unit_assignments_kind",
+      sql`(${t.kind} = 'reuse' AND ${t.requiredUnitToken} IS NOT NULL)
+          OR (${t.kind} = 'create' AND ${t.requiredUnitToken} IS NULL)`,
+    ),
+  ],
+);
 
 export const parts = sqliteTable("parts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -827,7 +959,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 23;
+export const currentSchemaVersion = 24;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -1560,15 +1692,20 @@ export const schemaMigrations: string[] = [
     END`,
   `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_ownership_update
     BEFORE UPDATE ON plan_drafts
-    WHEN NOT EXISTS (
-      SELECT 1 FROM build_profiles profile
-       WHERE profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
-    ) OR (
-      NEW.base_revision_id IS NOT NULL AND NOT EXISTS (
-        SELECT 1 FROM plan_revisions revision
-         WHERE revision.id = NEW.base_revision_id
-           AND revision.profile_id = NEW.profile_id
-           AND revision.tenant_id = NEW.tenant_id
+    WHEN EXISTS (
+      SELECT 1 FROM build_profiles old_profile
+       WHERE old_profile.id = OLD.profile_id AND old_profile.tenant_id = OLD.tenant_id
+    ) AND (
+      NOT EXISTS (
+        SELECT 1 FROM build_profiles profile
+         WHERE profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
+      ) OR (
+        NEW.base_revision_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM plan_revisions revision
+           WHERE revision.id = NEW.base_revision_id
+             AND revision.profile_id = NEW.profile_id
+             AND revision.tenant_id = NEW.tenant_id
+        )
       )
     )
     BEGIN
@@ -1823,5 +1960,289 @@ export const schemaMigrations: string[] = [
     )
     BEGIN
       SELECT RAISE(ABORT, 'Required-unit set is immutable');
+    END`,
+  `CREATE TABLE IF NOT EXISTS plan_draft_required_unit_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    draft_id INTEGER NOT NULL REFERENCES plan_drafts(id) ON DELETE CASCADE,
+    format TEXT NOT NULL CHECK (format = 'required-unit-reconciliation-v1'),
+    planning_digest TEXT NOT NULL,
+    base_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE RESTRICT,
+    base_mapping_digest TEXT,
+    selection_basis_digest TEXT NOT NULL,
+    selection_basis_json TEXT NOT NULL
+      CHECK (json_valid(selection_basis_json) AND json_type(selection_basis_json) = 'array'),
+    decision_digest TEXT NOT NULL,
+    result_kind TEXT NOT NULL CHECK (result_kind IN ('unresolved', 'ready')),
+    result_digest TEXT NOT NULL,
+    result_json TEXT NOT NULL
+      CHECK (json_valid(result_json) AND json_type(result_json) = 'object'),
+    reconciliation_digest TEXT NOT NULL,
+    expected_assignment_count INTEGER NOT NULL CHECK (expected_assignment_count >= 0),
+    actor_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    payload_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    finalized_at TEXT,
+    UNIQUE (tenant_id, actor_id, draft_id, idempotency_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS plan_draft_required_unit_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    reconciliation_id INTEGER NOT NULL
+      REFERENCES plan_draft_required_unit_reconciliations(id) ON DELETE CASCADE,
+    target_draft_part_id INTEGER NOT NULL REFERENCES plan_draft_parts(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    predecessor_revision_part_id INTEGER REFERENCES plan_revision_parts(id) ON DELETE RESTRICT,
+    UNIQUE (tenant_id, reconciliation_id, target_draft_part_id),
+    CHECK (
+      (kind = 'replace' AND predecessor_revision_part_id IS NULL)
+      OR (kind IN ('select_exact_predecessor', 'accept_prior_completion')
+        AND predecessor_revision_part_id IS NOT NULL)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_draft_required_unit_decisions_predecessor
+    ON plan_draft_required_unit_decisions (
+      tenant_id, reconciliation_id, predecessor_revision_part_id
+    ) WHERE predecessor_revision_part_id IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS plan_draft_required_unit_assignments (
+    tenant_id TEXT NOT NULL,
+    reconciliation_id INTEGER NOT NULL
+      REFERENCES plan_draft_required_unit_reconciliations(id) ON DELETE CASCADE,
+    target_draft_part_id INTEGER NOT NULL REFERENCES plan_draft_parts(id) ON DELETE CASCADE,
+    unit_index INTEGER NOT NULL CHECK (unit_index BETWEEN 0 AND 9999),
+    kind TEXT NOT NULL,
+    required_unit_token TEXT REFERENCES required_units(token) ON DELETE RESTRICT,
+    PRIMARY KEY (tenant_id, reconciliation_id, target_draft_part_id, unit_index),
+    CHECK (
+      (kind = 'reuse' AND required_unit_token IS NOT NULL)
+      OR (kind = 'create' AND required_unit_token IS NULL)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_draft_required_unit_assignments_token
+    ON plan_draft_required_unit_assignments (
+      tenant_id, reconciliation_id, required_unit_token
+    ) WHERE required_unit_token IS NOT NULL`,
+  `ALTER TABLE plan_drafts ADD COLUMN current_required_unit_reconciliation_id INTEGER
+    REFERENCES plan_draft_required_unit_reconciliations(id) ON DELETE SET NULL`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_required_unit_reconciliations_ownership_insert
+    BEFORE INSERT ON plan_draft_required_unit_reconciliations
+    WHEN NEW.finalized_at IS NOT NULL OR NOT EXISTS (
+      SELECT 1 FROM plan_drafts draft
+       WHERE draft.id = NEW.draft_id
+         AND draft.tenant_id = NEW.tenant_id
+         AND draft.profile_id = NEW.profile_id
+         AND draft.state = 'open'
+         AND draft.base_revision_id IS NEW.base_revision_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit reconciliation ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_required_unit_reconciliations_finalize
+    BEFORE UPDATE ON plan_draft_required_unit_reconciliations
+    WHEN NOT (
+      OLD.finalized_at IS NULL
+      AND NEW.finalized_at IS NOT NULL
+      AND NEW.id IS OLD.id
+      AND NEW.tenant_id IS OLD.tenant_id
+      AND NEW.profile_id IS OLD.profile_id
+      AND NEW.draft_id IS OLD.draft_id
+      AND NEW.format IS OLD.format
+      AND NEW.planning_digest IS OLD.planning_digest
+      AND NEW.base_revision_id IS OLD.base_revision_id
+      AND NEW.base_mapping_digest IS OLD.base_mapping_digest
+      AND NEW.selection_basis_digest IS OLD.selection_basis_digest
+      AND NEW.selection_basis_json IS OLD.selection_basis_json
+      AND NEW.decision_digest IS OLD.decision_digest
+      AND NEW.result_kind IS OLD.result_kind
+      AND NEW.result_digest IS OLD.result_digest
+      AND NEW.result_json IS OLD.result_json
+      AND NEW.reconciliation_digest IS OLD.reconciliation_digest
+      AND NEW.expected_assignment_count IS OLD.expected_assignment_count
+      AND NEW.actor_id IS OLD.actor_id
+      AND NEW.idempotency_key IS OLD.idempotency_key
+      AND NEW.payload_digest IS OLD.payload_digest
+      AND NEW.created_at IS OLD.created_at
+      AND (
+        (NEW.result_kind = 'unresolved'
+          AND json_extract(NEW.result_json, '$.kind') = 'unresolved'
+          AND json_type(NEW.result_json, '$.conflicts') = 'array'
+          AND NOT EXISTS (
+            SELECT 1 FROM plan_draft_required_unit_assignments assignment
+             WHERE assignment.reconciliation_id = NEW.id
+               AND assignment.tenant_id = NEW.tenant_id
+          ))
+        OR (NEW.result_kind = 'ready'
+          AND json_extract(NEW.result_json, '$.kind') = 'ready'
+          AND json_type(NEW.result_json, '$.assignments') = 'array'
+          AND json_type(NEW.result_json, '$.surplus') = 'array'
+          AND json_array_length(NEW.result_json, '$.assignments') = NEW.expected_assignment_count
+          AND NEW.expected_assignment_count = (
+            SELECT count(*) FROM plan_draft_required_unit_assignments assignment
+             WHERE assignment.reconciliation_id = NEW.id
+               AND assignment.tenant_id = NEW.tenant_id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM json_each(NEW.result_json, '$.assignments') expected
+             WHERE NOT EXISTS (
+               SELECT 1 FROM plan_draft_required_unit_assignments assignment
+                WHERE assignment.reconciliation_id = NEW.id
+                  AND assignment.tenant_id = NEW.tenant_id
+                  AND assignment.target_draft_part_id = json_extract(expected.value, '$.draftPartId')
+                  AND assignment.unit_index = json_extract(expected.value, '$.unitIndex')
+                  AND assignment.kind = json_extract(expected.value, '$.kind')
+                  AND (
+                    (assignment.kind = 'create' AND assignment.required_unit_token IS NULL)
+                    OR (assignment.kind = 'reuse'
+                      AND assignment.required_unit_token = json_extract(expected.value, '$.token'))
+                  )
+             )
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM plan_draft_parts part
+             WHERE part.draft_id = NEW.draft_id
+               AND part.tenant_id = NEW.tenant_id
+               AND (
+                 part.quantity_effective <> (
+                   SELECT count(*) FROM plan_draft_required_unit_assignments assignment
+                    WHERE assignment.reconciliation_id = NEW.id
+                      AND assignment.tenant_id = NEW.tenant_id
+                      AND assignment.target_draft_part_id = part.id
+                 )
+                 OR part.quantity_effective - 1 <> (
+                   SELECT max(assignment.unit_index)
+                     FROM plan_draft_required_unit_assignments assignment
+                    WHERE assignment.reconciliation_id = NEW.id
+                      AND assignment.tenant_id = NEW.tenant_id
+                      AND assignment.target_draft_part_id = part.id
+                 )
+               )
+          ))
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit reconciliation finalization violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_required_unit_reconciliations_immutable_delete
+    BEFORE DELETE ON plan_draft_required_unit_reconciliations
+    WHEN EXISTS (
+      SELECT 1 FROM plan_drafts draft
+      JOIN build_profiles profile
+        ON profile.id = draft.profile_id AND profile.tenant_id = draft.tenant_id
+      WHERE draft.id = OLD.draft_id AND draft.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit reconciliation is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_required_unit_decisions_ownership_insert
+    BEFORE INSERT ON plan_draft_required_unit_decisions
+    WHEN NOT EXISTS (
+      SELECT 1
+        FROM plan_draft_required_unit_reconciliations reconciliation
+        JOIN plan_draft_parts target
+          ON target.id = NEW.target_draft_part_id
+         AND target.draft_id = reconciliation.draft_id
+         AND target.tenant_id = reconciliation.tenant_id
+       WHERE reconciliation.id = NEW.reconciliation_id
+         AND reconciliation.tenant_id = NEW.tenant_id
+         AND reconciliation.finalized_at IS NULL
+         AND (
+           NEW.predecessor_revision_part_id IS NULL
+           OR EXISTS (
+             SELECT 1 FROM plan_revision_parts predecessor
+              WHERE predecessor.id = NEW.predecessor_revision_part_id
+                AND predecessor.revision_id = reconciliation.base_revision_id
+                AND predecessor.tenant_id = reconciliation.tenant_id
+           )
+         )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit reconciliation decision ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_required_unit_decisions_immutable_update
+    BEFORE UPDATE ON plan_draft_required_unit_decisions
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit reconciliation decision is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_required_unit_decisions_immutable_delete
+    BEFORE DELETE ON plan_draft_required_unit_decisions
+    WHEN EXISTS (
+      SELECT 1 FROM plan_draft_required_unit_reconciliations reconciliation
+      JOIN plan_drafts draft ON draft.id = reconciliation.draft_id
+      JOIN build_profiles profile
+        ON profile.id = draft.profile_id AND profile.tenant_id = draft.tenant_id
+      WHERE reconciliation.id = OLD.reconciliation_id
+        AND reconciliation.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit reconciliation decision is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_required_unit_assignments_ownership_insert
+    BEFORE INSERT ON plan_draft_required_unit_assignments
+    WHEN NOT EXISTS (
+      SELECT 1
+        FROM plan_draft_required_unit_reconciliations reconciliation
+        JOIN plan_draft_parts target
+          ON target.id = NEW.target_draft_part_id
+         AND target.draft_id = reconciliation.draft_id
+         AND target.tenant_id = reconciliation.tenant_id
+       WHERE reconciliation.id = NEW.reconciliation_id
+         AND reconciliation.tenant_id = NEW.tenant_id
+         AND reconciliation.finalized_at IS NULL
+         AND (
+           (NEW.kind = 'create' AND NEW.required_unit_token IS NULL)
+           OR (NEW.kind = 'reuse' AND EXISTS (
+             SELECT 1 FROM required_units unit
+              WHERE unit.token = NEW.required_unit_token
+                AND unit.tenant_id = reconciliation.tenant_id
+                AND unit.profile_id = reconciliation.profile_id
+           ))
+         )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit reconciliation assignment ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_required_unit_assignments_immutable_update
+    BEFORE UPDATE ON plan_draft_required_unit_assignments
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit reconciliation assignment is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_draft_required_unit_assignments_immutable_delete
+    BEFORE DELETE ON plan_draft_required_unit_assignments
+    WHEN EXISTS (
+      SELECT 1 FROM plan_draft_required_unit_reconciliations reconciliation
+      JOIN plan_drafts draft ON draft.id = reconciliation.draft_id
+      JOIN build_profiles profile
+        ON profile.id = draft.profile_id AND profile.tenant_id = draft.tenant_id
+      WHERE reconciliation.id = OLD.reconciliation_id
+        AND reconciliation.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Required-unit reconciliation assignment is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_required_unit_selection_update
+    BEFORE UPDATE OF current_required_unit_reconciliation_id ON plan_drafts
+    WHEN NEW.current_required_unit_reconciliation_id IS NOT OLD.current_required_unit_reconciliation_id
+      AND EXISTS (
+        SELECT 1 FROM build_profiles profile
+         WHERE profile.id = OLD.profile_id AND profile.tenant_id = OLD.tenant_id
+      )
+      AND (
+        NEW.state <> 'open'
+        OR (
+          NEW.current_required_unit_reconciliation_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM plan_draft_required_unit_reconciliations reconciliation
+             WHERE reconciliation.id = NEW.current_required_unit_reconciliation_id
+               AND reconciliation.tenant_id = NEW.tenant_id
+               AND reconciliation.profile_id = NEW.profile_id
+               AND reconciliation.draft_id = NEW.id
+               AND reconciliation.finalized_at IS NOT NULL
+          )
+        )
+      )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft Required-unit selection violation');
     END`,
 ];

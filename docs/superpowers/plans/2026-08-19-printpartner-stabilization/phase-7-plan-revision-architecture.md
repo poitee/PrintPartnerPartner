@@ -257,8 +257,43 @@ unit index. It does not copy or mirror progress. PostgreSQL has the same ledger
 schema and reader shape, but no Required-unit mutation path until native
 multi-statement transactions are available.
 
-Reconciliation uses artifact digest, path, role, and prior revision as
-evidence:
+Unit 3b saves one immutable reconciliation snapshot at a time. The pure
+reconciler uses stable Source identity, equal non-null artifact digests, and
+equal effective roles as continuity evidence. Paths, names, Part keys, row
+order, null artifact digests, and a prior revision link do not prove identity.
+A direct `baseRevisionPartId` selects the known candidate only. Automatic carry
+still requires the same Source, equal non-null artifact digest, and equal
+effective role. `select_exact_predecessor` may choose only a current ambiguous
+candidate that already satisfies that equivalence predicate.
+`accept_prior_completion` may choose only the known direct predecessor that
+fails the predicate. `replace` chooses no predecessor and carries no token.
+Accepting prior completion reuses completed physical tokens only. Missing
+target slots receive frozen create assignments.
+
+Each finalized snapshot commits the planning digest, base mapping digest,
+decisions, frozen assignments and surplus result, and the live progress rows
+that could affect shrink or prior-completion selection. Canonical JSON stores
+the complete result and progress basis beside their digests. Readers parse the
+typed values, rebuild every component digest, and require assignment rows to
+equal the committed result. The selected snapshot promotes the draft to
+`plan-draft-v2`. Part inclusion or quantity edits clear the selection in their
+existing immediate transaction. Lifecycle transitions preserve it, while a
+rebase starts its successor without a selection. SQLite resolves every exact
+or superseded idempotent retry inside one immediate transaction, so a delayed
+retry cannot pair an old result with a newer selection. PostgreSQL exposes the
+schema and verified reads, while reconciliation mutation remains fail closed
+until native transactions exist.
+
+Unit 4 must recompute the authoritative live progress basis inside the same
+transaction that publishes the Plan. If it differs from the selected snapshot,
+Apply rejects the stale reconciliation with zero writes and requires a new
+reconciliation. Frozen assignments are never applied against a changed
+selection basis.
+
+Reconciliation uses stable Source identity, a non-null artifact digest, and
+effective role as physical-equivalence evidence. The prior revision link is a
+candidate and audit link only. Paths and names do not prove physical
+equivalence:
 
 - An exact-content rename retains tokens and completion.
 - A quantity increase retains existing tokens and creates new tokens.

@@ -67,6 +67,54 @@ const V23_TABLES = [
   "plan_revision_required_units",
 ];
 
+const V24_TABLES = [
+  "plan_draft_required_unit_reconciliations",
+  "plan_draft_required_unit_decisions",
+  "plan_draft_required_unit_assignments",
+];
+
+const V24_COLUMNS: Record<string, string[]> = {
+  plan_draft_required_unit_reconciliations: [
+    "id",
+    "tenant_id",
+    "profile_id",
+    "draft_id",
+    "format",
+    "planning_digest",
+    "base_revision_id",
+    "base_mapping_digest",
+    "selection_basis_digest",
+    "selection_basis_json",
+    "decision_digest",
+    "result_kind",
+    "result_digest",
+    "result_json",
+    "reconciliation_digest",
+    "expected_assignment_count",
+    "actor_id",
+    "idempotency_key",
+    "payload_digest",
+    "created_at",
+    "finalized_at",
+  ],
+  plan_draft_required_unit_decisions: [
+    "id",
+    "tenant_id",
+    "reconciliation_id",
+    "target_draft_part_id",
+    "kind",
+    "predecessor_revision_part_id",
+  ],
+  plan_draft_required_unit_assignments: [
+    "tenant_id",
+    "reconciliation_id",
+    "target_draft_part_id",
+    "unit_index",
+    "kind",
+    "required_unit_token",
+  ],
+};
+
 const V23_COLUMNS: Record<string, string[]> = {
   required_units: [
     "token",
@@ -320,7 +368,7 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v23 tables and records schema version 23", () => {
+  it("creates the v15-v24 tables and records schema version 24", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
       for (const table of [
@@ -330,6 +378,7 @@ describe("schema v9-v13 (SQLite)", () => {
         ...V19_TABLES,
         ...V20_TABLES,
         ...V23_TABLES,
+        ...V24_TABLES,
       ]) {
         expect(tables, `missing table ${table}`).toContain(table);
       }
@@ -337,7 +386,7 @@ describe("schema v9-v13 (SQLite)", () => {
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "23" });
+      ).toMatchObject({ value: "24" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -919,8 +968,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(23);
-    expect(pgSchema.currentSchemaVersion).toBe(23);
+    expect(sqliteSchema.currentSchemaVersion).toBe(24);
+    expect(pgSchema.currentSchemaVersion).toBe(24);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -1075,6 +1124,35 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
     expect(POSTGRES_DDL).toContain(
       "trg_plan_revision_required_unit_sets_immutable_write",
     );
+  });
+
+  it("creates the v24 reconciliation snapshots and guards in Postgres", () => {
+    for (const [table, expected] of Object.entries(V24_COLUMNS)) {
+      expect(pgCreatedColumns(table)).toEqual(expect.arrayContaining(expected));
+    }
+    expect(pgAddedColumns("plan_drafts")).toContain(
+      "current_required_unit_reconciliation_id",
+    );
+    expect(POSTGRES_DDL).toContain("required-unit-reconciliation-v1");
+    expect(POSTGRES_DDL).toContain(
+      "uq_plan_draft_required_unit_decisions_predecessor",
+    );
+    expect(POSTGRES_DDL).toContain(
+      "uq_plan_draft_required_unit_assignments_token",
+    );
+    expect(POSTGRES_DDL).toContain(
+      "trg_plan_draft_required_unit_reconciliations_finalize",
+    );
+    expect(POSTGRES_DDL).toContain("selection_basis_json::jsonb");
+    expect(POSTGRES_DDL).toContain("result_json::jsonb->'assignments'");
+    expect(POSTGRES_DDL).toContain("assignment.required_unit_token = expected->>'token'");
+    expect(POSTGRES_DDL).toContain(
+      "trg_plan_draft_required_unit_decisions_immutable_write",
+    );
+    expect(POSTGRES_DDL).toContain(
+      "trg_plan_draft_required_unit_assignments_immutable_write",
+    );
+    expect(POSTGRES_DDL).toContain("trg_plan_drafts_required_unit_selection_update");
   });
 
   it("adds v13 profile-sync provenance columns on slicer profile tables", () => {

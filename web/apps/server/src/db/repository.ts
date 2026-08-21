@@ -99,10 +99,12 @@ import {
   applyPlanDraftPartDecision,
   diffPlanDraftSnapshot,
   digestPlanDraft,
+  digestPlanDraftSelection,
   MAX_PLAN_DRAFT_LIFECYCLE_VERSION,
   mergeRebasedPlanDraft,
   newPlanDraftPartDecisionBaseline,
   PLAN_DRAFT_DIGEST_FORMAT,
+  PLAN_DRAFT_SELECTION_DIGEST_FORMAT,
   type PlanDraftDiff,
   type PlanDraftPartDecision,
   type PlanDraftSnapshot,
@@ -120,6 +122,23 @@ import {
   REQUIRED_UNIT_MAP_FORMAT,
   validateRequiredUnitObjectName,
 } from "../services/required-units.js";
+import {
+  digestRequiredUnitDecisions,
+  digestRequiredUnitReconciliation,
+  digestRequiredUnitReconciliationResult,
+  digestRequiredUnitSelectionBasis,
+  parseRequiredUnitReconciliationResult,
+  parseRequiredUnitSelectionBasis,
+  reconcileRequiredUnits,
+  REQUIRED_UNIT_RECONCILIATION_FORMAT,
+  serializeRequiredUnitReconciliationResult,
+  serializeRequiredUnitSelectionBasis,
+  type RequiredUnitAssignment,
+  type RequiredUnitReconciliationBasePart,
+  type RequiredUnitReconciliationConflict,
+  type RequiredUnitReconciliationDecision,
+  type RequiredUnitSelectionBasisRow,
+} from "../services/required-unit-reconciliation.js";
 
 function docTitleFromPath(path: string): string {
   const base = basename(path);
@@ -147,6 +166,9 @@ export type SchemaTables = Pick<
   | "planDrafts"
   | "planDraftInputs"
   | "planDraftParts"
+  | "planDraftRequiredUnitReconciliations"
+  | "planDraftRequiredUnitDecisions"
+  | "planDraftRequiredUnitAssignments"
   | "sourceDocs"
   | "sourceNotes"
   | "planDecisions"
@@ -195,6 +217,8 @@ export type PlanRevisionPartRow = typeof defaultSchema.planRevisionParts.$inferS
 export type PlanDraftRow = typeof defaultSchema.planDrafts.$inferSelect;
 export type PlanDraftInputRow = typeof defaultSchema.planDraftInputs.$inferSelect;
 export type PlanDraftPartRow = typeof defaultSchema.planDraftParts.$inferSelect;
+export type PlanDraftRequiredUnitReconciliationRow =
+  typeof defaultSchema.planDraftRequiredUnitReconciliations.$inferSelect;
 
 export type RequiredUnitView = {
   readonly token: string;
@@ -217,6 +241,41 @@ export type ReadCurrentRequiredUnitSetResult =
       readonly mappingDigest: string;
       readonly units: readonly RequiredUnitView[];
     };
+
+export type SavedRequiredUnitReconciliation = {
+  readonly id: number;
+  readonly format: string;
+  readonly planningDigest: string;
+  readonly baseRevisionId: number | null;
+  readonly baseMappingDigest: string | null;
+  readonly selectionBasisDigest: string;
+  readonly decisionDigest: string;
+  readonly resultKind: "unresolved" | "ready";
+  readonly resultDigest: string;
+  readonly reconciliationDigest: string;
+  readonly expectedAssignmentCount: number;
+  readonly decisions: readonly RequiredUnitReconciliationDecision[];
+  readonly assignments: readonly RequiredUnitAssignment[];
+  readonly surplus: readonly string[];
+  readonly conflicts: readonly RequiredUnitReconciliationConflict[];
+  readonly selectionBasis: readonly RequiredUnitSelectionBasisRow[];
+};
+
+export type SavePlanDraftRequiredUnitReconciliationResult =
+  | {
+      readonly kind: "saved" | "existing";
+      readonly draft: PlanDraftSnapshot;
+      readonly reconciliation: SavedRequiredUnitReconciliation;
+    }
+  | { readonly kind: "superseded"; readonly reconciliationId: number }
+  | { readonly kind: "idempotency_conflict" }
+  | { readonly kind: "conflict"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "accepted_baseline_required" }
+  | { readonly kind: "base_changed"; readonly draft: PlanDraftSnapshot }
+  | { readonly kind: "required_unit_set_unavailable" }
+  | { readonly kind: "not_open"; readonly state: "abandoned" | "consumed" }
+  | { readonly kind: "not_found" }
+  | { readonly kind: "transaction_unavailable" };
 
 export type RecomputePlanDraftResult =
   | { readonly kind: "created"; readonly draft: PlanDraftSnapshot }
@@ -2900,6 +2959,38 @@ export class AppRepository {
       )
       .orderBy(asc(this.schema.planDraftParts.id))
       .all();
+    const selectedReconciliation =
+      row.currentRequiredUnitReconciliationId == null
+        ? null
+        : this.db
+            .select({
+              id: this.schema.planDraftRequiredUnitReconciliations.id,
+              tenantId: this.schema.planDraftRequiredUnitReconciliations.tenantId,
+              profileId: this.schema.planDraftRequiredUnitReconciliations.profileId,
+              draftId: this.schema.planDraftRequiredUnitReconciliations.draftId,
+              finalizedAt: this.schema.planDraftRequiredUnitReconciliations.finalizedAt,
+            })
+            .from(this.schema.planDraftRequiredUnitReconciliations)
+            .where(
+              eq(
+                this.schema.planDraftRequiredUnitReconciliations.id,
+                row.currentRequiredUnitReconciliationId,
+              ),
+            )
+            .get();
+    if (
+      row.currentRequiredUnitReconciliationId != null &&
+      (!selectedReconciliation ||
+        selectedReconciliation.tenantId !== this.tenantId ||
+        selectedReconciliation.profileId !== profileId ||
+        selectedReconciliation.draftId !== draftId ||
+        selectedReconciliation.finalizedAt == null)
+    ) {
+      throw new Error("Plan draft Required-unit selection is corrupt");
+    }
+    const verifiedReconciliation = selectedReconciliation
+      ? this.readSavedRequiredUnitReconciliation(selectedReconciliation.id)
+      : null;
     const draft: PlanDraftSnapshot = {
       id: row.id,
       profileId: row.profileId,
@@ -2913,6 +3004,12 @@ export class AppRepository {
       createdBy: row.createdBy,
       idempotencyKey: row.idempotencyKey,
       createdAt: row.createdAt,
+      requiredUnitReconciliation: verifiedReconciliation
+        ? {
+            format: verifiedReconciliation.format,
+            digest: verifiedReconciliation.reconciliationDigest,
+          }
+        : null,
       inputs: inputs.map((input) => ({
         id: input.id,
         draftId: input.draftId,
@@ -2951,10 +3048,23 @@ export class AppRepository {
         artifactDigest: part.artifactDigest,
       })),
     };
-    if (draft.digestFormat !== PLAN_DRAFT_DIGEST_FORMAT) {
-      throw new Error("Plan draft digest format is unsupported");
+    const planningDigest = digestPlanDraft(draft);
+    const digest =
+      draft.digestFormat === PLAN_DRAFT_DIGEST_FORMAT
+        ? planningDigest
+        : draft.digestFormat === PLAN_DRAFT_SELECTION_DIGEST_FORMAT
+          ? digestPlanDraftSelection({
+              planningDigest,
+              requiredUnitReconciliation: draft.requiredUnitReconciliation ?? null,
+            })
+          : null;
+    if (digest == null) throw new Error("Plan draft digest format is unsupported");
+    if (
+      draft.digestFormat === PLAN_DRAFT_DIGEST_FORMAT &&
+      draft.requiredUnitReconciliation != null
+    ) {
+      throw new Error("Plan draft v1 cannot select a Required-unit reconciliation");
     }
-    const digest = digestPlanDraft(draft);
     if (digest !== draft.snapshotDigest) throw new Error("Plan draft snapshot digest mismatch");
     return draft;
   }
@@ -3686,6 +3796,555 @@ export class AppRepository {
     return { kind: "rebased", draft };
   }
 
+  private requiredUnitReconciliationBase(
+    profileId: number,
+    draft: PlanDraftSnapshot,
+  ):
+    | {
+        readonly kind: "ready";
+        readonly mappingDigest: string | null;
+        readonly parts: readonly RequiredUnitReconciliationBasePart[];
+      }
+    | { readonly kind: "unavailable" } {
+    if (draft.baseRevisionId == null) {
+      return { kind: "ready", mappingDigest: null, parts: [] };
+    }
+    const currentSet = this.readCurrentRequiredUnitSet(profileId);
+    if (currentSet.kind !== "ready" || currentSet.revisionId !== draft.baseRevisionId) {
+      return { kind: "unavailable" };
+    }
+    const revision = this.db
+      .select({ inputSetId: this.schema.planRevisions.inputSetId })
+      .from(this.schema.planRevisions)
+      .where(
+        and(
+          eq(this.schema.planRevisions.tenantId, this.tenantId),
+          eq(this.schema.planRevisions.profileId, profileId),
+          eq(this.schema.planRevisions.id, draft.baseRevisionId),
+        ),
+      )
+      .get();
+    if (!revision) throw new Error("Plan draft base revision is missing");
+    const sourceIdByLayer = new Map<string, number | null>();
+    if (revision.inputSetId != null) {
+      const inputs = this.db
+        .select({
+          sourceId: this.schema.planRevisionInputs.sourceId,
+          sourceLayer: this.schema.planRevisionInputs.sourceLayer,
+        })
+        .from(this.schema.planRevisionInputs)
+        .where(
+          and(
+            eq(this.schema.planRevisionInputs.tenantId, this.tenantId),
+            eq(this.schema.planRevisionInputs.inputSetId, revision.inputSetId),
+          ),
+        )
+        .all();
+      for (const input of inputs) {
+        sourceIdByLayer.set(
+          input.sourceLayer,
+          sourceIdByLayer.has(input.sourceLayer) ? null : input.sourceId,
+        );
+      }
+    }
+    const tokens = currentSet.units.map((unit) => unit.token);
+    const createdAtByToken = new Map<string, string>();
+    if (tokens.length > 0) {
+      for (const unit of this.db
+        .select({
+          token: this.schema.requiredUnits.token,
+          createdAt: this.schema.requiredUnits.createdAt,
+        })
+        .from(this.schema.requiredUnits)
+        .where(
+          and(
+            eq(this.schema.requiredUnits.tenantId, this.tenantId),
+            eq(this.schema.requiredUnits.profileId, profileId),
+            inArray(this.schema.requiredUnits.token, tokens),
+          ),
+        )
+        .all()) {
+        createdAtByToken.set(unit.token, unit.createdAt);
+      }
+    }
+    const unitsByPart = new Map<number, RequiredUnitReconciliationBasePart["units"]>();
+    for (const unit of currentSet.units) {
+      const createdAt = createdAtByToken.get(unit.token);
+      if (!createdAt) throw new Error("Required-unit creation time is missing");
+      const units = unitsByPart.get(unit.revisionPartId) ?? [];
+      unitsByPart.set(unit.revisionPartId, [
+        ...units,
+        {
+          token: unit.token,
+          priorIndex: unit.unitIndex,
+          createdAt,
+          completed: unit.completed,
+          assembled: unit.assembled,
+        },
+      ]);
+    }
+    const parts = this.db
+      .select({
+        id: this.schema.planRevisionParts.id,
+        sourceLayer: this.schema.planRevisionParts.sourceLayer,
+        artifactDigest: this.schema.planRevisionParts.artifactDigest,
+        roleInferred: this.schema.planRevisionParts.roleInferred,
+        roleOverride: this.schema.planRevisionParts.roleOverride,
+      })
+      .from(this.schema.planRevisionParts)
+      .where(
+        and(
+          eq(this.schema.planRevisionParts.tenantId, this.tenantId),
+          eq(this.schema.planRevisionParts.revisionId, draft.baseRevisionId),
+        ),
+      )
+      .orderBy(asc(this.schema.planRevisionParts.id))
+      .all()
+      .map((part): RequiredUnitReconciliationBasePart => ({
+        id: part.id,
+        sourceId: sourceIdByLayer.get(part.sourceLayer) ?? null,
+        artifactDigest: part.artifactDigest,
+        roleInferred: part.roleInferred,
+        roleOverride: part.roleOverride,
+        units: unitsByPart.get(part.id) ?? [],
+      }));
+    return { kind: "ready", mappingDigest: currentSet.mappingDigest, parts };
+  }
+
+  private readSavedRequiredUnitReconciliation(
+    reconciliationId: number,
+  ): SavedRequiredUnitReconciliation {
+    const header = this.db
+      .select()
+      .from(this.schema.planDraftRequiredUnitReconciliations)
+      .where(
+        and(
+          eq(this.schema.planDraftRequiredUnitReconciliations.tenantId, this.tenantId),
+          eq(this.schema.planDraftRequiredUnitReconciliations.id, reconciliationId),
+        ),
+      )
+      .get();
+    if (!header || header.finalizedAt == null) {
+      throw new Error("Required-unit reconciliation is not finalized");
+    }
+    if (header.format !== REQUIRED_UNIT_RECONCILIATION_FORMAT) {
+      throw new Error("Required-unit reconciliation format is unsupported");
+    }
+    const selectionBasis = parseRequiredUnitSelectionBasis(header.selectionBasisJson);
+    const result = parseRequiredUnitReconciliationResult({
+      resultJson: header.resultJson,
+      selectionBasis,
+    });
+    if (result.kind !== header.resultKind) {
+      throw new Error("Required-unit reconciliation result kind mismatch");
+    }
+    const selectionBasisDigest = digestRequiredUnitSelectionBasis({
+      baseMappingDigest: header.baseMappingDigest,
+      rows: selectionBasis,
+    });
+    if (selectionBasisDigest !== header.selectionBasisDigest) {
+      throw new Error("Required-unit reconciliation selection basis digest mismatch");
+    }
+    const resultDigest = digestRequiredUnitReconciliationResult(result);
+    if (resultDigest !== header.resultDigest) {
+      throw new Error("Required-unit reconciliation result digest mismatch");
+    }
+    const decisions = this.db
+      .select()
+      .from(this.schema.planDraftRequiredUnitDecisions)
+      .where(
+        and(
+          eq(this.schema.planDraftRequiredUnitDecisions.tenantId, this.tenantId),
+          eq(
+            this.schema.planDraftRequiredUnitDecisions.reconciliationId,
+            reconciliationId,
+          ),
+        ),
+      )
+      .orderBy(asc(this.schema.planDraftRequiredUnitDecisions.targetDraftPartId))
+      .all()
+      .map((row): RequiredUnitReconciliationDecision => {
+        if (row.kind === "replace") {
+          if (row.predecessorRevisionPartId != null) {
+            throw new Error("Required-unit replacement decision is corrupt");
+          }
+          return { kind: "replace", targetDraftPartId: row.targetDraftPartId };
+        }
+        if (row.predecessorRevisionPartId == null) {
+          throw new Error("Required-unit predecessor decision is corrupt");
+        }
+        return {
+          kind: row.kind,
+          targetDraftPartId: row.targetDraftPartId,
+          predecessorRevisionPartId: row.predecessorRevisionPartId,
+        };
+      });
+    if (digestRequiredUnitDecisions(decisions) !== header.decisionDigest) {
+      throw new Error("Required-unit reconciliation decision digest mismatch");
+    }
+    const assignments = this.db
+      .select()
+      .from(this.schema.planDraftRequiredUnitAssignments)
+      .where(
+        and(
+          eq(this.schema.planDraftRequiredUnitAssignments.tenantId, this.tenantId),
+          eq(
+            this.schema.planDraftRequiredUnitAssignments.reconciliationId,
+            reconciliationId,
+          ),
+        ),
+      )
+      .orderBy(
+        asc(this.schema.planDraftRequiredUnitAssignments.targetDraftPartId),
+        asc(this.schema.planDraftRequiredUnitAssignments.unitIndex),
+      )
+      .all()
+      .map((row): RequiredUnitAssignment => {
+        if (row.kind === "create") {
+          if (row.requiredUnitToken != null) {
+            throw new Error("Required-unit create assignment is corrupt");
+          }
+          return {
+            kind: "create",
+            draftPartId: row.targetDraftPartId,
+            unitIndex: row.unitIndex,
+          };
+        }
+        if (row.requiredUnitToken == null) {
+          throw new Error("Required-unit reuse assignment is corrupt");
+        }
+        return {
+          kind: "reuse",
+          draftPartId: row.targetDraftPartId,
+          unitIndex: row.unitIndex,
+          token: row.requiredUnitToken,
+        };
+      });
+    if (
+      (header.resultKind === "unresolved" && assignments.length !== 0) ||
+      (header.resultKind === "ready" &&
+        assignments.length !== header.expectedAssignmentCount)
+    ) {
+      throw new Error("Required-unit reconciliation assignment count mismatch");
+    }
+    const expectedAssignments = result.kind === "ready" ? result.assignments : [];
+    if (JSON.stringify(assignments) !== JSON.stringify(expectedAssignments)) {
+      throw new Error("Required-unit reconciliation assignments do not match the saved result");
+    }
+    const reconciliationDigest = digestRequiredUnitReconciliation({
+      baseRevisionId: header.baseRevisionId,
+      baseMappingDigest: header.baseMappingDigest,
+      planningDigest: header.planningDigest,
+      selectionBasisDigest: header.selectionBasisDigest,
+      decisionDigest: header.decisionDigest,
+      resultKind: header.resultKind,
+      resultDigest: header.resultDigest,
+    });
+    if (reconciliationDigest !== header.reconciliationDigest) {
+      throw new Error("Required-unit reconciliation digest mismatch");
+    }
+    return {
+      id: header.id,
+      format: header.format,
+      planningDigest: header.planningDigest,
+      baseRevisionId: header.baseRevisionId,
+      baseMappingDigest: header.baseMappingDigest,
+      selectionBasisDigest: header.selectionBasisDigest,
+      decisionDigest: header.decisionDigest,
+      resultKind: header.resultKind,
+      resultDigest: header.resultDigest,
+      reconciliationDigest: header.reconciliationDigest,
+      expectedAssignmentCount: header.expectedAssignmentCount,
+      decisions,
+      assignments,
+      surplus: result.kind === "ready" ? result.surplus : [],
+      conflicts: result.kind === "unresolved" ? result.conflicts : [],
+      selectionBasis,
+    };
+  }
+
+  getPlanDraftRequiredUnitReconciliation(
+    profileId: number,
+    draftId: number,
+    reconciliationId: number,
+  ): SavedRequiredUnitReconciliation | null {
+    this.requireProfile(profileId);
+    const owned = this.db
+      .select({ id: this.schema.planDraftRequiredUnitReconciliations.id })
+      .from(this.schema.planDraftRequiredUnitReconciliations)
+      .where(
+        and(
+          eq(this.schema.planDraftRequiredUnitReconciliations.tenantId, this.tenantId),
+          eq(this.schema.planDraftRequiredUnitReconciliations.profileId, profileId),
+          eq(this.schema.planDraftRequiredUnitReconciliations.draftId, draftId),
+          eq(this.schema.planDraftRequiredUnitReconciliations.id, reconciliationId),
+        ),
+      )
+      .get();
+    return owned ? this.readSavedRequiredUnitReconciliation(owned.id) : null;
+  }
+
+  savePlanDraftRequiredUnitReconciliation(input: {
+    readonly profileId: number;
+    readonly draftId: number;
+    readonly expectedSnapshotDigest: string;
+    readonly decisions: readonly RequiredUnitReconciliationDecision[];
+    readonly actorId: string;
+    readonly idempotencyKey: string;
+  }): SavePlanDraftRequiredUnitReconciliationResult {
+    const actorId = requiredText(input.actorId, "Required-unit reconciliation actor");
+    const idempotencyKey = requiredText(
+      input.idempotencyKey,
+      "Required-unit reconciliation idempotency key",
+    );
+    const expectedSnapshotDigest = sha256Digest(
+      input.expectedSnapshotDigest,
+      "Expected Plan draft snapshot digest",
+    );
+    const decisionDigest = digestRequiredUnitDecisions(input.decisions);
+    const payloadDigest = createHash("sha256")
+      .update(
+        JSON.stringify({
+          profile_id: input.profileId,
+          draft_id: input.draftId,
+          expected_snapshot_digest: expectedSnapshotDigest,
+          decision_digest: decisionDigest,
+        }),
+      )
+      .digest("hex");
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+
+    return this.transaction((): SavePlanDraftRequiredUnitReconciliationResult => {
+      const transactionExisting = this.db
+        .select({
+          id: this.schema.planDraftRequiredUnitReconciliations.id,
+          payloadDigest: this.schema.planDraftRequiredUnitReconciliations.payloadDigest,
+        })
+        .from(this.schema.planDraftRequiredUnitReconciliations)
+        .where(
+          and(
+            eq(this.schema.planDraftRequiredUnitReconciliations.tenantId, this.tenantId),
+            eq(this.schema.planDraftRequiredUnitReconciliations.profileId, input.profileId),
+            eq(this.schema.planDraftRequiredUnitReconciliations.draftId, input.draftId),
+            eq(this.schema.planDraftRequiredUnitReconciliations.actorId, actorId),
+            eq(
+              this.schema.planDraftRequiredUnitReconciliations.idempotencyKey,
+              idempotencyKey,
+            ),
+          ),
+        )
+        .get();
+      if (transactionExisting) {
+        if (transactionExisting.payloadDigest !== payloadDigest) {
+          return { kind: "idempotency_conflict" };
+        }
+        const draftRow = this.db
+          .select({ selected: this.schema.planDrafts.currentRequiredUnitReconciliationId })
+          .from(this.schema.planDrafts)
+          .where(
+            and(
+              eq(this.schema.planDrafts.tenantId, this.tenantId),
+              eq(this.schema.planDrafts.profileId, input.profileId),
+              eq(this.schema.planDrafts.id, input.draftId),
+            ),
+          )
+          .get();
+        if (!draftRow) return { kind: "not_found" };
+        if (draftRow.selected !== transactionExisting.id) {
+          return { kind: "superseded", reconciliationId: transactionExisting.id };
+        }
+        const transactionDraft = this.getPlanDraft(input.profileId, input.draftId);
+        if (!transactionDraft) return { kind: "not_found" };
+        return {
+          kind: "existing",
+          draft: transactionDraft,
+          reconciliation: this.readSavedRequiredUnitReconciliation(transactionExisting.id),
+        };
+      }
+      const draft = this.getPlanDraft(input.profileId, input.draftId);
+      if (!draft) return { kind: "not_found" };
+      if (draft.state !== "open") return { kind: "not_open", state: draft.state };
+      if (draft.snapshotDigest !== expectedSnapshotDigest) {
+        return { kind: "conflict", draft };
+      }
+      const profile = this.db
+        .select({
+          baseRevisionId: this.schema.buildProfiles.acceptedPlanRevisionId,
+          basePlanVersion: this.schema.buildProfiles.acceptedPlanVersion,
+        })
+        .from(this.schema.buildProfiles)
+        .where(
+          and(
+            eq(this.schema.buildProfiles.tenantId, this.tenantId),
+            eq(this.schema.buildProfiles.id, input.profileId),
+          ),
+        )
+        .get();
+      if (!profile) return { kind: "not_found" };
+      if (this.planDraftNeedsAcceptedBaseline(input.profileId, profile)) {
+        return { kind: "accepted_baseline_required" };
+      }
+      if (
+        profile.baseRevisionId !== draft.baseRevisionId ||
+        profile.basePlanVersion !== draft.basePlanVersion
+      ) {
+        return { kind: "base_changed", draft };
+      }
+      const base = this.requiredUnitReconciliationBase(input.profileId, draft);
+      if (base.kind !== "ready") return { kind: "required_unit_set_unavailable" };
+      const result = reconcileRequiredUnits({
+        draft,
+        baseParts: base.parts,
+        baseMappingDigest: base.mappingDigest,
+        decisions: input.decisions,
+      });
+      const planningDigest = digestPlanDraft(draft);
+      const selectionBasisDigest = digestRequiredUnitSelectionBasis({
+        baseMappingDigest: base.mappingDigest,
+        rows: result.selectionBasis,
+      });
+      const selectionBasisJson = serializeRequiredUnitSelectionBasis(result.selectionBasis);
+      const resultDigest = digestRequiredUnitReconciliationResult(result);
+      const resultJson = serializeRequiredUnitReconciliationResult(result);
+      const reconciliationDigest = digestRequiredUnitReconciliation({
+        baseRevisionId: draft.baseRevisionId,
+        baseMappingDigest: base.mappingDigest,
+        planningDigest,
+        selectionBasisDigest,
+        decisionDigest,
+        resultKind: result.kind,
+        resultDigest,
+      });
+      const expectedAssignmentCount = draft.parts.reduce(
+        (total, part) => total + part.quantityEffective,
+        0,
+      );
+      const createdAt = new Date().toISOString();
+      const inserted = this.db
+        .insert(this.schema.planDraftRequiredUnitReconciliations)
+        .values({
+          tenantId: this.tenantId,
+          profileId: input.profileId,
+          draftId: input.draftId,
+          format: REQUIRED_UNIT_RECONCILIATION_FORMAT,
+          planningDigest,
+          baseRevisionId: draft.baseRevisionId,
+          baseMappingDigest: base.mappingDigest,
+          selectionBasisDigest,
+          selectionBasisJson,
+          decisionDigest,
+          resultKind: result.kind,
+          resultDigest,
+          resultJson,
+          reconciliationDigest,
+          expectedAssignmentCount,
+          actorId,
+          idempotencyKey,
+          payloadDigest,
+          createdAt,
+          finalizedAt: null,
+        })
+        .returning({ id: this.schema.planDraftRequiredUnitReconciliations.id })
+        .get();
+      if (!inserted) throw new Error("Required-unit reconciliation could not be created");
+      for (const decision of input.decisions) {
+        this.db
+          .insert(this.schema.planDraftRequiredUnitDecisions)
+          .values({
+            tenantId: this.tenantId,
+            reconciliationId: inserted.id,
+            targetDraftPartId: decision.targetDraftPartId,
+            kind: decision.kind,
+            predecessorRevisionPartId:
+              decision.kind === "replace" ? null : decision.predecessorRevisionPartId,
+          })
+          .run();
+      }
+      if (result.kind === "ready") {
+        for (const assignment of result.assignments) {
+          this.db
+            .insert(this.schema.planDraftRequiredUnitAssignments)
+            .values({
+              tenantId: this.tenantId,
+              reconciliationId: inserted.id,
+              targetDraftPartId: assignment.draftPartId,
+              unitIndex: assignment.unitIndex,
+              kind: assignment.kind,
+              requiredUnitToken: assignment.kind === "reuse" ? assignment.token : null,
+            })
+            .run();
+        }
+      }
+      const finalized = this.db
+        .update(this.schema.planDraftRequiredUnitReconciliations)
+        .set({ finalizedAt: createdAt })
+        .where(
+          and(
+            eq(this.schema.planDraftRequiredUnitReconciliations.tenantId, this.tenantId),
+            eq(this.schema.planDraftRequiredUnitReconciliations.id, inserted.id),
+            isNull(this.schema.planDraftRequiredUnitReconciliations.finalizedAt),
+          ),
+        )
+        .run();
+      if (finalized.changes !== 1) {
+        throw new Error("Required-unit reconciliation could not be finalized");
+      }
+      const persisted = this.readSavedRequiredUnitReconciliation(inserted.id);
+      if (
+        persisted.selectionBasisDigest !== selectionBasisDigest ||
+        persisted.resultDigest !== resultDigest ||
+        persisted.reconciliationDigest !== reconciliationDigest ||
+        JSON.stringify(persisted.selectionBasis) !== JSON.stringify(result.selectionBasis) ||
+        JSON.stringify(persisted.assignments) !==
+          JSON.stringify(result.kind === "ready" ? result.assignments : []) ||
+        JSON.stringify(persisted.surplus) !==
+          JSON.stringify(result.kind === "ready" ? result.surplus : []) ||
+        JSON.stringify(persisted.conflicts) !==
+          JSON.stringify(result.kind === "unresolved" ? result.conflicts : [])
+      ) {
+        throw new Error("Required-unit reconciliation persisted result mismatch");
+      }
+      const nextSnapshotDigest = digestPlanDraftSelection({
+        planningDigest,
+        requiredUnitReconciliation: {
+          format: REQUIRED_UNIT_RECONCILIATION_FORMAT,
+          digest: reconciliationDigest,
+        },
+      });
+      const selected = this.db
+        .update(this.schema.planDrafts)
+        .set({
+          currentRequiredUnitReconciliationId: inserted.id,
+          digestFormat: PLAN_DRAFT_SELECTION_DIGEST_FORMAT,
+          snapshotDigest: nextSnapshotDigest,
+        })
+        .where(
+          and(
+            eq(this.schema.planDrafts.tenantId, this.tenantId),
+            eq(this.schema.planDrafts.profileId, input.profileId),
+            eq(this.schema.planDrafts.id, input.draftId),
+            eq(this.schema.planDrafts.state, "open"),
+            eq(this.schema.planDrafts.snapshotDigest, expectedSnapshotDigest),
+          ),
+        )
+        .run();
+      if (selected.changes !== 1) throw new Error("Required-unit reconciliation selection failed");
+      const persistedDraft = this.getPlanDraft(input.profileId, input.draftId);
+      if (
+        !persistedDraft ||
+        persistedDraft.snapshotDigest !== nextSnapshotDigest ||
+        persistedDraft.requiredUnitReconciliation?.digest !== reconciliationDigest
+      ) {
+        throw new Error("Required-unit reconciliation selection could not be verified");
+      }
+      return {
+        kind: "saved",
+        draft: persistedDraft,
+        reconciliation: persisted,
+      };
+    }, "immediate");
+  }
+
   editPlanDraftParts(input: {
     readonly profileId: number;
     readonly draftId: number;
@@ -3775,10 +4434,23 @@ export class AppRepository {
       if (changedPartIds.length === 0) {
         return { kind: "unchanged", draft: current };
       }
+      const nextPlanningDigest = digestPlanDraft(next);
+      const nextDigestFormat = current.digestFormat;
+      const nextSnapshotDigest =
+        nextDigestFormat === PLAN_DRAFT_SELECTION_DIGEST_FORMAT
+          ? digestPlanDraftSelection({
+              planningDigest: nextPlanningDigest,
+              requiredUnitReconciliation: null,
+            })
+          : nextPlanningDigest;
 
       const headerWrite = this.db
         .update(this.schema.planDrafts)
-        .set({ snapshotDigest: next.snapshotDigest })
+        .set({
+          currentRequiredUnitReconciliationId: null,
+          digestFormat: nextDigestFormat,
+          snapshotDigest: nextSnapshotDigest,
+        })
         .where(
           and(
             eq(this.schema.planDrafts.tenantId, this.tenantId),
@@ -3815,7 +4487,12 @@ export class AppRepository {
         throw new Error("Plan draft Part edit did not update every selected row");
       }
       const persisted = this.getPlanDraft(input.profileId, input.draftId);
-      if (!persisted || persisted.snapshotDigest !== next.snapshotDigest) {
+      if (
+        !persisted ||
+        persisted.snapshotDigest !== nextSnapshotDigest ||
+        (nextDigestFormat === PLAN_DRAFT_SELECTION_DIGEST_FORMAT &&
+          persisted.requiredUnitReconciliation != null)
+      ) {
         throw new Error("Edited Plan draft could not be verified");
       }
       return { kind: "updated", draft: persisted };

@@ -811,18 +811,23 @@ export const postgresPostInitMigrations: string[] = [
     ON plan_draft_parts (tenant_id, draft_id, base_revision_part_id)`,
   `CREATE OR REPLACE FUNCTION validate_plan_draft_ownership() RETURNS trigger AS $function$
     BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM build_profiles profile
-         WHERE profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
-      ) OR (
-        NEW.base_revision_id IS NOT NULL AND NOT EXISTS (
-          SELECT 1 FROM plan_revisions revision
-           WHERE revision.id = NEW.base_revision_id
-             AND revision.profile_id = NEW.profile_id
-             AND revision.tenant_id = NEW.tenant_id
-        )
+      IF TG_OP = 'INSERT' OR EXISTS (
+        SELECT 1 FROM build_profiles old_profile
+         WHERE old_profile.id = OLD.profile_id AND old_profile.tenant_id = OLD.tenant_id
       ) THEN
-        RAISE EXCEPTION 'Plan draft ownership violation';
+        IF NOT EXISTS (
+          SELECT 1 FROM build_profiles profile
+           WHERE profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
+        ) OR (
+          NEW.base_revision_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM plan_revisions revision
+             WHERE revision.id = NEW.base_revision_id
+               AND revision.profile_id = NEW.profile_id
+               AND revision.tenant_id = NEW.tenant_id
+          )
+        ) THEN
+          RAISE EXCEPTION 'Plan draft ownership violation';
+        END IF;
       END IF;
       IF TG_OP = 'INSERT' AND NEW.rebased_from_draft_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM plan_drafts source
@@ -1152,6 +1157,335 @@ export const postgresPostInitMigrations: string[] = [
         CREATE TRIGGER trg_plan_revision_required_unit_sets_immutable_write
           BEFORE UPDATE OR DELETE ON plan_revision_required_unit_sets
           FOR EACH ROW EXECUTE FUNCTION enforce_plan_revision_required_unit_set_immutable();
+      END IF;
+    END
+  $block$`,
+  `CREATE TABLE IF NOT EXISTS plan_draft_required_unit_reconciliations (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    draft_id INTEGER NOT NULL REFERENCES plan_drafts(id) ON DELETE CASCADE,
+    format TEXT NOT NULL CONSTRAINT chk_plan_draft_required_unit_reconciliations_format
+      CHECK (format = 'required-unit-reconciliation-v1'),
+    planning_digest TEXT NOT NULL,
+    base_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE RESTRICT,
+    base_mapping_digest TEXT,
+    selection_basis_digest TEXT NOT NULL,
+    selection_basis_json TEXT NOT NULL CONSTRAINT chk_plan_draft_required_unit_reconciliations_basis_json
+      CHECK (jsonb_typeof(selection_basis_json::jsonb) = 'array'),
+    decision_digest TEXT NOT NULL,
+    result_kind TEXT NOT NULL CONSTRAINT chk_plan_draft_required_unit_reconciliations_result
+      CHECK (result_kind IN ('unresolved', 'ready')),
+    result_digest TEXT NOT NULL,
+    result_json TEXT NOT NULL CONSTRAINT chk_plan_draft_required_unit_reconciliations_result_json
+      CHECK (jsonb_typeof(result_json::jsonb) = 'object'),
+    reconciliation_digest TEXT NOT NULL,
+    expected_assignment_count INTEGER NOT NULL
+      CONSTRAINT chk_plan_draft_required_unit_reconciliations_count
+      CHECK (expected_assignment_count >= 0),
+    actor_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    payload_digest TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    finalized_at TEXT,
+    CONSTRAINT uq_plan_draft_required_unit_reconciliations_key
+      UNIQUE (tenant_id, actor_id, draft_id, idempotency_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS plan_draft_required_unit_decisions (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    reconciliation_id INTEGER NOT NULL
+      REFERENCES plan_draft_required_unit_reconciliations(id) ON DELETE CASCADE,
+    target_draft_part_id INTEGER NOT NULL REFERENCES plan_draft_parts(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    predecessor_revision_part_id INTEGER REFERENCES plan_revision_parts(id) ON DELETE RESTRICT,
+    CONSTRAINT uq_plan_draft_required_unit_decisions_target
+      UNIQUE (tenant_id, reconciliation_id, target_draft_part_id),
+    CONSTRAINT chk_plan_draft_required_unit_decisions_kind CHECK (
+      (kind = 'replace' AND predecessor_revision_part_id IS NULL)
+      OR (kind IN ('select_exact_predecessor', 'accept_prior_completion')
+        AND predecessor_revision_part_id IS NOT NULL)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_draft_required_unit_decisions_predecessor
+    ON plan_draft_required_unit_decisions (
+      tenant_id, reconciliation_id, predecessor_revision_part_id
+    ) WHERE predecessor_revision_part_id IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS plan_draft_required_unit_assignments (
+    tenant_id TEXT NOT NULL,
+    reconciliation_id INTEGER NOT NULL
+      REFERENCES plan_draft_required_unit_reconciliations(id) ON DELETE CASCADE,
+    target_draft_part_id INTEGER NOT NULL REFERENCES plan_draft_parts(id) ON DELETE CASCADE,
+    unit_index INTEGER NOT NULL CONSTRAINT chk_plan_draft_required_unit_assignments_index
+      CHECK (unit_index BETWEEN 0 AND 9999),
+    kind TEXT NOT NULL,
+    required_unit_token TEXT REFERENCES required_units(token) ON DELETE RESTRICT,
+    CONSTRAINT pk_plan_draft_required_unit_assignments
+      PRIMARY KEY (tenant_id, reconciliation_id, target_draft_part_id, unit_index),
+    CONSTRAINT chk_plan_draft_required_unit_assignments_kind CHECK (
+      (kind = 'reuse' AND required_unit_token IS NOT NULL)
+      OR (kind = 'create' AND required_unit_token IS NULL)
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_draft_required_unit_assignments_token
+    ON plan_draft_required_unit_assignments (
+      tenant_id, reconciliation_id, required_unit_token
+    ) WHERE required_unit_token IS NOT NULL`,
+  `ALTER TABLE plan_drafts
+    ADD COLUMN IF NOT EXISTS current_required_unit_reconciliation_id INTEGER
+      REFERENCES plan_draft_required_unit_reconciliations(id) ON DELETE SET NULL`,
+  `CREATE OR REPLACE FUNCTION validate_plan_draft_required_unit_reconciliation_insert()
+    RETURNS trigger AS $function$
+    BEGIN
+      IF NEW.finalized_at IS NOT NULL OR NOT EXISTS (
+        SELECT 1 FROM plan_drafts draft
+         WHERE draft.id = NEW.draft_id
+           AND draft.tenant_id = NEW.tenant_id
+           AND draft.profile_id = NEW.profile_id
+           AND draft.state = 'open'
+           AND draft.base_revision_id IS NOT DISTINCT FROM NEW.base_revision_id
+      ) THEN
+        RAISE EXCEPTION 'Required-unit reconciliation ownership violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION enforce_plan_draft_required_unit_reconciliation_update()
+    RETURNS trigger AS $function$
+    DECLARE assignment_count INTEGER;
+    BEGIN
+      IF OLD.finalized_at IS NOT NULL OR NEW.finalized_at IS NULL
+        OR ROW(NEW.id, NEW.tenant_id, NEW.profile_id, NEW.draft_id, NEW.format,
+          NEW.planning_digest, NEW.base_revision_id, NEW.base_mapping_digest,
+          NEW.selection_basis_digest, NEW.selection_basis_json, NEW.decision_digest,
+          NEW.result_kind, NEW.result_digest, NEW.result_json, NEW.reconciliation_digest,
+          NEW.expected_assignment_count,
+          NEW.actor_id, NEW.idempotency_key, NEW.payload_digest, NEW.created_at)
+          IS DISTINCT FROM
+          ROW(OLD.id, OLD.tenant_id, OLD.profile_id, OLD.draft_id, OLD.format,
+          OLD.planning_digest, OLD.base_revision_id, OLD.base_mapping_digest,
+          OLD.selection_basis_digest, OLD.selection_basis_json, OLD.decision_digest,
+          OLD.result_kind, OLD.result_digest, OLD.result_json, OLD.reconciliation_digest,
+          OLD.expected_assignment_count,
+          OLD.actor_id, OLD.idempotency_key, OLD.payload_digest, OLD.created_at)
+      THEN
+        RAISE EXCEPTION 'Required-unit reconciliation finalization violation';
+      END IF;
+      SELECT count(*) INTO assignment_count
+        FROM plan_draft_required_unit_assignments assignment
+       WHERE assignment.reconciliation_id = NEW.id
+         AND assignment.tenant_id = NEW.tenant_id;
+      IF (NEW.result_kind = 'unresolved' AND (
+          assignment_count <> 0
+          OR NEW.result_json::jsonb->>'kind' <> 'unresolved'
+          OR jsonb_typeof(NEW.result_json::jsonb->'conflicts') <> 'array'
+        ))
+        OR (NEW.result_kind = 'ready' AND (
+          assignment_count <> NEW.expected_assignment_count
+          OR NEW.result_json::jsonb->>'kind' <> 'ready'
+          OR jsonb_typeof(NEW.result_json::jsonb->'assignments') <> 'array'
+          OR jsonb_typeof(NEW.result_json::jsonb->'surplus') <> 'array'
+          OR jsonb_array_length(NEW.result_json::jsonb->'assignments')
+            <> NEW.expected_assignment_count
+          OR EXISTS (
+            SELECT 1
+              FROM jsonb_array_elements(NEW.result_json::jsonb->'assignments') expected
+             WHERE NOT EXISTS (
+               SELECT 1 FROM plan_draft_required_unit_assignments assignment
+                WHERE assignment.reconciliation_id = NEW.id
+                  AND assignment.tenant_id = NEW.tenant_id
+                  AND assignment.target_draft_part_id = (expected->>'draftPartId')::INTEGER
+                  AND assignment.unit_index = (expected->>'unitIndex')::INTEGER
+                  AND assignment.kind = expected->>'kind'
+                  AND (
+                    (assignment.kind = 'create' AND assignment.required_unit_token IS NULL)
+                    OR (assignment.kind = 'reuse'
+                      AND assignment.required_unit_token = expected->>'token')
+                  )
+             )
+          )
+        ))
+      THEN
+        RAISE EXCEPTION 'Required-unit reconciliation finalization violation';
+      END IF;
+      IF NEW.result_kind = 'ready' AND EXISTS (
+        SELECT 1 FROM plan_draft_parts part
+         WHERE part.draft_id = NEW.draft_id
+           AND part.tenant_id = NEW.tenant_id
+           AND (
+             part.quantity_effective <> (
+               SELECT count(*) FROM plan_draft_required_unit_assignments assignment
+                WHERE assignment.reconciliation_id = NEW.id
+                  AND assignment.tenant_id = NEW.tenant_id
+                  AND assignment.target_draft_part_id = part.id
+             )
+             OR part.quantity_effective - 1 <> (
+               SELECT max(assignment.unit_index)
+                 FROM plan_draft_required_unit_assignments assignment
+                WHERE assignment.reconciliation_id = NEW.id
+                  AND assignment.tenant_id = NEW.tenant_id
+                  AND assignment.target_draft_part_id = part.id
+             )
+           )
+      ) THEN
+        RAISE EXCEPTION 'Required-unit reconciliation finalization violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION validate_plan_draft_required_unit_decision_insert()
+    RETURNS trigger AS $function$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+          FROM plan_draft_required_unit_reconciliations reconciliation
+          JOIN plan_draft_parts target
+            ON target.id = NEW.target_draft_part_id
+           AND target.draft_id = reconciliation.draft_id
+           AND target.tenant_id = reconciliation.tenant_id
+         WHERE reconciliation.id = NEW.reconciliation_id
+           AND reconciliation.tenant_id = NEW.tenant_id
+           AND reconciliation.finalized_at IS NULL
+           AND (
+             NEW.predecessor_revision_part_id IS NULL
+             OR EXISTS (
+               SELECT 1 FROM plan_revision_parts predecessor
+                WHERE predecessor.id = NEW.predecessor_revision_part_id
+                  AND predecessor.revision_id = reconciliation.base_revision_id
+                  AND predecessor.tenant_id = reconciliation.tenant_id
+             )
+           )
+      ) THEN
+        RAISE EXCEPTION 'Required-unit reconciliation decision ownership violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION validate_plan_draft_required_unit_assignment_insert()
+    RETURNS trigger AS $function$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+          FROM plan_draft_required_unit_reconciliations reconciliation
+          JOIN plan_draft_parts target
+            ON target.id = NEW.target_draft_part_id
+           AND target.draft_id = reconciliation.draft_id
+           AND target.tenant_id = reconciliation.tenant_id
+         WHERE reconciliation.id = NEW.reconciliation_id
+           AND reconciliation.tenant_id = NEW.tenant_id
+           AND reconciliation.finalized_at IS NULL
+           AND (
+             (NEW.kind = 'create' AND NEW.required_unit_token IS NULL)
+             OR (NEW.kind = 'reuse' AND EXISTS (
+               SELECT 1 FROM required_units unit
+                WHERE unit.token = NEW.required_unit_token
+                  AND unit.tenant_id = reconciliation.tenant_id
+                  AND unit.profile_id = reconciliation.profile_id
+             ))
+           )
+      ) THEN
+        RAISE EXCEPTION 'Required-unit reconciliation assignment ownership violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION validate_plan_draft_required_unit_selection()
+    RETURNS trigger AS $function$
+    BEGIN
+      IF NEW.current_required_unit_reconciliation_id IS DISTINCT FROM
+          OLD.current_required_unit_reconciliation_id
+        AND EXISTS (
+          SELECT 1 FROM build_profiles profile
+           WHERE profile.id = OLD.profile_id AND profile.tenant_id = OLD.tenant_id
+        )
+        AND (
+          NEW.state <> 'open'
+          OR (NEW.current_required_unit_reconciliation_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM plan_draft_required_unit_reconciliations reconciliation
+             WHERE reconciliation.id = NEW.current_required_unit_reconciliation_id
+               AND reconciliation.tenant_id = NEW.tenant_id
+               AND reconciliation.profile_id = NEW.profile_id
+               AND reconciliation.draft_id = NEW.id
+               AND reconciliation.finalized_at IS NOT NULL
+          ))
+        )
+      THEN
+        RAISE EXCEPTION 'Plan draft Required-unit selection violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION enforce_plan_draft_required_unit_child_immutable()
+    RETURNS trigger AS $function$
+    BEGIN
+      IF TG_OP = 'UPDATE' OR EXISTS (
+        SELECT 1 FROM plan_draft_required_unit_reconciliations reconciliation
+        JOIN plan_drafts draft ON draft.id = reconciliation.draft_id
+        JOIN build_profiles profile
+          ON profile.id = draft.profile_id AND profile.tenant_id = draft.tenant_id
+        WHERE reconciliation.id = OLD.reconciliation_id
+          AND reconciliation.tenant_id = OLD.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Required-unit reconciliation child is immutable';
+      END IF;
+      RETURN OLD;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION enforce_plan_draft_required_unit_header_delete()
+    RETURNS trigger AS $function$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM plan_drafts draft
+        JOIN build_profiles profile
+          ON profile.id = draft.profile_id AND profile.tenant_id = draft.tenant_id
+        WHERE draft.id = OLD.draft_id AND draft.tenant_id = OLD.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Required-unit reconciliation is immutable';
+      END IF;
+      RETURN OLD;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `DO $block$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_draft_required_unit_reconciliations_ownership_insert') THEN
+        CREATE TRIGGER trg_plan_draft_required_unit_reconciliations_ownership_insert
+          BEFORE INSERT ON plan_draft_required_unit_reconciliations
+          FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_required_unit_reconciliation_insert();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_draft_required_unit_reconciliations_finalize') THEN
+        CREATE TRIGGER trg_plan_draft_required_unit_reconciliations_finalize
+          BEFORE UPDATE ON plan_draft_required_unit_reconciliations
+          FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_required_unit_reconciliation_update();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_draft_required_unit_reconciliations_immutable_delete') THEN
+        CREATE TRIGGER trg_plan_draft_required_unit_reconciliations_immutable_delete
+          BEFORE DELETE ON plan_draft_required_unit_reconciliations
+          FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_required_unit_header_delete();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_draft_required_unit_decisions_ownership_insert') THEN
+        CREATE TRIGGER trg_plan_draft_required_unit_decisions_ownership_insert
+          BEFORE INSERT ON plan_draft_required_unit_decisions
+          FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_required_unit_decision_insert();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_draft_required_unit_decisions_immutable_write') THEN
+        CREATE TRIGGER trg_plan_draft_required_unit_decisions_immutable_write
+          BEFORE UPDATE OR DELETE ON plan_draft_required_unit_decisions
+          FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_required_unit_child_immutable();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_draft_required_unit_assignments_ownership_insert') THEN
+        CREATE TRIGGER trg_plan_draft_required_unit_assignments_ownership_insert
+          BEFORE INSERT ON plan_draft_required_unit_assignments
+          FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_required_unit_assignment_insert();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_draft_required_unit_assignments_immutable_write') THEN
+        CREATE TRIGGER trg_plan_draft_required_unit_assignments_immutable_write
+          BEFORE UPDATE OR DELETE ON plan_draft_required_unit_assignments
+          FOR EACH ROW EXECUTE FUNCTION enforce_plan_draft_required_unit_child_immutable();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_drafts_required_unit_selection_update') THEN
+        CREATE TRIGGER trg_plan_drafts_required_unit_selection_update
+          BEFORE UPDATE OF current_required_unit_reconciliation_id ON plan_drafts
+          FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_required_unit_selection();
       END IF;
     END
   $block$`,

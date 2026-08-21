@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 export const PLAN_DRAFT_DIGEST_FORMAT = "plan-draft-v1";
+export const PLAN_DRAFT_SELECTION_DIGEST_FORMAT = "plan-draft-v2";
 export const MAX_PLAN_DRAFT_PART_QUANTITY = 10_000;
 export const MAX_PLAN_DRAFT_LIFECYCLE_VERSION = 2_147_483_647;
 
@@ -69,6 +70,9 @@ export type PlanDraftSnapshot = {
   createdBy: string;
   idempotencyKey: string;
   createdAt: string;
+  requiredUnitReconciliation?:
+    | { readonly format: string; readonly digest: string }
+    | null;
   inputs: PlanDraftInput[];
   parts: PlanDraftPart[];
 };
@@ -494,6 +498,21 @@ export function digestPlanDraft(input: {
   return createHash("sha256").update(canonical).digest("hex");
 }
 
+export function digestPlanDraftSelection(input: {
+  readonly planningDigest: string;
+  readonly requiredUnitReconciliation: {
+    readonly format: string;
+    readonly digest: string;
+  } | null;
+}): string {
+  const canonical = JSON.stringify({
+    format: PLAN_DRAFT_SELECTION_DIGEST_FORMAT,
+    planning_digest: input.planningDigest,
+    required_unit_reconciliation: input.requiredUnitReconciliation,
+  });
+  return createHash("sha256").update(canonical).digest("hex");
+}
+
 function validatedDecisionPartIds(partIds: readonly number[]): ReadonlySet<number> {
   if (partIds.length === 0) throw new Error("Plan draft decision requires at least one Part");
   const unique = new Set<number>();
@@ -556,7 +575,17 @@ export function applyPlanDraftPartDecision(input: {
     parts,
     snapshotDigest: input.draft.snapshotDigest,
   };
-  return { ...next, snapshotDigest: digestPlanDraft(next) };
+  const planningDigest = digestPlanDraft(next);
+  return {
+    ...next,
+    snapshotDigest:
+      input.draft.digestFormat === PLAN_DRAFT_SELECTION_DIGEST_FORMAT
+        ? digestPlanDraftSelection({
+            planningDigest,
+            requiredUnitReconciliation: input.draft.requiredUnitReconciliation ?? null,
+          })
+        : planningDigest,
+  };
 }
 
 function changedFields(before: PlanSnapshotPart, after: PlanSnapshotPart): string[] {

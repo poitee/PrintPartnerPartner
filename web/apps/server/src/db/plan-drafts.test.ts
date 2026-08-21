@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
+import { backfillCurrentRequiredUnitSets } from "./required-units.js";
 import { getDb, SqliteDatabase } from "./client.js";
 import { AppRepository } from "./repository.js";
 import { MAX_PLAN_DRAFT_LIFECYCLE_VERSION } from "../services/plan-drafts.js";
@@ -2097,5 +2098,537 @@ describe("saved Plan drafts", () => {
       expect(raw.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({ count: 0 });
     }
     database.close();
+  });
+
+  it("saves, retries, supersedes, and invalidates frozen Required-unit reconciliation", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    backfillCurrentRequiredUnitSets(raw, {
+      tokenFactory: (() => {
+        let value = 1;
+        return () => `ppu_${(value++).toString(16).padStart(32, "0")}`;
+      })(),
+    });
+    const bracket = draft.parts.find((part) => part.filename === "bracket.stl");
+    const gear = draft.parts.find((part) => part.filename === "gear.stl");
+    if (!bracket?.baseRevisionPartId || !gear?.baseRevisionPartId) {
+      throw new Error("test draft predecessors are missing");
+    }
+    const decisions = [
+      {
+        kind: "accept_prior_completion" as const,
+        targetDraftPartId: bracket.id,
+        predecessorRevisionPartId: bracket.baseRevisionPartId,
+      },
+      { kind: "replace" as const, targetDraftPartId: gear.id },
+    ];
+    const protectedBefore = snapshotTables(raw, ACCEPTED_STATE_TABLES);
+    const expectedAssignmentCount = draft.parts.reduce(
+      (total, part) => total + part.quantityEffective,
+      0,
+    );
+    const first = repo.savePlanDraftRequiredUnitReconciliation({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: draft.snapshotDigest,
+      decisions,
+      actorId: "test:user",
+      idempotencyKey: "required-units-first",
+    });
+    expect(first).toMatchObject({
+      kind: "saved",
+      draft: { digestFormat: "plan-draft-v2" },
+      reconciliation: { resultKind: "ready", expectedAssignmentCount },
+    });
+    if (first.kind !== "saved") throw new Error("reconciliation was not saved");
+    expect(first.reconciliation.assignments[0]).toMatchObject({
+        kind: "reuse",
+        draftPartId: bracket.id,
+        unitIndex: 0,
+    });
+    expect(first.reconciliation.assignments.slice(1)).toEqual(
+      Array.from({ length: gear.quantityEffective }, (_, unitIndex) => ({
+        kind: "create",
+        draftPartId: gear.id,
+        unitIndex,
+      })),
+    );
+    expect(
+      repo.savePlanDraftRequiredUnitReconciliation({
+        profileId: profile.id,
+        draftId: draft.id,
+        expectedSnapshotDigest: draft.snapshotDigest,
+        decisions,
+        actorId: "test:user",
+        idempotencyKey: "required-units-first",
+      }),
+    ).toMatchObject({ kind: "existing" });
+    expect(
+      repo.savePlanDraftRequiredUnitReconciliation({
+        profileId: profile.id,
+        draftId: draft.id,
+        expectedSnapshotDigest: draft.snapshotDigest,
+        decisions: [],
+        actorId: "test:user",
+        idempotencyKey: "required-units-first",
+      }),
+    ).toEqual({ kind: "idempotency_conflict" });
+    expect(
+      repo.transitionPlanDraft({
+        profileId: profile.id,
+        draftId: draft.id,
+        transition: { kind: "abandon", expectedLifecycleVersion: 0 },
+      }),
+    ).toMatchObject({
+      kind: "transitioned",
+      draft: { requiredUnitReconciliation: first.draft.requiredUnitReconciliation },
+    });
+    expect(
+      repo.transitionPlanDraft({
+        profileId: profile.id,
+        draftId: draft.id,
+        transition: { kind: "resume", expectedLifecycleVersion: 1 },
+      }),
+    ).toMatchObject({
+      kind: "transitioned",
+      draft: { requiredUnitReconciliation: first.draft.requiredUnitReconciliation },
+    });
+    const second = repo.savePlanDraftRequiredUnitReconciliation({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: first.draft.snapshotDigest,
+      decisions,
+      actorId: "test:user",
+      idempotencyKey: "required-units-second",
+    });
+    expect(second).toMatchObject({ kind: "saved" });
+    expect(
+      repo.savePlanDraftRequiredUnitReconciliation({
+        profileId: profile.id,
+        draftId: draft.id,
+        expectedSnapshotDigest: draft.snapshotDigest,
+        decisions,
+        actorId: "test:user",
+        idempotencyKey: "required-units-first",
+      }),
+    ).toMatchObject({ kind: "superseded", reconciliationId: first.reconciliation.id });
+    if (second.kind !== "saved") throw new Error("replacement reconciliation was not saved");
+    const edited = repo.editPlanDraftParts({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: second.draft.snapshotDigest,
+      decision: { kind: "set_included", partIds: [gear.id], value: false },
+    });
+    expect(edited).toMatchObject({
+      kind: "updated",
+      draft: {
+        digestFormat: "plan-draft-v2",
+        requiredUnitReconciliation: null,
+      },
+    });
+    for (const [table, rows] of protectedBefore) {
+      expect(raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()).toEqual(rows);
+    }
+    expect(() =>
+      raw
+        .prepare(
+          `UPDATE plan_draft_required_unit_reconciliations
+              SET result_digest = ? WHERE id = ?`,
+        )
+        .run("f".repeat(64), first.reconciliation.id),
+    ).toThrow(/finalization/i);
+    expect(() =>
+      raw
+        .prepare("DELETE FROM plan_draft_required_unit_reconciliations WHERE id = ?")
+        .run(first.reconciliation.id),
+    ).toThrow(/immutable/i);
+    expect(() =>
+      raw
+        .prepare(
+          `UPDATE plan_draft_required_unit_assignments
+              SET unit_index = unit_index + 1 WHERE reconciliation_id = ?`,
+        )
+        .run(first.reconciliation.id),
+    ).toThrow(/immutable/i);
+    expect(() => repo.deleteProfile(profile.id)).not.toThrow();
+    for (const table of [
+      "plan_draft_required_unit_reconciliations",
+      "plan_draft_required_unit_decisions",
+      "plan_draft_required_unit_assignments",
+    ]) {
+      expect(raw.prepare(`SELECT count(*) AS count FROM ${table}`).get()).toEqual({ count: 0 });
+    }
+    database.close();
+  });
+
+  it("upgrades a v23 draft without rewriting its v1 snapshot", () => {
+    const { database, raw, profile, draft, root } = editableDraftFixture();
+    raw.exec(`
+      DROP TRIGGER IF EXISTS trg_plan_drafts_required_unit_selection_update;
+      DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_assignments_immutable_delete;
+      DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_assignments_immutable_update;
+      DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_assignments_ownership_insert;
+      DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_decisions_immutable_delete;
+      DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_decisions_immutable_update;
+      DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_decisions_ownership_insert;
+      DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_reconciliations_immutable_delete;
+      DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_reconciliations_finalize;
+      DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_reconciliations_ownership_insert;
+      DROP TABLE plan_draft_required_unit_assignments;
+      DROP TABLE plan_draft_required_unit_decisions;
+      DROP TABLE plan_draft_required_unit_reconciliations;
+      ALTER TABLE plan_drafts DROP COLUMN current_required_unit_reconciliation_id;
+      UPDATE app_settings SET value = '23'
+       WHERE tenant_id = 'default' AND key = 'schema_version';
+    `);
+    database.close();
+
+    const migrated = new SqliteDatabase(root);
+    migrated.connect();
+    const migratedRepo = new AppRepository(getDb(migrated), "default", migrated.reposDir);
+    expect(migratedRepo.getPlanDraft(profile.id, draft.id)).toEqual(draft);
+    expect(
+      (migrated as unknown as { sqlite: Database.Database }).sqlite
+        .prepare(
+          `SELECT value FROM app_settings
+            WHERE tenant_id = 'default' AND key = 'schema_version'`,
+        )
+        .get(),
+    ).toEqual({ value: "24" });
+    migrated.close();
+  });
+
+  it("appends an unresolved reconciliation before a complete ready replacement", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    backfillCurrentRequiredUnitSets(raw, {
+      tokenFactory: (() => {
+        let value = 100;
+        return () => `ppu_${(value++).toString(16).padStart(32, "0")}`;
+      })(),
+    });
+    const unresolved = repo.savePlanDraftRequiredUnitReconciliation({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: draft.snapshotDigest,
+      decisions: [],
+      actorId: "test:user",
+      idempotencyKey: "required-units-unresolved",
+    });
+    expect(unresolved).toMatchObject({
+      kind: "saved",
+      reconciliation: { resultKind: "unresolved", assignments: [], conflicts: expect.any(Array) },
+    });
+    if (unresolved.kind !== "saved") throw new Error("unresolved snapshot was not saved");
+    expect(
+      repo.savePlanDraftRequiredUnitReconciliation({
+        profileId: profile.id,
+        draftId: draft.id,
+        expectedSnapshotDigest: draft.snapshotDigest,
+        decisions: [],
+        actorId: "test:user",
+        idempotencyKey: "required-units-unresolved",
+      }),
+    ).toEqual({
+      kind: "existing",
+      draft: unresolved.draft,
+      reconciliation: unresolved.reconciliation,
+    });
+    const decisions = draft.parts.map((part) => {
+      if (part.baseRevisionPartId == null) throw new Error("test predecessor is missing");
+      return {
+        kind: "accept_prior_completion" as const,
+        targetDraftPartId: part.id,
+        predecessorRevisionPartId: part.baseRevisionPartId,
+      };
+    });
+    expect(
+      repo.savePlanDraftRequiredUnitReconciliation({
+        profileId: profile.id,
+        draftId: draft.id,
+        expectedSnapshotDigest: unresolved.draft.snapshotDigest,
+        decisions,
+        actorId: "test:user",
+        idempotencyKey: "required-units-ready",
+      }),
+    ).toMatchObject({ kind: "saved", reconciliation: { resultKind: "ready" } });
+    expect(
+      repo.getPlanDraftRequiredUnitReconciliation(
+        profile.id,
+        draft.id,
+        unresolved.reconciliation.id,
+      ),
+    ).toEqual(unresolved.reconciliation);
+    expect(
+      raw.prepare("SELECT result_kind FROM plan_draft_required_unit_reconciliations ORDER BY id").all(),
+    ).toEqual([{ result_kind: "unresolved" }, { result_kind: "ready" }]);
+    expect(() => repo.deleteProfile(profile.id)).not.toThrow();
+    expect(
+      raw.prepare("SELECT count(*) AS count FROM plan_draft_required_unit_reconciliations").get(),
+    ).toEqual({ count: 0 });
+    database.close();
+  });
+
+  it("reopens a complete shrink result with the same surplus and progress basis", () => {
+    const { database, raw, profile, repo, draft, root } = editableDraftFixture();
+    backfillCurrentRequiredUnitSets(raw, {
+      tokenFactory: (() => {
+        let value = 200;
+        return () => `ppu_${(value++).toString(16).padStart(32, "0")}`;
+      })(),
+    });
+    const gear = draft.parts.find((part) => part.filename === "gear.stl");
+    if (!gear) throw new Error("gear draft Part is missing");
+    const edited = repo.editPlanDraftParts({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: draft.snapshotDigest,
+      decision: { kind: "set_quantity_override", partIds: [gear.id], value: 1 },
+    });
+    if (edited.kind !== "updated") throw new Error("shrink edit was not applied");
+    const decisions = edited.draft.parts.map((part) => {
+      if (part.baseRevisionPartId == null) throw new Error("test predecessor is missing");
+      return {
+        kind: "accept_prior_completion" as const,
+        targetDraftPartId: part.id,
+        predecessorRevisionPartId: part.baseRevisionPartId,
+      };
+    });
+    const saved = repo.savePlanDraftRequiredUnitReconciliation({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: edited.draft.snapshotDigest,
+      decisions,
+      actorId: "test:user",
+      idempotencyKey: "required-units-shrink",
+    });
+    if (saved.kind !== "saved") throw new Error("shrink reconciliation was not saved");
+    expect(saved.reconciliation.surplus).toHaveLength(2);
+    expect(saved.reconciliation.selectionBasis).toHaveLength(3);
+    database.close();
+
+    const reopened = new SqliteDatabase(root);
+    reopened.connect();
+    const reopenedRepo = new AppRepository(getDb(reopened), "default", reopened.reposDir);
+    expect(
+      reopenedRepo.getPlanDraftRequiredUnitReconciliation(
+        profile.id,
+        draft.id,
+        saved.reconciliation.id,
+      ),
+    ).toEqual(saved.reconciliation);
+    expect(
+      reopenedRepo.savePlanDraftRequiredUnitReconciliation({
+        profileId: profile.id,
+        draftId: draft.id,
+        expectedSnapshotDigest: edited.draft.snapshotDigest,
+        decisions,
+        actorId: "test:user",
+        idempotencyKey: "required-units-shrink",
+      }),
+    ).toEqual({ kind: "existing", draft: saved.draft, reconciliation: saved.reconciliation });
+    reopened.close();
+  });
+
+  it("rejects wrong assignment tokens and every persisted result component mismatch", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    backfillCurrentRequiredUnitSets(raw, {
+      tokenFactory: (() => {
+        let value = 300;
+        return () => `ppu_${(value++).toString(16).padStart(32, "0")}`;
+      })(),
+    });
+    const decisions = draft.parts.map((part) => {
+      if (part.baseRevisionPartId == null) throw new Error("test predecessor is missing");
+      return {
+        kind: "accept_prior_completion" as const,
+        targetDraftPartId: part.id,
+        predecessorRevisionPartId: part.baseRevisionPartId,
+      };
+    });
+    const saved = repo.savePlanDraftRequiredUnitReconciliation({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: draft.snapshotDigest,
+      decisions,
+      actorId: "test:user",
+      idempotencyKey: "required-units-integrity",
+    });
+    if (saved.kind !== "saved") throw new Error("integrity reconciliation was not saved");
+    const cloneHeader = raw.prepare(
+      `INSERT INTO plan_draft_required_unit_reconciliations (
+        tenant_id, profile_id, draft_id, format, planning_digest, base_revision_id,
+        base_mapping_digest, selection_basis_digest, selection_basis_json,
+        decision_digest, result_kind, result_digest, result_json,
+        reconciliation_digest, expected_assignment_count, actor_id, idempotency_key,
+        payload_digest, created_at, finalized_at
+      ) SELECT tenant_id, profile_id, draft_id, format, planning_digest, base_revision_id,
+        base_mapping_digest, selection_basis_digest, ?, decision_digest, result_kind,
+        result_digest, ?, reconciliation_digest, expected_assignment_count, actor_id, ?,
+        payload_digest, created_at, NULL
+      FROM plan_draft_required_unit_reconciliations WHERE id = ?`,
+    );
+    const copyChildren = (reconciliationId: number, tokenOverride?: string) => {
+      raw.prepare(
+        `INSERT INTO plan_draft_required_unit_decisions (
+          tenant_id, reconciliation_id, target_draft_part_id, kind,
+          predecessor_revision_part_id
+        ) SELECT tenant_id, ?, target_draft_part_id, kind, predecessor_revision_part_id
+          FROM plan_draft_required_unit_decisions WHERE reconciliation_id = ?`,
+      ).run(reconciliationId, saved.reconciliation.id);
+      raw.prepare(
+        `INSERT INTO plan_draft_required_unit_assignments (
+          tenant_id, reconciliation_id, target_draft_part_id, unit_index, kind,
+          required_unit_token
+        ) SELECT tenant_id, ?, target_draft_part_id, unit_index, kind,
+          CASE WHEN kind = 'reuse' AND ? IS NOT NULL THEN ? ELSE required_unit_token END
+          FROM plan_draft_required_unit_assignments WHERE reconciliation_id = ?`,
+      ).run(reconciliationId, tokenOverride ?? null, tokenOverride ?? null, saved.reconciliation.id);
+    };
+    const sourceHeader = raw
+      .prepare(
+        `SELECT selection_basis_json AS selectionBasisJson, result_json AS resultJson
+           FROM plan_draft_required_unit_reconciliations WHERE id = ?`,
+      )
+      .get(saved.reconciliation.id) as
+      | { selectionBasisJson: string; resultJson: string }
+      | undefined;
+    if (!sourceHeader) throw new Error("source reconciliation header is missing");
+    const wrongToken = raw
+      .prepare(
+        `SELECT token FROM required_units
+          WHERE tenant_id = 'default' AND profile_id = ?
+            AND token NOT IN (
+              SELECT required_unit_token FROM plan_draft_required_unit_assignments
+               WHERE reconciliation_id = ? AND required_unit_token IS NOT NULL
+            ) ORDER BY token LIMIT 1`,
+      )
+      .pluck()
+      .get(profile.id, saved.reconciliation.id) as string | undefined;
+    if (!wrongToken) throw new Error("same-Build wrong token fixture is missing");
+    const wrong = cloneHeader.run(
+      sourceHeader.selectionBasisJson,
+      sourceHeader.resultJson,
+      "wrong-token",
+      saved.reconciliation.id,
+    );
+    copyChildren(Number(wrong.lastInsertRowid), wrongToken);
+    expect(() =>
+      raw
+        .prepare(
+          "UPDATE plan_draft_required_unit_reconciliations SET finalized_at = created_at WHERE id = ?",
+        )
+        .run(Number(wrong.lastInsertRowid)),
+    ).toThrow(/finalization/i);
+
+    const basisJson = raw
+      .prepare(
+        `SELECT json_set(?, '$[0].createdAt', json_extract(?, '$[0].createdAt') || 'x')`,
+      )
+      .pluck()
+      .get(sourceHeader.selectionBasisJson, sourceHeader.selectionBasisJson) as string;
+    const basis = cloneHeader.run(
+      basisJson,
+      sourceHeader.resultJson,
+      "basis-tamper",
+      saved.reconciliation.id,
+    );
+    copyChildren(Number(basis.lastInsertRowid));
+    raw
+      .prepare(
+        "UPDATE plan_draft_required_unit_reconciliations SET finalized_at = created_at WHERE id = ?",
+      )
+      .run(Number(basis.lastInsertRowid));
+    raw
+      .prepare("UPDATE plan_drafts SET current_required_unit_reconciliation_id = ? WHERE id = ?")
+      .run(Number(basis.lastInsertRowid), draft.id);
+    expect(() => repo.getPlanDraft(profile.id, draft.id)).toThrow(/selection basis digest/i);
+
+    const resultJson = raw
+      .prepare("SELECT json_insert(?, '$.surplus[#]', ?)")
+      .pluck()
+      .get(sourceHeader.resultJson, `ppu_${"f".repeat(32)}`) as string;
+    const result = cloneHeader.run(
+      sourceHeader.selectionBasisJson,
+      resultJson,
+      "result-tamper",
+      saved.reconciliation.id,
+    );
+    copyChildren(Number(result.lastInsertRowid));
+    raw
+      .prepare(
+        "UPDATE plan_draft_required_unit_reconciliations SET finalized_at = created_at WHERE id = ?",
+      )
+      .run(Number(result.lastInsertRowid));
+    raw
+      .prepare("UPDATE plan_drafts SET current_required_unit_reconciliation_id = ? WHERE id = ?")
+      .run(Number(result.lastInsertRowid), draft.id);
+    expect(() => repo.getPlanDraft(profile.id, draft.id)).toThrow(/result digest/i);
+    database.close();
+  });
+
+  it("resolves a delayed retry inside IMMEDIATE after another connection selects newer", () => {
+    const firstConnection = editableDraftFixture();
+    backfillCurrentRequiredUnitSets(firstConnection.raw, {
+      tokenFactory: (() => {
+        let value = 400;
+        return () => `ppu_${(value++).toString(16).padStart(32, "0")}`;
+      })(),
+    });
+    const decisions = firstConnection.draft.parts.map((part) => {
+      if (part.baseRevisionPartId == null) throw new Error("test predecessor is missing");
+      return {
+        kind: "accept_prior_completion" as const,
+        targetDraftPartId: part.id,
+        predecessorRevisionPartId: part.baseRevisionPartId,
+      };
+    });
+    const first = firstConnection.repo.savePlanDraftRequiredUnitReconciliation({
+      profileId: firstConnection.profile.id,
+      draftId: firstConnection.draft.id,
+      expectedSnapshotDigest: firstConnection.draft.snapshotDigest,
+      decisions,
+      actorId: "test:user",
+      idempotencyKey: "required-units-delayed",
+    });
+    if (first.kind !== "saved") throw new Error("first reconciliation was not saved");
+    const secondDatabase = new SqliteDatabase(firstConnection.root);
+    secondDatabase.connect();
+    const secondRepo = new AppRepository(
+      getDb(secondDatabase),
+      "default",
+      secondDatabase.reposDir,
+    );
+    const nativeTransaction = firstConnection.repo.transaction.bind(firstConnection.repo);
+    let injected = false;
+    firstConnection.repo.transaction = <T>(
+      fn: () => T,
+      behavior: "deferred" | "immediate" = "deferred",
+    ): T => {
+      if (!injected) {
+        injected = true;
+        expect(
+          secondRepo.savePlanDraftRequiredUnitReconciliation({
+            profileId: firstConnection.profile.id,
+            draftId: firstConnection.draft.id,
+            expectedSnapshotDigest: first.draft.snapshotDigest,
+            decisions,
+            actorId: "test:user",
+            idempotencyKey: "required-units-newer",
+          }),
+        ).toMatchObject({ kind: "saved" });
+      }
+      return nativeTransaction(fn, behavior);
+    };
+    expect(
+      firstConnection.repo.savePlanDraftRequiredUnitReconciliation({
+        profileId: firstConnection.profile.id,
+        draftId: firstConnection.draft.id,
+        expectedSnapshotDigest: firstConnection.draft.snapshotDigest,
+        decisions,
+        actorId: "test:user",
+        idempotencyKey: "required-units-delayed",
+      }),
+    ).toEqual({ kind: "superseded", reconciliationId: first.reconciliation.id });
+    secondDatabase.close();
+    firstConnection.database.close();
   });
 });
