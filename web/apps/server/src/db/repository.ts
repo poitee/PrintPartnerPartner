@@ -194,6 +194,16 @@ import {
   listUnattributedPrints,
   type UnattributedPrint,
 } from "../services/unattributed-print-store.js";
+import {
+  moveAcceptedPlateUnitInternal,
+  publishAcceptedPlatesInternal,
+  readAcceptedPlatesInternal,
+  type MoveAcceptedPlateUnitCommand,
+  type MoveAcceptedPlateUnitResult,
+  type PublishAcceptedPlatesCommand,
+  type PublishAcceptedPlatesResult,
+  type ReadAcceptedPlatesResult,
+} from "./accepted-plates.js";
 
 type PrinterPlanBinding = Readonly<{
   integration_id: string;
@@ -252,6 +262,10 @@ export type SchemaTables = Pick<
   | "requiredUnits"
   | "planRevisionRequiredUnitSets"
   | "planRevisionRequiredUnits"
+  | "acceptedPlateHeads"
+  | "acceptedPlateRevisions"
+  | "acceptedPlates"
+  | "acceptedPlateUnits"
   | "planDrafts"
   | "planDraftInputs"
   | "planDraftParts"
@@ -985,6 +999,31 @@ export class AppRepository {
       )
       .get();
     if (!visible) throw new Error("Profile not found");
+  }
+
+  private acceptedPlateDependencies() {
+    return {
+      db: this.db,
+      schema: this.schema,
+      tenantId: this.tenantId,
+      reposDir: this.reposDir,
+      sqlite: this.syncSqlite,
+      transaction: <T>(operation: () => T) => this.transaction(operation, "immediate"),
+      readTransaction: <T>(operation: () => T) => this.transaction(operation, "deferred"),
+      clock: this.planApplyDependencies.clock,
+    };
+  }
+
+  readAcceptedPlates(profileId: number): ReadAcceptedPlatesResult {
+    return readAcceptedPlatesInternal(this.acceptedPlateDependencies(), profileId);
+  }
+
+  publishAcceptedPlates(command: PublishAcceptedPlatesCommand): PublishAcceptedPlatesResult {
+    return publishAcceptedPlatesInternal(this.acceptedPlateDependencies(), command);
+  }
+
+  moveAcceptedPlateUnit(command: MoveAcceptedPlateUnitCommand): MoveAcceptedPlateUnitResult {
+    return moveAcceptedPlateUnitInternal(this.acceptedPlateDependencies(), command);
   }
 
   private requirePart(partId: number): PartDbRow {
@@ -5742,6 +5781,15 @@ export class AppRepository {
           appliedAt,
         ]);
       }
+      this.db
+        .delete(this.schema.acceptedPlateHeads)
+        .where(
+          and(
+            eq(this.schema.acceptedPlateHeads.tenantId, this.tenantId),
+            eq(this.schema.acceptedPlateHeads.profileId, profileId),
+          ),
+        )
+        .run();
       const detached = this.db
         .update(this.schema.buildProfiles)
         .set({ acceptedPlanRevisionId: null })

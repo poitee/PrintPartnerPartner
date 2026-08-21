@@ -13,21 +13,11 @@ import * as sqliteSchema from "./schema.js";
 import { currentSchemaVersion, schemaMigrations } from "./schema.js";
 
 /**
- * Regression tests for the schema v9-v13 migration set.
+ * Cumulative SQLite migration and PostgreSQL DDL parity checks.
  *
- * The v9 slicer-profile tables and the v11/v12 print_jobs tables that the
- * get_farm_status / get_print_stats MCP tools read were added to the SQLite
- * migration list AND to schema-pg.ts (the Drizzle table declarations), but the
- * Postgres migration runner only executed drizzle/postgres/0000_init.sql — which
- * stops at v8 — while still stamping app_settings.schema_version ahead of DDL.
- * A saas (Postgres) install therefore reported a high schema version against a
- * database with no print_jobs table at all, and any query from those tools
- * failed at runtime. v13 adds profile-sync provenance columns that must exist
- * on both dialects for the profile library / profile-sync watcher.
- *
- * These tests pin both halves: the SQLite DB really contains the v9-v13 tables
- * after migrating, and the Postgres DDL actually creates every table/column
- * declared in schema-pg.ts.
+ * These tests caught a PostgreSQL install that recorded a schema version before
+ * creating later tables. Keep table, column, and database-guard checks paired
+ * across both dialects whenever a schema version adds persisted state.
  */
 
 /** Tables introduced by schema v9 (slicer profiles) and v11 (job/telemetry/event log). */
@@ -74,6 +64,55 @@ const V24_TABLES = [
 ];
 
 const V25_TABLES = ["plan_apply_requests"];
+
+const V27_TABLES = [
+  "accepted_plate_heads",
+  "accepted_plate_revisions",
+  "accepted_plates",
+  "accepted_plate_units",
+];
+
+const V27_COLUMNS: Record<string, string[]> = {
+  accepted_plate_heads: ["tenant_id", "profile_id", "current_revision_id"],
+  accepted_plate_revisions: [
+    "id",
+    "tenant_id",
+    "profile_id",
+    "plan_revision_id",
+    "plan_version",
+    "plan_revision_digest",
+    "required_unit_mapping_digest",
+    "layout_digest",
+    "expected_plate_count",
+    "expected_unit_count",
+    "revision_number",
+    "created_at",
+  ],
+  accepted_plates: [
+    "tenant_id",
+    "revision_id",
+    "plate_id",
+    "ordinal",
+    "printer_id",
+    "printer_name",
+    "printer_model",
+    "bed_width_um",
+    "bed_depth_um",
+    "bed_height_um",
+    "margin_um",
+  ],
+  accepted_plate_units: [
+    "tenant_id",
+    "revision_id",
+    "plate_id",
+    "required_unit_token",
+    "x_um",
+    "y_um",
+    "width_um",
+    "depth_um",
+    "height_um",
+  ],
+};
 
 const V25_COLUMNS: Record<string, string[]> = {
   plan_apply_requests: [
@@ -376,7 +415,7 @@ function sqliteColumnNames(sqlite: SqliteDatabase, table: string): string[] {
   );
 }
 
-describe("schema v9-v13 (SQLite)", () => {
+describe("database schema migrations (SQLite)", () => {
   it("creates every v9-v12 table on a fresh database", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
@@ -395,7 +434,7 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v26 tables and records schema version 26", () => {
+  it("creates the v15-v27 tables and records schema version 27", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
       for (const table of [
@@ -407,6 +446,7 @@ describe("schema v9-v13 (SQLite)", () => {
         ...V23_TABLES,
         ...V24_TABLES,
         ...V25_TABLES,
+        ...V27_TABLES,
       ]) {
         expect(tables, `missing table ${table}`).toContain(table);
       }
@@ -414,7 +454,7 @@ describe("schema v9-v13 (SQLite)", () => {
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "26" });
+      ).toMatchObject({ value: "27" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -478,6 +518,14 @@ describe("schema v9-v13 (SQLite)", () => {
   it("creates every v19 accepted-revision column", () => {
     withSqlite((sqlite) => {
       for (const [table, expected] of Object.entries(V19_COLUMNS)) {
+        expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
+      }
+    });
+  });
+
+  it("creates every v27 accepted Plate column", () => {
+    withSqlite((sqlite) => {
+      for (const [table, expected] of Object.entries(V27_COLUMNS)) {
         expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
       }
     });
@@ -764,6 +812,39 @@ describe("schema v9-v13 (SQLite)", () => {
     }
   });
 
+  it("migrates a v26 database to the normalized accepted Plate schema", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-schema-v27-upgrade-"));
+    try {
+      const legacy = new SqliteDatabase(dir);
+      legacy.connect();
+      const raw = rawSqlite(legacy);
+      raw.exec(`
+        DROP TABLE accepted_plate_units;
+        DROP TABLE accepted_plates;
+        DROP TABLE accepted_plate_heads;
+        DROP TABLE accepted_plate_revisions;
+        UPDATE app_settings SET value = '26'
+          WHERE tenant_id = 'default' AND key = 'schema_version';
+      `);
+      legacy.close();
+
+      const upgraded = new SqliteDatabase(dir);
+      upgraded.connect();
+      expect(sqliteTableNames(upgraded)).toEqual(expect.arrayContaining(V27_TABLES));
+      for (const [table, expected] of Object.entries(V27_COLUMNS)) {
+        expect(sqliteColumnNames(upgraded, table)).toEqual(expect.arrayContaining(expected));
+      }
+      expect(
+        rawSqlite(upgraded)
+          .prepare("SELECT value FROM app_settings WHERE tenant_id = 'default' AND key = 'schema_version'")
+          .get(),
+      ).toEqual({ value: "27" });
+      upgraded.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects orphaned v17 Plan inputs before rebuilding their table", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-schema-v18-orphan-"));
     const dbPath = join(dir, "print-partner.db");
@@ -984,7 +1065,7 @@ describe("schema v9-v13 (SQLite)", () => {
 /**
  * Static parity check for the Postgres side. A Postgres server cannot be spun
  * up in unit tests, so instead assert that the DDL the migration runner
- * executes covers every table and column the Drizzle schema declares. This is
+ * executes covers every table, column, and guard the Drizzle schema declares. This is
  * exactly the check that would have caught print_jobs never being created on
  * saas installs.
  */
@@ -1032,10 +1113,10 @@ function pgAddedColumns(table: string): string[] {
   ].map((m) => m[1]!.toLowerCase());
 }
 
-describe("schema v9-v13 (Postgres DDL parity)", () => {
+describe("database schema migrations (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(26);
-    expect(pgSchema.currentSchemaVersion).toBe(26);
+    expect(sqliteSchema.currentSchemaVersion).toBe(27);
+    expect(pgSchema.currentSchemaVersion).toBe(27);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -1238,6 +1319,32 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
     expect(POSTGRES_DDL).toContain("trg_plan_drafts_consumption_write");
     expect(POSTGRES_DDL).toContain("trg_plan_apply_requests_ownership_insert");
     expect(POSTGRES_DDL).toContain("trg_plan_apply_requests_immutable_write");
+  });
+
+  it("creates the v27 accepted Plate tables with SQLite and Postgres column parity", () => {
+    const byName = new Map(pgTables().map((table) => [table.name, table.columns]));
+    for (const [table, expected] of Object.entries(V27_COLUMNS)) {
+      expect(byName.get(table)).toEqual(expect.arrayContaining(expected));
+      expect(pgCreatedColumns(table)).toEqual(expect.arrayContaining(expected));
+    }
+    expect(POSTGRES_DDL).toContain("pk_accepted_plates");
+    expect(POSTGRES_DDL).toContain("pk_accepted_plate_units");
+    expect(POSTGRES_DDL).toContain("uq_accepted_plates_tenant_revision_ordinal");
+    expect(POSTGRES_DDL).toContain("trg_accepted_plate_revisions_ownership_insert");
+    expect(POSTGRES_DDL).toContain("trg_accepted_plate_heads_ownership_write");
+    expect(POSTGRES_DDL).toContain("trg_accepted_plates_ownership_insert");
+    expect(POSTGRES_DDL).toContain("trg_accepted_plate_units_ownership_insert");
+    expect(POSTGRES_DDL).toContain("trg_accepted_plate_revisions_immutable_write");
+    expect(POSTGRES_DDL).toContain("trg_accepted_plates_immutable_write");
+    expect(POSTGRES_DDL).toContain("trg_accepted_plate_units_immutable_write");
+    expect(POSTGRES_DDL).toContain(
+      "current_revision_id INTEGER NOT NULL REFERENCES accepted_plate_revisions(id) ON DELETE CASCADE",
+    );
+    expect(POSTGRES_DDL).toContain(
+      "required_unit_token TEXT NOT NULL REFERENCES required_units(token) ON DELETE CASCADE",
+    );
+    expect(POSTGRES_DDL).not.toMatch(/accepted_plate_units[\s\S]*object_name/i);
+    expect(POSTGRES_DDL).not.toMatch(/accepted_plate_units[\s\S]*rotation/i);
   });
 
   it("adds v13 profile-sync provenance columns on slicer profile tables", () => {

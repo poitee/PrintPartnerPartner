@@ -48,6 +48,18 @@ function markAsV18(raw: Database.Database): void {
 
 function downgradeToV18(raw: Database.Database): void {
   raw.exec(`
+    DROP TRIGGER IF EXISTS trg_accepted_plate_units_immutable_update;
+    DROP TRIGGER IF EXISTS trg_accepted_plate_units_ownership_insert;
+    DROP TRIGGER IF EXISTS trg_accepted_plates_immutable_update;
+    DROP TRIGGER IF EXISTS trg_accepted_plates_ownership_insert;
+    DROP TRIGGER IF EXISTS trg_accepted_plate_heads_ownership_update;
+    DROP TRIGGER IF EXISTS trg_accepted_plate_heads_ownership_insert;
+    DROP TRIGGER IF EXISTS trg_accepted_plate_revisions_immutable_update;
+    DROP TRIGGER IF EXISTS trg_accepted_plate_revisions_ownership_insert;
+    DROP TABLE accepted_plate_units;
+    DROP TABLE accepted_plates;
+    DROP TABLE accepted_plate_heads;
+    DROP TABLE accepted_plate_revisions;
     DROP TRIGGER IF EXISTS trg_plan_apply_requests_immutable_delete;
     DROP TRIGGER IF EXISTS trg_plan_apply_requests_immutable_update;
     DROP TRIGGER IF EXISTS trg_plan_apply_requests_ownership_insert;
@@ -984,7 +996,7 @@ describe("accepted Plan revision backfill", () => {
     expect(utf8Bytes(Object.values(revision))).toBe(MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES);
     expect(
       migratedRaw.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get(),
-    ).toEqual({ value: "26" });
+    ).toEqual({ value: "27" });
     migrated.close();
   });
 
@@ -1179,7 +1191,7 @@ describe("accepted Plan revision backfill", () => {
     upgraded.close();
   });
 
-  it("repairs a layer race before removing invalidation and stamping v26", () => {
+  it("repairs a layer race before removing invalidation and stamping v27", () => {
     const { dir, database } = createDatabase();
     const raw = rawDatabase(database);
     const profile = repository(database).createProfile("Layer cutover race");
@@ -1223,7 +1235,7 @@ describe("accepted Plan revision backfill", () => {
       rawDatabase(upgraded)
         .prepare("SELECT value FROM app_settings WHERE key = 'schema_version'")
         .get(),
-    ).toEqual({ value: "26" });
+    ).toEqual({ value: "27" });
     expect(
       rawDatabase(upgraded)
         .prepare(

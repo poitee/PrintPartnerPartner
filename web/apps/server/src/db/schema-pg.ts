@@ -305,6 +305,111 @@ export const planRevisionRequiredUnits = pgTable(
   ],
 );
 
+export const acceptedPlateRevisions = pgTable(
+  "accepted_plate_revisions",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    planRevisionId: integer("plan_revision_id")
+      .notNull()
+      .references(() => planRevisions.id, { onDelete: "cascade" }),
+    planVersion: integer("plan_version").notNull(),
+    planRevisionDigest: text("plan_revision_digest").notNull(),
+    requiredUnitMappingDigest: text("required_unit_mapping_digest").notNull(),
+    layoutDigest: text("layout_digest").notNull(),
+    expectedPlateCount: integer("expected_plate_count").notNull(),
+    expectedUnitCount: integer("expected_unit_count").notNull(),
+    revisionNumber: integer("revision_number").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_accepted_plate_revisions_tenant_profile_number").on(
+      t.tenantId,
+      t.profileId,
+      t.revisionNumber,
+    ),
+    check("chk_accepted_plate_revisions_plan_version", sql`${t.planVersion} > 0`),
+    check("chk_accepted_plate_revisions_number", sql`${t.revisionNumber} > 0`),
+    check("chk_accepted_plate_revisions_plate_count", sql`${t.expectedPlateCount} > 0`),
+    check("chk_accepted_plate_revisions_unit_count", sql`${t.expectedUnitCount} > 0`),
+  ],
+);
+
+export const acceptedPlateHeads = pgTable("accepted_plate_heads", {
+  tenantId: text("tenant_id").notNull(),
+  profileId: integer("profile_id")
+    .primaryKey()
+    .references(() => buildProfiles.id, { onDelete: "cascade" }),
+  currentRevisionId: integer("current_revision_id")
+    .notNull()
+    .references(() => acceptedPlateRevisions.id, { onDelete: "cascade" }),
+});
+
+export const acceptedPlates = pgTable(
+  "accepted_plates",
+  {
+    tenantId: text("tenant_id").notNull(),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => acceptedPlateRevisions.id, { onDelete: "cascade" }),
+    plateId: text("plate_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    printerId: text("printer_id").notNull(),
+    printerName: text("printer_name").notNull(),
+    printerModel: text("printer_model").notNull(),
+    bedWidthUm: integer("bed_width_um").notNull(),
+    bedDepthUm: integer("bed_depth_um").notNull(),
+    bedHeightUm: integer("bed_height_um").notNull(),
+    marginUm: integer("margin_um").notNull(),
+  },
+  (t) => [
+    primaryKey({ name: "pk_accepted_plates", columns: [t.tenantId, t.revisionId, t.plateId] }),
+    uniqueIndex("uq_accepted_plates_tenant_revision_ordinal").on(
+      t.tenantId,
+      t.revisionId,
+      t.ordinal,
+    ),
+    check("chk_accepted_plates_ordinal", sql`${t.ordinal} > 0`),
+    check("chk_accepted_plates_bed_width", sql`${t.bedWidthUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plates_bed_depth", sql`${t.bedDepthUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plates_bed_height", sql`${t.bedHeightUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plates_margin", sql`${t.marginUm} BETWEEN 0 AND 2147483647`),
+  ],
+);
+
+export const acceptedPlateUnits = pgTable(
+  "accepted_plate_units",
+  {
+    tenantId: text("tenant_id").notNull(),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => acceptedPlateRevisions.id, { onDelete: "cascade" }),
+    plateId: text("plate_id").notNull(),
+    requiredUnitToken: text("required_unit_token")
+      .notNull()
+      .references(() => requiredUnits.token, { onDelete: "cascade" }),
+    xUm: integer("x_um").notNull(),
+    yUm: integer("y_um").notNull(),
+    widthUm: integer("width_um").notNull(),
+    depthUm: integer("depth_um").notNull(),
+    heightUm: integer("height_um").notNull(),
+  },
+  (t) => [
+    primaryKey({
+      name: "pk_accepted_plate_units",
+      columns: [t.tenantId, t.revisionId, t.requiredUnitToken],
+    }),
+    check("chk_accepted_plate_units_x", sql`${t.xUm} BETWEEN 0 AND 2147483647`),
+    check("chk_accepted_plate_units_y", sql`${t.yUm} BETWEEN 0 AND 2147483647`),
+    check("chk_accepted_plate_units_width", sql`${t.widthUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plate_units_depth", sql`${t.depthUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plate_units_height", sql`${t.heightUm} BETWEEN 1 AND 2147483647`),
+  ],
+);
+
 export const planDrafts = pgTable(
   "plan_drafts",
   {
@@ -1023,4 +1128,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 26;
+export const currentSchemaVersion = 27;

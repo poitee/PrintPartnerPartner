@@ -1632,6 +1632,250 @@ export const postgresPostInitMigrations: string[] = [
       END IF;
     END
   $block$`,
+  `CREATE TABLE IF NOT EXISTS accepted_plate_revisions (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    plan_revision_id INTEGER NOT NULL REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    plan_version INTEGER NOT NULL CONSTRAINT chk_accepted_plate_revisions_plan_version
+      CHECK (plan_version > 0),
+    plan_revision_digest TEXT NOT NULL,
+    required_unit_mapping_digest TEXT NOT NULL,
+    layout_digest TEXT NOT NULL,
+    expected_plate_count INTEGER NOT NULL CONSTRAINT chk_accepted_plate_revisions_plate_count
+      CHECK (expected_plate_count > 0),
+    expected_unit_count INTEGER NOT NULL CONSTRAINT chk_accepted_plate_revisions_unit_count
+      CHECK (expected_unit_count > 0),
+    revision_number INTEGER NOT NULL CONSTRAINT chk_accepted_plate_revisions_number
+      CHECK (revision_number > 0),
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_accepted_plate_revisions_tenant_profile_number
+    ON accepted_plate_revisions (tenant_id, profile_id, revision_number)`,
+  `CREATE TABLE IF NOT EXISTS accepted_plate_heads (
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER PRIMARY KEY REFERENCES build_profiles(id) ON DELETE CASCADE,
+    current_revision_id INTEGER NOT NULL REFERENCES accepted_plate_revisions(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS accepted_plates (
+    tenant_id TEXT NOT NULL,
+    revision_id INTEGER NOT NULL REFERENCES accepted_plate_revisions(id) ON DELETE CASCADE,
+    plate_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CONSTRAINT chk_accepted_plates_ordinal CHECK (ordinal > 0),
+    printer_id TEXT NOT NULL,
+    printer_name TEXT NOT NULL,
+    printer_model TEXT NOT NULL,
+    bed_width_um INTEGER NOT NULL CONSTRAINT chk_accepted_plates_bed_width
+      CHECK (bed_width_um BETWEEN 1 AND 2147483647),
+    bed_depth_um INTEGER NOT NULL CONSTRAINT chk_accepted_plates_bed_depth
+      CHECK (bed_depth_um BETWEEN 1 AND 2147483647),
+    bed_height_um INTEGER NOT NULL CONSTRAINT chk_accepted_plates_bed_height
+      CHECK (bed_height_um BETWEEN 1 AND 2147483647),
+    margin_um INTEGER NOT NULL CONSTRAINT chk_accepted_plates_margin
+      CHECK (margin_um BETWEEN 0 AND 2147483647),
+    CONSTRAINT pk_accepted_plates PRIMARY KEY (tenant_id, revision_id, plate_id)
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_accepted_plates_tenant_revision_ordinal
+    ON accepted_plates (tenant_id, revision_id, ordinal)`,
+  `CREATE TABLE IF NOT EXISTS accepted_plate_units (
+    tenant_id TEXT NOT NULL,
+    revision_id INTEGER NOT NULL REFERENCES accepted_plate_revisions(id) ON DELETE CASCADE,
+    plate_id TEXT NOT NULL,
+    required_unit_token TEXT NOT NULL REFERENCES required_units(token) ON DELETE CASCADE,
+    x_um INTEGER NOT NULL CONSTRAINT chk_accepted_plate_units_x
+      CHECK (x_um BETWEEN 0 AND 2147483647),
+    y_um INTEGER NOT NULL CONSTRAINT chk_accepted_plate_units_y
+      CHECK (y_um BETWEEN 0 AND 2147483647),
+    width_um INTEGER NOT NULL CONSTRAINT chk_accepted_plate_units_width
+      CHECK (width_um BETWEEN 1 AND 2147483647),
+    depth_um INTEGER NOT NULL CONSTRAINT chk_accepted_plate_units_depth
+      CHECK (depth_um BETWEEN 1 AND 2147483647),
+    height_um INTEGER NOT NULL CONSTRAINT chk_accepted_plate_units_height
+      CHECK (height_um BETWEEN 1 AND 2147483647),
+    CONSTRAINT pk_accepted_plate_units
+      PRIMARY KEY (tenant_id, revision_id, required_unit_token)
+  )`,
+  `CREATE OR REPLACE FUNCTION validate_accepted_plate_revision_insert()
+  RETURNS trigger AS $function$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1
+        FROM build_profiles profile
+        JOIN plan_revisions revision
+          ON revision.id = NEW.plan_revision_id
+         AND revision.tenant_id = profile.tenant_id
+         AND revision.profile_id = profile.id
+        JOIN plan_revision_required_unit_sets unit_set
+          ON unit_set.revision_id = revision.id
+         AND unit_set.tenant_id = revision.tenant_id
+         AND unit_set.profile_id = revision.profile_id
+       WHERE profile.id = NEW.profile_id
+         AND profile.tenant_id = NEW.tenant_id
+         AND profile.accepted_plan_revision_id = NEW.plan_revision_id
+         AND profile.accepted_plan_version = NEW.plan_version
+         AND revision.snapshot_digest = NEW.plan_revision_digest
+         AND unit_set.mapping_digest = NEW.required_unit_mapping_digest
+    ) THEN
+      RAISE EXCEPTION 'Accepted Plate revision ownership violation';
+    END IF;
+    RETURN NEW;
+  END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION validate_accepted_plate_head_write()
+  RETURNS trigger AS $function$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM accepted_plate_revisions revision
+       WHERE revision.id = NEW.current_revision_id
+         AND revision.tenant_id = NEW.tenant_id
+         AND revision.profile_id = NEW.profile_id
+    ) THEN
+      RAISE EXCEPTION 'Accepted Plate head ownership violation';
+    END IF;
+    RETURN NEW;
+  END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION validate_accepted_plate_insert()
+  RETURNS trigger AS $function$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM accepted_plate_revisions revision
+       WHERE revision.id = NEW.revision_id
+         AND revision.tenant_id = NEW.tenant_id
+         AND NOT EXISTS (
+           SELECT 1 FROM accepted_plate_heads head
+            WHERE head.current_revision_id = revision.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM accepted_plate_revisions newer
+            WHERE newer.tenant_id = revision.tenant_id
+              AND newer.profile_id = revision.profile_id
+              AND newer.revision_number > revision.revision_number
+         )
+    ) THEN
+      RAISE EXCEPTION 'Accepted Plate ownership violation';
+    END IF;
+    RETURN NEW;
+  END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION validate_accepted_plate_unit_insert()
+  RETURNS trigger AS $function$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1
+        FROM accepted_plates plate
+        JOIN accepted_plate_revisions plate_revision
+          ON plate_revision.id = plate.revision_id
+         AND plate_revision.tenant_id = plate.tenant_id
+        JOIN plan_revision_required_units mapping
+          ON mapping.revision_id = plate_revision.plan_revision_id
+         AND mapping.tenant_id = plate_revision.tenant_id
+         AND mapping.required_unit_token = NEW.required_unit_token
+        JOIN plan_revision_parts part
+          ON part.id = mapping.revision_part_id
+         AND part.revision_id = mapping.revision_id
+         AND part.tenant_id = mapping.tenant_id
+       WHERE plate.tenant_id = NEW.tenant_id
+         AND plate.revision_id = NEW.revision_id
+         AND plate.plate_id = NEW.plate_id
+         AND part.included = TRUE
+         AND NOT EXISTS (
+           SELECT 1 FROM accepted_plate_heads head
+            WHERE head.current_revision_id = plate_revision.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM accepted_plate_revisions newer
+            WHERE newer.tenant_id = plate_revision.tenant_id
+              AND newer.profile_id = plate_revision.profile_id
+              AND newer.revision_number > plate_revision.revision_number
+         )
+    ) THEN
+      RAISE EXCEPTION 'Accepted Plate unit ownership violation';
+    END IF;
+    RETURN NEW;
+  END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION enforce_accepted_plate_revision_immutable()
+  RETURNS trigger AS $function$
+  BEGIN
+    IF TG_OP = 'UPDATE' OR EXISTS (
+      SELECT 1 FROM build_profiles profile
+       WHERE profile.id = OLD.profile_id AND profile.tenant_id = OLD.tenant_id
+    ) THEN
+      RAISE EXCEPTION 'Accepted Plate revision is immutable';
+    END IF;
+    RETURN OLD;
+  END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION enforce_accepted_plate_immutable()
+  RETURNS trigger AS $function$
+  BEGIN
+    IF TG_OP = 'UPDATE' OR EXISTS (
+      SELECT 1
+        FROM accepted_plate_revisions revision
+        JOIN build_profiles profile
+          ON profile.id = revision.profile_id AND profile.tenant_id = revision.tenant_id
+       WHERE revision.id = OLD.revision_id AND revision.tenant_id = OLD.tenant_id
+    ) THEN
+      RAISE EXCEPTION 'Accepted Plate is immutable';
+    END IF;
+    RETURN OLD;
+  END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION enforce_accepted_plate_unit_immutable()
+  RETURNS trigger AS $function$
+  BEGIN
+    IF TG_OP = 'UPDATE' OR EXISTS (
+      SELECT 1
+        FROM accepted_plate_revisions revision
+        JOIN build_profiles profile
+          ON profile.id = revision.profile_id AND profile.tenant_id = revision.tenant_id
+       WHERE revision.id = OLD.revision_id AND revision.tenant_id = OLD.tenant_id
+    ) THEN
+      RAISE EXCEPTION 'Accepted Plate unit is immutable';
+    END IF;
+    RETURN OLD;
+  END
+  $function$ LANGUAGE plpgsql`,
+  `DO $block$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_accepted_plate_revisions_ownership_insert') THEN
+        CREATE TRIGGER trg_accepted_plate_revisions_ownership_insert
+          BEFORE INSERT ON accepted_plate_revisions
+          FOR EACH ROW EXECUTE FUNCTION validate_accepted_plate_revision_insert();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_accepted_plate_heads_ownership_write') THEN
+        CREATE TRIGGER trg_accepted_plate_heads_ownership_write
+          BEFORE INSERT OR UPDATE ON accepted_plate_heads
+          FOR EACH ROW EXECUTE FUNCTION validate_accepted_plate_head_write();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_accepted_plates_ownership_insert') THEN
+        CREATE TRIGGER trg_accepted_plates_ownership_insert
+          BEFORE INSERT ON accepted_plates
+          FOR EACH ROW EXECUTE FUNCTION validate_accepted_plate_insert();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_accepted_plate_units_ownership_insert') THEN
+        CREATE TRIGGER trg_accepted_plate_units_ownership_insert
+          BEFORE INSERT ON accepted_plate_units
+          FOR EACH ROW EXECUTE FUNCTION validate_accepted_plate_unit_insert();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_accepted_plate_revisions_immutable_write') THEN
+        CREATE TRIGGER trg_accepted_plate_revisions_immutable_write
+          BEFORE UPDATE OR DELETE ON accepted_plate_revisions
+          FOR EACH ROW EXECUTE FUNCTION enforce_accepted_plate_revision_immutable();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_accepted_plates_immutable_write') THEN
+        CREATE TRIGGER trg_accepted_plates_immutable_write
+          BEFORE UPDATE OR DELETE ON accepted_plates
+          FOR EACH ROW EXECUTE FUNCTION enforce_accepted_plate_immutable();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_accepted_plate_units_immutable_write') THEN
+        CREATE TRIGGER trg_accepted_plate_units_immutable_write
+          BEFORE UPDATE OR DELETE ON accepted_plate_units
+          FOR EACH ROW EXECUTE FUNCTION enforce_accepted_plate_unit_immutable();
+      END IF;
+    END
+  $block$`,
 ];
 
 export class PostgresDatabase {

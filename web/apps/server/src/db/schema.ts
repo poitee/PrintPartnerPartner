@@ -308,6 +308,114 @@ export const planRevisionRequiredUnits = sqliteTable(
   ],
 );
 
+export const acceptedPlateRevisions = sqliteTable(
+  "accepted_plate_revisions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull(),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    planRevisionId: integer("plan_revision_id")
+      .notNull()
+      .references(() => planRevisions.id, { onDelete: "cascade" }),
+    planVersion: integer("plan_version").notNull(),
+    planRevisionDigest: text("plan_revision_digest").notNull(),
+    requiredUnitMappingDigest: text("required_unit_mapping_digest").notNull(),
+    layoutDigest: text("layout_digest").notNull(),
+    expectedPlateCount: integer("expected_plate_count").notNull(),
+    expectedUnitCount: integer("expected_unit_count").notNull(),
+    revisionNumber: integer("revision_number").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_accepted_plate_revisions_tenant_profile_number").on(
+      t.tenantId,
+      t.profileId,
+      t.revisionNumber,
+    ),
+    check("chk_accepted_plate_revisions_plan_version", sql`${t.planVersion} > 0`),
+    check("chk_accepted_plate_revisions_number", sql`${t.revisionNumber} > 0`),
+    check("chk_accepted_plate_revisions_plate_count", sql`${t.expectedPlateCount} > 0`),
+    check("chk_accepted_plate_revisions_unit_count", sql`${t.expectedUnitCount} > 0`),
+  ],
+);
+
+export const acceptedPlateHeads = sqliteTable("accepted_plate_heads", {
+  tenantId: text("tenant_id").notNull(),
+  profileId: integer("profile_id")
+    .primaryKey()
+    .references(() => buildProfiles.id, { onDelete: "cascade" }),
+  currentRevisionId: integer("current_revision_id")
+    .notNull()
+    .references(() => acceptedPlateRevisions.id, { onDelete: "cascade" }),
+});
+
+export const acceptedPlates = sqliteTable(
+  "accepted_plates",
+  {
+    tenantId: text("tenant_id").notNull(),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => acceptedPlateRevisions.id, { onDelete: "cascade" }),
+    plateId: text("plate_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    printerId: text("printer_id").notNull(),
+    printerName: text("printer_name").notNull(),
+    printerModel: text("printer_model").notNull(),
+    bedWidthUm: integer("bed_width_um").notNull(),
+    bedDepthUm: integer("bed_depth_um").notNull(),
+    bedHeightUm: integer("bed_height_um").notNull(),
+    marginUm: integer("margin_um").notNull(),
+  },
+  (t) => [
+    primaryKey({
+      name: "pk_accepted_plates",
+      columns: [t.tenantId, t.revisionId, t.plateId],
+    }),
+    uniqueIndex("uq_accepted_plates_tenant_revision_ordinal").on(
+      t.tenantId,
+      t.revisionId,
+      t.ordinal,
+    ),
+    check("chk_accepted_plates_ordinal", sql`${t.ordinal} > 0`),
+    check("chk_accepted_plates_bed_width", sql`${t.bedWidthUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plates_bed_depth", sql`${t.bedDepthUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plates_bed_height", sql`${t.bedHeightUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plates_margin", sql`${t.marginUm} BETWEEN 0 AND 2147483647`),
+  ],
+);
+
+export const acceptedPlateUnits = sqliteTable(
+  "accepted_plate_units",
+  {
+    tenantId: text("tenant_id").notNull(),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => acceptedPlateRevisions.id, { onDelete: "cascade" }),
+    plateId: text("plate_id").notNull(),
+    requiredUnitToken: text("required_unit_token")
+      .notNull()
+      .references(() => requiredUnits.token, { onDelete: "cascade" }),
+    xUm: integer("x_um").notNull(),
+    yUm: integer("y_um").notNull(),
+    widthUm: integer("width_um").notNull(),
+    depthUm: integer("depth_um").notNull(),
+    heightUm: integer("height_um").notNull(),
+  },
+  (t) => [
+    primaryKey({
+      name: "pk_accepted_plate_units",
+      columns: [t.tenantId, t.revisionId, t.requiredUnitToken],
+    }),
+    check("chk_accepted_plate_units_x", sql`${t.xUm} BETWEEN 0 AND 2147483647`),
+    check("chk_accepted_plate_units_y", sql`${t.yUm} BETWEEN 0 AND 2147483647`),
+    check("chk_accepted_plate_units_width", sql`${t.widthUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plate_units_depth", sql`${t.depthUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plate_units_height", sql`${t.heightUm} BETWEEN 1 AND 2147483647`),
+  ],
+);
+
 export const planDrafts = sqliteTable(
   "plan_drafts",
   {
@@ -1032,7 +1140,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 26;
+export const currentSchemaVersion = 27;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -2436,5 +2544,202 @@ export const schemaMigrations: string[] = [
     )
     BEGIN
       SELECT RAISE(ABORT, 'Plan Apply request is immutable');
+    END`,
+  `CREATE TABLE IF NOT EXISTS accepted_plate_revisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    plan_revision_id INTEGER NOT NULL REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    plan_version INTEGER NOT NULL CHECK (plan_version > 0),
+    plan_revision_digest TEXT NOT NULL,
+    required_unit_mapping_digest TEXT NOT NULL,
+    layout_digest TEXT NOT NULL,
+    expected_plate_count INTEGER NOT NULL CHECK (expected_plate_count > 0),
+    expected_unit_count INTEGER NOT NULL CHECK (expected_unit_count > 0),
+    revision_number INTEGER NOT NULL CHECK (revision_number > 0),
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_accepted_plate_revisions_tenant_profile_number
+    ON accepted_plate_revisions (tenant_id, profile_id, revision_number)`,
+  `CREATE TABLE IF NOT EXISTS accepted_plate_heads (
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER PRIMARY KEY REFERENCES build_profiles(id) ON DELETE CASCADE,
+    current_revision_id INTEGER NOT NULL REFERENCES accepted_plate_revisions(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS accepted_plates (
+    tenant_id TEXT NOT NULL,
+    revision_id INTEGER NOT NULL REFERENCES accepted_plate_revisions(id) ON DELETE CASCADE,
+    plate_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+    printer_id TEXT NOT NULL,
+    printer_name TEXT NOT NULL,
+    printer_model TEXT NOT NULL,
+    bed_width_um INTEGER NOT NULL CHECK (bed_width_um BETWEEN 1 AND 2147483647),
+    bed_depth_um INTEGER NOT NULL CHECK (bed_depth_um BETWEEN 1 AND 2147483647),
+    bed_height_um INTEGER NOT NULL CHECK (bed_height_um BETWEEN 1 AND 2147483647),
+    margin_um INTEGER NOT NULL CHECK (margin_um BETWEEN 0 AND 2147483647),
+    CONSTRAINT pk_accepted_plates PRIMARY KEY (tenant_id, revision_id, plate_id)
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_accepted_plates_tenant_revision_ordinal
+    ON accepted_plates (tenant_id, revision_id, ordinal)`,
+  `CREATE TABLE IF NOT EXISTS accepted_plate_units (
+    tenant_id TEXT NOT NULL,
+    revision_id INTEGER NOT NULL REFERENCES accepted_plate_revisions(id) ON DELETE CASCADE,
+    plate_id TEXT NOT NULL,
+    required_unit_token TEXT NOT NULL REFERENCES required_units(token) ON DELETE CASCADE,
+    x_um INTEGER NOT NULL CHECK (x_um BETWEEN 0 AND 2147483647),
+    y_um INTEGER NOT NULL CHECK (y_um BETWEEN 0 AND 2147483647),
+    width_um INTEGER NOT NULL CHECK (width_um BETWEEN 1 AND 2147483647),
+    depth_um INTEGER NOT NULL CHECK (depth_um BETWEEN 1 AND 2147483647),
+    height_um INTEGER NOT NULL CHECK (height_um BETWEEN 1 AND 2147483647),
+    CONSTRAINT pk_accepted_plate_units
+      PRIMARY KEY (tenant_id, revision_id, required_unit_token)
+  )`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plate_revisions_ownership_insert
+    BEFORE INSERT ON accepted_plate_revisions
+    WHEN NOT EXISTS (
+      SELECT 1
+        FROM build_profiles profile
+        JOIN plan_revisions revision
+          ON revision.id = NEW.plan_revision_id
+         AND revision.tenant_id = profile.tenant_id
+         AND revision.profile_id = profile.id
+        JOIN plan_revision_required_unit_sets unit_set
+          ON unit_set.revision_id = revision.id
+         AND unit_set.tenant_id = revision.tenant_id
+         AND unit_set.profile_id = revision.profile_id
+       WHERE profile.id = NEW.profile_id
+         AND profile.tenant_id = NEW.tenant_id
+         AND profile.accepted_plan_revision_id = NEW.plan_revision_id
+         AND profile.accepted_plan_version = NEW.plan_version
+         AND revision.snapshot_digest = NEW.plan_revision_digest
+         AND unit_set.mapping_digest = NEW.required_unit_mapping_digest
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate revision ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plate_heads_ownership_insert
+    BEFORE INSERT ON accepted_plate_heads
+    WHEN NOT EXISTS (
+      SELECT 1 FROM accepted_plate_revisions revision
+       WHERE revision.id = NEW.current_revision_id
+         AND revision.tenant_id = NEW.tenant_id
+         AND revision.profile_id = NEW.profile_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate head ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plate_heads_ownership_update
+    BEFORE UPDATE ON accepted_plate_heads
+    WHEN NOT EXISTS (
+      SELECT 1 FROM accepted_plate_revisions revision
+       WHERE revision.id = NEW.current_revision_id
+         AND revision.tenant_id = NEW.tenant_id
+         AND revision.profile_id = NEW.profile_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate head ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plates_ownership_insert
+    BEFORE INSERT ON accepted_plates
+    WHEN NOT EXISTS (
+      SELECT 1 FROM accepted_plate_revisions revision
+       WHERE revision.id = NEW.revision_id
+         AND revision.tenant_id = NEW.tenant_id
+         AND NOT EXISTS (
+           SELECT 1 FROM accepted_plate_heads head
+            WHERE head.current_revision_id = revision.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM accepted_plate_revisions newer
+            WHERE newer.tenant_id = revision.tenant_id
+              AND newer.profile_id = revision.profile_id
+              AND newer.revision_number > revision.revision_number
+         )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plate_units_ownership_insert
+    BEFORE INSERT ON accepted_plate_units
+    WHEN NOT EXISTS (
+      SELECT 1
+        FROM accepted_plates plate
+        JOIN accepted_plate_revisions plate_revision
+          ON plate_revision.id = plate.revision_id
+         AND plate_revision.tenant_id = plate.tenant_id
+        JOIN plan_revision_required_units mapping
+          ON mapping.revision_id = plate_revision.plan_revision_id
+         AND mapping.tenant_id = plate_revision.tenant_id
+         AND mapping.required_unit_token = NEW.required_unit_token
+        JOIN plan_revision_parts part
+          ON part.id = mapping.revision_part_id
+         AND part.revision_id = mapping.revision_id
+         AND part.tenant_id = mapping.tenant_id
+       WHERE plate.tenant_id = NEW.tenant_id
+         AND plate.revision_id = NEW.revision_id
+         AND plate.plate_id = NEW.plate_id
+         AND part.included = 1
+         AND NOT EXISTS (
+           SELECT 1 FROM accepted_plate_heads head
+            WHERE head.current_revision_id = plate_revision.id
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM accepted_plate_revisions newer
+            WHERE newer.tenant_id = plate_revision.tenant_id
+              AND newer.profile_id = plate_revision.profile_id
+              AND newer.revision_number > plate_revision.revision_number
+         )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate unit ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plate_revisions_immutable_update
+    BEFORE UPDATE ON accepted_plate_revisions
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate revision is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plates_immutable_update
+    BEFORE UPDATE ON accepted_plates
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plate_units_immutable_update
+    BEFORE UPDATE ON accepted_plate_units
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate unit is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plate_revisions_immutable_delete
+    BEFORE DELETE ON accepted_plate_revisions
+    WHEN EXISTS (
+      SELECT 1 FROM build_profiles profile
+       WHERE profile.id = OLD.profile_id AND profile.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate revision is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plates_immutable_delete
+    BEFORE DELETE ON accepted_plates
+    WHEN EXISTS (
+      SELECT 1
+        FROM accepted_plate_revisions revision
+        JOIN build_profiles profile
+          ON profile.id = revision.profile_id AND profile.tenant_id = revision.tenant_id
+       WHERE revision.id = OLD.revision_id AND revision.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_accepted_plate_units_immutable_delete
+    BEFORE DELETE ON accepted_plate_units
+    WHEN EXISTS (
+      SELECT 1
+        FROM accepted_plate_revisions revision
+        JOIN build_profiles profile
+          ON profile.id = revision.profile_id AND profile.tenant_id = revision.tenant_id
+       WHERE revision.id = OLD.revision_id AND revision.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Accepted Plate unit is immutable');
     END`,
 ];

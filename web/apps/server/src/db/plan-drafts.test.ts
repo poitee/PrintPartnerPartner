@@ -2474,7 +2474,7 @@ describe("saved Plan drafts", () => {
             WHERE tenant_id = 'default' AND key = 'schema_version'`,
         )
         .get(),
-    ).toEqual({ value: "26" });
+    ).toEqual({ value: "27" });
     migrated.close();
   });
 
@@ -2553,7 +2553,7 @@ describe("saved Plan drafts", () => {
       (reopened as unknown as { sqlite: Database.Database }).sqlite
         .prepare("SELECT value FROM app_settings WHERE key = 'schema_version'")
         .get(),
-    ).toEqual({ value: "26" });
+    ).toEqual({ value: "27" });
     reopened.close();
   });
 
@@ -3263,6 +3263,133 @@ describe("saved Plan drafts", () => {
       expect(raw.prepare(`SELECT COUNT(*) FROM ${table}`).pluck().get()).toBe(0);
     }
     database.close();
+  });
+
+  it("clears the current accepted Plate head on Apply and retains immutable Plate history", () => {
+    const { database, raw, profile, repo, command } = readyApplyFixture();
+    const accepted = repo.readAcceptedPlanOperationalSnapshot(profile.id);
+    if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+    const tokens = accepted.snapshot.parts
+      .filter((part) => part.included)
+      .flatMap((part) => part.units)
+      .filter((unit) => unit.required)
+      .map((unit) => unit.token);
+    expect(
+      repo.publishAcceptedPlates({
+        profileId: profile.id,
+        expected: acceptedPlanBasis(accepted.snapshot),
+        expectedPlateRevisionId: null,
+        plates: [
+          {
+            plateId: "apply-plate",
+            printerId: "printer-1",
+            printerName: "Printer 1",
+            printerModel: "Test Printer",
+            bedWidthUm: 500_000,
+            bedDepthUm: 500_000,
+            bedHeightUm: 500_000,
+            marginUm: 0,
+            units: tokens.map((token, index) => ({
+              token,
+              xUm: index * 20_000,
+              yUm: 0,
+              widthUm: 10_000,
+              depthUm: 10_000,
+              heightUm: 10_000,
+            })),
+          },
+        ],
+      }),
+    ).toMatchObject({ kind: "published" });
+
+    raw.exec(`CREATE TRIGGER fail_apply_after_plate_head_delete
+      BEFORE UPDATE OF accepted_plan_revision_id ON build_profiles
+      BEGIN
+        SELECT RAISE(ABORT, 'injected Apply failure after Plate head delete');
+      END`);
+    expect(() => repo.applyPlanChanges(command)).toThrow(/injected Apply failure/i);
+    expect(raw.prepare("SELECT count(*) FROM accepted_plate_heads").pluck().get()).toBe(1);
+    expect(raw.prepare("SELECT count(*) FROM accepted_plate_revisions").pluck().get()).toBe(1);
+    raw.exec("DROP TRIGGER fail_apply_after_plate_head_delete");
+
+    expect(repo.applyPlanChanges(command)).toMatchObject({ kind: "applied" });
+    expect(raw.prepare("SELECT count(*) FROM accepted_plate_heads").pluck().get()).toBe(0);
+    expect(raw.prepare("SELECT count(*) FROM accepted_plate_revisions").pluck().get()).toBe(1);
+    expect(raw.prepare("SELECT count(*) FROM accepted_plates").pluck().get()).toBe(1);
+    expect(raw.prepare("SELECT count(*) FROM accepted_plate_units").pluck().get()).toBe(tokens.length);
+    expect(repo.readAcceptedPlates(profile.id)).toMatchObject({ kind: "empty", plates: [] });
+    database.close();
+  });
+
+  it("reads one complete old Plate snapshot when Apply commits on a second connection", () => {
+    const first = readyApplyFixture();
+    const accepted = first.repo.readAcceptedPlanOperationalSnapshot(first.profile.id);
+    if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+    const units = accepted.snapshot.parts
+      .filter((part) => part.included)
+      .flatMap((part) => part.units)
+      .filter((unit) => unit.required);
+    expect(
+      first.repo.publishAcceptedPlates({
+        profileId: first.profile.id,
+        expected: acceptedPlanBasis(accepted.snapshot),
+        expectedPlateRevisionId: null,
+        plates: [
+          {
+            plateId: "snapshot-plate",
+            printerId: "printer-1",
+            printerName: "Printer 1",
+            printerModel: "Test Printer",
+            bedWidthUm: 500_000,
+            bedDepthUm: 500_000,
+            bedHeightUm: 500_000,
+            marginUm: 0,
+            units: units.map((unit, index) => ({
+              token: unit.token,
+              xUm: index * 20_000,
+              yUm: 0,
+              widthUm: 10_000,
+              depthUm: 10_000,
+              heightUm: 10_000,
+            })),
+          },
+        ],
+      }),
+    ).toMatchObject({ kind: "published" });
+    const secondDatabase = new SqliteDatabase(first.root);
+    secondDatabase.connect();
+    const secondRepo = new AppRepository(
+      getDb(secondDatabase),
+      "default",
+      secondDatabase.reposDir,
+    );
+    const nativeTransaction = first.repo.transaction.bind(first.repo);
+    let barrierUsed = false;
+    let applyKind: string | null = null;
+    first.repo.transaction = <T>(
+      fn: () => T,
+      behavior: "deferred" | "immediate" = "deferred",
+    ): T => {
+      if (behavior !== "deferred" || barrierUsed) return nativeTransaction(fn, behavior);
+      return nativeTransaction(() => {
+        first.raw
+          .prepare("SELECT current_revision_id FROM accepted_plate_heads WHERE profile_id = ?")
+          .get(first.profile.id);
+        barrierUsed = true;
+        applyKind = secondRepo.applyPlanChanges(first.command).kind;
+        return fn();
+      }, behavior);
+    };
+
+    expect(first.repo.readAcceptedPlates(first.profile.id)).toMatchObject({
+      kind: "ready",
+      plateRevisionNumber: 1,
+      plates: [{ plateId: "snapshot-plate" }],
+    });
+    expect(applyKind).toBe("applied");
+    expect(first.repo.readAcceptedPlates(first.profile.id)).toMatchObject({ kind: "empty", plates: [] });
+    secondDatabase.close();
+    first.database.close();
   });
 
   it("serializes a two-connection Checkoff patch before Apply and copies it", () => {

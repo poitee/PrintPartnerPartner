@@ -725,6 +725,49 @@ route, parser, verification, Apply, and caller-inventory coverage passed 118
 tests. The full server suite passed 163 files with one file skipped, 1275 tests
 passed, and 3 tests skipped. Server typecheck and root lint passed.
 
+## Accepted Plate revisions
+
+Accepted Plates use immutable normalized revisions instead of the legacy
+`print_plan:<profileId>` JSON. A revision is bound to one accepted Plan basis
+and contains an ordered set of Plates plus a complete one-to-one partition of
+the included Required-unit tokens. Required-unit tokens are the only unit
+identity. Legacy `match_key` and compatibility Part coordinates are not stored
+or translated.
+
+Each Plate captures its stable ordinal, printer ID, name, model, full XYZ build
+volume, margin, and integer-micrometre placements. Rotation and scale are not
+part of the model. Required-unit Object names remain owned by the accepted Plan
+snapshot and are projected on read instead of copied into Plate storage.
+
+Publication and move commands run in SQLite `IMMEDIATE` transactions. They
+reread the accepted Plan basis, validate complete token coverage and geometry,
+insert a complete immutable successor, and compare-and-swap the current head.
+An exact publication retry returns the existing revision. A move copies the
+whole revision, changes one X/Y position, and returns unchanged when the target
+position already matches. PostgreSQL reads and mutations return
+`transaction_unavailable` before querying until a real transaction path is
+available.
+
+Revision headers record the expected Plate count, expected unit count, and a
+canonical layout digest. Reads use one SQLite deferred snapshot and verify every
+stored row, contiguous Plate ordinal, token, count, geometry field, and digest.
+Direct revision, Plate, and placement updates or deletions are blocked while the
+Build exists. Build deletion cascades the complete ownership graph. Plan Apply
+deletes only the current Plate head inside its publication transaction, leaving
+historical Plate revisions intact for audit.
+
+This slice changes no route, browser, or 3MF behavior. The next internal slice
+will generate deterministic 3MF bytes from the same accepted Plate revision and
+verified accepted artifact descriptors. It will not repack, read mutable fleet
+state, infer filament, or derive Object names from filenames.
+
+Focused Plate, schema, Apply, and migration coverage passed 142 tests. The full
+server suite passed 164 files with one file skipped, 1304 tests passed, and 3
+tests skipped. Server typecheck, root lint, independent review, the no-comments
+scan, and the diff check passed. PostgreSQL coverage verifies declaration and
+DDL parity, ownership and immutability trigger presence, query-free repository
+refusal, and cascade relationships. No live PostgreSQL server was available.
+
 ## Module shape
 
 ```ts
