@@ -1,10 +1,10 @@
-/** Pure helpers for the Plans page list (GRE-228). */
+/** Pure helpers for the Builds list. */
 
 import type { AcceptedProgressSummary } from "@print-partner/contracts";
 
-export const PLANS_LIST_LIMIT = 16;
-
 export type PlansListFilter = "active" | "archived" | "all";
+
+export type PlansListSort = "name" | "recent";
 
 export type PlansListRow = {
   id: number;
@@ -13,6 +13,7 @@ export type PlansListRow = {
   part_count: number;
   accepted_progress: AcceptedProgressSummary;
   build_stale: boolean;
+  last_used_at: string | null;
 };
 
 function isArchived(plan: { archived_at: string | null }): boolean {
@@ -23,17 +24,28 @@ function byName(a: { name: string }, b: { name: string }): number {
   return a.name.localeCompare(b.name);
 }
 
-/** Active / Archived / All — name-sorted, capped at PLANS_LIST_LIMIT (desk list, not a farm). */
+/** Active / Archived / All. Search by name. Sort by name or last used. */
 export function filterPlansList<T extends PlansListRow>(
   plans: T[],
   filter: PlansListFilter,
+  query = "",
+  sort: PlansListSort = "name",
 ): T[] {
+  const needle = query.trim().toLowerCase();
   const filtered = plans.filter((p) => {
-    if (filter === "active") return !isArchived(p);
-    if (filter === "archived") return isArchived(p);
+    if (filter === "active" && isArchived(p)) return false;
+    if (filter === "archived" && !isArchived(p)) return false;
+    if (needle && !p.name.toLowerCase().includes(needle)) return false;
     return true;
   });
-  return [...filtered].sort(byName).slice(0, PLANS_LIST_LIMIT);
+  return [...filtered].sort((a, b) => {
+    if (sort === "recent") {
+      const at = a.last_used_at ?? "";
+      const bt = b.last_used_at ?? "";
+      if (at !== bt) return bt.localeCompare(at);
+    }
+    return byName(a, b);
+  });
 }
 
 export function planStatusLabel(plan: {

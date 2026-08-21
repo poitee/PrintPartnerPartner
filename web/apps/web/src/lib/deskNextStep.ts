@@ -2,11 +2,11 @@
  * One next-step line per spine page (GRE-226). Exact copy; hide when done.
  */
 export const DESK_NEXT_STEP = {
-  library: "Add a source, then Create plan.",
+  library: "Add a source, then New Build.",
   plan: "Attach sources, pick files, assign colors.",
   parts: "Check qty. Conflicts: exclude on Plan.",
   progress: "Remaining is the work. Add bag/sort when you bag.",
-  export: "Export remaining STLs, slice outside, choose the .gcode here.",
+  export: "Send remaining STLs to the slicer, then choose the .gcode here.",
 } as const;
 
 export type DeskNextStepPage = keyof typeof DESK_NEXT_STEP;

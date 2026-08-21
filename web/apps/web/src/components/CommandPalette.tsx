@@ -18,15 +18,19 @@ import { checkoffUnitTotals } from "../lib/checkoffProgress";
 import { completeExportDownload } from "../lib/exportActions";
 import { handleStlPackExportJobDone } from "../lib/exportStlJobResult";
 import { flattenReviewParts } from "../lib/reviewParts";
+import { globalSectionPath } from "../lib/siteMap";
 import {
-  buildRoute,
+  buildsRoute,
+  buildSourcesRoute,
   checkoffRoute,
   exportRoute,
   helpRoute,
   isBuildPath,
+  isExportPath,
+  isLibraryPath,
   isPartsPath,
+  partsRoute,
   printersRoute,
-  reviewRoute,
   settingsRoute,
   sourcesRoute,
 } from "../lib/routes";
@@ -84,7 +88,7 @@ export default function CommandPalette(_props?: Props) {
 
   const onBuild = isBuildPath(location.pathname);
   const onReview = isPartsPath(location.pathname);
-  const onSources = location.pathname === "/library" || location.pathname === "/sources";
+  const onLibrary = isLibraryPath(location.pathname);
 
   const actions: Action[] = useMemo(() => {
     const leaveBuildThen = (go: () => void) => {
@@ -94,15 +98,25 @@ export default function CommandPalette(_props?: Props) {
 
     const list: Action[] = [
       {
-        id: "nav-sources",
-        label: "Go to Library",
-        hint: onSources ? "current" : undefined,
+        id: "nav-builds",
+        label: "Go to Builds",
+        hint: location.pathname === "/builds" || location.pathname === "/plans" ? "current" : undefined,
         group: "Navigate",
         run: () => {
           leaveBuildThen(() => {
-            navigate(sourcesRoute());
+            navigate(buildsRoute(selectedProfileId));
             setOpen(false);
           });
+        },
+      },
+      {
+        id: "nav-sources",
+        label: "Go to Sources",
+        hint: onBuild ? "current" : undefined,
+        group: "Navigate",
+        run: () => {
+          navigate(buildSourcesRoute(selectedProfileId));
+          setOpen(false);
         },
       },
       {
@@ -119,30 +133,32 @@ export default function CommandPalette(_props?: Props) {
         },
       },
       {
-        id: "nav-build",
-        label: "Go to Plan",
-        hint: onBuild ? "current" : undefined,
-        group: "Navigate",
-        run: () => {
-          navigate(buildRoute(selectedProfileId));
-          setOpen(false);
-        },
-      },
-      {
-        id: "nav-review",
-        label: "Go to Parts",
-        hint: onReview ? "current" : undefined,
+        id: "nav-library",
+        label: "Go to source library",
+        hint: onLibrary ? "current" : undefined,
         group: "Navigate",
         run: () => {
           leaveBuildThen(() => {
-            navigate(reviewRoute(selectedProfileId));
+            navigate(sourcesRoute());
             setOpen(false);
           });
         },
       },
       {
-        id: "nav-progress",
-        label: "Go to Progress",
+        id: "nav-plan",
+        label: "Go to Plan",
+        hint: onReview ? "current" : undefined,
+        group: "Navigate",
+        run: () => {
+          leaveBuildThen(() => {
+            navigate(partsRoute(selectedProfileId));
+            setOpen(false);
+          });
+        },
+      },
+      {
+        id: "nav-checkoff",
+        label: "Go to Checkoff",
         hint:
           location.pathname === "/progress" || location.pathname === "/checkoff"
             ? "current"
@@ -156,13 +172,13 @@ export default function CommandPalette(_props?: Props) {
         },
       },
       {
-        id: "nav-export",
-        label: "Go to Export hub",
-        hint: location.pathname === "/export" ? "current" : undefined,
+        id: "nav-production",
+        label: "Go to Production",
+        hint: isExportPath(location.pathname) ? "current" : undefined,
         group: "Navigate",
         run: () => {
           leaveBuildThen(() => {
-            navigate(exportRoute(selectedProfileId));
+            navigate(globalSectionPath("production"));
             setOpen(false);
           });
         },
@@ -203,8 +219,8 @@ export default function CommandPalette(_props?: Props) {
       },
       {
         id: "create-plan",
-        label: "Create plan",
-        hint: "Open create-plan dialog",
+        label: "New Build",
+        hint: "Open create-build dialog",
         group: "Workflow",
         run: () => {
           openCreatePlan();
@@ -232,7 +248,7 @@ export default function CommandPalette(_props?: Props) {
                 completeExportDownload("Share build", snap.result);
               },
             );
-            if (!onBuild && !onReview) navigate(buildRoute(selectedProfileId));
+            if (!onBuild && !onReview) navigate(buildSourcesRoute(selectedProfileId));
             setOpen(false);
           },
         },
@@ -256,7 +272,7 @@ export default function CommandPalette(_props?: Props) {
                   },
                 );
                 if (!onBuild && !onReview) {
-                  navigate(reviewRoute(selectedProfileId));
+                  navigate(partsRoute(selectedProfileId));
                 }
                 setOpen(false);
               },
@@ -267,7 +283,7 @@ export default function CommandPalette(_props?: Props) {
                 remainingUnits != null
                   ? `Export remaining ${remainingUnits} (${groupHint})`
                   : `Export remaining (${groupHint})`,
-              hint: "This plan · Progress checkoff",
+              hint: "This Build · Checkoff",
               group: "Actions" as const,
               disabled: stlExportJob.busy || remainingUnits === 0,
               run: () => {
@@ -338,7 +354,7 @@ export default function CommandPalette(_props?: Props) {
     kitExportJob,
     onBuild,
     onReview,
-    onSources,
+    onLibrary,
     location.pathname,
     flushBuildSaves,
     importSharedBuild,

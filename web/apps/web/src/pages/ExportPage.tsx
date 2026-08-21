@@ -23,7 +23,7 @@ import { useRoleFilamentsQuery } from "../queries/roleFilaments";
 import { checkoffUnitTotals } from "../lib/checkoffProgress";
 import { deskNextStepLine } from "../lib/deskNextStep";
 import { flattenReviewParts } from "../lib/reviewParts";
-import { partsRoute, planRoute } from "../lib/routes";
+import { planRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
 import {
   getBackgroundError,
@@ -104,14 +104,14 @@ export default function ExportPage() {
       <RouteBreadcrumbs
         items={[
           { label: "Plan", to: planRoute(selectedProfileId) },
-          { label: "Export" },
+          { label: "Production" },
         ]}
       />
       <PageHeader
         icon={FileArchive}
         accent
         eyebrow={planIdentity}
-        title="Export"
+        title="Production"
         description="Send already-sliced G-code from your slicer. STL and 3MF below are slicer input."
       />
       <DeskNextStep>{exportNextStep}</DeskNextStep>
@@ -234,10 +234,7 @@ export default function ExportPage() {
 
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" size="sm" asChild>
-              <Link to={partsRoute(selectedProfileId)}>Back to Parts</Link>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to={planRoute(selectedProfileId)}>Open Plan</Link>
+              <Link to={planRoute(selectedProfileId)}>Back to Plan</Link>
             </Button>
           </div>
         </>

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import PlansPage from "./PlansPage";
 
 const state = vi.hoisted(() => ({
@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
       part_count: 24,
       accepted_progress: { kind: "ready" as const, remaining_units: 6, total_units: 30 },
       build_stale: true,
+      last_used_at: null,
     },
   ],
   loading: false,
@@ -62,6 +63,7 @@ describe("PlansPage", () => {
         part_count: 24,
         accepted_progress: { kind: "ready" as const, remaining_units: 6, total_units: 30 },
         build_stale: true,
+        last_used_at: null,
       },
     ];
     state.loading = false;
@@ -69,25 +71,25 @@ describe("PlansPage", () => {
     state.mobile = true;
   });
 
-  it("renders one accessible Plans tree with complete controls on small screens", () => {
+  it("renders one accessible Builds tree with complete controls on small screens", () => {
     render(
       <MemoryRouter>
         <PlansPage />
       </MemoryRouter>,
     );
 
-    const mobilePlans = screen.getByRole("list", { name: "Plans" });
+    const mobileBuilds = screen.getByRole("list", { name: "Builds" });
     expect(
-      within(mobilePlans).getByRole("button", { name: "Select Voron" }).tagName,
+      within(mobileBuilds).getByRole("button", { name: "Open Voron" }).tagName,
     ).toBe("BUTTON");
     expect(
-      within(mobilePlans).getByRole("button", { name: "Actions for Voron" }).tagName,
+      within(mobileBuilds).getByRole("button", { name: "Actions for Voron" }).tagName,
     ).toBe("BUTTON");
-    expect(within(mobilePlans).getByText("6 remaining").textContent).toBe("6 remaining");
+    expect(within(mobileBuilds).getByText("6 remaining").textContent).toBe("6 remaining");
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("renders one accessible Plans table on wider screens", () => {
+  it("renders one accessible Builds table on wider screens", () => {
     state.mobile = false;
 
     render(
@@ -96,11 +98,11 @@ describe("PlansPage", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("table", { name: "Plans" }).tagName).toBe("TABLE");
-    expect(screen.queryByRole("list", { name: "Plans" })).toBeNull();
+    expect(screen.getByRole("table", { name: "Builds" }).tagName).toBe("TABLE");
+    expect(screen.queryByRole("list", { name: "Builds" })).toBeNull();
   });
 
-  it("announces plan loading through a polite live status", () => {
+  it("announces build loading through a polite live status", () => {
     state.profiles = [];
     state.loading = true;
 
@@ -113,7 +115,7 @@ describe("PlansPage", () => {
     const status = screen.getByRole("status");
     expect(status.getAttribute("aria-live")).toBe("polite");
     expect(status.getAttribute("aria-atomic")).toBe("true");
-    expect(status.textContent).toContain("Loading plans");
+    expect(status.textContent).toContain("Loading builds");
 
     state.loading = false;
     rerender(
@@ -124,6 +126,74 @@ describe("PlansPage", () => {
 
     expect(screen.getByRole("status")).toBe(status);
     expect(status.textContent).toBe("");
+  });
+
+  it("links Checkoff and Production from a Build row", () => {
+    state.mobile = false;
+
+    render(
+      <MemoryRouter>
+        <PlansPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Checkoff for Voron" }).getAttribute("href")).toBe(
+      "/progress?profile=7",
+    );
+    expect(screen.getByRole("link", { name: "Production for Voron" }).getAttribute("href")).toBe(
+      "/production?profile=7",
+    );
+  });
+
+  it("filters the Builds list by name", () => {
+    state.mobile = false;
+    state.profiles = [
+      {
+        id: 7,
+        name: "Voron",
+        archived_at: null,
+        part_count: 24,
+        accepted_progress: { kind: "ready" as const, remaining_units: 6, total_units: 30 },
+        build_stale: true,
+        last_used_at: null,
+      },
+      {
+        id: 8,
+        name: "A1 Mini",
+        archived_at: null,
+        part_count: 2,
+        accepted_progress: { kind: "ready" as const, remaining_units: 0, total_units: 2 },
+        build_stale: false,
+        last_used_at: null,
+      },
+    ];
+
+    render(
+      <MemoryRouter>
+        <PlansPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search builds" }), {
+      target: { value: "a1" },
+    });
+
+    expect(screen.getByRole("button", { name: "Open A1 Mini" }).textContent).toBe("A1 Mini");
+    expect(screen.queryByRole("button", { name: "Open Voron" })).toBeNull();
+  });
+
+  it("opens an existing Build in Plan", () => {
+    render(
+      <MemoryRouter initialEntries={["/builds"]}>
+        <Routes>
+          <Route path="/builds" element={<PlansPage />} />
+          <Route path="/plan" element={<div>Plan destination</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Voron" }));
+    expect(screen.getByText("Plan destination").textContent).toBe("Plan destination");
   });
 
   it("announces initial plan load failures as alerts", () => {
@@ -137,7 +207,7 @@ describe("PlansPage", () => {
     );
 
     expect(screen.getByRole("alert").textContent).toContain(
-      "Could not load plans: database unavailable",
+      "Could not load builds: database unavailable",
     );
   });
 });

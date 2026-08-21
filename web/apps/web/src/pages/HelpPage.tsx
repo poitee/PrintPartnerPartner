@@ -33,7 +33,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
-import { buildRoute, exportRoute, reviewRoute, sourcesRoute } from "../lib/routes";
+import { buildSourcesRoute, checkoffRoute, exportRoute, planRoute } from "../lib/routes";
 import { resolveEngineState } from "../lib/workflowState";
 
 type LegalTab = "summary" | "license" | "attribution" | "third-party";
@@ -50,28 +50,27 @@ const WORKFLOW_STEP_ICONS: LucideIcon[] = [FolderGit2, Hammer, ClipboardCheck, F
 const WORKFLOW_STEPS = [
   {
     num: 1,
-    label: "Library",
-    path: sourcesRoute(),
-    description: "Register repos, sync, and set import rules; search STLs across repos",
+    label: "Sources",
+    path: null as string | null,
+    description: "Attach sources, pick STLs, and set role colors for this Build",
   },
   {
     num: 2,
     label: "Plan",
     path: null as string | null,
-    description: "Manage plans, attach sources, pick STLs, set role colors, Update plan",
+    description: "Review quantities and warnings, then apply Plan changes",
   },
   {
     num: 3,
-    label: "Parts",
+    label: "Checkoff",
     path: null as string | null,
-    description: "Validate, edit quantities, then continue to Progress and Export",
+    description: "Track printed units and bag completed work",
   },
   {
     num: 4,
-    label: "Export",
+    label: "Production",
     path: null as string | null,
-    description:
-      "Settings → Printers to load filament; Export to enable machines, preview assignment, and export 3MF per plate",
+    description: "Allocate printers, edit plates, download, and verify jobs",
   },
 ] as const;
 
@@ -124,10 +123,11 @@ export default function HelpPage() {
 
   const stepPaths = WORKFLOW_STEPS.map((step) => {
     if (step.path) return step.path;
-    if (step.label === "Plan") return buildRoute(selectedProfileId);
-    if (step.label === "Parts") return reviewRoute(selectedProfileId);
-    if (step.label === "Export") return exportRoute(selectedProfileId);
-    return buildRoute(selectedProfileId);
+    if (step.label === "Sources") return buildSourcesRoute(selectedProfileId);
+    if (step.label === "Plan") return planRoute(selectedProfileId);
+    if (step.label === "Checkoff") return checkoffRoute(selectedProfileId);
+    if (step.label === "Production") return exportRoute(selectedProfileId);
+    return planRoute(selectedProfileId);
   });
 
   useEffect(() => {
@@ -211,7 +211,7 @@ export default function HelpPage() {
             </span>
             <div>
               <CardTitle className="text-base">Workflow</CardTitle>
-              <CardDescription>Library → Plan → Parts → Export</CardDescription>
+              <CardDescription>Sources → Plan → Checkoff → Production</CardDescription>
             </div>
           </div>
         </CardHeader>

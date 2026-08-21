@@ -11,7 +11,8 @@ import { SaveStatusProvider } from "./context/SaveStatusContext";
 import { AuthProvider } from "./context/AuthContext";
 import AuthGate from "./components/AuthGate";
 import AppLayout from "./layout/AppLayout";
-import { planRoute } from "./lib/routes";
+import { buildSourcesRoute } from "./lib/routes";
+import { productionScopeFromSearch } from "./lib/siteMap";
 
 // ─── Lazy page bundles ────────────────────────────────────────────────────────
 // Each page is split into its own async chunk so browsers only download what
@@ -20,6 +21,7 @@ import { planRoute } from "./lib/routes";
 const BuildPage      = lazy(() => import("./pages/BuildPage"));
 const CheckoffPage   = lazy(() => import("./pages/CheckoffPage"));
 const ExportPage     = lazy(() => import("./pages/ExportPage"));
+const GlobalProductionPage = lazy(() => import("./pages/GlobalProductionPage"));
 const HelpPage       = lazy(() => import("./pages/HelpPage"));
 const LoginPage      = lazy(() => import("./pages/LoginPage"));
 const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
@@ -29,7 +31,6 @@ const PlansPage      = lazy(() => import("./pages/PlansPage"));
 const PrintersPage   = lazy(() => import("./pages/PrintersPage"));
 const SettingsPage   = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage    = lazy(() => import("./pages/SourcesPage"));
-const WelcomePage    = lazy(() => import("./pages/WelcomePage"));
 
 // ─── Minimal page-transition fallback ─────────────────────────────────────────
 // Shown only on first load of a chunk — cached chunks render instantly.
@@ -58,7 +59,7 @@ function LegacyStudioRedirect() {
   const { planId } = useParams();
   const id = Number(planId);
   return (
-    <Navigate to={planRoute(Number.isFinite(id) && id > 0 ? id : null)} replace />
+    <Navigate to={buildSourcesRoute(Number.isFinite(id) && id > 0 ? id : null)} replace />
   );
 }
 
@@ -68,7 +69,16 @@ function PreserveSearchRedirect({ to }: { to: string }) {
 }
 
 function IndexRedirect() {
-  return <WelcomePage />;
+  return <PreserveSearchRedirect to="/builds" />;
+}
+
+function ProductionRoute() {
+  const location = useLocation();
+  return productionScopeFromSearch(location.search) === "build" ? (
+    <ExportPage />
+  ) : (
+    <GlobalProductionPage />
+  );
 }
 
 export default function App() {
@@ -92,26 +102,25 @@ export default function App() {
                             <Route index element={<IndexRedirect />} />
 
                             <Route path="library" element={<SourcesPage />} />
-                            <Route
-                              path="sources"
-                              element={<PreserveSearchRedirect to="/library" />}
-                            />
-
-                            <Route
-                              path="builds"
-                              element={<PreserveSearchRedirect to="/plan" />}
-                            />
-                            <Route path="plans" element={<PlansPage />} />
-                            <Route path="plan" element={<BuildPage />} />
+                            <Route path="sources" element={<BuildPage />} />
                             <Route
                               path="build"
-                              element={<PreserveSearchRedirect to="/plan" />}
+                              element={<PreserveSearchRedirect to="/sources" />}
                             />
 
-                            <Route path="parts" element={<PartsPage />} />
+                            <Route path="builds" element={<PlansPage />} />
+                            <Route
+                              path="plans"
+                              element={<PreserveSearchRedirect to="/builds" />}
+                            />
+                            <Route path="plan" element={<PartsPage />} />
+                            <Route
+                              path="parts"
+                              element={<PreserveSearchRedirect to="/plan" />}
+                            />
                             <Route
                               path="review"
-                              element={<PreserveSearchRedirect to="/parts" />}
+                              element={<PreserveSearchRedirect to="/plan" />}
                             />
 
                             <Route path="progress" element={<CheckoffPage />} />
@@ -120,16 +129,20 @@ export default function App() {
                               element={<PreserveSearchRedirect to="/progress" />}
                             />
 
-                            <Route path="export" element={<ExportPage />} />
+                            <Route path="production" element={<ProductionRoute />} />
+                            <Route
+                              path="export"
+                              element={<PreserveSearchRedirect to="/production" />}
+                            />
 
                             <Route path="plans/:planId/studio" element={<LegacyStudioRedirect />} />
                             <Route
                               path="plate"
-                              element={<PreserveSearchRedirect to="/parts" />}
+                              element={<PreserveSearchRedirect to="/plan" />}
                             />
                             <Route
                               path="print"
-                              element={<PreserveSearchRedirect to="/parts" />}
+                              element={<PreserveSearchRedirect to="/plan" />}
                             />
 
                             <Route path="printers" element={<PrintersPage />} />

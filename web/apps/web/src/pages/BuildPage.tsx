@@ -69,7 +69,7 @@ import {
   useReplacePlanLayerMutation,
   useSetPlanBaseLayerMutation,
 } from "../queries/planLayers";
-import { buildRoute, exportRoute, libraryRoute } from "../lib/routes";
+import { buildSourcesRoute, exportRoute, libraryRoute } from "../lib/routes";
 import { groupMergeConflictsByFilename } from "../lib/mergeConflictGroups";
 import { takeKitImportResult } from "../lib/kitImportStash";
 import { deskNextStepLine } from "../lib/deskNextStep";
@@ -640,11 +640,11 @@ function BuildPageContent() {
 
   return (
     <div className="space-y-4">
-      <RouteBreadcrumbs items={[{ label: "Plan", to: buildRoute(selectedProfileId) }]} />
+      <RouteBreadcrumbs items={[{ label: "Sources", to: buildSourcesRoute(selectedProfileId) }]} />
       <PageHeader
         icon={Hammer}
         accent
-        title="Plan"
+        title="Sources"
         description={headerSubtitle}
         actions={workspaceReady ? (
           <PageHeaderActions>
@@ -917,9 +917,9 @@ function BuildPageContent() {
         <EmptyState
           icon={Hammer}
           title="No plan yet"
-          description="Use Create plan in the sidebar (or the + button on mobile) to create a plan, then attach sources and pick STL files below."
+          description="Use New Build in the sidebar (or the + button on mobile) to name a Build, then attach sources and pick STL files below."
           action={{
-            label: "Create plan",
+            label: "New Build",
             onClick: openCreatePlan,
           }}
         />

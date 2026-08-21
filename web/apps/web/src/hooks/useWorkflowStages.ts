@@ -10,7 +10,7 @@ import {
   type WorkflowStageId,
 } from "../lib/workflowStages";
 
-/** Live workflow stage meta (Library→Export) for the spine rail and mobile stage bar. */
+/** Live Build destination meta (Sources→Production) for the spine rail and mobile stage bar. */
 export function useWorkflowStages(): {
   stages: WorkflowStage[];
   activeId: WorkflowStageId | null;

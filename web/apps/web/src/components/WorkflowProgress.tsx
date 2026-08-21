@@ -19,8 +19,8 @@ type Props = {
 };
 
 /**
- * Always-visible workflow nav (Library → Plan → Parts → Progress → Export).
- * Spine fill tracks the four workflow objects; Export uses the same active/meta styling.
+ * Always-visible Build destinations (Sources → Plan → Checkoff → Production).
+ * Spine fill tracks Sources through Checkoff; Production uses the same active/meta styling.
  */
 export default function WorkflowProgress({
   stages,

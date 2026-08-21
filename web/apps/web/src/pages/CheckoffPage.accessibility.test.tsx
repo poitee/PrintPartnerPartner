@@ -188,7 +188,7 @@ describe("CheckoffPage accessibility", () => {
     );
 
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Progress");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Checkoff");
     const printTitle = container.querySelector(".sheet-title");
     const repositoryTitle = container.querySelector(".sheet-repo-title");
     const folderTitle = container.querySelector(".sheet-folder-title");

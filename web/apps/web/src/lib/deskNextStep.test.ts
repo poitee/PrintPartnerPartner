@@ -3,14 +3,14 @@ import { DESK_NEXT_STEP, deskNextStepLine, deskNextStepVisible } from "./deskNex
 
 describe("deskNextStep", () => {
   it("keeps exact copy", () => {
-    expect(DESK_NEXT_STEP.library).toBe("Add a source, then Create plan.");
+    expect(DESK_NEXT_STEP.library).toBe("Add a source, then New Build.");
     expect(DESK_NEXT_STEP.plan).toBe("Attach sources, pick files, assign colors.");
     expect(DESK_NEXT_STEP.parts).toBe("Check qty. Conflicts: exclude on Plan.");
     expect(DESK_NEXT_STEP.progress).toBe(
       "Remaining is the work. Add bag/sort when you bag.",
     );
     expect(DESK_NEXT_STEP.export).toBe(
-      "Export remaining STLs, slice outside, choose the .gcode here.",
+      "Send remaining STLs to the slicer, then choose the .gcode here.",
     );
   });
 

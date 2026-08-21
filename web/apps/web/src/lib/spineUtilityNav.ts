@@ -1,6 +1,12 @@
-import { helpRoute, plansRoute, printersRoute, settingsRoute } from "./routes";
+import { globalSectionPath } from "./siteMap";
+import {
+  buildsRoute,
+  helpRoute,
+  printersRoute,
+  settingsRoute,
+} from "./routes";
 
-export type SpineUtilityId = "plans" | "printers" | "settings" | "help";
+export type SpineUtilityId = "builds" | "production" | "printers" | "settings" | "help";
 
 export type SpineUtilityNavItem = {
   id: SpineUtilityId;
@@ -10,14 +16,20 @@ export type SpineUtilityNavItem = {
 };
 
 /**
- * Spine / More utility rows: Plans · Printers · Settings · Help.
- * Stage-weight chrome below the desk-loop track — not WorkflowProgress, not a sixth step.
+ * Global sections: Builds · Production · Printers · Settings.
+ * Help stays reachable without becoming a fifth production section.
  */
 export function spineUtilityNavItems(
   profileId?: number | null,
 ): SpineUtilityNavItem[] {
   return [
-    { id: "plans", to: plansRoute(profileId), label: "Plans", path: "/plans" },
+    { id: "builds", to: buildsRoute(profileId), label: "Builds", path: "/builds" },
+    {
+      id: "production",
+      to: globalSectionPath("production"),
+      label: "Production",
+      path: "/production",
+    },
     { id: "printers", to: printersRoute(), label: "Printers", path: "/printers" },
     { id: "settings", to: settingsRoute(), label: "Settings", path: "/settings" },
     { id: "help", to: helpRoute(), label: "Help", path: "/help" },

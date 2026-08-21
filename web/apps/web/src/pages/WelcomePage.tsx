@@ -11,7 +11,7 @@ import EmptyState from "../components/layout/EmptyState";
 import { Button } from "../components/ui/button";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useSourcesQuery } from "../queries/sources";
-import { buildRoute, helpRoute, sourcesRoute } from "../lib/routes";
+import { buildRoute, helpRoute, planRoute, sourcesRoute } from "../lib/routes";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { resolveEngineState } from "../lib/workflowState";
 
@@ -24,9 +24,9 @@ const STEPS = [
   },
   {
     icon: Layers,
-    title: "Create a plan",
+    title: "Name a Build",
     description:
-      "Use Create plan in the sidebar under the plan picker to create or switch plans.",
+      "Use New Build in the sidebar under the Build picker to create or switch Builds.",
     to: null,
   },
   {
@@ -39,7 +39,7 @@ const STEPS = [
     icon: ClipboardCheck,
     title: "Update & review",
     description:
-      "Click Rebuild plan, then validate on Parts, track printing on Progress, and ship from Export.",
+      "Click Rebuild plan, then validate on Plan, track printing on Checkoff, and ship from Production.",
     to: buildRoute(null),
   },
 ] as const;
@@ -85,7 +85,7 @@ export default function WelcomePage() {
           description="Continue on Plan to pick files and update your kit."
           action={{
             label: "Open Plan",
-            onClick: () => navigate(buildRoute(profiles[0]?.id ?? null)),
+            onClick: () => navigate(planRoute(profiles[0]?.id ?? null)),
           }}
         />
       </div>

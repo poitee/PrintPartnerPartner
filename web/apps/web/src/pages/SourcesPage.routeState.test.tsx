@@ -50,10 +50,10 @@ describe("SourcesPage route state", () => {
     });
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[{ pathname: "/sources", state: { stlSearch: true } }]}>
+        <MemoryRouter initialEntries={[{ pathname: "/library", state: { stlSearch: true } }]}>
           <Routes>
             <Route
-              path="/sources"
+              path="/library"
               element={
                 <>
                   <SourcesPage />

@@ -8,7 +8,7 @@ import { Button } from "./ui/button";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useFlushBuildPageSaves } from "../hooks/useFlushBuildPageSaves";
-import { exportRoute, isExportPath, isPlanPath, planRoute } from "../lib/routes";
+import { exportRoute, isExportPath, isSourcesPath, planRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { planPrintTotals } from "../lib/workflowStages";
 import { countMissingStls } from "../lib/stlAutoSync";
@@ -213,9 +213,9 @@ export default function PlanTray() {
             onClick={() => {
               const to = exportRoute(selectedProfileId);
               const destPath = to.split("?")[0] ?? to;
-              const leavingPlan =
-                isPlanPath(location.pathname) && !isPlanPath(destPath);
-              if (leavingPlan) {
+              const leavingSources =
+                isSourcesPath(location.pathname) && !isSourcesPath(destPath);
+              if (leavingSources) {
                 void flushBuildSaves().then(() => {
                   navigate(to);
                 });

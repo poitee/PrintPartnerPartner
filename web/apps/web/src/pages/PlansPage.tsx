@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Archive,
   Copy,
@@ -19,6 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
+import { Input } from "../components/ui/input";
 import { SegmentedControl } from "../components/ui/segmented-control";
 import { usePlanActions } from "../context/PlanActionsContext";
 import { useProfileSelection } from "../context/ProfileContext";
@@ -30,8 +32,9 @@ import {
   planProgressLabel,
   planStatusLabel,
   type PlansListFilter,
+  type PlansListSort,
 } from "../lib/plansList";
-import { plansRoute } from "../lib/routes";
+import { buildsRoute, planRoute, productionRoute, progressRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
 import {
   getBackgroundError,
@@ -40,8 +43,9 @@ import {
 } from "../lib/workflowState";
 import { useTouchProfileLastUsedMutation } from "../queries/profiles";
 
-/** Dedicated Plans list — not a spine desk-loop step (GRE-228). */
+/** Dedicated Builds list — global section, not a Build destination. */
 export default function PlansPage() {
+  const navigate = useNavigate();
   const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const {
     profiles,
@@ -62,6 +66,8 @@ export default function PlansPage() {
   const useCompactPlanList = useMediaQuery("(max-width: 639px)");
 
   const [filter, setFilter] = useState<PlansListFilter>("active");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<PlansListSort>("name");
   const engineState = resolveEngineState({
     health,
     loading: healthLoading,
@@ -80,18 +86,18 @@ export default function PlansPage() {
     engineState === "loading"
       ? "Connecting to the engine…"
       : profilesState === "loading"
-        ? "Loading plans…"
+        ? "Loading builds…"
         : "";
 
   const rows = useMemo(
-    () => filterPlansList(profiles, filter),
-    [profiles, filter],
+    () => filterPlansList(profiles, filter, query, sort),
+    [profiles, filter, query, sort],
   );
 
-  /** GRE-231: activate spine plan only — stay on /plans; do not navigate to /plan or unarchive. */
-  const selectPlan = (id: number) => {
+  const openBuild = (id: number) => {
     setSelectedProfileId(id);
     touchMutation.mutate(id);
+    navigate(planRoute(id));
   };
 
   const renderPlanActions = (plan: (typeof rows)[number]) => {
@@ -141,13 +147,13 @@ export default function PlansPage() {
   return (
     <div className="space-y-4">
       <RouteBreadcrumbs
-        items={[{ label: "Plans", to: plansRoute(selectedProfileId) }]}
+        items={[{ label: "Builds", to: buildsRoute(selectedProfileId) }]}
       />
       <PageHeader
         icon={Layers}
         accent
-        title="Plans"
-        description="Switch the spine plan, or manage templates. Picker stays the quick switcher."
+        title="Builds"
+        description="Open a Build into Plan, or start a new one. New Build asks only for a name."
         actions={engineState === "ready" && profilesState === "ready" && profiles.length > 0 ? (
           <PageHeaderActions>
             <Button
@@ -155,7 +161,7 @@ export default function PlansPage() {
               onClick={openCreatePlan}
               disabled={engineState !== "ready" || profilesState !== "ready"}
             >
-              Create plan
+              New Build
             </Button>
           </PageHeaderActions>
         ) : undefined}
@@ -171,7 +177,7 @@ export default function PlansPage() {
 
       {profilesBackgroundError && (
         <p className="text-sm text-destructive" role="alert">
-          Could not refresh plans: {profilesBackgroundError}
+              Could not refresh builds: {profilesBackgroundError}
         </p>
       )}
 
@@ -183,7 +189,7 @@ export default function PlansPage() {
               aria-hidden={engineState === "loading" ? "true" : undefined}
             >
               {engineState === "offline"
-                ? "Engine offline — start the print-partner engine to manage plans."
+                ? "Engine offline — start the print-partner engine to manage builds."
                 : "Connecting to the engine…"}
             </p>
           </CardContent>
@@ -192,7 +198,7 @@ export default function PlansPage() {
         <Card className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-destructive" role="alert">
-              Could not load plans: {profilesError}
+              Could not load builds: {profilesError}
             </p>
             <Button size="sm" variant="secondary" onClick={() => void reloadProfiles()}>
               Retry
@@ -206,37 +212,58 @@ export default function PlansPage() {
               className="text-sm text-muted-foreground"
               aria-hidden="true"
             >
-              Loading plans…
+              Loading builds…
             </p>
           </CardContent>
         </Card>
       ) : emptyAll ? (
         <EmptyState
           icon={Layers}
-          title="Create a plan to start the desk loop."
-          action={{ label: "Create plan", onClick: openCreatePlan }}
+          title="Name a Build to start."
+          action={{ label: "New Build", onClick: openCreatePlan }}
         />
       ) : (
         <>
-          <SegmentedControl
-            aria-label="Plan status filter"
-            value={filter}
-            onValueChange={setFilter}
-            options={[
-              { value: "active", label: "Active" },
-              { value: "archived", label: "Archived" },
-              { value: "all", label: "All" },
-            ]}
-          />
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <Input
+              type="search"
+              aria-label="Search builds"
+              placeholder="Search builds"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="sm:max-w-xs"
+            />
+            <SegmentedControl
+              aria-label="Build status filter"
+              value={filter}
+              onValueChange={setFilter}
+              options={[
+                { value: "active", label: "Active" },
+                { value: "archived", label: "Archived" },
+                { value: "all", label: "All" },
+              ]}
+            />
+            <SegmentedControl
+              aria-label="Build sort"
+              value={sort}
+              onValueChange={setSort}
+              options={[
+                { value: "name", label: "Name" },
+                { value: "recent", label: "Recent" },
+              ]}
+            />
+          </div>
 
           {emptyFilter ? (
             <p className="text-sm text-muted-foreground">
-              No {filter === "archived" ? "archived" : "active"} plans.
+              {query.trim()
+                ? "No matching builds."
+                : `No ${filter === "archived" ? "archived" : "active"} builds.`}
             </p>
           ) : (
             <>
               {useCompactPlanList ? (
-              <ul className="space-y-2" aria-label="Plans">
+              <ul className="space-y-2" aria-label="Builds">
                 {rows.map((plan) => {
                   const selected = plan.id === selectedProfileId;
                   return (
@@ -255,8 +282,8 @@ export default function PlansPage() {
                                 "min-w-0 flex-1 truncate text-left font-medium underline-offset-2 hover:underline",
                                 selected && "text-primary",
                               )}
-                              aria-label={`Select ${plan.name}`}
-                              onClick={() => selectPlan(plan.id)}
+                              aria-label={`Open ${plan.name}`}
+                              onClick={() => openBuild(plan.id)}
                               disabled={engineState !== "ready"}
                             >
                               {plan.name}
@@ -271,6 +298,7 @@ export default function PlansPage() {
                               <span className="text-warning">stale</span>
                             ) : null}
                           </div>
+                          <BuildStatusLinks id={plan.id} name={plan.name} />
                         </CardContent>
                       </Card>
                     </li>
@@ -281,7 +309,7 @@ export default function PlansPage() {
               <div className="overflow-x-auto">
               <table
                 className="w-full min-w-[36rem] border-collapse text-sm"
-                aria-label="Plans"
+                aria-label="Builds"
               >
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -290,6 +318,8 @@ export default function PlansPage() {
                     <th className="py-2 pr-3 font-medium">Remaining</th>
                     <th className="py-2 pr-3 font-medium">Parts</th>
                     <th className="py-2 pr-3 font-medium">Stale</th>
+                    <th className="py-2 pr-3 font-medium">Checkoff</th>
+                    <th className="py-2 pr-3 font-medium">Production</th>
                     <th className="py-2 pl-2 font-medium">
                       <span className="sr-only">Actions</span>
                     </th>
@@ -313,7 +343,8 @@ export default function PlansPage() {
                               "max-w-[16rem] truncate text-left font-medium underline-offset-2 hover:underline",
                               selected && "text-primary",
                             )}
-                            onClick={() => selectPlan(plan.id)}
+                            aria-label={`Open ${plan.name}`}
+                            onClick={() => openBuild(plan.id)}
                             disabled={engineState !== "ready"}
                           >
                             {plan.name}
@@ -335,6 +366,24 @@ export default function PlansPage() {
                             <span className="sr-only">fresh</span>
                           )}
                         </td>
+                        <td className="py-2.5 pr-3">
+                          <Link
+                            className="text-xs underline-offset-2 hover:underline"
+                            to={progressRoute(plan.id)}
+                            aria-label={`Checkoff for ${plan.name}`}
+                          >
+                            Checkoff
+                          </Link>
+                        </td>
+                        <td className="py-2.5 pr-3">
+                          <Link
+                            className="text-xs underline-offset-2 hover:underline"
+                            to={productionRoute(plan.id)}
+                            aria-label={`Production for ${plan.name}`}
+                          >
+                            Production
+                          </Link>
+                        </td>
                         <td className="py-2.5 pl-2 text-right">
                           {renderPlanActions(plan)}
                         </td>
@@ -349,6 +398,27 @@ export default function PlansPage() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function BuildStatusLinks({ id, name }: { id: number; name: string }) {
+  return (
+    <div className="flex flex-wrap gap-3 text-xs">
+      <Link
+        className="underline-offset-2 hover:underline"
+        to={progressRoute(id)}
+        aria-label={`Checkoff for ${name}`}
+      >
+        Checkoff
+      </Link>
+      <Link
+        className="underline-offset-2 hover:underline"
+        to={productionRoute(id)}
+        aria-label={`Production for ${name}`}
+      >
+        Production
+      </Link>
     </div>
   );
 }

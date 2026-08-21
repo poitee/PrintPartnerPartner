@@ -26,10 +26,10 @@ import { Card, CardContent } from "../components/ui/card";
 import { fetchStlNaming, startSync } from "../api/engine";
 import type { StlNamingFolderRule } from "../api/engine";
 import {
+  buildSourcesRoute,
   exportRoute,
-  planRoute,
-  progressRoute,
   libraryRoute,
+  progressRoute,
 } from "../lib/routes";
 import {
   PARTS_CONFLICT_CTA,
@@ -49,7 +49,7 @@ import { resolveEngineState } from "../lib/workflowState";
 
 function hintRoute(hint: string | null | undefined, profileId: number | null) {
   if (hint === "sources") return libraryRoute();
-  if (hint === "build" && profileId != null) return planRoute(profileId);
+  if (hint === "build" && profileId != null) return buildSourcesRoute(profileId);
   return null;
 }
 
@@ -107,7 +107,7 @@ export default function PartsPage() {
   const planName =
     profiles.find((p) => p.id === selectedProfileId)?.name ??
     review?.plan_name ??
-    "Parts";
+    "Plan";
 
   const blockers = useMemo(
     () =>
@@ -163,14 +163,14 @@ export default function PartsPage() {
     <div className="space-y-4">
       <RouteBreadcrumbs
         items={[
-          { label: "Plan", to: planRoute(selectedProfileId) },
-          { label: "Parts" },
+          { label: "Sources", to: buildSourcesRoute(selectedProfileId) },
+          { label: "Plan" },
         ]}
       />
       <PageHeader
         icon={Package}
         accent
-        title="Parts"
+        title="Plan"
         description={
           summaryLine ??
           "Validate parts, edit quantities, and export when ready."
@@ -194,7 +194,7 @@ export default function PartsPage() {
               <Link to={progressRoute(selectedProfileId)}>Progress</Link>
             </Button>
             <Button className="min-h-10 w-full sm:w-auto" asChild>
-              <Link to={exportRoute(selectedProfileId)}>Export hub</Link>
+              <Link to={exportRoute(selectedProfileId)}>Production</Link>
             </Button>
           </PageHeaderActions>
         }
@@ -205,7 +205,7 @@ export default function PartsPage() {
       {selectedProfile && (
         <PlanFreshnessNotice
           freshness={selectedProfile.freshness}
-          action={{ kind: "review", href: planRoute(selectedProfileId) }}
+          action={{ kind: "review", href: buildSourcesRoute(selectedProfileId) }}
         />
       )}
 
@@ -267,7 +267,7 @@ export default function PartsPage() {
                       ))}
                     </ul>
                     <Link
-                      to={planRoute(selectedProfileId)}
+                      to={buildSourcesRoute(selectedProfileId)}
                       className="mt-2 inline-block text-xs text-primary underline"
                     >
                       {PARTS_CONFLICT_CTA}
@@ -380,10 +380,10 @@ export default function PartsPage() {
 
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
-              <Link to={planRoute(selectedProfileId)}>Back to Plan</Link>
+              <Link to={buildSourcesRoute(selectedProfileId)}>Back to Sources</Link>
             </Button>
             <Button className="min-h-10 w-full sm:w-auto" variant="secondary" asChild>
-              <Link to={exportRoute(selectedProfileId)}>Open Export hub</Link>
+              <Link to={exportRoute(selectedProfileId)}>Open Production</Link>
             </Button>
           </div>
         </>

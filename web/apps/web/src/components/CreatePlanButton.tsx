@@ -27,10 +27,10 @@ export default function CreatePlanButton({
       size={size}
       className={cn("shrink-0", className)}
       onClick={openCreatePlan}
-      aria-label="Create plan"
+      aria-label="New Build"
     >
       <Plus className={cn("h-4 w-4", showLabel && !iconOnly && "mr-1.5")} />
-      {showLabel && !iconOnly ? "Create plan" : null}
+      {showLabel && !iconOnly ? "New Build" : null}
     </Button>
   );
 }

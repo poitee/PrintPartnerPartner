@@ -57,7 +57,7 @@ import {
   type UnattributedPrint,
 } from "../api/engine";
 import { useBuildTrackingSettingsQuery } from "../queries/buildTracking";
-import { exportRoute, partsRoute, planRoute } from "../lib/routes";
+import { buildSourcesRoute, exportRoute, planRoute } from "../lib/routes";
 import { groupCheckoffParts } from "../lib/checkoffGroups";
 import {
   checkoffUnitTotals,
@@ -463,7 +463,7 @@ export default function CheckoffPage() {
   const planName =
     profiles.find((p) => p.id === selectedProfileId)?.name ??
     review?.plan_name ??
-    "Progress";
+    "Checkoff";
   const specialRequest =
     profiles.find((p) => p.id === selectedProfileId)?.special_request ?? null;
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
@@ -887,16 +887,16 @@ export default function CheckoffPage() {
       <div className="space-y-4">
         <RouteBreadcrumbs
           items={[
+            { label: "Sources", to: buildSourcesRoute(selectedProfileId) },
             { label: "Plan", to: planRoute(selectedProfileId) },
-            { label: "Parts", to: partsRoute(selectedProfileId) },
-            { label: "Progress" },
+            { label: "Checkoff" },
           ]}
         />
         <PageHeader
           icon={CheckSquare}
           accent
           eyebrow={progressEyebrow}
-          title="Progress"
+          title="Checkoff"
           description={progressDescription}
         />
         {stateContent}
@@ -909,16 +909,16 @@ export default function CheckoffPage() {
       <div className="no-print space-y-4">
         <RouteBreadcrumbs
           items={[
+            { label: "Sources", to: buildSourcesRoute(selectedProfileId) },
             { label: "Plan", to: planRoute(selectedProfileId) },
-            { label: "Parts", to: partsRoute(selectedProfileId) },
-            { label: "Progress" },
+            { label: "Checkoff" },
           ]}
         />
         <PageHeader
           icon={CheckSquare}
           accent
           eyebrow={progressEyebrow}
-          title="Progress"
+          title="Checkoff"
           description={progressDescription}
           actions={
             <PageHeaderActions>
@@ -932,7 +932,7 @@ export default function CheckoffPage() {
                 Print sheet
               </Button>
               <Button className="min-h-10 w-full sm:w-auto" asChild>
-                <Link to={exportRoute(selectedProfileId)}>Export hub</Link>
+                <Link to={exportRoute(selectedProfileId)}>Production</Link>
               </Button>
             </PageHeaderActions>
           }
@@ -947,7 +947,7 @@ export default function CheckoffPage() {
         {selectedProfile && (
           <PlanFreshnessNotice
             freshness={selectedProfile.freshness}
-            action={{ kind: "review", href: planRoute(selectedProfileId) }}
+            action={{ kind: "review", href: buildSourcesRoute(selectedProfileId) }}
           />
         )}
 
@@ -1269,10 +1269,10 @@ export default function CheckoffPage() {
       {review && (
         <div className="no-print flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
-            <Link to={partsRoute(selectedProfileId)}>Back to Parts</Link>
+            <Link to={planRoute(selectedProfileId)}>Back to Plan</Link>
           </Button>
           <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
-            <Link to={exportRoute(selectedProfileId)}>Open Export hub</Link>
+            <Link to={exportRoute(selectedProfileId)}>Open Production</Link>
           </Button>
         </div>
       )}

@@ -11,14 +11,19 @@ export function libraryRoute(): string {
   return "/library";
 }
 
-/** Canonical: Plan (attach sources, picks, roles). */
+/** Canonical: Build Sources (attach sources, picks, roles). */
+export function buildSourcesRoute(profileId?: number | null): string {
+  return withProfile("/sources", profileId ?? null);
+}
+
+/** Canonical: Plan (quantities, warnings, apply). */
 export function planRoute(profileId?: number | null): string {
   return withProfile("/plan", profileId ?? null);
 }
 
-/** Canonical: Parts (validate / quantities). */
+/** @deprecated Prefer `planRoute`. */
 export function partsRoute(profileId?: number | null): string {
-  return withProfile("/parts", profileId ?? null);
+  return planRoute(profileId);
 }
 
 /** Canonical: Progress (print checkoff). */
@@ -26,18 +31,23 @@ export function progressRoute(profileId?: number | null): string {
   return withProfile("/progress", profileId ?? null);
 }
 
-/** Canonical: Export hub. */
+/** Canonical: Production (plates, downloads, printer jobs). */
+export function productionRoute(profileId?: number | null): string {
+  return withProfile("/production", profileId ?? null);
+}
+
+/** @deprecated Prefer `productionRoute`. */
 export function exportRoute(profileId?: number | null): string {
-  return withProfile("/export", profileId ?? null);
+  return productionRoute(profileId);
 }
 
 export function buildsRoute(profileId?: number | null): string {
   return withProfile("/builds", profileId ?? null);
 }
 
-/** Plans list (manage / switch) — not a desk-loop spine step. */
+/** Builds list — alias kept for callers that still say Plans. */
 export function plansRoute(profileId?: number | null): string {
-  return withProfile("/plans", profileId ?? null);
+  return buildsRoute(profileId);
 }
 
 export function settingsRoute(): string {
@@ -61,24 +71,24 @@ export function isPrintersPath(pathname: string): boolean {
   return pathname === "/printers";
 }
 
-/** @deprecated Prefer `libraryRoute` — kept for call-site compatibility. */
+/** Global source registry. Build Sources is `buildSourcesRoute`. */
 export function sourcesRoute(): string {
   return libraryRoute();
 }
 
-/** @deprecated Prefer `planRoute` — kept for call-site compatibility. */
+/** @deprecated Prefer `buildSourcesRoute`. */
 export function buildRoute(profileId?: number | null): string {
+  return buildSourcesRoute(profileId);
+}
+
+/** @deprecated Prefer `planRoute`. */
+export function reviewRoute(profileId?: number | null): string {
   return planRoute(profileId);
 }
 
-/** @deprecated Prefer `partsRoute` — kept for call-site compatibility. */
-export function reviewRoute(profileId?: number | null): string {
-  return partsRoute(profileId);
-}
-
-/** Legacy Kit Studio deep link — redirects to Plan in the router. */
+/** Legacy Kit Studio deep link — redirects to Build Sources. */
 export function planStudioRoute(planId: number): string {
-  return planRoute(planId);
+  return buildSourcesRoute(planId);
 }
 
 export function isKitStudioPath(pathname: string): boolean {
@@ -86,28 +96,34 @@ export function isKitStudioPath(pathname: string): boolean {
 }
 
 export function isLibraryPath(pathname: string): boolean {
-  return pathname === "/library" || pathname === "/sources";
+  return pathname === "/library";
 }
 
-/** Plan stage (`/plan`); also matches legacy `/build`. */
+/** Build Sources (`/sources`); also matches legacy `/build`. */
+export function isSourcesPath(pathname: string): boolean {
+  return pathname === "/sources" || pathname === "/build";
+}
+
+/** @deprecated Prefer `isSourcesPath`. */
 export function isBuildPath(pathname: string): boolean {
-  return pathname === "/plan" || pathname === "/build";
+  return isSourcesPath(pathname);
 }
 
+/** Plan destination (`/plan`); also matches legacy `/parts` and `/review`. */
 export function isPlanPath(pathname: string): boolean {
-  return isBuildPath(pathname);
+  return pathname === "/plan" || pathname === "/parts" || pathname === "/review";
 }
 
 export function isBuildsPath(pathname: string): boolean {
-  return pathname === "/builds";
+  return pathname === "/builds" || pathname === "/plans";
 }
 
 export function isPlansPath(pathname: string): boolean {
-  return pathname === "/plans";
+  return isBuildsPath(pathname);
 }
 
 export function isPartsPath(pathname: string): boolean {
-  return pathname === "/parts" || pathname === "/review";
+  return isPlanPath(pathname);
 }
 
 export function isProgressPath(pathname: string): boolean {
@@ -115,7 +131,7 @@ export function isProgressPath(pathname: string): boolean {
 }
 
 export function isExportPath(pathname: string): boolean {
-  return pathname === "/export";
+  return pathname === "/export" || pathname === "/production";
 }
 
 /**
@@ -139,6 +155,7 @@ export function checkoffRoute(profileId?: number | null): string {
 export function isPlanWorkflowPath(pathname: string): boolean {
   return (
     isLibraryPath(pathname) ||
+    isSourcesPath(pathname) ||
     isPlanPath(pathname) ||
     isBuildsPath(pathname) ||
     isPlansPath(pathname) ||

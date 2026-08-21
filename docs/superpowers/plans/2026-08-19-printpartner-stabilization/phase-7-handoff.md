@@ -60,8 +60,16 @@ The Phase 7 exit assertion is:
 > No production command can change accepted Plan requirements or the Required-unit set except `applyPlanChanges`.
 
 The production inventory in `plan-draft-cutover-inventory.test.ts` pins that
-assertion. Resume at Phase 8 site structure when starting the next stabilization
-slice.
+assertion. Phase 8 site structure is in progress on `feat/phase8-site-structure`.
+The first route unit landed locally: Builds is home, global nav is Builds /
+Production / Printers / Settings, and Build destinations are Sources, Plan,
+Checkoff, and Production. Parts and Export remain as page owners behind those
+routes until their callers migrate. Resume there rather than redoing Phase 7.
+
+The second route unit assigned canonical URLs: Build Sources is `/sources`,
+Plan is `/plan` (the former Parts page), and `/parts` redirects to `/plan`.
+The global source registry stays at `/library`. Next: migrate remaining Parts
+copy into Plan, then split Build Production from global Production.
 
 ## Resume procedure
 
