@@ -403,6 +403,44 @@ thumbnail cache state. Migrating only its Part rows would preserve a misleading
 mixed-version result. Unit 5b2b must define and verify the accepted artifact and
 media boundary before changing that caller.
 
+The Unit 5b2b foundation separates cheap accepted artifact observation from
+verified byte access. Observation checks stored-root containment, portable
+case resolution, ambiguous folds, symlinks, regular nonempty file state,
+presence, and an optional size bound without hashing. Verified access opens one
+descriptor, hashes that descriptor against the accepted SHA-256 digest, and
+returns a lease that streams only the hashed byte extent from the same
+descriptor. Bytes appended after hashing are not served. Legacy and untracked
+evidence remains explicitly unavailable.
+
+Accepted derivative cache identity is the full SHA-256 of the accepted artifact
+digest, normalized accepted role and color, derivative variant, and cache
+format. PNG cache reads reject paths outside the configured cache, symlinks,
+non-files, invalid signatures, and files above the 5 MiB bound. Writes validate
+before creating the cache directory, use a mode 0600 exclusive temporary file,
+flush it, and rename it atomically in the target directory.
+
+Cache verification forces a publication failure after temporary-file creation,
+then proves the prior target survives and the temporary file is removed. A
+bounded concurrent process test uses an explicit publication handshake and
+proves readers observe both complete old and complete new PNG bytes, with no
+missing or partial value. Cache reads retry descriptor identity, size, mtime,
+ctime, and post-lstat open rename-window races at most eight times. Permanent
+missing, unsafe, oversized, invalid-signature, and stable I/O outcomes return
+after one attempt.
+
+This foundation changes no route, Review response, browser API, contract,
+database schema, database state, or existing behavior. A production-tree
+inventory pins callers of the known accepted-reader, Review, Part-path,
+thumbnail-cache, cache-clearing, and Source-thumbnail gateway symbols. It is a
+migration checklist, not proof that arbitrary future filesystem code cannot
+bypass those gateways. Portable Node filesystem APIs cannot eliminate a
+hostile intermediate-directory replacement race, so the verifier still
+depends on the application-owned, append-only Source snapshot invariant. The
+focused foundation suite passed 29 tests with one Linux-only case-fold test
+skipped on case-insensitive macOS. The full server suite passed 148 files and
+1125 tests, with one file and three tests skipped. Server typecheck and root
+lint also passed.
+
 ## Module shape
 
 ```ts
