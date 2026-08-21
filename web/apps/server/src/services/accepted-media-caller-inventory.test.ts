@@ -114,7 +114,7 @@ describe("known accepted media production caller inventory", () => {
       clearPartThumbnailCacheAtHexes: ["routes/plans.ts"],
       readAcceptedPlanReview: ["assistant/tools.ts", "routes/plans.ts"],
       observeAcceptedArtifact: ["services/accepted-plan-review.ts"],
-      openVerifiedAcceptedArtifact: ["routes/parts.ts"],
+      openVerifiedAcceptedArtifact: ["routes/parts.ts", "services/accepted-plate-3mf.ts"],
       acceptedMediaBasis: ["services/accepted-part-media.ts"],
       readAcceptedMediaPng: ["routes/parts.ts"],
       observeAcceptedMediaPng: ["services/accepted-plan-review.ts"],

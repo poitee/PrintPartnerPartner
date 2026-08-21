@@ -756,10 +756,9 @@ Build exists. Build deletion cascades the complete ownership graph. Plan Apply
 deletes only the current Plate head inside its publication transaction, leaving
 historical Plate revisions intact for audit.
 
-This slice changes no route, browser, or 3MF behavior. The next internal slice
-will generate deterministic 3MF bytes from the same accepted Plate revision and
-verified accepted artifact descriptors. It will not repack, read mutable fleet
-state, infer filament, or derive Object names from filenames.
+This slice changes no route, browser, or 3MF behavior. The accepted 3MF
+generator described below is also internal. Route, browser, job, and slicer
+handoff cutover remain a later release unit.
 
 Focused Plate, schema, Apply, and migration coverage passed 142 tests. The full
 server suite passed 164 files with one file skipped, 1304 tests passed, and 3
@@ -767,6 +766,47 @@ tests skipped. Server typecheck, root lint, independent review, the no-comments
 scan, and the diff check passed. PostgreSQL coverage verifies declaration and
 DDL parity, ownership and immutability trigger presence, query-free repository
 refusal, and cascade relationships. No live PostgreSQL server was available.
+
+## Accepted Plate 3MF generation
+
+Accepted Plate export resolves one immutable Plate revision and its accepted
+Plan artifacts in one SQLite deferred snapshot. It then opens each distinct
+tracked artifact through the verified descriptor lease, parses those bytes
+directly, and generates one minimal core 3MF for every durable Plate. It does
+not reopen mutable paths, repack geometry, read printer fleet or filament state,
+or use compatibility Parts, filenames, match keys, or legacy print-plan JSON.
+
+Each 3MF Object name is the accepted Required-unit Object name. The Object and
+build-item part numbers are the Required-unit token. Vertex coordinates place
+the verified mesh minimum at the stored integer-micrometre X/Y position and at
+Z zero. Before encoding, the generator rounds the verified mesh AABB to the
+nearest micrometre, requires an exact match with the stored footprint, and
+independently rechecks captured margin and XYZ build volume. A mismatch fails
+the whole operation with the affected token.
+
+Accepted STL parsing is stricter than the legacy loader. Exact-size binary STL
+is recognized before ASCII and binary trailing bytes are rejected. ASCII must
+contain a complete `solid` document made only of complete facet blocks;
+geometry is extracted only from the validated facet body. The legacy parser
+remains unchanged for existing callers.
+
+The manifest and inner and outer ZIP files are deterministic. ZIP timestamps
+use the earliest portable DOS local-calendar date because fflate rejects Unix
+epoch dates and reads local calendar fields. Limits cover per-artifact bytes,
+cumulative source bytes, Required-unit Objects, repeated triangles, Plate
+count, and total output bytes. Accepted Plate storage and export share a hard
+ceiling of 65,534 Plates, reserving one classic ZIP entry for `manifest.json`.
+The base output limit is checked before an optional bundle is allocated.
+
+The real integration proof activates a tracked Source revision, creates and
+applies a Plan, publishes a durable Plate, resolves the accepted artifact, and
+unzips the generated 3MF to verify token, Object name, artifact digest, and
+exact XYZ placement. Parser injection, geometry mismatch, artifact replacement
+and append races, deterministic bytes, every limit boundary, stale accepted
+state, PostgreSQL query-free refusal, and forbidden legacy imports are covered.
+The full domain suite passed 19 files and 147 tests. The full server suite
+passed 165 files with one file skipped, 1331 tests passed, and 3 tests skipped.
+Both typechecks, root lint, independent review, and diff checks passed.
 
 ## Module shape
 

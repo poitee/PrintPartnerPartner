@@ -5,6 +5,7 @@ import type Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
+import { MAX_ACCEPTED_PLATES } from "@print-partner/domain";
 import { acceptedPlanBasis } from "./accepted-plan-progress.js";
 import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
 import { AcceptedPlateIntegrityError } from "./accepted-plates.js";
@@ -200,6 +201,60 @@ describe("accepted Plate repository", () => {
     ]);
   });
 
+  it("resolves one immutable export input with accepted artifacts and stored ordinal order", () => {
+    const { repo, profile, accepted, required } = fixture();
+    const first = plateInput(required.map((unit) => unit.token))[0]!;
+    const published = repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: null,
+      plates: [
+        { ...first, plateId: "z-first" },
+        { ...first, plateId: "a-second", units: [] },
+      ],
+    });
+    if (published.kind !== "published") throw new Error("Plate publish failed");
+
+    const resolved = repo.readAcceptedPlateExportInput(profile.id);
+    expect(resolved.kind).toBe("ready");
+    if (resolved.kind !== "ready") throw new Error("Plate export input failed");
+    expect(resolved.input).toMatchObject({
+      basis: acceptedPlanBasis(accepted),
+      plateRevisionId: published.plateRevisionId,
+      plateRevisionNumber: 1,
+      plates: [
+        {
+          plateId: "z-first",
+          ordinal: 1,
+          printerId: "printer-core-one",
+          printerName: "Core One",
+          printerModel: "Prusa Core One",
+          bedWidthUm: 250_000,
+          bedDepthUm: 220_000,
+          bedHeightUm: 220_000,
+          marginUm: 5_000,
+          units: [
+            { widthUm: 50_000, depthUm: 40_000, heightUm: 30_000, artifact: { kind: "unavailable", reason: "legacy" } },
+            { widthUm: 50_000, depthUm: 40_000, heightUm: 30_000, artifact: { kind: "unavailable", reason: "legacy" } },
+          ],
+        },
+        { plateId: "a-second", ordinal: 2, units: [] },
+      ],
+    });
+    expect(resolved.input.layoutDigest).toMatch(/^[a-f0-9]{64}$/);
+
+    expect(repo.moveAcceptedPlateUnit({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: published.plateRevisionId,
+      plateId: "z-first",
+      token: required[0]!.token,
+      xUm: 6_000,
+      yUm: 5_000,
+    })).toMatchObject({ kind: "moved" });
+    expect(resolved.input.plates[0]!.units[0]!.xUm).toBe(5_000);
+  });
+
   it("makes exact publication retries idempotent and stale changes compare-and-swap", () => {
     const { repo, raw, profile, accepted, required } = fixture();
     const basis = acceptedPlanBasis(accepted);
@@ -263,6 +318,47 @@ describe("accepted Plate repository", () => {
       expect(acceptedPlateRows(raw)).toEqual(before);
     }
   });
+
+  it("rejects one Plate beyond the classic ZIP-safe publication ceiling without writes", () => {
+    const { repo, raw, profile, accepted, required } = fixture();
+    const base = plateInput(required.map((unit) => unit.token))[0]!;
+    const before = acceptedPlateRows(raw);
+    const plates = Array.from({ length: MAX_ACCEPTED_PLATES + 1 }, (_, index) => ({
+      ...base,
+      plateId: `plate-${index + 1}`,
+      units: index === 0 ? base.units : [],
+    }));
+    expect(repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: null,
+      plates,
+    })).toEqual({ kind: "invalid_units" });
+    expect(acceptedPlateRows(raw)).toEqual(before);
+  });
+
+  it("admits the exact ZIP-safe Plate count to publication while rolling back an injected stop", () => {
+    const { repo, raw, profile, accepted, required } = fixture();
+    const base = plateInput(required.map((unit) => unit.token))[0]!;
+    const before = acceptedPlateRows(raw);
+    raw.exec(`CREATE TRIGGER stop_boundary_plate_publication
+      BEFORE INSERT ON accepted_plate_revisions
+      BEGIN
+        SELECT RAISE(ABORT, 'injected boundary stop');
+      END`);
+    const plates = Array.from({ length: MAX_ACCEPTED_PLATES }, (_, index) => ({
+      ...base,
+      plateId: `boundary-${index + 1}`,
+      units: index === 0 ? base.units : [],
+    }));
+    expect(() => repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: null,
+      plates,
+    })).toThrow(/injected boundary stop/i);
+    expect(acceptedPlateRows(raw)).toEqual(before);
+  }, 20_000);
 
   it("blocks direct immutable history deletion while the Build exists", () => {
     const { repo, raw, profile, accepted, required } = fixture();
@@ -628,6 +724,7 @@ describe("accepted Plate repository", () => {
     };
     try {
       expect(repo.readAcceptedPlates(1)).toEqual({ kind: "transaction_unavailable" });
+      expect(repo.readAcceptedPlateExportInput(1)).toEqual({ kind: "transaction_unavailable" });
       expect(repo.publishAcceptedPlates({ profileId: 1, expected, expectedPlateRevisionId: null, plates: [] })).toEqual({
         kind: "transaction_unavailable",
       });

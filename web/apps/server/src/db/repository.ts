@@ -197,7 +197,9 @@ import {
 import {
   moveAcceptedPlateUnitInternal,
   publishAcceptedPlatesInternal,
+  readAcceptedPlateExportInputInternal,
   readAcceptedPlatesInternal,
+  type ReadAcceptedPlateExportInputResult,
   type MoveAcceptedPlateUnitCommand,
   type MoveAcceptedPlateUnitResult,
   type PublishAcceptedPlatesCommand,
@@ -1016,6 +1018,10 @@ export class AppRepository {
 
   readAcceptedPlates(profileId: number): ReadAcceptedPlatesResult {
     return readAcceptedPlatesInternal(this.acceptedPlateDependencies(), profileId);
+  }
+
+  readAcceptedPlateExportInput(profileId: number): ReadAcceptedPlateExportInputResult {
+    return readAcceptedPlateExportInputInternal(this.acceptedPlateDependencies(), profileId);
   }
 
   publishAcceptedPlates(command: PublishAcceptedPlatesCommand): PublishAcceptedPlatesResult {

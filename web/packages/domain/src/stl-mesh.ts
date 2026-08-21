@@ -7,6 +7,23 @@ export type StlMesh = {
   bounds: StlBounds;
 };
 
+export type StlMeshDimensionsUm = Readonly<{
+  widthUm: number;
+  depthUm: number;
+  heightUm: number;
+}>;
+
+export function stlMeshDimensionsUm(mesh: StlMesh): StlMeshDimensionsUm | null {
+  const dimensions = {
+    widthUm: Math.round(mesh.bounds.widthMm * 1_000),
+    depthUm: Math.round(mesh.bounds.depthMm * 1_000),
+    heightUm: Math.round(mesh.bounds.heightMm * 1_000),
+  };
+  return Object.values(dimensions).every((value) => Number.isSafeInteger(value) && value > 0)
+    ? dimensions
+    : null;
+}
+
 function parseAsciiStlMesh(text: string): StlMesh | null {
   const vertices: Array<[number, number, number]> = [];
   const faces: Array<[number, number, number]> = [];
@@ -84,14 +101,48 @@ function parseBinaryStlMesh(buf: Buffer): StlMesh | null {
   return { vertices, faces, bounds: readStlBoundsFromVertices(vertices) };
 }
 
-export function loadStlMesh(stlPath: string): StlMesh | null {
-  const buf = readFileSync(stlPath);
+function exactBinaryStlSize(buf: Buffer): number | null {
+  if (buf.length < 84) return null;
+  const triangles = buf.readUInt32LE(80);
+  const size = 84 + triangles * 50;
+  return Number.isSafeInteger(size) && size === buf.length ? size : null;
+}
+
+function parseStrictAsciiStlMesh(buf: Buffer): StlMesh | null {
+  const text = buf.toString("utf8").trim();
+  const document = /^solid[^\r\n]*(?:\r?\n)([\s\S]*?)(?:\r?\n)endsolid[^\r\n]*$/.exec(text);
+  if (!document) return null;
+  const number = "[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?";
+  const facet = new RegExp(
+    `facet\\s+normal\\s+${number}\\s+${number}\\s+${number}\\s+outer\\s+loop\\s+` +
+      `vertex\\s+${number}\\s+${number}\\s+${number}\\s+` +
+      `vertex\\s+${number}\\s+${number}\\s+${number}\\s+` +
+      `vertex\\s+${number}\\s+${number}\\s+${number}\\s+endloop\\s+endfacet`,
+    "g",
+  );
+  const body = document[1]!;
+  if (body.replace(facet, "").trim().length !== 0) return null;
+  return parseAsciiStlMesh(`solid accepted\n${body}\nendsolid accepted`);
+}
+
+export function parseStlMesh(bytes: Uint8Array): StlMesh | null {
+  const buf = Buffer.from(bytes);
   const header = buf.subarray(0, 80).toString("utf8", 0, 80).trim().toLowerCase();
   if (header.startsWith("solid")) {
     const ascii = parseAsciiStlMesh(buf.toString("utf8"));
     if (ascii) return ascii;
   }
   return parseBinaryStlMesh(buf);
+}
+
+export function parseAcceptedStlMesh(bytes: Uint8Array): StlMesh | null {
+  const buf = Buffer.from(bytes);
+  if (exactBinaryStlSize(buf) != null) return parseBinaryStlMesh(buf);
+  return parseStrictAsciiStlMesh(buf);
+}
+
+export function loadStlMesh(stlPath: string): StlMesh | null {
+  return parseStlMesh(readFileSync(stlPath));
 }
 
 export function translateMesh(

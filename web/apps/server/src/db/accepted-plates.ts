@@ -1,13 +1,15 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { createHash } from "node:crypto";
+import { MAX_ACCEPTED_PLATES } from "@print-partner/domain";
 import type { DrizzleDb } from "./client.js";
 import * as defaultSchema from "./schema.js";
 import {
   readAcceptedPlanOperationalSnapshotInternal,
+  type AcceptedOperationalArtifact,
   type AcceptedPlanOperationalSnapshot,
 } from "./accepted-plan-operational.js";
 import { acceptedPlanBasis, type AcceptedPlanBasis } from "./accepted-plan-progress.js";
-import { parseRequiredUnitToken } from "../services/required-units.js";
+import { parseRequiredUnitToken, type RequiredUnitToken } from "../services/required-units.js";
 
 export const MAX_ACCEPTED_PLATE_UM = 2_147_483_647;
 export const ACCEPTED_PLATE_LAYOUT_FORMAT = 1;
@@ -110,6 +112,42 @@ export type ReadAcceptedPlatesResult =
     }
   | { readonly kind: "empty_plan" }
   | { readonly kind: "stale_accepted_plan" }
+  | { readonly kind: "accepted_state_unavailable"; readonly reason: "compatibility_dirty" | "uninitialized" }
+  | { readonly kind: "transaction_unavailable" };
+
+export type AcceptedPlateExportUnit = Readonly<{
+  token: RequiredUnitToken;
+  objectName: string;
+  xUm: number;
+  yUm: number;
+  widthUm: number;
+  depthUm: number;
+  heightUm: number;
+  artifact: AcceptedOperationalArtifact;
+}>;
+
+export type AcceptedPlateExportInput = Readonly<{
+  basis: AcceptedPlanBasis;
+  plateRevisionId: number;
+  plateRevisionNumber: number;
+  layoutDigest: string;
+  plates: readonly Readonly<{
+    plateId: string;
+    ordinal: number;
+    printerId: string;
+    printerName: string;
+    printerModel: string;
+    bedWidthUm: number;
+    bedDepthUm: number;
+    bedHeightUm: number;
+    marginUm: number;
+    units: readonly AcceptedPlateExportUnit[];
+  }>[];
+}>;
+
+export type ReadAcceptedPlateExportInputResult =
+  | { readonly kind: "ready"; readonly input: AcceptedPlateExportInput }
+  | { readonly kind: "empty_plan" | "plates_not_published" | "stale_accepted_plan" }
   | { readonly kind: "accepted_state_unavailable"; readonly reason: "compatibility_dirty" | "uninitialized" }
   | { readonly kind: "transaction_unavailable" };
 
@@ -220,7 +258,11 @@ function validatePlates(
   plates: readonly AcceptedPlateInput[],
   expectedTokens: ReadonlySet<string>,
 ): { readonly kind: "ready"; readonly plates: readonly ValidatedPlate[] } | AcceptedPlateFailure {
-  if (plates.length === 0 || expectedTokens.size === 0) return { kind: "invalid_units" };
+  if (
+    plates.length === 0 ||
+    plates.length > MAX_ACCEPTED_PLATES ||
+    expectedTokens.size === 0
+  ) return { kind: "invalid_units" };
   const seenPlates = new Set<string>();
   const seenTokens = new Set<string>();
   const normalized: ValidatedPlate[] = [];
@@ -461,12 +503,22 @@ function readStoredPlates(
   return validated.plates;
 }
 
-export function readAcceptedPlatesInternal(
+type AcceptedPlateStateResult =
+  | {
+      readonly kind: "ready";
+      readonly basis: AcceptedPlanBasis;
+      readonly snapshot: AcceptedPlanOperationalSnapshot;
+      readonly plateRevisionId: number;
+      readonly plateRevisionNumber: number;
+      readonly layoutDigest: string;
+      readonly plates: readonly AcceptedPlate[];
+    }
+  | Exclude<ReadAcceptedPlatesResult, { readonly kind: "ready" }>;
+
+function readAcceptedPlateState(
   dependencies: AcceptedPlateDependencies,
   profileId: number,
-): ReadAcceptedPlatesResult {
-  if (!dependencies.sqlite) return { kind: "transaction_unavailable" };
-  return dependencies.readTransaction(() => {
+): AcceptedPlateStateResult {
     if (!visibleProfile(dependencies, profileId)) return { kind: "empty_plan" };
     const accepted = readAcceptedPlanOperationalSnapshotInternal({
       db: dependencies.db,
@@ -533,8 +585,10 @@ export function readAcceptedPlatesInternal(
     return {
       kind: "ready",
       basis,
+      snapshot: accepted.snapshot,
       plateRevisionId: revision.id,
       plateRevisionNumber: revision.revisionNumber,
+      layoutDigest: revision.layoutDigest,
       plates: stored.map((plate) => ({
         ...plate,
         units: plate.units.map((unit) => {
@@ -543,6 +597,71 @@ export function readAcceptedPlatesInternal(
           return { ...unit, objectName };
         }),
       })),
+    };
+}
+
+export function readAcceptedPlatesInternal(
+  dependencies: AcceptedPlateDependencies,
+  profileId: number,
+): ReadAcceptedPlatesResult {
+  if (!dependencies.sqlite) return { kind: "transaction_unavailable" };
+  return dependencies.readTransaction(() => {
+    const state = readAcceptedPlateState(dependencies, profileId);
+    if (state.kind !== "ready") return state;
+    const { snapshot: _snapshot, layoutDigest: _layoutDigest, ...result } = state;
+    return result;
+  });
+}
+
+export function readAcceptedPlateExportInputInternal(
+  dependencies: AcceptedPlateDependencies,
+  profileId: number,
+): ReadAcceptedPlateExportInputResult {
+  if (!dependencies.sqlite) return { kind: "transaction_unavailable" };
+  return dependencies.readTransaction(() => {
+    const state = readAcceptedPlateState(dependencies, profileId);
+    if (state.kind === "empty") return { kind: "plates_not_published" };
+    if (state.kind !== "ready") return state;
+    const artifactByToken = new Map<string, AcceptedOperationalArtifact>();
+    for (const part of state.snapshot.parts) {
+      if (!part.included) continue;
+      for (const unit of part.units) {
+        if (unit.required) artifactByToken.set(unit.token, part.artifact);
+      }
+    }
+    return {
+      kind: "ready",
+      input: {
+        basis: state.basis,
+        plateRevisionId: state.plateRevisionId,
+        plateRevisionNumber: state.plateRevisionNumber,
+        layoutDigest: state.layoutDigest,
+        plates: state.plates.map((plate) => ({
+          plateId: plate.plateId,
+          ordinal: plate.ordinal,
+          printerId: plate.printerId,
+          printerName: plate.printerName,
+          printerModel: plate.printerModel,
+          bedWidthUm: plate.bedWidthUm,
+          bedDepthUm: plate.bedDepthUm,
+          bedHeightUm: plate.bedHeightUm,
+          marginUm: plate.marginUm,
+          units: plate.units.map((unit) => {
+            const artifact = artifactByToken.get(unit.token);
+            if (!artifact) throw new AcceptedPlateIntegrityError("layout");
+            return {
+              token: parseRequiredUnitToken(unit.token),
+              objectName: unit.objectName,
+              xUm: unit.xUm,
+              yUm: unit.yUm,
+              widthUm: unit.widthUm,
+              depthUm: unit.depthUm,
+              heightUm: unit.heightUm,
+              artifact,
+            };
+          }),
+        })),
+      },
     };
   });
 }
