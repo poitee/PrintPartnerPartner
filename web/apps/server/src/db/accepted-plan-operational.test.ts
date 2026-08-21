@@ -601,11 +601,6 @@ describe("accepted Plan operational snapshot", () => {
     expect(context.repo.getCheckoff(profile.id).parts).toMatchObject([
       { print_units: [false, false], printed_count: 0 },
     ]);
-    expect(context.repo.getPartAssembled(partId)).toEqual({
-      part_id: partId,
-      assembled_count: 0,
-      assembled_units: [false, false],
-    });
     expect(context.raw.prepare("SELECT * FROM print_progress ORDER BY id").all()).toEqual(before);
 
     expect(context.repo.patchPartProgress(partId, 0, true)).toMatchObject({
@@ -637,11 +632,10 @@ describe("accepted Plan operational snapshot", () => {
     expect(source.match(callPattern)).toHaveLength(4);
     expect(body("ensureProgressForPart(", "printUnitsByPartId(")).toMatch(callPattern);
     expect(body("patchPartProgress(", "patchPartAssembled(")).toMatch(callPattern);
-    expect(body("patchPartAssembled(", "getPartAssembled(")).toMatch(callPattern);
+    expect(body("patchPartAssembled(", "patchPart(\n")).toMatch(callPattern);
     expect(body("patchPart(\n", "buildMergePartsForProfile(")).toMatch(callPattern);
     expect(body("getEnrichedPartsForReview(", "getCheckoff(")).not.toMatch(callPattern);
     expect(body("getCheckoff(", "patchPartProgress(")).not.toMatch(callPattern);
-    expect(body("getPartAssembled(", "patchPart(\n")).not.toMatch(callPattern);
   });
 
   it("keeps WAL instrumentation and the raw loader out of the production API", () => {
@@ -1216,7 +1210,6 @@ describe("accepted Plan operational snapshot", () => {
     try {
       expect(repo.getEnrichedPartsForReview(1, false)).toEqual([]);
       expect(repo.getCheckoff(1)).toMatchObject({ profile_id: 1, parts: [] });
-      expect(() => repo.getPartAssembled(1)).toThrowError("Part not found");
       expect(statements.length).toBeGreaterThan(0);
       expect(statements.every((statement) => /^select\b/i.test(statement.trim()))).toBe(true);
     } finally {

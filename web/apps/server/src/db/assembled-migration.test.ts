@@ -6,6 +6,17 @@ import { join } from "node:path";
 import { SqliteDatabase, getDb } from "./client.js";
 import { AppRepository } from "./repository.js";
 
+function assembledForPart(repo: AppRepository, profileId: number, partId: number) {
+  const part = repo
+    .getEnrichedPartsForReview(profileId, true)
+    .find((candidate) => candidate.id === partId);
+  if (!part) throw new Error("test Part is missing");
+  return {
+    assembled_count: part.assembled_units.filter(Boolean).length,
+    assembled_units: part.assembled_units,
+  };
+}
+
 /**
  * Migration coverage for print_progress.assembled (assembly tracking).
  *
@@ -96,22 +107,28 @@ describe("print_progress.assembled migration", () => {
       const partId = repo.getCheckoff(plan.id).parts[0].id;
 
       // New rows default to false via the read accessor.
-      expect(repo.getPartAssembled(partId)).toMatchObject({ assembled_count: 0, assembled_units: [false] });
+      expect(assembledForPart(repo, plan.id, partId)).toMatchObject({
+        assembled_count: 0,
+        assembled_units: [false],
+      });
 
       // Write accessor is gated on the unit being printed first.
       repo.patchPartAssembled(partId, 0, true);
-      expect(repo.getPartAssembled(partId).assembled_units).toEqual([false]);
+      expect(assembledForPart(repo, plan.id, partId).assembled_units).toEqual([false]);
 
       repo.patchPartProgress(partId, 0, true);
       repo.patchPartAssembled(partId, 0, true);
-      expect(repo.getPartAssembled(partId)).toMatchObject({ assembled_count: 1, assembled_units: [true] });
+      expect(assembledForPart(repo, plan.id, partId)).toMatchObject({
+        assembled_count: 1,
+        assembled_units: [true],
+      });
 
       // The flag persists across a reconnect (it is really on disk, not in memory).
       sqlite.close();
       const reopened = new SqliteDatabase(dir);
       reopened.connect();
       const repo2 = new AppRepository(getDb(reopened), undefined, reopened.reposDir);
-      expect(repo2.getPartAssembled(partId).assembled_units).toEqual([true]);
+      expect(assembledForPart(repo2, plan.id, partId).assembled_units).toEqual([true]);
       reopened.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

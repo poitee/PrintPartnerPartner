@@ -76,7 +76,6 @@ describe("Phase 6 tenant isolation", () => {
       expect(() => repo.patchPart(partId, { included: false })).toThrow("Part not found");
       expect(() => repo.patchPartProgress(partId, 0, false)).toThrow("Part not found");
       expect(() => repo.patchPartAssembled(partId, 0, false)).toThrow("Part not found");
-      expect(() => repo.getPartAssembled(partId)).toThrow("Part not found");
       expect(() => repo.listParts(profileId)).toThrow("Profile not found");
       expect(() => repo.recomputeProfile(profileId)).toThrow("Profile not found");
       expect(() => repo.buildMergePartsForProfile(profileId)).toThrow("Profile not found");
@@ -95,7 +94,7 @@ describe("Phase 6 tenant isolation", () => {
     tenantStorage.run("tenant-a", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
       expect(repo.getPartRow(partId)?.included).toBe(true);
-      expect(repo.getPartAssembled(partId).assembled_units).toEqual([true]);
+      expect(repo.getEnrichedPartsForReview(profileId, false)[0]?.assembled_units).toEqual([true]);
       expect(repo.getCheckoff(profileId).parts[0]?.print_units).toEqual([true]);
     });
 

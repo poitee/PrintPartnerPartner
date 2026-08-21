@@ -7091,19 +7091,6 @@ export class AppRepository {
     return this.transaction(mutate, "immediate");
   }
 
-  /** Read accessor: the assembled state of every unit of a single part. */
-  getPartAssembled(partId: number) {
-    const part = this.requirePart(partId);
-    const qty = Math.max(1, part.quantityEffective);
-    const rows = this.progressRowsForPart(partId);
-    const assembledUnits = getAssembledUnits(rows, qty);
-    return {
-      part_id: partId,
-      assembled_count: assembledUnits.filter(Boolean).length,
-      assembled_units: assembledUnits,
-    };
-  }
-
   patchPart(
     partId: number,
     patch: {

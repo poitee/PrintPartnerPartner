@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,6 +11,8 @@ import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { buildStlTreePayload, progressSummary } from "@print-partner/domain";
 import { exportProfileStlPack, exportStlPackJobMessage, STL_EXPORT_MISSING_HINT } from "./services/export-stl-pack.js";
 import { buildPlanReview } from "./services/plan-review.js";
+import { backfillAcceptedPlanRevisions } from "./db/accepted-plan-revisions.js";
+import { backfillCurrentRequiredUnitSets } from "./db/required-units.js";
 
 describe("Phase 3 APIs", () => {
   it("builds STL tree from repo folder", () => {
@@ -125,6 +128,14 @@ describe("Phase 3 APIs", () => {
     // Same round trip through the actual HTTP endpoint used by the frontend,
     // to prove the route is wired end-to-end and doesn't break the existing
     // /parts/:id/progress contract alongside it.
+    const raw = new Database(join(dir, "print-partner.db"));
+    raw.pragma("foreign_keys = ON");
+    backfillAcceptedPlanRevisions(raw, "2026-08-21T06:00:00.000Z");
+    backfillCurrentRequiredUnitSets(raw, {
+      now: () => "2026-08-21T06:01:00.000Z",
+      tokenFactory: () => "ppu_00000000000000000000000000000001",
+    });
+    raw.close();
     const config = loadConfig();
     const ports = createSelfHostPorts(dir);
     await ports.db.connect();

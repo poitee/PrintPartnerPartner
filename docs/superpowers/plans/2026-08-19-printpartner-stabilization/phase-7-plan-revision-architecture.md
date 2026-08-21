@@ -379,6 +379,30 @@ response remains below its 8 MiB limit. Legacy repaired revisions are ready
 with unavailable artifact evidence. Historical format-1 input snapshots remain
 uninitialized. Unit 5b1 does not migrate routes or other production callers.
 
+Unit 5b2a moves the Checkoff sheet and Part assembled reads onto the accepted
+operational aggregate. Each request that resolves its Plan or Part performs one
+verified accepted read, then a pure projection preserves the existing response
+shape, including catalog, custom, and Spoolman filament display fields.
+Checkoff includes accepted Parts only and sorts filenames with SQLite binary
+ordering. The Part route uses its compatibility ID only to locate the Build and
+match the accepted projection coordinate. It no longer reads assembled state
+through a separate repository path.
+
+Compatibility-dirty and uninitialized Plans return stable conflict responses.
+Accepted integrity failures return a stable public error while logs retain only
+the coarse integrity code, Plan ID, and requested Part ID when applicable.
+Unexpected lookup and read failures also return a stable public error without
+exposing internal details. The old
+`getPartAssembled` repository method is deleted. The only remaining direct
+Checkoff reads are the two assistant callers, and the only remaining enriched
+Review read belongs to the Plan Review service.
+
+Plan Review moves in Unit 5b2b. Its current response mixes accepted planning
+facts with working Source labels, naming rules, STL filesystem existence, and
+thumbnail cache state. Migrating only its Part rows would preserve a misleading
+mixed-version result. Unit 5b2b must define and verify the accepted artifact and
+media boundary before changing that caller.
+
 ## Module shape
 
 ```ts

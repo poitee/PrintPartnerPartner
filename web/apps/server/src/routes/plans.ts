@@ -10,6 +10,8 @@ import { canonicalRoleOrder, loadRoleFilamentDefaults } from "../services/role-f
 import { resolvePartFilamentHex } from "../services/filament-catalog.js";
 import { resolvePartStl } from "../services/part-paths.js";
 import { normalizePartRole } from "../services/role-filament.js";
+import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
+import { toAcceptedCheckoffView } from "../services/accepted-plan-views.js";
 
 type RouteDeps = { repo: AppRepository; dataDir: string; thumbsDir: string };
 
@@ -322,14 +324,42 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/checkoff", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
-    const resolveDeps = { repo: deps.repo, dataDir: deps.dataDir };
-    const { parts: checkoffParts } = deps.repo.listParts(id, 10000, 0);
-    const ctx = await preloadSpoolmanForColorIds(
-      resolveDeps,
-      checkoffParts.map((p) => p.filament_color_id),
-    );
-    return deps.repo.getCheckoff(id, ctx);
+    try {
+      if (!deps.repo.getProfile(id)) {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      const accepted = deps.repo.readAcceptedPlanOperationalSnapshot(id);
+      const filamentContext =
+        accepted.kind === "ready"
+          ? await preloadSpoolmanForColorIds(
+              { repo: deps.repo, dataDir: deps.dataDir },
+              accepted.snapshot.parts.map((part) => part.filamentColorId),
+            )
+          : undefined;
+      const view = toAcceptedCheckoffView({
+        profileId: id,
+        accepted,
+        filamentContext,
+      });
+      if (view.kind === "accepted_state_unavailable") {
+        const detail =
+          view.reason === "compatibility_dirty"
+            ? "Accepted Plan requires compatibility repair"
+            : "Accepted Plan operational state is not initialized";
+        return reply.status(409).send({ detail });
+      }
+      return view.body;
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error(
+          { code: error.code, profileId: id },
+          "Accepted Plan integrity failure",
+        );
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error({ err: error, profileId: id }, "Accepted Plan read failed");
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
   });
 
   app.get("/plans/:id/kit-manifest", async (request, reply) => {

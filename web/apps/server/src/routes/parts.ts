@@ -13,6 +13,8 @@ import {
   thumbnailCacheDigest,
 } from "../lib/thumbnails.js";
 import { safePathUnderRoot } from "../lib/secure-path.js";
+import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
+import { toAcceptedPartAssembledView } from "../services/accepted-plan-views.js";
 
 const MESH_MAX_BYTES = 15 * 1024 * 1024;
 
@@ -86,11 +88,37 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/parts/:id/assembled", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
+    let profileId: number | null = null;
     try {
-      return deps.repo.getPartAssembled(id);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return reply.status(msg.includes("not found") ? 404 : 400).send({ detail: msg });
+      const part = deps.repo.getPartRow(id);
+      if (!part) return reply.status(404).send({ detail: "Part not found" });
+      profileId = part.profileId;
+      const accepted = deps.repo.readAcceptedPlanOperationalSnapshot(profileId);
+      const view = toAcceptedPartAssembledView({ partId: id, accepted });
+      if (view.kind === "part_not_found") {
+        return reply.status(404).send({ detail: "Part not found" });
+      }
+      if (view.kind === "accepted_state_unavailable") {
+        const detail =
+          view.reason === "compatibility_dirty"
+            ? "Accepted Plan requires compatibility repair"
+            : "Accepted Plan operational state is not initialized";
+        return reply.status(409).send({ detail });
+      }
+      return view.body;
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error(
+          { code: error.code, profileId, partId: id },
+          "Accepted Plan integrity failure",
+        );
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error(
+        { err: error, profileId, partId: id },
+        "Accepted Plan read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
 
