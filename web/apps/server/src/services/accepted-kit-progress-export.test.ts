@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb, SqliteDatabase } from "../db/client.js";
 import { AppRepository } from "../db/repository.js";
 import * as schema from "../db/schema.js";
@@ -178,7 +178,7 @@ describe("buildKitBundleData", () => {
     expect(data.parts).toEqual([]);
   });
 
-  it("imports accepted completion as editable compatibility progress without Required-unit identity", () => {
+  it("imports matched kit Sources through Apply rather than compatibility Part rows", () => {
     const dir = mkdtempSync(join(tmpdir(), "print-partner-accepted-kit-import-"));
     const sqlite = new SqliteDatabase(dir);
     sqlite.connect();
@@ -191,20 +191,9 @@ describe("buildKitBundleData", () => {
       });
 
       const imported = repo.importKitBundle(data, "Imported accepted progress");
-      const parts = repo.listParts(imported.profile_id).parts;
-      const first = parts.find((part) => part.relative_path === "accepted.stl");
-      const second = parts.find((part) => part.relative_path === "accepted-only.stl");
-      if (!first || !second) throw new Error("Imported Parts are missing");
-      expect(first?.quantity_effective).toBe(2);
-      expect(second?.quantity_effective).toBe(1);
-      expect(
-        db
-          .select({ completed: schema.printProgress.completed })
-          .from(schema.printProgress)
-          .where(eq(schema.printProgress.partId, first.id))
-          .orderBy(asc(schema.printProgress.unitIndex))
-          .all(),
-      ).toEqual([{ completed: true }, { completed: false }]);
+      expect(imported.parts_imported).toBe(0);
+      expect(repo.readAcceptedPlanOperationalSnapshot(imported.profile_id).kind).toBe("empty");
+      expect(repo.listParts(imported.profile_id).parts).toEqual([]);
       expect(
         db
           .select({ token: schema.requiredUnits.token })

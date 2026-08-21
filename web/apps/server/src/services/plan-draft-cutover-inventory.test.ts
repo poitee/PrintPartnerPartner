@@ -69,4 +69,22 @@ describe("Plan draft cutover production inventory", () => {
     expect(repository).toContain("  assignAcceptedFilament(");
     expect(repository).not.toContain("  bulkSetRoleFilament(");
   });
+
+  it("keeps Progress and assembly on accepted token commands", () => {
+    const repository = readFileSync(join(webRoot, "apps/server/src/db/repository.ts"), "utf8");
+    expect(repository).toContain("  setAcceptedUnitCompletion(");
+    expect(repository).toContain("  setAcceptedUnitAssembly(");
+    expect(repository).not.toContain("  patchPartProgress(");
+    expect(repository).not.toContain("  patchPartAssembled(");
+
+    const routes = readFileSync(join(webRoot, "apps/server/src/routes/parts.ts"), "utf8");
+    expect(routes).toContain("setAcceptedUnitCompletion");
+    expect(routes).toContain("setAcceptedUnitAssembly");
+  });
+
+  it("creates compatibility Parts only through applyPlanChanges", () => {
+    const repository = readFileSync(join(webRoot, "apps/server/src/db/repository.ts"), "utf8");
+    expect(repository.split(".insert(this.schema.parts)").length - 1).toBe(1);
+    expect(repository).toContain("applyPlanChanges(");
+  });
 });

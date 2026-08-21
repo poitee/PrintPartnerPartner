@@ -12,7 +12,6 @@ import {
   serializeImportRules,
   STL_NAMING_DEFAULTS_KEY,
   type MergePart,
-  type ProgressRow,
   type StlNamingProfileDict,
   validateNamingProfile,
   parseProjectMetadata,
@@ -150,14 +149,17 @@ import { resolveStoredSnapshotPath } from "./stored-snapshot-path.js";
 import {
   projectionPlanningFieldsMatch,
   readAcceptedPlanOperationalSnapshotInternal,
+  type AcceptedOperationalPart,
   type AcceptedPlanCorruptionCode,
   type ReadAcceptedPlanOperationalSnapshotResult,
 } from "./accepted-plan-operational.js";
 import {
   assignAcceptedFilamentInternal,
   filamentAssignmentColumns,
+  liveAssignmentFrom,
   type AssignAcceptedFilament,
   type AssignAcceptedFilamentResult,
+  type FilamentAssignment,
 } from "./accepted-part-filament.js";
 import {
   MAX_ACCEPTED_PROGRESS_SUMMARY_BATCH,
@@ -244,6 +246,32 @@ function parsePrinterPlanBindings(raw: string | null | undefined): PrinterPlanBi
       updated_at: row.updated_at,
     };
   });
+}
+
+function completedPrefixLength(
+  units: ReadonlyArray<{ readonly unitIndex: number; readonly completed: boolean }>,
+): number {
+  let count = 0;
+  for (const unit of [...units].sort((left, right) => left.unitIndex - right.unitIndex)) {
+    if (unit.unitIndex !== count || !unit.completed) break;
+    count += 1;
+  }
+  return count;
+}
+
+function filamentAssignmentFromRecord(row: Record<string, unknown>): FilamentAssignment {
+  const colorId = typeof row.filament_color_id === "string" ? row.filament_color_id : null;
+  const customHex = typeof row.filament_custom_hex === "string" ? row.filament_custom_hex : null;
+  const color: FilamentAssignment["color"] =
+    colorId != null
+      ? { kind: "catalog", colorId }
+      : customHex != null
+        ? { kind: "custom", hex: customHex }
+        : { kind: "unset" };
+  return {
+    color,
+    spoolmanSpoolId: typeof row.spoolman_spool_id === "string" ? row.spoolman_spool_id : null,
+  };
 }
 
 function docTitleFromPath(path: string): string {
@@ -6801,6 +6829,118 @@ export class AppRepository {
     return this.getProfileHeader(id)!;
   }
 
+  private reconcileDraftForPublish(
+    draft: PlanDraftSnapshot,
+    actorId: string,
+    idempotencyKey: string,
+  ): PlanDraftSnapshot | null {
+    const first = this.savePlanDraftRequiredUnitReconciliation({
+      profileId: draft.profileId,
+      draftId: draft.id,
+      expectedSnapshotDigest: draft.snapshotDigest,
+      decisions: [],
+      actorId,
+      idempotencyKey: `${idempotencyKey}:reconcile`,
+    });
+    if (first.kind !== "saved" && first.kind !== "existing") return null;
+    if (first.reconciliation.resultKind === "ready") return first.draft;
+    const decisions: RequiredUnitReconciliationDecision[] = first.reconciliation.conflicts.map(
+      (conflict) => {
+        switch (conflict.kind) {
+          case "unsafe_predecessor":
+            return {
+              kind: "accept_prior_completion",
+              targetDraftPartId: conflict.targetDraftPartId,
+              predecessorRevisionPartId: conflict.predecessorRevisionPartId,
+            };
+          case "ambiguous_exact_match":
+            return {
+              kind: "select_exact_predecessor",
+              targetDraftPartId: conflict.targetDraftPartId,
+              predecessorRevisionPartId: conflict.candidateRevisionPartIds[0]!,
+            };
+          case "predecessor_claimed":
+            return { kind: "replace", targetDraftPartId: conflict.targetDraftPartId };
+        }
+      },
+    );
+    const resolved = this.savePlanDraftRequiredUnitReconciliation({
+      profileId: draft.profileId,
+      draftId: draft.id,
+      expectedSnapshotDigest: first.draft.snapshotDigest,
+      decisions,
+      actorId,
+      idempotencyKey: `${idempotencyKey}:resolve`,
+    });
+    if (
+      (resolved.kind !== "saved" && resolved.kind !== "existing") ||
+      resolved.reconciliation.resultKind !== "ready"
+    ) {
+      return null;
+    }
+    return resolved.draft;
+  }
+
+  private publishWorkingPlan(profileId: number, actorId: string, idempotencyKey: string): boolean {
+    const created = this.recomputePlanDraft({
+      profileId,
+      actor: actorId,
+      idempotencyKey: `${idempotencyKey}:draft`,
+    });
+    if (created.kind !== "created" && created.kind !== "existing") return false;
+    const ready = this.reconcileDraftForPublish(created.draft, actorId, idempotencyKey);
+    if (!ready) return false;
+    const expectedBase =
+      ready.baseRevisionId == null
+        ? { kind: "empty" as const, planVersion: 0 as const }
+        : {
+            kind: "revision" as const,
+            revisionId: ready.baseRevisionId,
+            planVersion: ready.basePlanVersion,
+          };
+    const result = this.applyPlanChanges({
+      profileId: ready.profileId,
+      draftId: ready.id,
+      expectedSnapshotDigest: ready.snapshotDigest,
+      expectedLifecycleVersion: ready.lifecycleVersion,
+      expectedBase,
+      actorId,
+      idempotencyKey: `${idempotencyKey}:apply`,
+    });
+    return result.kind === "applied" || result.kind === "existing" || result.kind === "already_applied";
+  }
+
+  private overlayAcceptedOperationalCopy(
+    profileId: number,
+    sourceParts: readonly AcceptedOperationalPart[],
+    copyCheckoff: boolean,
+  ): void {
+    const accepted = this.readAcceptedPlanOperationalSnapshot(profileId);
+    if (accepted.kind !== "ready") return;
+    const expected = acceptedPlanBasis(accepted.snapshot);
+    for (const source of sourceParts) {
+      const copy = accepted.snapshot.parts.find((part) => part.partKey === source.partKey);
+      if (!copy) continue;
+      this.assignAcceptedFilament({
+        expected,
+        target: { kind: "part", projectionPartId: copy.projectionPartId },
+        assignment: liveAssignmentFrom(source),
+      });
+    }
+    if (!copyCheckoff) return;
+    const rows = sourceParts.flatMap((source) => {
+      const copy = accepted.snapshot.parts.find((part) => part.partKey === source.partKey);
+      if (!copy) return [];
+      return [
+        {
+          partId: copy.projectionPartId,
+          printedCount: completedPrefixLength(source.units),
+        },
+      ];
+    });
+    if (rows.length > 0) this.setAcceptedPrintedCounts({ expected, rows });
+  }
+
   duplicateProfile(
     id: number,
     newName: string,
@@ -6862,68 +7002,23 @@ export class AppRepository {
         .run();
     }
 
-    const oldParts = this.db
-      .select()
-      .from(this.schema.parts)
-      .where(eq(this.schema.parts.profileId, id))
-      .all();
-    const oldToNew = new Map<number, number>();
-    for (const old of oldParts) {
-      const inserted = this.db
-        .insert(this.schema.parts)
-        .values({
-          tenantId: this.tenantId,
-          profileId: newProfile.id,
-          matchKey: old.matchKey,
-          relativePath: old.relativePath,
-          filename: old.filename,
-          sourceLayer: old.sourceLayer,
-          status: old.status,
-          role: old.role,
-          filamentColorId: old.filamentColorId,
-          filamentCustomHex: old.filamentCustomHex,
-          quantityAuto: old.quantityAuto,
-          quantityOverride: old.quantityOverride,
-          quantityEffective: old.quantityEffective,
-          included: old.included,
-          notes: old.notes,
-          githubBlobUrl: old.githubBlobUrl,
-          geometrySame: old.geometrySame,
-          requirement: old.requirement,
-          optionGroupId: old.optionGroupId,
-          manifestSource: old.manifestSource,
-        })
-        .returning()
-        .get();
-      if (inserted) oldToNew.set(old.id, inserted.id);
+    const sourceAccepted = this.readAcceptedPlanOperationalSnapshot(id);
+    if (layers.length > 0) {
+      this.publishWorkingPlan(newProfile.id, "system:duplicate", `duplicate:${newProfile.id}`);
     }
-
-    // Copy per-unit checkoff progress unless the caller asked for a clean copy.
-    if (!options?.clearCheckoff) {
-      for (const [oldId, newId] of oldToNew) {
-        const progress = this.db
-          .select()
-          .from(this.schema.printProgress)
-          .where(eq(this.schema.printProgress.partId, oldId))
-          .all();
-        for (const row of progress) {
-          this.db
-            .insert(this.schema.printProgress)
-            .values({
-              tenantId: this.tenantId,
-              partId: newId,
-              unitIndex: row.unitIndex,
-              completed: row.completed,
-            })
-            .run();
-        }
-      }
+    if (sourceAccepted.kind === "ready") {
+      this.overlayAcceptedOperationalCopy(
+        newProfile.id,
+        sourceAccepted.snapshot.parts,
+        options?.clearCheckoff !== true,
+      );
     }
 
     const roleFilaments = this.getSetting(roleFilamentSettingKey(id));
     if (roleFilaments) {
       this.setSetting(roleFilamentSettingKey(newProfile.id), roleFilaments);
     }
+    saveKitManifest(this, newProfile.id, loadKitManifest(this, id));
 
     return {
       ...this.getProfileHeader(newProfile.id)!,
@@ -7301,30 +7396,6 @@ export class AppRepository {
       .all();
   }
 
-  /** Replace progress only after the caller has proved the part belongs to this tenant. */
-  private saveProgressRowsForOwnedPart(partId: number, rows: ProgressRow[]): void {
-    this.db
-      .delete(this.schema.printProgress)
-      .where(eq(this.schema.printProgress.partId, partId))
-      .run();
-    for (const row of rows) {
-      const vals: Record<string, unknown> = {
-        tenantId: this.tenantId,
-        partId,
-        unitIndex: row.unitIndex,
-        completed: row.completed,
-        // Always persist explicitly so a row that was toggled back to
-        // not-assembled actually clears the column instead of keeping the old value.
-        assembled: (row as Record<string, unknown>).assembled === true,
-      };
-      this.db
-        .insert(this.schema.printProgress)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .values(vals as any)
-        .run();
-    }
-  }
-
   getRoleFilaments(profileId: number) {
     const partRows = this.listPartRows(profileId);
     const savedDefaults = loadRoleFilamentDefaults(this, profileId);
@@ -7608,45 +7679,38 @@ export class AppRepository {
       layersImported += 1;
     }
 
+    if (layersImported > 0) {
+      this.publishWorkingPlan(profile.id, "system:kit-import", `kit-import:${profile.id}`);
+    }
+    const accepted = this.readAcceptedPlanOperationalSnapshot(profile.id);
     let partsImported = 0;
-    for (const partData of (data.parts as Array<Record<string, unknown>>) ?? []) {
-      const inserted = this.db
-        .insert(this.schema.parts)
-        .values({
-          tenantId: this.tenantId,
-          profileId: profile.id,
-          matchKey: String(partData.match_key ?? ""),
-          relativePath: String(partData.relative_path ?? ""),
-          filename: String(partData.filename ?? ""),
-          sourceLayer: String(partData.source_layer ?? ""),
-          status: String(partData.status ?? "base"),
-          role: String(partData.role ?? "primary"),
-          filamentColorId: (partData.filament_color_id as string) ?? null,
-          filamentCustomHex: (partData.filament_custom_hex as string) ?? null,
-          quantityAuto: Number(partData.quantity_auto ?? 1),
-          quantityOverride: (partData.quantity_override as number) ?? null,
-          quantityEffective: Number(partData.quantity_effective ?? partData.quantity_auto ?? 1),
-          included: Boolean(partData.included ?? true),
-          notes: String(partData.notes ?? ""),
-          geometrySame: (partData.geometry_same as boolean) ?? null,
-          requirement: (partData.requirement as string) ?? null,
-          optionGroupId: (partData.option_group_id as string) ?? null,
-          manifestSource: (partData.manifest_source as string) ?? null,
-        })
-        .returning()
-        .get();
-      if (inserted) {
-        partsImported += 1;
-        const units = partData.print_units as boolean[] | undefined;
-        if (Array.isArray(units)) {
-          const rows: ProgressRow[] = units.map((completed, unitIndex) => ({
-            partId: inserted.id,
-            unitIndex,
-            completed: Boolean(completed),
-          }));
-          this.saveProgressRowsForOwnedPart(inserted.id, rows);
+    if (accepted.kind === "ready") {
+      partsImported = accepted.snapshot.parts.length;
+      const expected = acceptedPlanBasis(accepted.snapshot);
+      const printed: { partId: number; printedCount: number }[] = [];
+      for (const partData of (data.parts as Array<Record<string, unknown>>) ?? []) {
+        const copy = accepted.snapshot.parts.find(
+          (part) => part.partKey === String(partData.match_key ?? ""),
+        );
+        if (!copy) continue;
+        this.assignAcceptedFilament({
+          expected,
+          target: { kind: "part", projectionPartId: copy.projectionPartId },
+          assignment: filamentAssignmentFromRecord(partData),
+        });
+        if (Array.isArray(partData.print_units)) {
+          printed.push({
+            partId: copy.projectionPartId,
+            printedCount: completedPrefixLength(
+              partData.print_units.map((completed, unitIndex) => ({
+                unitIndex,
+                completed: Boolean(completed),
+              })),
+            ),
+          });
         }
       }
+      if (printed.length > 0) this.setAcceptedPrintedCounts({ expected, rows: printed });
     }
 
     return {
