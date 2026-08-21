@@ -1,0 +1,573 @@
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AcceptedPlateExportJobResult, JobSnapshot } from "@print-partner/contracts";
+import { createSelfHostPorts } from "../adapters/self-host/index.js";
+import { buildApp } from "../app.js";
+import { loadConfig } from "../config.js";
+import { acceptedPlanBasis } from "../db/accepted-plan-progress.js";
+import { InProcessJobRunner } from "./jobs.js";
+
+vi.mock("../services/webhook-store.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../services/webhook-store.js")>()),
+  dispatchWebhooks: vi.fn(async () => undefined),
+}));
+
+import { dispatchWebhooks } from "../services/webhook-store.js";
+import { getLogger } from "../services/logger.js";
+
+const cleanups: Array<() => Promise<void>> = [];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseAcceptedPlateExportJobResult(value: unknown): AcceptedPlateExportJobResult {
+  if (
+    !isRecord(value) ||
+    value.format !== "accepted-plate-export-job-v1" ||
+    !Number.isSafeInteger(value.profile_id) ||
+    !isRecord(value.basis) ||
+    !Number.isSafeInteger(value.basis.profile_id) ||
+    !Number.isSafeInteger(value.basis.plan_version) ||
+    !Number.isSafeInteger(value.basis.plan_revision_id) ||
+    typeof value.basis.plan_revision_digest !== "string" ||
+    typeof value.basis.required_unit_mapping_digest !== "string" ||
+    !Number.isSafeInteger(value.plate_revision_id) ||
+    !Number.isSafeInteger(value.plate_revision_number) ||
+    typeof value.layout_digest !== "string" ||
+    typeof value.download_url !== "string" ||
+    typeof value.manifest_download_url !== "string" ||
+    typeof value.bundle_download_url !== "string" ||
+    !Array.isArray(value.plates)
+  ) throw new Error("accepted Plate export result is invalid");
+  const plates = value.plates.map((plate) => {
+    if (
+      !isRecord(plate) ||
+      typeof plate.plate_id !== "string" ||
+      !Number.isSafeInteger(plate.ordinal) ||
+      typeof plate.filename !== "string" ||
+      typeof plate.download_url !== "string"
+    ) throw new Error("accepted Plate export file is invalid");
+    return {
+      plate_id: plate.plate_id,
+      ordinal: Number(plate.ordinal),
+      filename: plate.filename,
+      download_url: plate.download_url,
+    };
+  });
+  return {
+    format: value.format,
+    profile_id: Number(value.profile_id),
+    basis: {
+      profile_id: Number(value.basis.profile_id),
+      plan_version: Number(value.basis.plan_version),
+      plan_revision_id: Number(value.basis.plan_revision_id),
+      plan_revision_digest: value.basis.plan_revision_digest,
+      required_unit_mapping_digest: value.basis.required_unit_mapping_digest,
+    },
+    plate_revision_id: Number(value.plate_revision_id),
+    plate_revision_number: Number(value.plate_revision_number),
+    layout_digest: value.layout_digest,
+    download_url: value.download_url,
+    manifest_download_url: value.manifest_download_url,
+    bundle_download_url: value.bundle_download_url,
+    plates,
+  };
+}
+
+afterEach(async () => {
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+});
+
+async function waitForJob(app: Awaited<ReturnType<typeof buildApp>>, jobId: string): Promise<JobSnapshot> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const response = await app.inject({ method: "GET", url: `/jobs/${jobId}` });
+    const snapshot: JobSnapshot = response.json();
+    if (snapshot.status === "done" || snapshot.status === "error") return snapshot;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("accepted Plate export job did not finish");
+}
+
+async function fixture(jobOptions?: ConstructorParameters<typeof InProcessJobRunner>[1]) {
+  const root = mkdtempSync(join(tmpdir(), "pp-accepted-export-routes-"));
+  const exchangeDir = join(root, "exchange");
+  mkdirSync(exchangeDir);
+  const ports = createSelfHostPorts(root);
+  await ports.db.connect();
+  const repo = ports.repository;
+  const source = repo.createSource({
+    name: "Accepted export source",
+    url: "https://example.test/accepted-export-source",
+    source_kind: "github",
+  });
+  const observed = repo.getProjectRow(source.id);
+  if (!observed) throw new Error("Source is missing");
+  const locator = `${source.id}/revisions/accepted`;
+  const snapshotRoot = join(root, "repos", locator);
+  mkdirSync(snapshotRoot, { recursive: true });
+  writeFileSync(join(snapshotRoot, "part.stl"), `solid accepted
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 30 0 0
+vertex 0 20 10
+endloop
+endfacet
+endsolid accepted`);
+  const sourceRevision = repo.recordSourceRevision({
+    sourceId: source.id,
+    upstreamRevisionKey: "accepted",
+    manifestDigest: "d".repeat(64),
+    snapshotLocator: locator,
+    syncedAt: "2026-08-21T12:00:00.000Z",
+    completeness: "complete",
+  });
+  repo.activateSourceRevision({ sourceId: source.id, revisionId: sourceRevision.id, observed });
+  const profile = repo.createProfile("Accepted export Build", source.id);
+  const draft = repo.recomputePlanDraft({
+    profileId: profile.id,
+    actor: "test:user",
+    idempotencyKey: "accepted-export-draft",
+  });
+  if (draft.kind !== "created") throw new Error("Plan draft was not created");
+  const reconciled = repo.savePlanDraftRequiredUnitReconciliation({
+    profileId: profile.id,
+    draftId: draft.draft.id,
+    expectedSnapshotDigest: draft.draft.snapshotDigest,
+    decisions: [],
+    actorId: "test:user",
+    idempotencyKey: "accepted-export-reconciliation",
+  });
+  if (reconciled.kind !== "saved") throw new Error("Plan reconciliation failed");
+  const applied = repo.applyPlanChanges({
+    profileId: profile.id,
+    draftId: draft.draft.id,
+    expectedSnapshotDigest: reconciled.draft.snapshotDigest,
+    expectedLifecycleVersion: 0,
+    expectedBase: { kind: "empty", planVersion: 0 },
+    actorId: "test:user",
+    idempotencyKey: "accepted-export-apply",
+  });
+  if (applied.kind !== "applied") throw new Error("Plan was not applied");
+  const accepted = repo.readAcceptedPlanOperationalSnapshot(profile.id);
+  if (accepted.kind !== "ready") throw new Error("Accepted Plan is unavailable");
+  const unit = accepted.snapshot.parts
+    .filter((part) => part.included)
+    .flatMap((part) => part.units)
+    .find((candidate) => candidate.required);
+  if (!unit) throw new Error("Required unit is missing");
+  const published = repo.publishAcceptedPlates({
+    profileId: profile.id,
+    expected: acceptedPlanBasis(accepted.snapshot),
+    expectedPlateRevisionId: null,
+    plates: [{
+      plateId: "accepted-plate-one",
+      printerId: "printer-one",
+      printerName: "Printer One",
+      printerModel: "Model One",
+      bedWidthUm: 250_000,
+      bedDepthUm: 210_000,
+      bedHeightUm: 200_000,
+      marginUm: 4_000,
+      units: [{
+        token: unit.token,
+        xUm: 4_000,
+        yUm: 4_000,
+        widthUm: 30_000,
+        depthUm: 20_000,
+        heightUm: 10_000,
+      }],
+    }],
+  });
+  if (published.kind !== "published") throw new Error("Plate was not published");
+  const slicer = repo.upsertSlicerInstance({
+    name: "Orca",
+    kind: "orca",
+    dialect: "orca_json",
+    guiUrl: "http://127.0.0.1:18888",
+    watchPath: "/profiles/orca",
+    enabled: true,
+  });
+  if (jobOptions) {
+    ports.jobs = new InProcessJobRunner({
+      getRepo: () => repo,
+      reposDir: join(root, "repos"),
+      exportsDir: join(root, "exports"),
+      dataDir: root,
+    }, jobOptions);
+  }
+  const app = await buildApp({ ...loadConfig(), dataDir: root, exchangeDir }, ports);
+  cleanups.push(async () => {
+    await app.close();
+    ports.db.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  return { app, root, exchangeDir, repo, profile, plateRevisionId: published.plateRevisionId, slicer };
+}
+
+describe("accepted Plate export delivery routes", () => {
+  it("returns root and v1 jobs with byte-exact download URLs", async () => {
+    const { app, root, profile, plateRevisionId } = await fixture();
+    const completedJobIds: string[] = [];
+    for (const url of ["/jobs/export-accepted-plate-3mf", "/api/v1/jobs/export-accepted-plate-3mf"]) {
+      const started = await app.inject({
+        method: "POST",
+        url,
+        payload: {
+          profile_id: profile.id,
+          expected_plate_revision_id: plateRevisionId,
+        },
+      });
+      expect(started.statusCode).toBe(200);
+      const snapshot = await waitForJob(app, started.json().job_id);
+      expect(snapshot.status).toBe("done");
+      completedJobIds.push(snapshot.job_id);
+      const statusUrl = url.startsWith("/api/v1")
+        ? `/api/v1/jobs/${started.json().job_id}`
+        : `/jobs/${started.json().job_id}`;
+      expect((await app.inject({ method: "GET", url: statusUrl })).statusCode).toBe(200);
+      const result = parseAcceptedPlateExportJobResult(snapshot.result);
+      expect(result).toMatchObject({
+        format: "accepted-plate-export-job-v1",
+        profile_id: profile.id,
+        plate_revision_id: plateRevisionId,
+        download_url: result.plates[0]?.download_url,
+      });
+      expect(JSON.stringify(result)).not.toMatch(/pp-accepted-export-routes|\/private\/var|\/tmp\//);
+      for (const downloadUrl of [
+        result.download_url,
+        result.manifest_download_url,
+        result.bundle_download_url,
+        ...result.plates.map((plate) => plate.download_url),
+      ]) {
+        const downloaded = await app.inject({ method: "GET", url: downloadUrl });
+        expect(downloaded.statusCode).toBe(200);
+        expect(downloaded.rawPayload).toEqual(readFileSync(join(
+          root,
+          "exports",
+          "tenant-default",
+          ...downloadUrl.replace(/^\/exports\//, "").split("/"),
+        )));
+      }
+    }
+
+    const artifacts = await app.inject({
+      method: "GET",
+      url: `/api/v1/plans/${profile.id}/artifacts`,
+    });
+    expect(artifacts.statusCode).toBe(200);
+    expect(artifacts.json().artifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "export-accepted-plate-3mf",
+        download_url: expect.stringMatching(/^\/exports\//),
+      }),
+    ]));
+    expect(dispatchWebhooks).toHaveBeenCalledWith(
+      expect.anything(),
+      "plan.exported",
+      expect.objectContaining({
+        kind: "export-accepted-plate-3mf",
+        profile_id: profile.id,
+        download_url: expect.stringMatching(/^\/exports\//),
+      }),
+    );
+    const exportedCalls = vi.mocked(dispatchWebhooks).mock.calls
+      .filter(([, event]) => event === "plan.exported");
+    expect(exportedCalls).toHaveLength(completedJobIds.length);
+    expect(exportedCalls.map(([, , payload]) => payload.job_id).sort()).toEqual(completedJobIds.sort());
+    expect((await app.inject({ method: "GET", url: "/api/v2/jobs/not-a-job" })).statusCode).toBe(404);
+  });
+
+  it("logs only coarse context for an unexpected accepted Plate job failure", async () => {
+    const { app, repo, profile, plateRevisionId } = await fixture();
+    const privateValues = [
+      "/private/accepted/customer-plan.stl",
+      "d".repeat(64),
+      "ppu_private_token",
+      "private-stack-frame",
+    ];
+    const failure = new Error(privateValues.slice(0, 3).join(" "));
+    failure.stack = privateValues[3];
+    repo.readAcceptedPlateExportInput = () => {
+      throw failure;
+    };
+    const log = vi.spyOn(getLogger(), "log").mockImplementation(() => undefined);
+
+    const started = await app.inject({
+      method: "POST",
+      url: "/jobs/export-accepted-plate-3mf",
+      payload: {
+        profile_id: profile.id,
+        expected_plate_revision_id: plateRevisionId,
+      },
+    });
+    const snapshot = await waitForJob(app, started.json().job_id);
+    const statusResponse = await app.inject({ method: "GET", url: `/jobs/${snapshot.job_id}` });
+
+    expect(snapshot).toMatchObject({
+      status: "error",
+      result: null,
+      error: "Accepted Plate export failed.",
+    });
+    expect(log).toHaveBeenCalledWith(
+      "error",
+      "Accepted Plate export failed unexpectedly",
+      {
+        operation: "accepted_plate_export",
+        failure: "unexpected",
+        profileId: profile.id,
+        expectedPlateRevisionId: plateRevisionId,
+      },
+    );
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(dispatchWebhooks).toHaveBeenCalledWith(
+      expect.anything(),
+      "job.error",
+      expect.objectContaining({
+        job_id: snapshot.job_id,
+        kind: "export-accepted-plate-3mf",
+        error: "Accepted Plate export failed.",
+      }),
+    );
+    const observable = JSON.stringify({
+      response: statusResponse.json(),
+      snapshot,
+      webhooks: vi.mocked(dispatchWebhooks).mock.calls.map(([, event, payload]) => ({ event, payload })),
+      logs: log.mock.calls,
+    });
+    for (const value of privateValues) expect(observable).not.toContain(value);
+  });
+
+  it("validates identifiers and maps revision and filesystem failures to safe job errors", async () => {
+    const { app, root, profile, plateRevisionId } = await fixture();
+    for (const payload of [
+      { profile_id: 0, expected_plate_revision_id: plateRevisionId },
+      { profile_id: profile.id, expected_plate_revision_id: "19" },
+    ]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/jobs/export-accepted-plate-3mf",
+        payload,
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).not.toHaveProperty("job_id");
+    }
+    const missing = await app.inject({
+      method: "POST",
+      url: "/jobs/export-accepted-plate-3mf",
+      payload: { profile_id: 999_999, expected_plate_revision_id: plateRevisionId },
+    });
+    expect(missing.statusCode).toBe(404);
+
+    const stale = await app.inject({
+      method: "POST",
+      url: "/jobs/export-accepted-plate-3mf",
+      payload: { profile_id: profile.id, expected_plate_revision_id: plateRevisionId + 1 },
+    });
+    const staleJob = await waitForJob(app, stale.json().job_id);
+    expect(staleJob).toMatchObject({
+      status: "error",
+      result: null,
+      error: "Plate layout changed. Refresh and export again.",
+    });
+
+    const tenantExports = join(root, "exports", "tenant-default");
+    rmSync(tenantExports, { recursive: true });
+    writeFileSync(tenantExports, "blocked");
+    const failed = await app.inject({
+      method: "POST",
+      url: "/jobs/export-accepted-plate-3mf",
+      payload: { profile_id: profile.id, expected_plate_revision_id: plateRevisionId },
+    });
+    const failedJob = await waitForJob(app, failed.json().job_id);
+    expect(failedJob).toMatchObject({
+      status: "error",
+      result: null,
+      error: "Accepted Plate export failed.",
+    });
+    expect(JSON.stringify(failedJob)).not.toContain(root);
+  });
+
+  it("keeps the accepted Plate download after pruning the completed job snapshot", async () => {
+    const { app, profile, plateRevisionId } = await fixture({
+      completedJobMax: 1,
+      completedJobRetentionMs: 60_000,
+    });
+    const payload = {
+      profile_id: profile.id,
+      expected_plate_revision_id: plateRevisionId,
+    };
+    const first = await app.inject({
+      method: "POST",
+      url: "/jobs/export-accepted-plate-3mf",
+      payload,
+    });
+    const firstJob = await waitForJob(app, first.json().job_id);
+    const firstResult = parseAcceptedPlateExportJobResult(firstJob.result);
+    const second = await app.inject({
+      method: "POST",
+      url: "/jobs/export-accepted-plate-3mf",
+      payload,
+    });
+    await waitForJob(app, second.json().job_id);
+
+    expect((await app.inject({ method: "GET", url: `/jobs/${first.json().job_id}` })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: firstResult.download_url })).statusCode).toBe(200);
+  });
+
+  it("rejects missing or disabled slicers and an unavailable exchange before export", async () => {
+    const { app, root, exchangeDir, repo, profile, plateRevisionId, slicer } = await fixture();
+    const payload = {
+      profile_id: profile.id,
+      expected_plate_revision_id: plateRevisionId,
+    };
+    const finalDirectory = join(
+      root,
+      "exports",
+      "tenant-default",
+      "accepted-plates",
+      `profile-${profile.id}`,
+      `revision-${plateRevisionId}`,
+    );
+    const missing = await app.inject({
+      method: "POST",
+      url: "/slicer-instances/missing/open-accepted-plates",
+      payload,
+    });
+    expect(missing.statusCode).toBe(404);
+    expect(existsSync(finalDirectory)).toBe(false);
+
+    repo.upsertSlicerInstance({
+      id: slicer.id,
+      name: slicer.name,
+      kind: slicer.kind,
+      dialect: slicer.dialect,
+      guiUrl: slicer.guiUrl,
+      watchPath: slicer.watchPath,
+      enabled: false,
+    });
+    const disabled = await app.inject({
+      method: "POST",
+      url: `/slicer-instances/${slicer.id}/open-accepted-plates`,
+      payload,
+    });
+    expect(disabled.statusCode).toBe(400);
+    expect(existsSync(finalDirectory)).toBe(false);
+
+    repo.upsertSlicerInstance({
+      id: slicer.id,
+      name: slicer.name,
+      kind: slicer.kind,
+      dialect: slicer.dialect,
+      guiUrl: slicer.guiUrl,
+      watchPath: slicer.watchPath,
+      enabled: true,
+    });
+    rmSync(exchangeDir, { recursive: true });
+    const unavailable = await app.inject({
+      method: "POST",
+      url: `/slicer-instances/${slicer.id}/open-accepted-plates`,
+      payload,
+    });
+    expect(unavailable.statusCode).toBe(400);
+    expect(existsSync(finalDirectory)).toBe(false);
+  });
+
+  it("logs only coarse context for an unexpected accepted Plate handoff failure", async () => {
+    const { app, repo, profile, plateRevisionId, slicer } = await fixture();
+    const privateValues = [
+      "/private/slicer/customer-plan.3mf",
+      "e".repeat(64),
+      "ppu_handoff_private_token",
+      "handoff-private-stack",
+    ];
+    const failure = new Error(privateValues.slice(0, 3).join(" "));
+    failure.stack = privateValues[3];
+    repo.readAcceptedPlateExportInput = () => {
+      throw failure;
+    };
+    const capturedErrors: unknown[][] = [];
+    app.addHook("onRequest", (request, _reply, done) => {
+      request.log.error = (...args: unknown[]) => {
+        capturedErrors.push(args);
+      };
+      done();
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/slicer-instances/${slicer.id}/open-accepted-plates`,
+      payload: {
+        profile_id: profile.id,
+        expected_plate_revision_id: plateRevisionId,
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ detail: "Accepted Plate handoff failed." });
+    expect(capturedErrors).toEqual([[
+      {
+        operation: "accepted_plate_slicer_handoff",
+        failure: "unexpected",
+        profileId: profile.id,
+        expectedPlateRevisionId: plateRevisionId,
+        slicerInstanceId: slicer.id,
+      },
+      "Accepted Plate slicer handoff failed unexpectedly",
+    ]]);
+    const observable = JSON.stringify({ response: response.json(), logs: capturedErrors });
+    for (const value of privateValues) expect(observable).not.toContain(value);
+  });
+
+  it("stages the downloaded Plate bytes without returning server paths", async () => {
+    const { app, exchangeDir, profile, plateRevisionId, slicer } = await fixture();
+    const response = await app.inject({
+      method: "POST",
+      url: `/slicer-instances/${slicer.id}/open-accepted-plates`,
+      payload: {
+        profile_id: profile.id,
+        expected_plate_revision_id: plateRevisionId,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const result = response.json();
+    expect(result).toMatchObject({
+      plate_revision_id: plateRevisionId,
+      inbox_relative_path: `pp-inbox/${slicer.id}/profile-${profile.id}/revision-${plateRevisionId}`,
+      staged: [{ ordinal: 1, filename: "0001.3mf" }],
+      local_app: { scheme_attempt: null },
+    });
+    expect(result).not.toHaveProperty("inbox_dir");
+    expect(JSON.stringify(result)).not.toContain(exchangeDir);
+    const downloaded = await app.inject({ method: "GET", url: result.download_url });
+    const staged = readFileSync(join(exchangeDir, result.inbox_relative_path, "0001.3mf"));
+    expect(downloaded.rawPayload).toEqual(staged);
+
+    const retry = await app.inject({
+      method: "POST",
+      url: `/api/v1/slicer-instances/${slicer.id}/open-accepted-plates`,
+      payload: { profile_id: profile.id, expected_plate_revision_id: plateRevisionId },
+    });
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json()).toEqual(result);
+
+    const stagedPath = join(exchangeDir, result.inbox_relative_path, "0001.3mf");
+    writeFileSync(stagedPath, "tampered");
+    const conflict = await app.inject({
+      method: "POST",
+      url: `/slicer-instances/${slicer.id}/open-accepted-plates`,
+      payload: { profile_id: profile.id, expected_plate_revision_id: plateRevisionId },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toEqual({
+      detail: "The slicer inbox for this Plate revision failed integrity verification.",
+    });
+    expect(readFileSync(stagedPath, "utf8")).toBe("tampered");
+  });
+});

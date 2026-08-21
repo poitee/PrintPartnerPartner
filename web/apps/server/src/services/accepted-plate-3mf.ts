@@ -65,6 +65,7 @@ export type GenerateAcceptedPlate3mfArtifactsResult =
   | { readonly kind: "empty_plan" | "plates_not_published" | "stale_accepted_plan" }
   | { readonly kind: "accepted_state_unavailable"; readonly reason: "compatibility_dirty" | "uninitialized" }
   | { readonly kind: "transaction_unavailable" }
+  | { readonly kind: "plate_revision_changed" }
   | {
       readonly kind: "artifact_unavailable";
       readonly token: AcceptedPlateExportUnit["token"];
@@ -116,12 +117,19 @@ function manifestBytes(input: AcceptedPlateExportInput): Uint8Array {
 
 export async function generateAcceptedPlate3mfArtifacts(
   dependencies: AcceptedPlate3mfDependencies,
-  command: Readonly<{ profileId: number; includeBundle?: boolean }>,
+  command: Readonly<{
+    profileId: number;
+    expectedPlateRevisionId: number;
+    includeBundle?: boolean;
+  }>,
 ): Promise<GenerateAcceptedPlate3mfArtifactsResult> {
   if (!validLimits(dependencies.limits)) throw new RangeError("Accepted Plate 3MF limits must be nonnegative safe integers");
   const resolved = dependencies.repository.readAcceptedPlateExportInput(command.profileId);
   if (resolved.kind !== "ready") return resolved;
   const input = resolved.input;
+  if (input.plateRevisionId !== command.expectedPlateRevisionId) {
+    return { kind: "plate_revision_changed" };
+  }
   if (input.plates.length > dependencies.limits.maxPlates) {
     return { kind: "limit_exceeded", limit: "plates" };
   }

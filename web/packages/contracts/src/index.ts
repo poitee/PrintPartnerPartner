@@ -164,6 +164,40 @@ export type MoveAcceptedPlateUnitRequest = Readonly<{
   y_um: number;
 }>;
 
+export type StartAcceptedPlateExportRequest = Readonly<{
+  profile_id: number;
+  expected_plate_revision_id: number;
+}>;
+
+export type AcceptedPlateExportJobResult = Readonly<{
+  format: "accepted-plate-export-job-v1";
+  profile_id: number;
+  basis: AcceptedPlanBasisContract;
+  plate_revision_id: number;
+  plate_revision_number: number;
+  layout_digest: string;
+  download_url: string;
+  manifest_download_url: string;
+  bundle_download_url: string;
+  plates: readonly Readonly<{
+    plate_id: string;
+    ordinal: number;
+    filename: string;
+    download_url: string;
+  }>[];
+}>;
+
+export type AcceptedPlateSlicerHandoffResult = Readonly<{
+  gui_url: string;
+  plate_revision_id: number;
+  plate_revision_number: number;
+  layout_digest: string;
+  inbox_relative_path: string;
+  staged: readonly Readonly<{ ordinal: number; filename: string }>[];
+  download_url: string;
+  local_app: { scheme_attempt: null; note: string };
+}>;
+
 /**
  * Validates a Discord incoming-webhook URL: must be
  * `https://discord.com/api/webhooks/<numeric id>/<non-empty token>`
@@ -198,6 +232,7 @@ export const JOB_KINDS = [
   "export-checklist-html",
   "export-kit-bundle",
   "export-3mf",
+  "export-accepted-plate-3mf",
   "pack-preview",
   "printer-upload",
   "auto-slice",

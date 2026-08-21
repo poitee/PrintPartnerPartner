@@ -19,6 +19,7 @@ export async function registerExportRoutes(app: FastifyInstance, deps: RouteDeps
     const lower = name.toLowerCase();
     const isZip = lower.endsWith(".zip");
     const isHtml = lower.endsWith(".html");
+    const is3mf = lower.endsWith(".3mf");
     // Slicer plate thumbnails (auto-slice writes gcode/thumbnails/plate_NN.png)
     // are displayed in the UI via <img src>, so they must be served inline with
     // their real image type rather than as an octet-stream attachment.
@@ -27,6 +28,8 @@ export async function registerExportRoutes(app: FastifyInstance, deps: RouteDeps
       ? "application/zip"
       : isHtml
         ? "text/html; charset=utf-8"
+        : is3mf
+          ? "model/3mf"
         : isPng
           ? "image/png"
           : "application/octet-stream";

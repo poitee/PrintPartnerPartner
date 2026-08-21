@@ -41,6 +41,8 @@ describe("slicer handoff exchange-status", () => {
       repo,
       config: minimalConfig(dir),
       exportsDir: join(dir, "exports"),
+      dataDir: dir,
+      reposDir: sqlite.reposDir,
     });
     cleanup.push(() => {
       void app.close();
@@ -64,6 +66,8 @@ describe("slicer handoff exchange-status", () => {
       repo,
       config: minimalConfig("/definitely/missing/exchange-pp"),
       exportsDir: join(sqliteDir, "exports"),
+      dataDir: sqliteDir,
+      reposDir: sqlite.reposDir,
     });
     cleanup.push(() => {
       void app.close();
@@ -115,6 +119,8 @@ describe("POST /slicer-instances/:id/open-plates", () => {
       repo,
       config: minimalConfig(exchangeDir),
       exportsDir,
+      dataDir: root,
+      reposDir: sqlite.reposDir,
     });
     cleanup.push(() => {
       void app.close();
@@ -154,6 +160,8 @@ describe("POST /slicer-instances/:id/open-plates", () => {
       repo,
       config: minimalConfig("/missing/exchange-dir-pp"),
       exportsDir: join(root, "exports"),
+      dataDir: root,
+      reposDir: sqlite.reposDir,
     });
     cleanup.push(() => {
       void app.close();

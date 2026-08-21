@@ -1,7 +1,13 @@
 import { basename, dirname, join } from "node:path";
 import { rmSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
-import { DATE_FORMAT_DEFAULT, type DateFormatId, type JobSnapshot } from "@print-partner/contracts";
+import {
+  DATE_FORMAT_DEFAULT,
+  type AcceptedPlateExportJobResult,
+  type DateFormatId,
+  type JobSnapshot,
+  type StartAcceptedPlateExportRequest,
+} from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import { exportDownloadKey, tenantExportDirectory } from "../lib/secure-path.js";
 import { syncProjectById } from "./sources.js";
@@ -29,6 +35,12 @@ import { parsePrinterUploadMultipart } from "../services/printer-upload-multipar
 import { runPrinterUploadJob } from "../services/printer-upload-job.js";
 import { reconcileSendQueueJobResult } from "../services/printer-send-queue.js";
 import { runAutoSliceJob, autoSliceJobMessage } from "../services/auto-slice-job.js";
+import { getLogger } from "../services/logger.js";
+import {
+  ACCEPTED_PLATE_EXPORT_LIMITS,
+  materializeAcceptedPlateExport,
+  type MaterializeAcceptedPlateExportResult,
+} from "../services/accepted-plate-export-delivery.js";
 
 export type JobHandler = (
   jobId: string,
@@ -59,6 +71,52 @@ export const COMPLETED_JOB_MAX = 1_000;
 export const COMPLETED_JOB_GLOBAL_MAX = 10_000;
 export const COMPLETED_JOB_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const EMPTY_TENANT_JOB_BUCKET = Symbol("empty-tenant-job-bucket");
+
+const ACCEPTED_PLATE_EXPORT_ERRORS = {
+  plate_revision_changed: "Plate layout changed. Refresh and export again.",
+  accepted_state: "Accepted Plan state is unavailable. Refresh the Plan.",
+  artifact: "A verified accepted artifact is unavailable.",
+  limit: "Accepted Plate export exceeds the configured limit.",
+  transaction: "Accepted Plate export is temporarily unavailable.",
+  output: "The stored export for this Plate revision failed integrity verification.",
+  unexpected: "Accepted Plate export failed.",
+} as const;
+
+class AcceptedPlateExportPublicError extends Error {}
+
+function positiveSafeInteger(value: unknown): number | null {
+  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function acceptedPlateExportError(result: Exclude<
+  MaterializeAcceptedPlateExportResult,
+  { readonly kind: "materialized" }
+>): string {
+  switch (result.kind) {
+    case "plate_revision_changed":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.plate_revision_changed;
+    case "empty_plan":
+    case "plates_not_published":
+    case "stale_accepted_plan":
+    case "accepted_state_unavailable":
+    case "profile_not_found":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.accepted_state;
+    case "artifact_unavailable":
+    case "invalid_stl":
+    case "artifact_geometry_mismatch":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.artifact;
+    case "limit_exceeded":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.limit;
+    case "transaction_unavailable":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.transaction;
+    case "output_conflict":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.output;
+  }
+}
 
 export type JobRunnerOptions = {
   completedJobMax?: number;
@@ -206,6 +264,7 @@ export class InProcessJobRunner {
         "export-checklist-html",
         "export-kit-bundle",
         "export-3mf",
+        "export-accepted-plate-3mf",
       ]);
       if (event.status === "done" && EXPORT_KINDS.has(event.kind)) {
         const meta = this.jobMeta.get(jobId);
@@ -335,6 +394,8 @@ export class InProcessJobRunner {
           result = await this.runExportKitBundle(payload);
         } else if (kind === "export-3mf") {
           result = await this.runExport3mf(payload);
+        } else if (kind === "export-accepted-plate-3mf") {
+          result = await this.runAcceptedPlateExport(payload);
         } else if (kind === "pack-preview") {
           result = await this.runPackPreview(payload);
         } else if (kind === "printer-upload") {
@@ -582,6 +643,76 @@ export class InProcessJobRunner {
       warnings: result.warnings,
       printer_summaries: result.printer_summaries,
     };
+  }
+
+  private async runAcceptedPlateExport(
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const profileId = positiveSafeInteger(payload.profile_id);
+    const expectedPlateRevisionId = positiveSafeInteger(payload.expected_plate_revision_id);
+    const unexpectedFailure = (): never => {
+      getLogger().log(
+        "error",
+        "Accepted Plate export failed unexpectedly",
+        {
+          operation: "accepted_plate_export",
+          failure: "unexpected",
+          profileId,
+          expectedPlateRevisionId,
+        },
+      );
+      throw new Error(ACCEPTED_PLATE_EXPORT_ERRORS.unexpected);
+    };
+    try {
+      if (profileId == null || expectedPlateRevisionId == null) {
+        throw new Error(ACCEPTED_PLATE_EXPORT_ERRORS.unexpected);
+      }
+      const materialized = await materializeAcceptedPlateExport({
+        repository: this.repo,
+        reposDir: this.deps.reposDir,
+        tenantExportsDir: this.getExportsDir(),
+        limits: ACCEPTED_PLATE_EXPORT_LIMITS,
+      }, { profileId, expectedPlateRevisionId });
+      if (materialized.kind !== "materialized") {
+        throw new AcceptedPlateExportPublicError(acceptedPlateExportError(materialized));
+      }
+      const downloadUrl = (path: string): string => {
+        const url = this.downloadUrlForPath(path);
+        if (!url) throw new Error(ACCEPTED_PLATE_EXPORT_ERRORS.unexpected);
+        return url;
+      };
+      const plates = materialized.plates.map((plate) => ({
+        plate_id: plate.plateId,
+        ordinal: plate.ordinal,
+        filename: plate.filename,
+        download_url: downloadUrl(plate.absolutePath),
+      }));
+      const solePlate = plates.length === 1 ? plates[0] : undefined;
+      const result: AcceptedPlateExportJobResult = {
+        format: "accepted-plate-export-job-v1",
+        profile_id: profileId,
+        basis: {
+          profile_id: materialized.basis.profileId,
+          plan_version: materialized.basis.planVersion,
+          plan_revision_id: materialized.basis.revisionId,
+          plan_revision_digest: materialized.basis.revisionDigest,
+          required_unit_mapping_digest: materialized.basis.requiredUnitMappingDigest,
+        },
+        plate_revision_id: materialized.plateRevisionId,
+        plate_revision_number: materialized.plateRevisionNumber,
+        layout_digest: materialized.layoutDigest,
+        download_url: solePlate?.download_url ?? downloadUrl(materialized.bundle.absolutePath),
+        manifest_download_url: downloadUrl(materialized.manifest.absolutePath),
+        bundle_download_url: downloadUrl(materialized.bundle.absolutePath),
+        plates,
+      };
+      return result;
+    } catch (error) {
+      if (error instanceof AcceptedPlateExportPublicError) {
+        throw error;
+      }
+      return unexpectedFailure();
+    }
   }
 
   private async runPackPreview(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -859,6 +990,26 @@ export async function registerJobRoutes(
       },
       request.tenantId,
     );
+    return { job_id };
+  });
+
+  app.post("/jobs/export-accepted-plate-3mf", limited, async (request, reply) => {
+    if (!isRecord(request.body)) {
+      return sendProblem(reply, 400, "Bad Request", "profile_id and expected_plate_revision_id are required");
+    }
+    const profileId = positiveSafeInteger(request.body.profile_id);
+    const expectedPlateRevisionId = positiveSafeInteger(request.body.expected_plate_revision_id);
+    if (profileId == null || expectedPlateRevisionId == null) {
+      return sendProblem(reply, 400, "Bad Request", "profile_id and expected_plate_revision_id must be positive integers");
+    }
+    if (!jobs.getRepo().getOwnedProfileIdentity(profileId)) {
+      return sendProblem(reply, 404, "Not Found", "Profile not found");
+    }
+    const payload: StartAcceptedPlateExportRequest = {
+      profile_id: profileId,
+      expected_plate_revision_id: expectedPlateRevisionId,
+    };
+    const job_id = await jobs.start("export-accepted-plate-3mf", payload, request.tenantId);
     return { job_id };
   });
 

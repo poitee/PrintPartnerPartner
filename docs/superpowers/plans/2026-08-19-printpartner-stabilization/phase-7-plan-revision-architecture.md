@@ -857,6 +857,53 @@ no-comments audit, and diff checks passed. The browser Plate workspace and
 legacy export callers remain on their current flows until the accepted export
 delivery unit is complete.
 
+## Accepted Plate export delivery
+
+Accepted Plate export now requires the Plate revision ID that the caller read.
+The generator compares that ID with its resolved immutable revision before it
+opens an accepted artifact or encodes bytes. A later Plate move does not change
+an export that already resolved the requested revision.
+
+The server materializes one complete revision tree under the tenant export
+root. The tree contains the deterministic manifest, every ordered Plate 3MF, and
+the bundle. The materializer writes a private sibling directory with exclusive
+files and syncs the files and directories. It then calls `rename` to publish
+the complete tree.
+Retries succeed only when the existing tree has the exact directory set, file
+set, byte lengths, and SHA-256 digests. Altered, missing, extra, symlinked, and
+non-regular entries fail without repair or overwrite.
+
+Two PrintPartner processes can publish the same revision concurrently. One
+process publishes the populated directory and the other verifies it. Standard
+Node does not provide a portable directory rename-if-absent operation. The
+current algorithm therefore assumes that the app owns the export root. If an
+untrusted writer can create the empty final directory during publication, the
+storage boundary needs a filesystem operation that creates the final directory
+only when it does not exist.
+
+The `export-accepted-plate-3mf` job uses the existing root and `/api/v1` job
+transport. It does not add `/api/v2/jobs` or a second websocket contract. Job
+results contain tenant-scoped `/exports` URLs and accepted revision metadata.
+They contain no absolute paths. Known failures use fixed client messages.
+Unexpected failures log only the operation, a coarse failure kind, and numeric
+revision context. Logs, responses, snapshots, and webhooks contain no raw
+filesystem errors, paths, digests, Required-unit tokens, or stacks.
+
+The accepted slicer handoff uses the same materialized Plate files. It stages
+only `plates/NNNN.3mf` into a revision-specific inbox through the same
+complete-tree publication and verification code. The response contains the
+slicer GUI URL, the relative inbox path, Plate metadata, and a tenant-scoped
+`/exports` URL. It never returns an absolute export or exchange path.
+
+Focused delivery coverage passed 61 tests. The contracts suite passed 27
+tests, and the domain suite passed 150 tests. In the full server suite, 170 test
+files passed, 1 test file was skipped, 1385 tests passed, and 3 tests were
+skipped. Monorepo typecheck, lint, and build passed. CodeRabbit found no
+tracked-file findings. Independent review, the no-comments audit, and diff
+checks passed. The browser still uses the legacy export controls.
+`auto-slice-job.ts` still imports `runExport3mfJob`, so that exporter cannot be
+deleted yet.
+
 ## Module shape
 
 ```ts

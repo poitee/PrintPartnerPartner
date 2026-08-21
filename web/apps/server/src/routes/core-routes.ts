@@ -97,6 +97,8 @@ export async function registerCoreRoutes(
     repo: deps.repo,
     config: deps.config,
     exportsDir: join(deps.dataDir, "exports"),
+    dataDir: deps.dataDir,
+    reposDir: deps.reposDir,
   });
   await registerProfileLibraryRoutes(app, { repo: deps.repo });
   await registerPrintPlanRoutes(app, { repo: deps.repo });
