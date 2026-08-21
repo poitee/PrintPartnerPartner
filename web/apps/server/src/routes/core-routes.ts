@@ -7,7 +7,7 @@ import { registerImportRoutes } from "./imports.js";
 import { registerLegalRoutes } from "./legal.js";
 import { registerManifestRoutes } from "./manifest.js";
 import { registerPartRoutes } from "./parts.js";
-import { registerPlanRoutes } from "./plans.js";
+import { registerPlanRoutes, type PlanSummaryContract } from "./plans.js";
 import { registerPrintPlanRoutes } from "./print-plan.js";
 import { registerPrinterRoutes } from "./printers.js";
 import { registerSlicerInstanceRoutes } from "./slicer-instances.js";
@@ -51,6 +51,7 @@ export type CoreRouteOptions = {
   /** v1-only routes: integrations, webhooks, artifacts, job list */
   apiV1Extensions?: boolean;
   authStore?: AuthStore | null;
+  planSummaryContract?: PlanSummaryContract;
 };
 
 export async function registerCoreRoutes(
@@ -73,7 +74,7 @@ export async function registerCoreRoutes(
     dataDir: deps.dataDir,
     reposDir: deps.reposDir,
     thumbsDir: deps.thumbsDir,
-  });
+  }, { summaryContract: options.planSummaryContract });
   await registerPartRoutes(app, {
     repo: deps.repo,
     reposDir: deps.reposDir,
@@ -106,7 +107,6 @@ export async function registerCoreRoutes(
     registerShareRoutes(app, { repo: deps.repo, authStore, config: deps.config });
   }
 
-  // SPA-facing printer host routes (flat, not behind /api/v1 API-key gate).
   const integrations = createIntegrationPort({
     repo: deps.repo,
     getAdapter: getIntegrationAdapter,

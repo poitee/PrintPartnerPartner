@@ -60,7 +60,6 @@ import type {
   PlanSnapshot,
   PlanSnapshotSource,
   PlanSnapshotSummary,
-  ProfileSummary,
   PrintOutcomeEvent,
   PrinterCheckoffLink,
   SourceRevision,
@@ -3024,12 +3023,6 @@ export class AppRepository {
       .run();
   }
 
-  listProfiles(): ProfileSummary[] {
-    return this.listProfileHeaders().map((header) =>
-      this.toProfileSummary(header, this.printUnitTotals(header.id)),
-    );
-  }
-
   listProfileHeaders(): ProfileHeader[] {
     const rows = this.db
       .select({
@@ -3240,33 +3233,6 @@ export class AppRepository {
     };
   }
 
-  private toProfileSummary(
-    header: ProfileHeader,
-    totals: { readonly totalUnits: number; readonly remainingUnits: number },
-  ): ProfileSummary {
-    return {
-      ...header,
-      remaining_units: totals.remainingUnits,
-      total_units: totals.totalUnits,
-    };
-  }
-
-  printUnitTotals(profileId: number): { totalUnits: number; remainingUnits: number } {
-    const partRows = this.listPartRows(profileId).filter((p) => p.included);
-    let totalUnits = 0;
-    let printedUnits = 0;
-    const unitsById = this.printUnitsByPartId(profileId);
-    for (const part of partRows) {
-      const qty = Math.max(1, part.quantityEffective);
-      totalUnits += qty;
-      printedUnits += (unitsById.get(part.id) ?? []).filter(Boolean).length;
-    }
-    return {
-      totalUnits,
-      remainingUnits: Math.max(0, totalUnits - printedUnits),
-    };
-  }
-
   private isProfileStale(profile: {
     configModifiedAt: string | null;
     lastRecomputedAt: string | null;
@@ -3349,11 +3315,6 @@ export class AppRepository {
         ),
       )
       .run();
-  }
-
-  getProfile(id: number): ProfileSummary | null {
-    const header = this.getProfileHeader(id);
-    return header ? this.toProfileSummary(header, this.printUnitTotals(id)) : null;
   }
 
   getProfileHeader(id: number): ProfileHeader | null {
@@ -6315,7 +6276,7 @@ export class AppRepository {
     });
   }
 
-  createProfile(name: string, baseProjectId?: number): ProfileSummary & {
+  createProfile(name: string, baseProjectId?: number): ProfileHeader & {
     layers: Array<{
       id: number;
       layer_order: number;
@@ -6350,7 +6311,7 @@ export class AppRepository {
     }
 
     return {
-      ...this.getProfile(profile.id)!,
+      ...this.getProfileHeader(profile.id)!,
       layers: this.getProfileLayers(profile.id),
     };
   }
@@ -6372,7 +6333,7 @@ export class AppRepository {
     else mutate();
   }
 
-  renameProfile(id: number, name: string): ProfileSummary {
+  renameProfile(id: number, name: string): ProfileHeader {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("Profile name is required");
     const dup = this.db
@@ -6393,12 +6354,12 @@ export class AppRepository {
         and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)),
       )
       .run();
-    const profile = this.getProfile(id);
+    const profile = this.getProfileHeader(id);
     if (!profile) throw new Error("Profile not found");
     return profile;
   }
 
-  updateProfileSpecialRequest(id: number, specialRequest: string | null): ProfileSummary {
+  updateProfileSpecialRequest(id: number, specialRequest: string | null): ProfileHeader {
     if (!this.getOwnedProfileIdentity(id)) throw new Error("Profile not found");
     const trimmed = (specialRequest ?? "").trim();
     this.db
@@ -6408,7 +6369,7 @@ export class AppRepository {
         and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)),
       )
       .run();
-    const profile = this.getProfile(id);
+    const profile = this.getProfileHeader(id);
     if (!profile) throw new Error("Profile not found");
     return profile;
   }
@@ -6418,7 +6379,7 @@ export class AppRepository {
     throw new Error("Cannot unarchive; duplicate the archived template instead");
   }
 
-  touchProfileLastUsed(id: number): ProfileSummary {
+  touchProfileLastUsed(id: number): ProfileHeader {
     const existing = this.getOwnedProfileIdentity(id);
     if (!existing) throw new Error("Profile not found");
     const now = new Date().toISOString();
@@ -6429,7 +6390,7 @@ export class AppRepository {
         and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)),
       )
       .run();
-    return this.getProfile(id)!;
+    return this.getProfileHeader(id)!;
   }
 
   duplicateProfile(

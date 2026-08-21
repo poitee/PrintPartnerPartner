@@ -30,9 +30,6 @@ describe("assistant tools + example builds", () => {
       source_kind: "github",
     });
     const plan = repo.createProfile("My 2.4", source.id);
-    repo.listProfiles = () => {
-      throw new Error("Profile summaries must not be read");
-    };
 
     const plans = JSON.parse((await invokeAssistantTool("list_plans", {}, { repo })).content);
     expect(plans.plans).toContainEqual({
@@ -130,10 +127,6 @@ describe("assistant tools + example builds", () => {
 
   it("duplicate_plan returns header fields without reading a profile summary", async () => {
     const plan = repo.createProfile("Template");
-    repo.getProfile = () => {
-      throw new Error("Profile summary must not be read");
-    };
-
     const result = await applyAssistantAction(
       {
         id: "duplicate-plan",

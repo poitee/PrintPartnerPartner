@@ -82,9 +82,6 @@ describe("POST /api/discord-digest", () => {
     repo.listAcceptedProfileSummaries = () => {
       throw new Error("secret SQL /private/path token_123");
     };
-    repo.listProfiles = () => {
-      throw new Error("legacy summary read must not run");
-    };
     const sendSpy = vi
       .spyOn(discordNotify, "sendFarmDigest")
       .mockResolvedValue({ ok: true, status: 204, attempts: 1 });

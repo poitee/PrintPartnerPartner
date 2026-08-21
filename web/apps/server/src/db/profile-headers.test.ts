@@ -28,7 +28,7 @@ function withRepos(
 }
 
 describe("Profile headers", () => {
-  it("matches summary metadata, name order, archived rows, and tenant ownership", () => {
+  it("preserves metadata, name order, archived rows, and tenant ownership", () => {
     withRepos((repo, foreignRepo, db) => {
       const zeta = repo.createProfile("Zeta");
       const alpha = repo.createProfile("Alpha");
@@ -47,18 +47,6 @@ describe("Profile headers", () => {
         }),
       );
       for (const header of headers) {
-        const summary = repo.getProfile(header.id);
-        expect(header).toEqual({
-          id: summary?.id,
-          name: summary?.name,
-          order_number: summary?.order_number,
-          special_request: summary?.special_request,
-          part_count: summary?.part_count,
-          build_stale: summary?.build_stale,
-          freshness: summary?.freshness,
-          archived_at: summary?.archived_at,
-          last_used_at: summary?.last_used_at,
-        });
         expect(repo.getProfileHeader(header.id)).toEqual(header);
       }
       expect(repo.getProfileHeader(999_999)).toBeNull();
@@ -80,9 +68,6 @@ describe("Profile headers", () => {
           included: true,
         })
         .run();
-      repo.printUnitTotals = () => {
-        throw new Error("Progress totals must not be read");
-      };
       repo.printUnitsByPartId = () => {
         throw new Error("Progress rows must not be read");
       };
@@ -92,15 +77,9 @@ describe("Profile headers", () => {
     });
   });
 
-  it("keeps a name-only service independent from summary Progress", () => {
+  it("provides Plan names to the Build recipe service", () => {
     withRepos((repo) => {
       const profile = repo.createProfile("Recipe metadata");
-      repo.getProfile = () => {
-        throw new Error("summary Progress must not be read");
-      };
-      repo.printUnitTotals = () => {
-        throw new Error("Progress totals must not be read");
-      };
 
       expect(deriveBuildRecipe(repo, profile.id)?.plan_name).toBe("Recipe metadata");
     });

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  canArchiveAcceptedPlan,
   filterPlansList,
+  planProgressLabel,
   planStatusLabel,
   PLANS_LIST_LIMIT,
   type PlansListRow,
@@ -12,8 +14,7 @@ function row(
   return {
     archived_at: null,
     part_count: 0,
-    remaining_units: 0,
-    total_units: 0,
+    accepted_progress: { kind: "empty" },
     build_stale: false,
     ...partial,
   };
@@ -54,5 +55,50 @@ describe("planStatusLabel", () => {
     expect(planStatusLabel({ archived_at: "2026-08-14T00:00:00Z" })).toBe(
       "Archived",
     );
+  });
+});
+
+describe("accepted Progress display", () => {
+  it("labels every Progress state", () => {
+    expect(planProgressLabel({ kind: "ready", total_units: 5, remaining_units: 2 })).toBe(
+      "2 remaining",
+    );
+    expect(planProgressLabel({ kind: "ready", total_units: 0, remaining_units: 0 })).toBe(
+      "No required units",
+    );
+    expect(planProgressLabel({ kind: "empty" })).toBe("Not applied");
+    for (const reason of [
+      "compatibility_dirty",
+      "uninitialized",
+      "integrity",
+      "concurrent_update",
+    ] as const) {
+      expect(planProgressLabel({ kind: "unavailable", reason })).toBe(
+        "Progress unavailable",
+      );
+    }
+  });
+
+  it("allows archive only for active complete Plans with required units", () => {
+    expect(
+      canArchiveAcceptedPlan({
+        archived_at: null,
+        accepted_progress: { kind: "ready", total_units: 5, remaining_units: 0 },
+      }),
+    ).toBe(true);
+    for (const accepted_progress of [
+      { kind: "ready", total_units: 0, remaining_units: 0 } as const,
+      { kind: "ready", total_units: 5, remaining_units: 1 } as const,
+      { kind: "empty" } as const,
+      { kind: "unavailable", reason: "uninitialized" } as const,
+    ]) {
+      expect(canArchiveAcceptedPlan({ archived_at: null, accepted_progress })).toBe(false);
+    }
+    expect(
+      canArchiveAcceptedPlan({
+        archived_at: "2026-08-21T12:00:00.000Z",
+        accepted_progress: { kind: "ready", total_units: 5, remaining_units: 0 },
+      }),
+    ).toBe(false);
   });
 });

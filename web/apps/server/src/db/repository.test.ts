@@ -50,9 +50,7 @@ describe("AppRepository", () => {
       expect(plan.name).toBe("My Plan");
       expect(plan.archived_at).toBeNull();
       expect(plan.last_used_at).toBeTruthy();
-      expect(plan.remaining_units).toBe(0);
-      expect(plan.total_units).toBe(0);
-      expect(repo.listProfiles()).toHaveLength(1);
+      expect(repo.listProfileHeaders()).toHaveLength(1);
     });
   });
 
@@ -84,7 +82,7 @@ describe("AppRepository", () => {
         "contact customer before printing",
       );
       expect(updated.special_request).toBe("contact customer before printing");
-      expect(repo.getProfile(plan.id)?.special_request).toBe(
+      expect(repo.getProfileHeader(plan.id)?.special_request).toBe(
         "contact customer before printing",
       );
 

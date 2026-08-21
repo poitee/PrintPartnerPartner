@@ -30,25 +30,19 @@ function knownProductionCallers(
     .sort((left, right) => left.file.localeCompare(right.file));
 }
 
-function sourceBetween(source: string, start: string, end: string): string {
-  const startIndex = source.indexOf(start);
-  const endIndex = source.indexOf(end, startIndex + start.length);
-  if (startIndex < 0 || endIndex < 0) throw new Error(`Missing source boundary: ${start} / ${end}`);
-  return source.slice(startIndex, endIndex);
-}
-
 describe("Profile summary caller inventory", () => {
-  it("pins summary, header, and identity API consumers", () => {
-    expect(knownProductionCallers("getProfile", "db/repository.ts")).toEqual([
-      { file: "routes/plans.ts", count: 6 },
-    ]);
-    expect(knownProductionCallers("listProfiles", "db/repository.ts")).toEqual([
-      { file: "routes/plans.ts", count: 1 },
-    ]);
+  it("pins summary and header API consumers", () => {
+    expect(knownProductionCallers("getProfile", "db/repository.ts")).toEqual([]);
+    expect(knownProductionCallers("listProfiles", "db/repository.ts")).toEqual([]);
+    expect(knownProductionCallers("printUnitTotals", "db/repository.ts")).toEqual([]);
     expect(knownProductionCallers("listAcceptedProfileSummaries", "db/repository.ts")).toEqual([
       { file: "assistant/tools.ts", count: 1 },
       { file: "routes/discord-digest.ts", count: 1 },
       { file: "routes/metrics.ts", count: 1 },
+      { file: "routes/plans.ts", count: 1 },
+    ]);
+    expect(knownProductionCallers("readAcceptedProfileSummary", "db/repository.ts")).toEqual([
+      { file: "routes/plans.ts", count: 4 },
     ]);
     expect(knownProductionCallers("getProfileHeader", "db/repository.ts")).toEqual([
       { file: "assistant/assistant-context.ts", count: 1 },
@@ -69,31 +63,12 @@ describe("Profile summary caller inventory", () => {
     ).toHaveLength(1);
   });
 
-  it("keeps repository summary reads in summary-returning mutation paths", () => {
+  it("keeps deleted summary APIs out and confines the legacy v1 type to its presenter", () => {
     const repository = readFileSync(join(sourceRoot, "db/repository.ts"), "utf8");
-    expect(repository.match(/\bthis\.getProfile\(/g) ?? []).toHaveLength(4);
-    const summaryMethods = {
-      create: sourceBetween(repository, "  createProfile(", "  deleteProfile("),
-      rename: sourceBetween(repository, "  renameProfile(", "  updateProfileSpecialRequest("),
-      specialRequest: sourceBetween(
-        repository,
-        "  updateProfileSpecialRequest(",
-        "  unarchiveProfile(",
-      ),
-      touch: sourceBetween(repository, "  touchProfileLastUsed(", "  duplicateProfile("),
-    };
-    expect(
-      Object.fromEntries(
-        Object.entries(summaryMethods).map(([name, method]) => [
-          name,
-          (method.match(/\bthis\.getProfile\(/g) ?? []).length,
-        ]),
-      ),
-    ).toEqual({ create: 1, rename: 1, specialRequest: 1, touch: 1 });
-    expect(
-      sourceBetween(repository, "  duplicateProfile(", "  removeLayer(").match(
-        /\bthis\.getProfileHeader\(/g,
-      ) ?? [],
-    ).toHaveLength(1);
+    expect(repository.match(/\b(getProfile|listProfiles|printUnitTotals)\b/g) ?? []).toEqual([]);
+
+    const presenter = readFileSync(join(sourceRoot, "routes/plan-summary-presenter.ts"), "utf8");
+    expect(presenter.match(/\bLegacyProfileSummaryV1\b/g) ?? []).toHaveLength(2);
+    expect(knownProductionCallers("LegacyProfileSummaryV1", "routes/plan-summary-presenter.ts")).toEqual([]);
   });
 });

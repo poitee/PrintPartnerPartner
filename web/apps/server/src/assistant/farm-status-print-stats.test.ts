@@ -244,9 +244,6 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
         progress: { kind: "ready", totalUnits: 9, remainingUnits: 9 },
       },
     ];
-    repo.listProfiles = () => {
-      throw new Error("legacy summary read must not run");
-    };
 
     const data = JSON.parse((await invokeAssistantTool("get_print_stats", {}, { repo })).content);
     expect(data.active_plans).toEqual({
@@ -295,9 +292,6 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
   it("get_print_stats preserves non-Plan stats and redacts collection failures", async () => {
     repo.listAcceptedProfileSummaries = () => {
       throw new Error("secret SQL /private/path token_123");
-    };
-    repo.listProfiles = () => {
-      throw new Error("legacy summary read must not run");
     };
     const log = vi.spyOn(getLogger(), "log").mockImplementation(() => undefined);
 

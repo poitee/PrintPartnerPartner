@@ -24,9 +24,10 @@ import { usePlanActions } from "../context/PlanActionsContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { canArchivePlan } from "../lib/planPickerGroups";
 import {
+  canArchiveAcceptedPlan,
   filterPlansList,
+  planProgressLabel,
   planStatusLabel,
   type PlansListFilter,
 } from "../lib/plansList";
@@ -94,11 +95,7 @@ export default function PlansPage() {
   };
 
   const renderPlanActions = (plan: (typeof rows)[number]) => {
-    const archiveAllowed = canArchivePlan({
-      archived: Boolean(plan.archived_at),
-      totalUnits: plan.total_units,
-      remainingUnits: plan.remaining_units,
-    });
+    const archiveAllowed = canArchiveAcceptedPlan(plan);
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -268,7 +265,7 @@ export default function PlansPage() {
                           </div>
                           <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground">
                             <span>{planStatusLabel(plan)}</span>
-                            <span>{plan.remaining_units} remaining</span>
+                            <span>{planProgressLabel(plan.accepted_progress)}</span>
                             <span>{plan.part_count} parts</span>
                             {plan.build_stale ? (
                               <span className="text-warning">stale</span>
@@ -326,7 +323,7 @@ export default function PlansPage() {
                           {planStatusLabel(plan)}
                         </td>
                         <td className="py-2.5 pr-3 font-mono tabular-nums text-muted-foreground">
-                          {plan.remaining_units}
+                          {planProgressLabel(plan.accepted_progress)}
                         </td>
                         <td className="py-2.5 pr-3 font-mono tabular-nums text-muted-foreground">
                           {plan.part_count}

@@ -368,7 +368,7 @@ describe("accepted Plan revision backfill", () => {
     const repo = repository(migrated);
     expect(repo.getAcceptedPlanRevision(profile.id)).not.toBeNull();
     expect(() => repo.deleteProfile(profile.id)).not.toThrow();
-    expect(repo.getProfile(profile.id)).toBeNull();
+    expect(repo.getProfileHeader(profile.id)).toBeNull();
     expect(
       rawDatabase(migrated)
         .prepare("SELECT count(*) AS count FROM plan_revisions WHERE profile_id = ?")

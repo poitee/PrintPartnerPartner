@@ -72,9 +72,6 @@ describe("accepted Plan Progress metrics", () => {
       summary(repo, "H archived", { kind: "ready", totalUnits: 1, remainingUnits: 1 }, true),
     ];
     repo.listAcceptedProfileSummaries = () => summaries;
-    repo.listProfiles = () => {
-      throw new Error("legacy summary read must not run");
-    };
 
     const body = await metrics(repo);
     expect(body).toContain("plan_progress_collection_available 1");
@@ -98,9 +95,6 @@ describe("accepted Plan Progress metrics", () => {
     const repo = fixture();
     repo.listAcceptedProfileSummaries = () => {
       throw new Error("secret SQL /private/path token_123");
-    };
-    repo.listProfiles = () => {
-      throw new Error("legacy summary read must not run");
     };
     const log = vi.spyOn(getLogger(), "log").mockImplementation(() => undefined);
 

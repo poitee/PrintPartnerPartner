@@ -199,7 +199,7 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped: compare against this version instead of GitHub |
-| `PRINT_PARTNER_API_KEY` | unset | Gates `/api/v1/*` when set; **required** for `/api/v1/mcp` unless `HOST` is loopback |
+| `PRINT_PARTNER_API_KEY` | unset | Gates `/api/v1/*` and `/api/v2/*` when set; **required** for `/api/v1/mcp` unless `HOST` is loopback |
 <!-- release-version:end -->
 
 The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker upgrade: `docker compose pull && docker compose up -d`.
@@ -305,7 +305,7 @@ Credits (people only): **Chad Lynch** ([@poitee](https://github.com/poitee)), **
 - [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) — kit brain + MCP (no in-app AI)
 - [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, MCP attach
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design
-- [`docs/API.md`](docs/API.md) — HTTP API overview (`/api/v1`, MCP)
+- [`docs/API.md`](docs/API.md) — HTTP API overview (`/api/v1`, `/api/v2`, MCP)
 - [`OPERATIONS.md`](OPERATIONS.md) — backups, API keys, metrics, day-two ops
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
 - [`LICENSE`](LICENSE) — full license text

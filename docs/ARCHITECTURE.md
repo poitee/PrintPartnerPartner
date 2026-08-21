@@ -59,8 +59,8 @@ STL previews and Progress thumbnails are rendered **client-side with Three.js** 
 
 ## HTTP API & integrations
 
-- **Versioned surface:** `GET /api/v1` with OpenAPI at `/api/v1/openapi.json` (legacy flat routes remain for the SPA).
-- **Automation auth (self-host):** optional `PRINT_PARTNER_API_KEY` for `/api/v1/*`.
+- **Versioned routes:** `/api/v1` keeps legacy numeric Plan summaries and the existing integration routes. `/api/v2` contains only Plan routes with accepted Progress summaries. Both versions have an OpenAPI JSON path.
+- **Automation auth (self-host):** optional `PRINT_PARTNER_API_KEY` for `/api/v1/*` and `/api/v2/*`.
 - **Integrations:** pluggable adapters under `/api/v1/integrations` (Moonraker, PrusaLink, Bambu status, Spoolman, slicer sidecar, Discord, Home Assistant).
 - **Fleet presets:** `/printers` bed metadata for 3MF packing — separate from live printer hosts.
 - **Live printer hosts:** Moonraker and PrusaLink support status + G-code upload with verify-first Progress; Bambu LAN MQTT is status-only. Setup: [integrations/PRINTER_SETUP.md](./integrations/PRINTER_SETUP.md); research/UX: [integrations/PRINTER_APIS.md](./integrations/PRINTER_APIS.md), [integrations/PRINTER_UX.md](./integrations/PRINTER_UX.md).
@@ -71,8 +71,10 @@ See [API.md](./API.md) for slicer polling, exports, and webhooks.
 ```mermaid
 flowchart LR
   Clients[External clients] --> V1["/api/v1"]
+  Clients --> V2["/api/v2"]
   SPA[React SPA] --> Flat["/plans /jobs …"]
   V1 --> Core[Core routes]
+  V2 --> Plans[Plan routes]
   Flat --> Core
   V1 --> Integrations[integrations adapters]
   V1 --> MCP["/api/v1/mcp"]

@@ -1,36 +1,13 @@
 import type { AcceptedPlanCorruptionCode } from "../db/accepted-plan-operational.js";
 import type {
+  AcceptedProgressSummary,
+  LegacyProfileSummaryV1,
+  ProfileSummary,
+} from "@print-partner/contracts";
+import type {
   AcceptedProfileProgress,
   AcceptedProfileSummary,
-  ProfileHeader,
 } from "../db/repository.js";
-
-export type AcceptedProgressSummaryView =
-  | {
-      readonly kind: "ready";
-      readonly total_units: number;
-      readonly remaining_units: number;
-    }
-  | { readonly kind: "empty" }
-  | {
-      readonly kind: "unavailable";
-      readonly reason:
-        | "compatibility_dirty"
-        | "uninitialized"
-        | "integrity"
-        | "concurrent_update";
-    };
-
-export type AcceptedProfileSummaryView = Readonly<
-  ProfileHeader & { readonly accepted_progress: AcceptedProgressSummaryView }
->;
-
-export type LegacyProfileSummaryView = Readonly<
-  ProfileHeader & {
-    readonly remaining_units: number;
-    readonly total_units: number;
-  }
->;
 
 export type LegacyProgressFailure =
   | {
@@ -41,7 +18,7 @@ export type LegacyProgressFailure =
   | { readonly kind: "concurrent_update" };
 
 export type LegacyProfileSummaryResult =
-  | { readonly kind: "ready"; readonly profile: LegacyProfileSummaryView }
+  | { readonly kind: "ready"; readonly profile: LegacyProfileSummaryV1 }
   | { readonly kind: "unavailable"; readonly failure: LegacyProgressFailure };
 
 function unreachable(progress: never): never {
@@ -50,7 +27,7 @@ function unreachable(progress: never): never {
 
 function toAcceptedProgressSummary(
   progress: AcceptedProfileProgress,
-): AcceptedProgressSummaryView {
+): AcceptedProgressSummary {
   switch (progress.kind) {
     case "ready":
       return {
@@ -73,7 +50,7 @@ function toAcceptedProgressSummary(
 
 export function toProfileSummary(
   summary: AcceptedProfileSummary,
-): AcceptedProfileSummaryView {
+): ProfileSummary {
   return {
     ...summary.header,
     accepted_progress: toAcceptedProgressSummary(summary.progress),

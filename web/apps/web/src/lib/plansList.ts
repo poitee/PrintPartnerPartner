@@ -1,5 +1,7 @@
 /** Pure helpers for the Plans page list (GRE-228). */
 
+import type { AcceptedProgressSummary } from "@print-partner/contracts";
+
 export const PLANS_LIST_LIMIT = 16;
 
 export type PlansListFilter = "active" | "archived" | "all";
@@ -9,8 +11,7 @@ export type PlansListRow = {
   name: string;
   archived_at: string | null;
   part_count: number;
-  remaining_units: number;
-  total_units: number;
+  accepted_progress: AcceptedProgressSummary;
   build_stale: boolean;
 };
 
@@ -39,4 +40,30 @@ export function planStatusLabel(plan: {
   archived_at: string | null;
 }): "Active" | "Archived" {
   return isArchived(plan) ? "Archived" : "Active";
+}
+
+export function planProgressLabel(progress: AcceptedProgressSummary): string {
+  switch (progress.kind) {
+    case "ready":
+      return progress.total_units === 0
+        ? "No required units"
+        : `${progress.remaining_units} remaining`;
+    case "empty":
+      return "Not applied";
+    case "unavailable":
+      return "Progress unavailable";
+  }
+}
+
+export function canArchiveAcceptedPlan(plan: {
+  readonly archived_at: string | null;
+  readonly accepted_progress: AcceptedProgressSummary;
+}): boolean {
+  const progress = plan.accepted_progress;
+  return (
+    !isArchived(plan) &&
+    progress.kind === "ready" &&
+    progress.total_units > 0 &&
+    progress.remaining_units === 0
+  );
 }

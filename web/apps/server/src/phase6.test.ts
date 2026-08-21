@@ -34,7 +34,7 @@ describe("Phase 6 tenant isolation", () => {
       sourceB = repoB.createSource({ name: "RepoB", url: "https://github.com/b/b" });
       expect(repoB.listSources()).toHaveLength(1);
       expect(repoB.getSource(sourceA.id)).toBeNull();
-      expect(repoB.getProfile(planA.id)).toBeNull();
+      expect(repoB.getProfileHeader(planA.id)).toBeNull();
     });
 
     tenantStorage.run("tenant-a", () => {
@@ -88,7 +88,7 @@ describe("Phase 6 tenant isolation", () => {
 
     tenantStorage.run("tenant-b", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
-      expect(repo.getProfile(profileId)).toBeNull();
+      expect(repo.getProfileHeader(profileId)).toBeNull();
       expect(repo.getPartRow(partId)).toBeNull();
       expect(() => repo.patchPart(partId, { included: false })).toThrow("Part not found");
       expect(repo.setAcceptedUnitCompletion({ expected, token, completed: false })).toEqual({

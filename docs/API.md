@@ -1,6 +1,6 @@
 # Print Partner HTTP API
 
-Self-host Docker serves the API on **http://localhost:8080**. The SPA continues to use flat routes (`/plans`, `/jobs`, …); automation and third-party tools should use the versioned namespace **`/api/v1`**.
+Self-host Docker serves the API on **http://localhost:8080**. The SPA uses flat routes such as `/plans` and `/jobs`. Automation and third-party tools use the versioned namespaces. Use `/api/v2` for the accepted Plan summary contract. Use `/api/v1` for other versioned routes.
 
 ## Discovery
 
@@ -10,6 +10,8 @@ Self-host Docker serves the API on **http://localhost:8080**. The SPA continues 
 | `GET /api/v1` | API index: OpenAPI URL, docs, health |
 | `GET /api/v1/openapi.json` | OpenAPI 3.1 spec (alias: `GET /openapi.json` → redirect) |
 | `GET /api/v1/docs` | Swagger UI (dev / when `OPENAPI_UI=1`) |
+| `GET /api/v2` | Plan API index |
+| `GET /api/v2/openapi.json` | OpenAPI 3.1 alias. Only v2 Plan paths are registered. |
 
 ### Capabilities (health)
 
@@ -24,7 +26,7 @@ Self-host Docker serves the API on **http://localhost:8080**. The SPA continues 
 ## Authentication (self-host)
 
 When `PRINT_PARTNER_API_KEY` (or its `INTEGRATION_API_KEY` alias) is set,
-`/api/v1/*` requires a valid credential. Settings-created `ppk_…` keys are
+`/api/v1/*` and `/api/v2/*` require a valid credential. Settings-created `ppk_…` keys are
 accepted alongside the configured key:
 
 - `Authorization: Bearer <key>`, or
@@ -36,8 +38,8 @@ peer is loopback can access the API without a key when authentication and proxy
 trust are both disabled and no forwarding headers are present. Browser-supplied
 `Origin`, `Referer`, and `Sec-Fetch-*` headers never grant access.
 
-Exempt paths: `/health`, `/api/v1`, `/api/v1/openapi.json`, and
-`/api/v1/docs`. Dotted API paths are not treated as static assets.
+Exempt paths include `/health`, both version indexes, both OpenAPI JSON paths,
+and `/api/v1/docs`. Dotted API paths are not treated as static assets.
 
 Supplying an invalid bearer or custom API key always returns `401`, including
 from loopback. API keys currently have full authority; there is no role or scope
@@ -62,6 +64,26 @@ Flat routes (`/plans`, …) remain available for direct single-user SPA use.
 ## Errors
 
 JSON errors use `{ "detail": "message" }` (optional `title`, `status`).
+
+## Plan summaries
+
+Flat Plan routes and `/api/v2/plans` return the accepted `ProfileSummary` contract. The `accepted_progress` field has one of these forms:
+
+```json
+{ "kind": "ready", "total_units": 12, "remaining_units": 3 }
+{ "kind": "empty" }
+{ "kind": "unavailable", "reason": "uninitialized" }
+```
+
+The unavailable reasons are `compatibility_dirty`, `uninitialized`, `integrity`, and `concurrent_update`. An unavailable Plan remains in a successful list response.
+
+`/api/v1/plans` returns the legacy numeric fields `total_units` and `remaining_units` only when accepted Progress is ready or empty. A v1 list fails as one response when any Plan cannot supply accepted numeric totals. Integrity failures take precedence over other unavailable states.
+
+`POST /api/v1/plans/:id/duplicate` returns `409` before writing:
+
+```json
+{ "detail": "Duplicate this Plan through /api/v2" }
+```
 
 ## Slicer / export poll flow
 
@@ -243,11 +265,13 @@ docker compose up --build
 curl http://localhost:8080/health
 curl http://localhost:8080/api/v1
 curl -H "Authorization: Bearer $PRINT_PARTNER_API_KEY" http://localhost:8080/api/v1/plans
+curl -H "Authorization: Bearer $PRINT_PARTNER_API_KEY" http://localhost:8080/api/v2/plans
 ```
 
 ## Route layout
 
-- **Flat** — SPA compatibility: `/plans`, `/jobs`, `/exports`, `/ws/jobs/:id`, …
-- **`/api/v1`** — Same kit-planning routes plus integrations, webhooks, job list, plan artifacts
+- **Flat** — SPA routes, including the accepted Plan summary contract at `/plans`
+- **`/api/v1`** — Legacy numeric Plan summaries plus integrations, webhooks, the job list, and Plan artifacts
+- **`/api/v2`** — Plan routes with the accepted `ProfileSummary` contract
 
-Both mounts share the same handlers; responses are identical for shared paths.
+Flat and v2 Plan responses use the same contract. V1 Plan responses use the legacy presenter described above.

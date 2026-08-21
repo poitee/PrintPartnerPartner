@@ -71,14 +71,14 @@ describe("Plan freshness", () => {
 
       expect(repo.recomputeProfile(dependent.id).merged).toBe(true);
       expect(repo.recomputeProfile(unrelated.id).merged).toBe(true);
-      expect(repo.getProfile(dependent.id)?.freshness.status).toBe("current");
-      expect(repo.getProfile(unrelated.id)?.freshness.status).toBe("current");
+      expect(repo.getProfileHeader(dependent.id)?.freshness.status).toBe("current");
+      expect(repo.getProfileHeader(unrelated.id)?.freshness.status).toBe("current");
 
       const partsBefore = repo.listParts(dependent.id).parts;
       const acceptedBefore = repo.readAcceptedPlanOperationalSnapshot(dependent.id);
       const revisionB = activateRevision(repo, reposDir, first.source.id, "b", "solid b");
 
-      expect(repo.getProfile(dependent.id)?.freshness).toMatchObject({
+      expect(repo.getProfileHeader(dependent.id)?.freshness).toMatchObject({
         status: "stale",
         reasons: [
           {
@@ -89,7 +89,7 @@ describe("Plan freshness", () => {
           },
         ],
       });
-      expect(repo.getProfile(unrelated.id)?.freshness.status).toBe("current");
+      expect(repo.getProfileHeader(unrelated.id)?.freshness.status).toBe("current");
       expect(repo.listParts(dependent.id).parts).toEqual(partsBefore);
       expect(repo.readAcceptedPlanOperationalSnapshot(dependent.id)).toEqual(acceptedBefore);
     });
@@ -179,7 +179,7 @@ describe("Plan freshness", () => {
           quantity: { ...current.quantity, default: current.quantity.default + 1 },
         },
       });
-      expect(repo.getProfile(trackedPlan.id)?.freshness).toMatchObject({
+      expect(repo.getProfileHeader(trackedPlan.id)?.freshness).toMatchObject({
         status: "stale",
         reasons: [{ kind: "naming_rules_changed", source_id: tracked.source.id }],
       });
@@ -193,7 +193,7 @@ describe("Plan freshness", () => {
       writeFileSync(join(reposDir, "local", "local.stl"), "solid local");
       const localPlan = repo.createProfile("Local plan", local.id);
       repo.recomputeProfile(localPlan.id);
-      expect(repo.getProfile(localPlan.id)?.freshness).toMatchObject({
+      expect(repo.getProfileHeader(localPlan.id)?.freshness).toMatchObject({
         status: "untracked",
         reasons: [{ kind: "source_revision_untracked", source_id: local.id }],
       });
@@ -250,7 +250,9 @@ describe("Plan freshness", () => {
         })
         .run();
 
-      expect(repo.listProfiles().find((profile) => profile.id === plan.id)?.freshness).toMatchObject({
+      expect(
+        repo.listProfileHeaders().find((profile) => profile.id === plan.id)?.freshness,
+      ).toMatchObject({
         status: "stale",
         reasons: expect.arrayContaining([{ kind: "plan_inputs_invalid" }]),
       });

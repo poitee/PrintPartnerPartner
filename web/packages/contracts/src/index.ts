@@ -434,25 +434,45 @@ export type AppUpdateCheckResponse = {
   checked_at: string | null;
 };
 
+export type AcceptedProgressUnavailableReason =
+  | "compatibility_dirty"
+  | "uninitialized"
+  | "integrity"
+  | "concurrent_update";
+
+export type AcceptedProgressSummary =
+  | {
+      readonly kind: "ready";
+      readonly total_units: number;
+      readonly remaining_units: number;
+    }
+  | { readonly kind: "empty" }
+  | {
+      readonly kind: "unavailable";
+      readonly reason: AcceptedProgressUnavailableReason;
+    };
+
 export type ProfileSummary = {
-  id: number;
-  name: string;
-  order_number: string | null;
+  readonly id: number;
+  readonly name: string;
+  readonly order_number: string | null;
   /** Quiet operator note (e.g. contact customer before printing). */
-  special_request: string | null;
-  part_count: number;
-  /** Included print units still unmarked on Progress. */
-  remaining_units: number;
-  /** Included print units (quantity sum) for this plan. */
-  total_units: number;
+  readonly special_request: string | null;
+  readonly part_count: number;
+  readonly accepted_progress: AcceptedProgressSummary;
   /** Compatibility flag for a definite stale Plan; use `freshness` for reasons. */
-  build_stale: boolean;
+  readonly build_stale: boolean;
   /** Accepted Source/naming identity compared with the current Plan inputs. */
-  freshness: PlanFreshness;
+  readonly freshness: PlanFreshness;
   /** ISO timestamp when archived as a template; null if active. */
-  archived_at: string | null;
+  readonly archived_at: string | null;
   /** ISO timestamp of last spine selection. */
-  last_used_at: string | null;
+  readonly last_used_at: string | null;
+};
+
+export type LegacyProfileSummaryV1 = Omit<ProfileSummary, "accepted_progress"> & {
+  readonly remaining_units: number;
+  readonly total_units: number;
 };
 
 export type PlanStaleReason =

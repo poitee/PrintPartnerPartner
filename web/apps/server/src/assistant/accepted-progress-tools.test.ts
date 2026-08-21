@@ -226,16 +226,12 @@ describe("assistant accepted Progress tools", () => {
         archived_at: expect.any(String),
       },
     });
-    expect(repo.getProfile(profile.id)?.archived_at).toEqual(expect.any(String));
+    expect(repo.getProfileHeader(profile.id)?.archived_at).toEqual(expect.any(String));
     expect(repo.getPartRow(part.id)).not.toBeNull();
   });
 
   it("does not read compatibility ProfileSummary for accepted Progress tools", async () => {
     const { repo, profile } = await fixture();
-    repo.getProfile = () => {
-      throw new Error("private compatibility Progress sentinel");
-    };
-
     const remaining = await invokeAssistantTool(
       "get_remaining",
       { plan_id: profile.id },
@@ -485,11 +481,6 @@ describe("assistant accepted Progress tools", () => {
         completed: true,
       });
       expect(completed.kind).toBe("updated");
-      let compatibilityReads = 0;
-      repo.getProfile = () => {
-        compatibilityReads += 1;
-        throw new Error(`private compatibility sentinel ${root} ${"f".repeat(64)}`);
-      };
       const archived = await app.inject({
         method: "POST",
         url: "/assistant/actions/apply",
@@ -504,7 +495,6 @@ describe("assistant accepted Progress tools", () => {
           archived_at: expect.any(String),
         },
       });
-      expect(compatibilityReads).toBe(0);
 
       repo.getOwnedProfileIdentity = () => {
         throw new Error(`private identity sentinel ${root} ${"a".repeat(64)}`);
@@ -612,8 +602,8 @@ describe("assistant accepted Progress tools", () => {
       expect(response.statusCode).toBe(400);
       expect(response.json()).toMatchObject({ detail: "Accepted Plan basis does not match action Plan" });
       expect(response.body).not.toContain(second.profile.name);
-      expect(repo.getProfile(first.profile.id)?.archived_at).toBeNull();
-      expect(repo.getProfile(second.profile.id)?.archived_at).toBeNull();
+      expect(repo.getProfileHeader(first.profile.id)?.archived_at).toBeNull();
+      expect(repo.getProfileHeader(second.profile.id)?.archived_at).toBeNull();
       expect(storedState()).toEqual(before);
     } finally {
       raw.close();

@@ -1,5 +1,9 @@
-import type { FastifyInstance } from "fastify";
-import type { AppRepository } from "../db/repository.js";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type {
+  AcceptedProfileProgress,
+  AcceptedProfileSummary,
+  AppRepository,
+} from "../db/repository.js";
 import { readAcceptedPlanReview } from "../services/accepted-plan-review.js";
 import { applyManifestToProfile } from "../services/manifest-apply.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
@@ -13,8 +17,49 @@ import { normalizePartRole } from "../services/role-filament.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import { toAcceptedCheckoffView } from "../services/accepted-plan-views.js";
 import { acceptedPlanBasis } from "../db/accepted-plan-progress.js";
+import {
+  toLegacyProfileSummary,
+  toProfileSummary,
+  type LegacyProgressFailure,
+} from "./plan-summary-presenter.js";
 
 type RouteDeps = { repo: AppRepository; dataDir: string; reposDir: string; thumbsDir: string };
+export type PlanSummaryContract = "accepted" | "legacy-v1";
+
+type PlanRouteOptions = { readonly summaryContract?: PlanSummaryContract };
+
+function presentProfile(summary: AcceptedProfileSummary, contract: PlanSummaryContract) {
+  if (contract === "accepted") return { kind: "ready" as const, profile: toProfileSummary(summary) };
+  return toLegacyProfileSummary(summary);
+}
+
+function sendLegacyFailure(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  operation: string,
+  failure: LegacyProgressFailure,
+  profileId?: number,
+) {
+  if (failure.kind === "integrity_failure") {
+    request.log.error(
+      { operation, ...(profileId == null ? {} : { profileId }), code: failure.code },
+      "Accepted Plan integrity failure",
+    );
+    return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+  }
+  if (failure.kind === "concurrent_update") {
+    request.log.warn(
+      { operation, ...(profileId == null ? {} : { profileId }), reason: "concurrent_update" },
+      "Accepted Plan progress unavailable",
+    );
+    return reply.status(409).send({ detail: "Accepted Plan changed; reload and retry" });
+  }
+  request.log.warn(
+    { operation, ...(profileId == null ? {} : { profileId }), reason: failure.reason },
+    "Accepted Plan progress unavailable",
+  );
+  return reply.status(409).send({ detail: acceptedStateDetail(failure.reason) });
+}
 
 function acceptedStateDetail(reason: "compatibility_dirty" | "uninitialized"): string {
   return reason === "compatibility_dirty"
@@ -34,13 +79,64 @@ function archiveAcceptedPlan(
   return deps.repo.archiveAcceptedPlan({ expected: acceptedPlanBasis(accepted.snapshot) });
 }
 
-export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
-  app.get("/plans", async () => ({ profiles: deps.repo.listProfiles() }));
+export async function registerPlanRoutes(
+  app: FastifyInstance,
+  deps: RouteDeps,
+  options: PlanRouteOptions = {},
+): Promise<void> {
+  const contract = options.summaryContract ?? "accepted";
+
+  app.get("/plans", async (request, reply) => {
+    try {
+      const summaries = deps.repo.listAcceptedProfileSummaries();
+      if (contract === "accepted") {
+        return { profiles: summaries.map(toProfileSummary) };
+      }
+      const projected = summaries.map(toLegacyProfileSummary);
+      const integrity = projected.find(
+        (result) =>
+          result.kind === "unavailable" && result.failure.kind === "integrity_failure",
+      );
+      if (integrity?.kind === "unavailable") {
+        return sendLegacyFailure(request, reply, "list_plans", integrity.failure);
+      }
+      const unavailable = projected.find((result) => result.kind === "unavailable");
+      if (unavailable?.kind === "unavailable") {
+        request.log.warn(
+          { operation: "list_plans", reason: "unavailable" },
+          "Accepted Plan progress unavailable",
+        );
+        return reply.status(409).send({
+          detail: "Accepted Plan progress is unavailable for one or more Plans",
+        });
+      }
+      return {
+        profiles: projected.map((result) => {
+          if (result.kind === "unavailable") {
+            throw new Error("Legacy Plan projection changed after preflight");
+          }
+          return result.profile;
+        }),
+      };
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "list_plans" },
+        "Plan summary collection failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+  });
 
   app.post("/plans", async (request, reply) => {
     try {
       const body = request.body as { name?: string; base_project_id?: number };
-      return deps.repo.createProfile(String(body.name ?? ""), body.base_project_id);
+      const created = deps.repo.createProfile(String(body.name ?? ""), body.base_project_id);
+      const { layers, ...header } = created;
+      const presented = presentProfile({ header, progress: { kind: "empty" } }, contract);
+      if (presented.kind !== "ready") {
+        throw new Error("Empty Plan cannot fail legacy projection");
+      }
+      return { ...presented.profile, layers };
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }
@@ -48,9 +144,23 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    const profile = deps.repo.getProfile(id);
-    if (!profile) return reply.status(404).send({ detail: "Profile not found" });
-    return profile;
+    try {
+      const read = deps.repo.readAcceptedProfileSummary(id);
+      if (read.kind === "missing") {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      const presented = presentProfile(read.summary, contract);
+      if (presented.kind === "unavailable") {
+        return sendLegacyFailure(request, reply, "get_plan", presented.failure, id);
+      }
+      return presented.profile;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "get_plan", profileId: id },
+        "Plan summary read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
   });
 
   app.delete("/plans/:id", async (request, reply) => {
@@ -71,41 +181,48 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       touch_last_used?: boolean;
     };
     const archiveAttempted = body.archived === true;
+    if (body.archived === false) {
+      return reply.status(400).send({
+        detail: "Cannot unarchive; duplicate the archived template instead",
+      });
+    }
+    if (archiveAttempted && !deps.repo.canMutateAcceptedPlan()) {
+      return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+    }
+    let accepted: AcceptedProfileSummary;
     try {
-      if (body.archived === true && !deps.repo.canMutateAcceptedPlan()) {
-        return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
-      }
-      const archiveIdentity = body.archived === true
-        ? deps.repo.getOwnedProfileIdentity(id)
-        : null;
-      if (body.archived === true && !archiveIdentity) {
+      const read = deps.repo.readAcceptedProfileSummary(id);
+      if (read.kind === "missing") {
         return reply.status(404).send({ detail: "Profile not found" });
       }
-      if (body.archived !== true && !deps.repo.getOwnedProfileIdentity(id)) {
-        return reply.status(404).send({ detail: "Profile not found" });
-      }
-      if (body.archived === false) {
-        return reply.status(400).send({
-          detail: "Cannot unarchive; duplicate the archived template instead",
-        });
-      }
-      let profile =
+      accepted = read.summary;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "update_plan", profileId: id },
+        "Plan summary read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+    const preflight = presentProfile(accepted, contract);
+    if (preflight.kind === "unavailable") {
+      return sendLegacyFailure(request, reply, "update_plan", preflight.failure, id);
+    }
+    try {
+      let header =
         typeof body.name === "string"
           ? deps.repo.renameProfile(id, body.name)
-          : body.archived === true
-            ? null
-            : deps.repo.getProfile(id)!;
+          : accepted.header;
       if (body.special_request !== undefined) {
-        profile = deps.repo.updateProfileSpecialRequest(
+        header = deps.repo.updateProfileSpecialRequest(
           id,
           body.special_request == null ? null : String(body.special_request),
         );
       }
       if (body.archived === true) {
-        if (!archiveIdentity) {
-          return reply.status(404).send({ detail: "Profile not found" });
-        }
-        const archived = archiveAcceptedPlan(deps, archiveIdentity);
+        const archived = archiveAcceptedPlan(deps, {
+          id,
+          archivedAt: accepted.header.archived_at,
+        });
         if (archived.kind === "compatibility_dirty" || archived.kind === "uninitialized") {
           return reply.status(409).send({ detail: acceptedStateDetail(archived.kind) });
         }
@@ -121,12 +238,22 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
         if (archived.kind === "empty" || archived.kind === "remaining") {
           return reply.status(400).send({ detail: "Archive only when print remaining is 0" });
         }
-        profile = deps.repo.getProfile(id)!;
+        if (!("archivedAt" in archived)) {
+          return reply.status(500).send({ detail: "Internal Server Error" });
+        }
+        header = { ...header, archived_at: archived.archivedAt };
       }
       if (body.touch_last_used === true) {
-        profile = deps.repo.touchProfileLastUsed(id);
+        header = deps.repo.touchProfileLastUsed(id);
       }
-      return profile ?? deps.repo.getProfile(id)!;
+      const presented = presentProfile(
+        { header, progress: accepted.progress },
+        contract,
+      );
+      if (presented.kind === "unavailable") {
+        throw new Error("Captured legacy Plan projection changed after write");
+      }
+      return presented.profile;
     } catch (error) {
       if (error instanceof AcceptedPlanOperationalIntegrityError) {
         request.log.error({ code: error.code, profileId: id }, "Accepted Plan integrity failure");
@@ -142,27 +269,68 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.post("/plans/:id/touch", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
+    let accepted: AcceptedProfileSummary;
     try {
-      if (!deps.repo.getOwnedProfileIdentity(id)) {
+      const read = deps.repo.readAcceptedProfileSummary(id);
+      if (read.kind === "missing") {
         return reply.status(404).send({ detail: "Profile not found" });
       }
-      return deps.repo.touchProfileLastUsed(id);
-    } catch (e) {
-      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+      accepted = read.summary;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "touch_plan", profileId: id },
+        "Plan summary read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+    const preflight = presentProfile(accepted, contract);
+    if (preflight.kind === "unavailable") {
+      return sendLegacyFailure(request, reply, "touch_plan", preflight.failure, id);
+    }
+    try {
+      const header = deps.repo.touchProfileLastUsed(id);
+      const presented = presentProfile({ header, progress: accepted.progress }, contract);
+      if (presented.kind === "unavailable") {
+        throw new Error("Captured legacy Plan projection changed after write");
+      }
+      return presented.profile;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "touch_plan", profileId: id },
+        "Plan touch failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
 
   app.post("/plans/:id/archive", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
+    if (!deps.repo.canMutateAcceptedPlan()) {
+      return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+    }
+    let accepted: AcceptedProfileSummary;
     try {
-      if (!deps.repo.canMutateAcceptedPlan()) {
-        return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
-      }
-      const profile = deps.repo.getOwnedProfileIdentity(id);
-      if (!profile) {
+      const read = deps.repo.readAcceptedProfileSummary(id);
+      if (read.kind === "missing") {
         return reply.status(404).send({ detail: "Profile not found" });
       }
-      const archived = archiveAcceptedPlan(deps, profile);
+      accepted = read.summary;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "archive_plan", profileId: id },
+        "Plan summary read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+    const preflight = presentProfile(accepted, contract);
+    if (preflight.kind === "unavailable") {
+      return sendLegacyFailure(request, reply, "archive_plan", preflight.failure, id);
+    }
+    try {
+      const archived = archiveAcceptedPlan(deps, {
+        id,
+        archivedAt: accepted.header.archived_at,
+      });
       if (archived.kind === "compatibility_dirty" || archived.kind === "uninitialized") {
         return reply.status(409).send({ detail: acceptedStateDetail(archived.kind) });
       }
@@ -178,7 +346,20 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       if (archived.kind === "empty" || archived.kind === "remaining") {
         return reply.status(400).send({ detail: "Archive only when print remaining is 0" });
       }
-      return deps.repo.getProfile(id)!;
+      if (!("archivedAt" in archived)) {
+        return reply.status(500).send({ detail: "Internal Server Error" });
+      }
+      const presented = presentProfile(
+        {
+          header: { ...accepted.header, archived_at: archived.archivedAt },
+          progress: accepted.progress,
+        },
+        contract,
+      );
+      if (presented.kind === "unavailable") {
+        throw new Error("Captured legacy Plan projection changed after write");
+      }
+      return presented.profile;
     } catch (error) {
       if (error instanceof AcceptedPlanOperationalIntegrityError) {
         request.log.error({ code: error.code, profileId: id }, "Accepted Plan integrity failure");
@@ -192,14 +373,19 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.post("/plans/:id/duplicate", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const body = request.body as { name?: string; clear_checkoff?: boolean };
+    if (contract === "legacy-v1") {
+      return reply.status(409).send({ detail: "Duplicate this Plan through /api/v2" });
+    }
     try {
       const duplicate = deps.repo.duplicateProfile(id, String(body.name ?? ""), {
         clearCheckoff: Boolean(body.clear_checkoff),
       });
-      return {
-        ...deps.repo.getProfile(duplicate.id)!,
-        layers: duplicate.layers,
-      };
+      const { layers, ...header } = duplicate;
+      const progress: AcceptedProfileProgress =
+        header.part_count === 0
+          ? { kind: "empty" }
+          : { kind: "unavailable", reason: "compatibility_dirty" };
+      return { ...toProfileSummary({ header, progress }), layers };
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }

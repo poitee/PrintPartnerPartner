@@ -551,16 +551,14 @@ accepted revision.
 
 Archive recomputes accepted included-unit totals inside the same transaction as
 the archive write. An already archived Plan remains idempotent without requiring
-accepted state. The existing combined Plan PATCH remains sequential, so a rename
-or special-request update can still survive a later archive failure. Successful
-HTTP archive responses and applied assistant archive results preserve their
-existing shapes while assistant proposals carry the accepted basis.
+accepted operational state. The existing combined Plan PATCH remains sequential,
+so a rename or special-request update can still survive a later archive failure.
+HTTP routes capture accepted summary Progress before the write and combine it
+with the returned header or archive timestamp. Assistant proposals carry the
+accepted basis.
 Assistant Apply parses a canonical complete basis and binds it to the action
 Plan before any command. `get_remaining` and archive eligibility use accepted
-snapshot identity and Progress instead of the compatibility ProfileSummary
-reader. HTTP archive uses a narrow tenant-owned identity lookup before the
-command and reads ProfileSummary only to produce the existing successful
-response shape.
+snapshot identity and Progress instead of a compatibility summary reader.
 
 Printer verification parses legacy Part and unit coordinates only at the JSON
 boundary, resolves them against one request-scoped accepted snapshot, and passes
@@ -580,15 +578,10 @@ boundaries.
 
 The cut deletes `patchPartProgress`, `patchPartAssembled`,
 `ensureProgressForPart`, `getCheckoff`, `archiveProfile`,
-`applyCheckoffUnits`, and the prefix compatibility helper. ProfileSummary,
-Plate, printer queue and link schema, filesystem, and web UI remain deferred.
-`printUnitTotals` and `printUnitsByPartId` remain temporarily pinned to the
-ProfileSummary, merge-export, and legacy Checkoff name-mapping callers for the
-next read-authority unit. The focused migration suite passed 225 tests across
-13 files. The full server suite passed 154 files with one file skipped, 1174
-tests passed, and 3 tests skipped. The full web suite passed 98 files and 429
-tests. Both typechecks, root lint, both production builds, and the diff check
-passed.
+`applyCheckoffUnits`, and the prefix compatibility helper. Later summary work
+also deletes `printUnitTotals`. `printUnitsByPartId` remains for merge export and
+legacy Checkoff name mapping. Plate, printer queue and link schema, and the
+filesystem remain deferred.
 
 The accepted Progress summary foundation adds one private bounded batch reader
 without changing routes, contracts, callers, or UI. It accepts at most 64
@@ -626,16 +619,11 @@ validates Progress. Assistant `list_plans` keeps its existing result, and exampl
 Build summaries reuse one bulk header read instead of adding per-Plan header
 queries.
 
-`duplicateProfile` now returns header metadata plus layers. The flat and
-`/api/v1` Plan routes explicitly compose the unchanged full `ProfileSummary`,
-including Progress totals, while the assistant duplicate action avoids that
-summary read. The public contract, HTTP bodies, web UI, metrics, Discord digest,
-and assistant print statistics remain unchanged. Static inventories pin every
-known summary, header, and identity API caller, plus the four repository mutation
-paths that still return full summaries. The focused caller proof passed 4 files
-and 40 tests. The full server suite passed 157 files with one file skipped, 1208
-tests passed, and 3 tests skipped. Server typecheck, full web lint, the final
-no-comments audit, and the diff check passed.
+`duplicateProfile` returns header metadata plus layers. Metadata mutations return
+headers, and accepted summary composition owns Progress. The assistant duplicate
+action avoids a summary read. Static inventories pin every summary, header, and
+identity API caller. The public contract cutover described below removes the old
+repository summary methods.
 
 Progress summary Unit 3a adds private accepted Profile summary composition and
 two pure presenters without changing contracts, routes, callers, or UI. The
@@ -673,6 +661,30 @@ full server suite passed 160 files with one file skipped, 1228 tests passed, and
 3 tests skipped. Server typecheck, root lint, the no-comments audit, and the
 diff check passed. Plan HTTP contracts, routes, web UI, and repository state did
 not change in this unit.
+
+Progress summary Unit 3c changes the public Plan contracts in one caller wave.
+Flat and `/api/v2` Plan routes return `ProfileSummary` with nested accepted
+Progress. The `/api/v2` index declares its Plan-only scope, and its OpenAPI alias
+contains v2 Plan paths without registering other v2 route families. API-key
+authentication covers both versioned prefixes.
+
+`/api/v1` uses the pure legacy presenter. Ready and empty states return numeric
+totals. Compatibility-dirty, uninitialized, concurrent-update, and integrity
+states return stable errors. A v1 list fails as one response, with integrity
+taking precedence. V1 duplicate returns `409` before calling `duplicateProfile`
+or changing profiles, layers, Parts, Progress, or settings.
+
+Plan mutations capture accepted Progress before the write and combine it with
+the returned header. Create and duplicate derive their accepted state from the
+command result. No mutation performs a summary read after writing. Unexpected
+list, detail, PATCH, touch, and archive failures return a stable `500` and log
+only coarse fields. Tests prove that SQL text, filesystem paths, digests, unit
+tokens, and Plan names do not cross those boundaries.
+
+The web cache stores the nested accepted Progress union. List rows render each
+accepted state, archive only active complete ready Plans with a positive total,
+and merge only `last_used_at` from delayed touch responses. The old repository
+`getProfile`, `listProfiles`, and `printUnitTotals` methods no longer exist.
 
 ## Module shape
 

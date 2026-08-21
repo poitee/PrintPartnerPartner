@@ -97,7 +97,7 @@ describe("AuthStore", () => {
       const result = repo.importKitBundle(JSON.parse(row.bundleJson!) as Record<string, unknown>);
       auth.markShareAccepted(row.id);
       expect(result.profile_name).toBe("Voron");
-      expect(repo.listProfiles()).toHaveLength(1);
+      expect(repo.listProfileHeaders()).toHaveLength(1);
     });
 
     sqlite.close();

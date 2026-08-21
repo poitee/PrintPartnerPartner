@@ -268,13 +268,6 @@ describe("accepted Plan read routes", () => {
       });
       expect(acceptedReadCount).toBe(5);
 
-      const readProfileSummary = repo.getProfile.bind(repo);
-      let profileSummaryReads = 0;
-      repo.getProfile = (profileId) => {
-        profileSummaryReads += 1;
-        return readProfileSummary(profileId);
-      };
-
       const archivedApi = await app.inject({
         method: "POST",
         url: `/api/v1/plans/${profile.id}/archive`,
@@ -286,17 +279,26 @@ describe("accepted Plan read routes", () => {
         archived_at: expect.any(String),
       });
       expect(acceptedReadCount).toBe(6);
-      expect(profileSummaryReads).toBe(1);
 
       const archivedFlat = await app.inject({
         method: "POST",
         url: `/plans/${profile.id}/archive`,
       });
       expect(archivedFlat.statusCode).toBe(200);
-      expect(archivedFlat.json()).toEqual(archivedApi.json());
+      const {
+        remaining_units: archivedRemainingUnits,
+        total_units: archivedTotalUnits,
+        ...archivedV1
+      } = archivedApi.json();
+      expect(archivedFlat.json()).toEqual({
+        ...archivedV1,
+        accepted_progress: {
+          kind: "ready",
+          remaining_units: archivedRemainingUnits,
+          total_units: archivedTotalUnits,
+        },
+      });
       expect(acceptedReadCount).toBe(6);
-      expect(profileSummaryReads).toBe(2);
-      repo.getProfile = readProfileSummary;
 
       const archivedUncheck = await app.inject({
         method: "PATCH",
@@ -412,9 +414,9 @@ describe("accepted Plan read routes", () => {
         return readAccepted(profileId);
       };
 
-      const getOwnedProfileIdentity = repo.getOwnedProfileIdentity.bind(repo);
-      repo.getOwnedProfileIdentity = () => {
-        throw new Error(`private identity lookup failure ${directory}`);
+      const readAcceptedProfileSummary = repo.readAcceptedProfileSummary.bind(repo);
+      repo.readAcceptedProfileSummary = () => {
+        throw new Error(`private summary lookup failure ${directory}`);
       };
       const archiveIdentityFailure = await app.inject({
         method: "POST",
@@ -429,16 +431,16 @@ describe("accepted Plan read routes", () => {
       });
       expect(patchArchiveIdentityFailure.statusCode).toBe(500);
       expect(patchArchiveIdentityFailure.json()).toEqual({ detail: "Internal Server Error" });
-      const identityLookupFailure = await app.inject({
+      const summaryLookupFailure = await app.inject({
         method: "GET",
-        url: `/plans/${emptyProfile.id}/checkoff`,
+        url: `/plans/${emptyProfile.id}`,
       });
-      expect(identityLookupFailure.statusCode).toBe(500);
-      expect(identityLookupFailure.json()).toEqual({
+      expect(summaryLookupFailure.statusCode).toBe(500);
+      expect(summaryLookupFailure.json()).toEqual({
         detail: "Internal Server Error",
       });
       expect(acceptedReadCount).toBe(13);
-      repo.getOwnedProfileIdentity = getOwnedProfileIdentity;
+      repo.readAcceptedProfileSummary = readAcceptedProfileSummary;
 
       repo.getPartRow = () => {
         throw new Error(`private Part lookup failure ${directory}`);
@@ -474,7 +476,7 @@ describe("accepted Plan read routes", () => {
       expect(serializedErrors).not.toContain(directory);
       expect(serializedErrors).not.toContain("e".repeat(64));
       expect(serializedErrors).not.toContain("accepted-plan-read-routes.test.ts");
-      expect(serializedErrors).toContain("Plan archive failed");
+      expect(serializedErrors).toContain("Plan summary read failed");
     } finally {
       await app.close();
     }

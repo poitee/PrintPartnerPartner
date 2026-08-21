@@ -18,7 +18,10 @@ export async function registerApiV1Plugin(
     mcp: "/api/v1/mcp",
   }));
 
-  await registerCoreRoutes(app, deps, { apiV1Extensions: true });
+  await registerCoreRoutes(app, deps, {
+    apiV1Extensions: true,
+    planSummaryContract: "legacy-v1",
+  });
   await registerMcpHttpRoutes(app, {
     getRepo: () => deps.repo,
     jobs: deps.jobs,
@@ -86,4 +89,5 @@ export function registerOpenApiJsonRoutes(app: FastifyInstance): void {
     return reply.redirect("/api/v1/openapi.json");
   });
   app.get("/api/v1/openapi.json", async () => app.swagger());
+  app.get("/api/v2/openapi.json", async () => app.swagger());
 }

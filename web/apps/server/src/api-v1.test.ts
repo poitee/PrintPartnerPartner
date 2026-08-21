@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -6,8 +7,8 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
 
-describe("API v1", () => {
-  it("flat and versioned GET /plans return the same profiles", async () => {
+describe("Plan API versions", () => {
+  it("serves accepted flat and v2 Plan summaries and numeric v1 summaries", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-apiv1-"));
     process.env.PRINT_PARTNER_DATA_DIR = dir;
     delete process.env.PRINT_PARTNER_API_KEY;
@@ -20,17 +21,37 @@ describe("API v1", () => {
     const app = await buildApp(config, ports);
     const flat = await app.inject({ method: "GET", url: "/plans" });
     const v1 = await app.inject({ method: "GET", url: "/api/v1/plans" });
+    const v2 = await app.inject({ method: "GET", url: "/api/v2/plans" });
 
     expect(flat.statusCode).toBe(200);
     expect(v1.statusCode).toBe(200);
-    expect(v1.json()).toEqual(flat.json());
+    expect(v2.statusCode).toBe(200);
+    expect(v2.json()).toEqual(flat.json());
+    expect(flat.json()).toEqual({
+      profiles: [
+        expect.objectContaining({
+          name: "Plan A",
+          accepted_progress: { kind: "empty" },
+        }),
+      ],
+    });
+    expect(v1.json()).toEqual({
+      profiles: [
+        expect.objectContaining({
+          name: "Plan A",
+          remaining_units: 0,
+          total_units: 0,
+        }),
+      ],
+    });
+    expect(v1.json().profiles[0].accepted_progress).toBeUndefined();
 
     await app.close();
     ports.db.close();
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("flat and versioned duplicate routes return the full profile summary with layers", async () => {
+  it("rejects v1 duplicate before writing and directs callers to v2", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-apiv1-duplicate-"));
     process.env.PRINT_PARTNER_DATA_DIR = dir;
     delete process.env.PRINT_PARTNER_API_KEY;
@@ -46,75 +67,37 @@ describe("API v1", () => {
     const plan = ports.repository.createProfile("Template", source.id);
     const app = await buildApp(config, ports);
 
-    const flat = await app.inject({
-      method: "POST",
-      url: `/plans/${plan.id}/duplicate`,
-      payload: { name: "Flat copy", clear_checkoff: true },
-    });
-    expect(flat.statusCode).toBe(200);
-    expect(flat.json()).toEqual({
-      id: expect.any(Number),
-      name: "Flat copy",
-      order_number: null,
-      special_request: null,
-      part_count: 0,
-      remaining_units: 0,
-      total_units: 0,
-      build_stale: false,
-      freshness: {
-        status: "untracked",
-        accepted_input_set_id: null,
-        accepted_at: null,
-        reasons: [{ kind: "no_accepted_inputs" }],
-      },
-      archived_at: null,
-      last_used_at: expect.any(String),
-      layers: [
-        {
-          id: expect.any(Number),
-          layer_order: 0,
-          layer_type: "base",
-          project_id: source.id,
-          project_name: "Base",
-        },
-      ],
-    });
-
+    const raw = new Database(join(dir, "print-partner.db"));
+    const tables = [
+      "build_profiles",
+      "profile_layers",
+      "parts",
+      "print_progress",
+      "app_settings",
+    ] as const;
+    const snapshot = () =>
+      Object.fromEntries(
+        tables.map((table) => [table, raw.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]),
+      );
+    const before = snapshot();
+    const duplicateProfile = ports.repository.duplicateProfile.bind(ports.repository);
+    let duplicateCalls = 0;
+    ports.repository.duplicateProfile = (...args: Parameters<typeof duplicateProfile>) => {
+      duplicateCalls += 1;
+      return duplicateProfile(...args);
+    };
     const versioned = await app.inject({
       method: "POST",
       url: `/api/v1/plans/${plan.id}/duplicate`,
       payload: { name: "Versioned copy", clear_checkoff: true },
     });
-    expect(versioned.statusCode).toBe(200);
-    expect(versioned.json()).toEqual({
-      id: expect.any(Number),
-      name: "Versioned copy",
-      order_number: null,
-      special_request: null,
-      part_count: 0,
-      remaining_units: 0,
-      total_units: 0,
-      build_stale: false,
-      freshness: {
-        status: "untracked",
-        accepted_input_set_id: null,
-        accepted_at: null,
-        reasons: [{ kind: "no_accepted_inputs" }],
-      },
-      archived_at: null,
-      last_used_at: expect.any(String),
-      layers: [
-        {
-          id: expect.any(Number),
-          layer_order: 0,
-          layer_type: "base",
-          project_id: source.id,
-          project_name: "Base",
-        },
-      ],
-    });
+    expect(versioned.statusCode).toBe(409);
+    expect(versioned.json()).toEqual({ detail: "Duplicate this Plan through /api/v2" });
+    expect(duplicateCalls).toBe(0);
+    expect(snapshot()).toEqual(before);
 
     await app.close();
+    raw.close();
     ports.db.close();
     rmSync(dir, { recursive: true, force: true });
   });
