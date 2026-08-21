@@ -1,22 +1,21 @@
 import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
-import { partMeshUrl, uploadPartThumbnail } from "../api/engine.js";
+import {
+  acceptedPartMediaMetadata,
+  acceptedPartMediaRevalidationHeaders,
+  partMeshUrl,
+  uploadPartThumbnail,
+} from "../api/engine.js";
 import { fetchWithRetry } from "./fetchWithRetry.js";
 import { getCachedMeshBuffer, cacheMeshBuffer } from "./meshCache.js";
 
 const SIZE = 256;
 const MESH_MAX_BYTES = 15 * 1024 * 1024;
 const DEFAULT_COLOR = "#c41230";
-/** Cap in-memory STL buffers so color re-renders skip network + parse. */
 const MESH_CACHE_MAX = 48;
-/** Cap in-memory rendered blobs by (partId:hex). */
 const BLOB_CACHE_MAX = 96;
-/** Max vertices before we decimate for preview rendering. */
 const DECIMATE_THRESHOLD = 80_000;
-/** Max fetch attempts with exponential backoff. */
 const MAX_FETCH_ATTEMPTS = 3;
-
-// ─── Shared WebGL renderer ────────────────────────────────────────────────────
 
 let sharedRenderer: THREE.WebGLRenderer | null = null;
 let sharedLoader: STLLoader | null = null;
@@ -26,12 +25,34 @@ type CachedMesh = {
   lastUsed: number;
 };
 
-const meshBufferCache = new Map<number, CachedMesh>();
+const meshBufferCache = new Map<string, CachedMesh>();
+const currentBasisByPartId = new Map<number, string>();
 
-/**
- * One reused WebGL context for ALL thumbnails — browsers cap live contexts
- * (~16), so rendering 145 part cards each needs its own canvas would fail.
- */
+function currentBasis(partId: number): string | null {
+  const basis = currentBasisByPartId.get(partId);
+  if (basis == null) return null;
+  currentBasisByPartId.delete(partId);
+  currentBasisByPartId.set(partId, basis);
+  return basis;
+}
+
+function rememberCurrentBasis(partId: number, basis: string): void {
+  currentBasisByPartId.delete(partId);
+  currentBasisByPartId.set(partId, basis);
+  if (currentBasisByPartId.size <= MESH_CACHE_MAX) return;
+  const oldestPartId = currentBasisByPartId.keys().next().value;
+  if (oldestPartId != null) currentBasisByPartId.delete(oldestPartId);
+}
+
+function optionalAcceptedPartMediaMetadata(response: Response) {
+  try {
+    return acceptedPartMediaMetadata(response);
+  } catch {
+    return null;
+  }
+}
+
+/** Reuse one WebGL context because browsers cap the number of live contexts. */
 function getRenderer(): THREE.WebGLRenderer {
   if (!sharedRenderer) {
     const canvas = document.createElement("canvas");
@@ -49,52 +70,44 @@ function getRenderer(): THREE.WebGLRenderer {
   return sharedRenderer;
 }
 
-// ─── In-memory mesh buffer cache ─────────────────────────────────────────────
-
-function rememberMeshBuffer(partId: number, buffer: ArrayBuffer): void {
-  meshBufferCache.set(partId, { buffer, lastUsed: Date.now() });
+function rememberMeshBuffer(basis: string, buffer: ArrayBuffer): void {
+  meshBufferCache.set(basis, { buffer, lastUsed: Date.now() });
   if (meshBufferCache.size <= MESH_CACHE_MAX) return;
-  let oldestId: number | null = null;
+  let oldestBasis: string | null = null;
   let oldestAt = Number.POSITIVE_INFINITY;
   for (const [id, entry] of meshBufferCache) {
     if (entry.lastUsed < oldestAt) {
       oldestAt = entry.lastUsed;
-      oldestId = id;
+      oldestBasis = id;
     }
   }
-  if (oldestId != null) meshBufferCache.delete(oldestId);
+  if (oldestBasis != null) meshBufferCache.delete(oldestBasis);
 }
 
-function cachedMeshBuffer(partId: number): ArrayBuffer | null {
-  const hit = meshBufferCache.get(partId);
+function cachedMeshBuffer(basis: string): ArrayBuffer | null {
+  const hit = meshBufferCache.get(basis);
   if (!hit) return null;
   hit.lastUsed = Date.now();
   return hit.buffer;
 }
 
-// ─── Fix #3: Blob cache by (partId, hex) ─────────────────────────────────────
-// Reuses already-rendered PNG blobs without re-parsing STL or re-rendering.
-// When a color changes, only parts with that new hex miss the cache; all others
-// return instantly from memory.
-
 type BlobEntry = { blob: Blob; lastUsed: number };
 const blobCache = new Map<string, BlobEntry>();
 
-function blobCacheKey(partId: number, hex: string): string {
-  return `${partId}:${hex.toLowerCase().replace(/^#/, "")}`;
+function blobCacheKey(basis: string, hex: string): string {
+  return `${basis}:${hex.toLowerCase().replace(/^#/, "")}`;
 }
 
-function getCachedBlob(partId: number, hex: string): Blob | null {
-  const entry = blobCache.get(blobCacheKey(partId, hex));
+function getCachedBlob(basis: string, hex: string): Blob | null {
+  const entry = blobCache.get(blobCacheKey(basis, hex));
   if (!entry) return null;
   entry.lastUsed = Date.now();
   return entry.blob;
 }
 
-function rememberBlob(partId: number, hex: string, blob: Blob): void {
-  blobCache.set(blobCacheKey(partId, hex), { blob, lastUsed: Date.now() });
+function rememberBlob(basis: string, hex: string, blob: Blob): void {
+  blobCache.set(blobCacheKey(basis, hex), { blob, lastUsed: Date.now() });
   if (blobCache.size <= BLOB_CACHE_MAX) return;
-  // Evict LRU entry
   let oldestKey: string | null = null;
   let oldestAt = Number.POSITIVE_INFINITY;
   for (const [key, entry] of blobCache) {
@@ -106,15 +119,10 @@ function rememberBlob(partId: number, hex: string, blob: Blob): void {
   if (oldestKey != null) blobCache.delete(oldestKey);
 }
 
-// ─── Fix #4: Mesh optimization (vertex decimation) ───────────────────────────
-// For large meshes (>80k vertices) we thin the geometry before rendering so the
-// browser doesn't choke on 200k+ vertex STLs. Quality is still fine at 256×256.
-
 function decimateGeometry(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
   const pos = geometry.getAttribute("position");
   if (!pos || pos.count <= DECIMATE_THRESHOLD) return geometry;
 
-  // Keep every Nth vertex to reach ~DECIMATE_THRESHOLD
   const step = Math.ceil(pos.count / DECIMATE_THRESHOLD);
   const kept = Math.floor(pos.count / step);
   const newPos = new Float32Array(kept * 3);
@@ -128,13 +136,11 @@ function decimateGeometry(geometry: THREE.BufferGeometry): THREE.BufferGeometry 
   return slim;
 }
 
-// ─── Render ───────────────────────────────────────────────────────────────────
-
 function renderBufferToBlob(buffer: ArrayBuffer, hex: string): Promise<Blob | null> {
   const renderer = getRenderer();
   const loader = (sharedLoader ??= new STLLoader());
   let geometry = loader.parse(buffer);
-  geometry = decimateGeometry(geometry); // Fix #4
+  geometry = decimateGeometry(geometry);
   geometry.center();
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
@@ -174,8 +180,6 @@ function renderBufferToBlob(buffer: ArrayBuffer, hex: string): Promise<Blob | nu
   });
 }
 
-// ─── Fix #1: Concurrent render queue ─────────────────────────────────────────
-
 class RenderQueue {
   private pending: Array<{
     task: () => Promise<unknown>;
@@ -194,7 +198,6 @@ class RenderQueue {
         reject,
         priority,
       });
-      // Fix #6: higher priority tasks run first
       this.pending.sort((a, b) => b.priority - a.priority);
       this.process();
     });
@@ -217,8 +220,6 @@ class RenderQueue {
 }
 
 const renderQueue = new RenderQueue();
-
-// ─── Bounded response reader ──────────────────────────────────────────────────
 
 async function readResponseBounded(
   res: Response,
@@ -270,83 +271,88 @@ async function readResponseBounded(
   return out.buffer;
 }
 
-// ─── Fix #5: Mesh loader with exponential backoff retry ──────────────────────
+type AcceptedMeshBuffer = {
+  readonly basis: string;
+  readonly renderHex: string | null;
+  readonly buffer: ArrayBuffer;
+};
 
-async function loadMeshBuffer(partId: number): Promise<ArrayBuffer | null> {
-  // Tier 1: in-memory cache (instant)
-  const memCached = cachedMeshBuffer(partId);
-  if (memCached) return memCached;
-
-  // Tier 2: IndexedDB cache (persistent across sessions)
-  const dbCached = await getCachedMeshBuffer(partId);
-  if (dbCached) {
-    rememberMeshBuffer(partId, dbCached);
-    return dbCached;
-  }
-
-  // Tier 3: network with exponential backoff retry
+export async function loadAcceptedMeshBuffer(
+  partId: number,
+): Promise<AcceptedMeshBuffer | null> {
+  const knownBasis = currentBasis(partId);
   for (let attempt = 0; attempt < MAX_FETCH_ATTEMPTS; attempt++) {
     if (attempt > 0) {
-      // Exponential backoff: 500ms, 1000ms, 2000ms…
       await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
     }
     let res: Response;
     try {
-      res = await fetchWithRetry(() => partMeshUrl(partId));
+      res = await fetchWithRetry(() => partMeshUrl(partId), {
+        init: { headers: acceptedPartMediaRevalidationHeaders(knownBasis) },
+        retryStatuses: [502, 503, 504],
+      });
     } catch {
-      continue; // retry
-    }
-    if (!res.ok) {
-      if (res.status === 404) return null; // no point retrying 404
       continue;
     }
+    if (res.status === 304) {
+      const metadata = optionalAcceptedPartMediaMetadata(res);
+      if (!metadata) return null;
+      const memory = cachedMeshBuffer(metadata.basis);
+      const persisted = memory ?? (await getCachedMeshBuffer(metadata.basis));
+      if (persisted) {
+        rememberMeshBuffer(metadata.basis, persisted);
+        rememberCurrentBasis(partId, metadata.basis);
+        return { ...metadata, buffer: persisted };
+      }
+      try {
+        res = await fetchWithRetry(() => partMeshUrl(partId), {
+          retryStatuses: [502, 503, 504],
+        });
+      } catch {
+        continue;
+      }
+    }
+    if (!res.ok) {
+      if (res.status === 404 || res.status === 409 || res.status === 413) return null;
+      continue;
+    }
+    const metadata = optionalAcceptedPartMediaMetadata(res);
+    if (!metadata) return null;
     const buffer = await readResponseBounded(res, MESH_MAX_BYTES);
     if (!buffer) continue;
 
-    rememberMeshBuffer(partId, buffer);
-    void cacheMeshBuffer(partId, buffer).catch(() => {});
-    return buffer;
+    rememberCurrentBasis(partId, metadata.basis);
+    rememberMeshBuffer(metadata.basis, buffer);
+    void cacheMeshBuffer(metadata.basis, buffer).catch(() => {});
+    return { ...metadata, buffer };
   }
 
-  return null; // all retries exhausted
+  return null;
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-/**
- * Render a color-accurate isometric thumbnail for a part.
- *
- * Priority bumps visible parts ahead of off-screen parts in the queue.
- * Blob cache (Fix #3) means color changes skip re-parsing for already-rendered
- * (partId, hex) combinations.
- */
 export function generatePartThumbnail(
   partId: number,
-  hex: string | null | undefined,
   options?: { priority?: number },
 ): Promise<string | null> {
-  const resolvedHex = hex ?? DEFAULT_COLOR;
-
   return renderQueue.enqueue(async () => {
-    // Fix #3: return cached blob without touching the network or GPU
-    const cachedBlob = getCachedBlob(partId, resolvedHex);
+    const mesh = await loadAcceptedMeshBuffer(partId);
+    if (!mesh) return null;
+    const resolvedHex = mesh.renderHex ?? DEFAULT_COLOR;
+    const cachedBlob = getCachedBlob(mesh.basis, resolvedHex);
     if (cachedBlob) {
       return URL.createObjectURL(cachedBlob);
     }
 
-    const buffer = await loadMeshBuffer(partId);
-    if (!buffer) return null;
-
     let blob: Blob | null;
     try {
-      blob = await renderBufferToBlob(buffer, resolvedHex);
+      blob = await renderBufferToBlob(mesh.buffer, resolvedHex);
     } catch {
       return null;
     }
     if (!blob) return null;
 
-    rememberBlob(partId, resolvedHex, blob); // Fix #3: cache for next call
-    void uploadPartThumbnail(partId, blob).catch(() => {});
+    rememberBlob(mesh.basis, resolvedHex, blob);
+    void uploadPartThumbnail(partId, blob, mesh.basis).catch(() => {});
     return URL.createObjectURL(blob);
   }, options?.priority ?? 0);
 }

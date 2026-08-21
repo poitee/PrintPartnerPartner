@@ -69,6 +69,10 @@ describe("known accepted media production caller inventory", () => {
         "readAcceptedMediaPng",
         "lib/accepted-media-cache.ts",
       ),
+      removeAcceptedMediaPng: productionCallers(
+        "removeAcceptedMediaPng",
+        "lib/accepted-media-cache.ts",
+      ),
       writeAcceptedMediaPng: productionCallers(
         "writeAcceptedMediaPng",
         "lib/accepted-media-cache.ts",
@@ -78,34 +82,32 @@ describe("known accepted media production caller inventory", () => {
       getAcceptedProfileStlRoots: ["services/part-paths.ts"],
       resolvePartStl: [
         "db/repository.ts",
-        "routes/parts.ts",
         "routes/plans.ts",
         "services/plan-review.ts",
         "services/plan-thumbnails.ts",
       ],
       globalThumbnailPath: [
         "lib/secure-path.ts",
-        "routes/parts.ts",
         "services/export-html.ts",
         "services/plan-review.ts",
         "services/plan-thumbnails.ts",
       ],
       globalPreviewPath: [
         "lib/secure-path.ts",
-        "routes/parts.ts",
         "services/plan-thumbnails.ts",
       ],
-      thumbnailCacheDigest: ["routes/parts.ts"],
+      thumbnailCacheDigest: [],
       previewCacheDigest: [],
       openStlThumbStream: ["routes/sources.ts"],
-      clearPlanThumbnailCache: ["routes/parts.ts", "routes/plans.ts"],
+      clearPlanThumbnailCache: ["routes/plans.ts"],
       clearPartThumbnailCacheAtHexes: ["routes/plans.ts"],
       buildPlanReview: ["assistant/tools.ts", "routes/plans.ts"],
       observeAcceptedArtifact: [],
-      openVerifiedAcceptedArtifact: [],
-      acceptedMediaBasis: [],
-      readAcceptedMediaPng: [],
-      writeAcceptedMediaPng: [],
+      openVerifiedAcceptedArtifact: ["routes/parts.ts"],
+      acceptedMediaBasis: ["routes/parts.ts"],
+      readAcceptedMediaPng: ["routes/parts.ts"],
+      removeAcceptedMediaPng: ["routes/parts.ts"],
+      writeAcceptedMediaPng: ["routes/parts.ts"],
     });
   });
 });

@@ -10,6 +10,7 @@ import {
   readSync,
   renameSync,
   rmSync,
+  unlinkSync,
   writeSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
@@ -161,6 +162,28 @@ export function readAcceptedMediaPng(input: ReadAcceptedMediaPngInput): Buffer |
     if (result.status === "miss") return null;
   }
   return null;
+}
+
+export function removeAcceptedMediaPng(input: {
+  readonly thumbsDir: string;
+  readonly basis: string;
+}): boolean {
+  const path = acceptedMediaCachePath(input);
+  try {
+    const rootStats = lstatSync(resolve(input.thumbsDir));
+    if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) return false;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+    throw error;
+  }
+
+  try {
+    unlinkSync(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 export function writeAcceptedMediaPng(input: {

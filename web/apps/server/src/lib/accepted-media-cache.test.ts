@@ -20,6 +20,7 @@ import {
   acceptedMediaBasis,
   acceptedMediaCachePath,
   readAcceptedMediaPng,
+  removeAcceptedMediaPng,
   writeAcceptedMediaPng,
 } from "./accepted-media-cache.js";
 
@@ -159,6 +160,52 @@ describe("accepted media PNG cache", () => {
 
     expect(readFileSync(sentinel, "utf8")).toBe("prior bytes");
     expect(readdirSync(thumbsDir)).toEqual([`${basis}.png`]);
+  });
+
+  it("removes only the requested accepted media basis", () => {
+    const thumbsDir = cacheFixture();
+    const otherBasis = "c".repeat(64);
+    writeAcceptedMediaPng({ thumbsDir, basis, png });
+    writeAcceptedMediaPng({ thumbsDir, basis: otherBasis, png });
+
+    expect(removeAcceptedMediaPng({ thumbsDir, basis })).toBe(true);
+    expect(removeAcceptedMediaPng({ thumbsDir, basis })).toBe(false);
+    expect(readAcceptedMediaPng({ thumbsDir, basis: otherBasis })).toEqual(png);
+  });
+
+  it("fails closed for absent, malformed, symlinked, and non-directory roots", () => {
+    const absentRoot = cacheFixture();
+    expect(removeAcceptedMediaPng({ thumbsDir: absentRoot, basis })).toBe(false);
+    expect(() => removeAcceptedMediaPng({ thumbsDir: absentRoot, basis: "not-a-basis" })).toThrow(
+      "Invalid accepted media basis",
+    );
+
+    const symlinkRoot = cacheFixture();
+    const outsideDirectory = join(symlinkRoot, "..", "outside-cache");
+    mkdirSync(outsideDirectory);
+    const outsideTarget = acceptedMediaCachePath({ thumbsDir: outsideDirectory, basis });
+    writeFileSync(outsideTarget, png);
+    symlinkSync(outsideDirectory, symlinkRoot, "dir");
+
+    expect(removeAcceptedMediaPng({ thumbsDir: symlinkRoot, basis })).toBe(false);
+    expect(readFileSync(outsideTarget)).toEqual(png);
+
+    const fileRoot = cacheFixture();
+    writeFileSync(fileRoot, "not a directory");
+    expect(removeAcceptedMediaPng({ thumbsDir: fileRoot, basis })).toBe(false);
+  });
+
+  it("unlinks a contained final-entry symlink without touching its target", () => {
+    const thumbsDir = cacheFixture();
+    mkdirSync(thumbsDir);
+    const outsideTarget = join(thumbsDir, "..", "outside-thumbnail.png");
+    writeFileSync(outsideTarget, png);
+    const cachePath = acceptedMediaCachePath({ thumbsDir, basis });
+    symlinkSync(outsideTarget, cachePath);
+
+    expect(removeAcceptedMediaPng({ thumbsDir, basis })).toBe(true);
+    expect(existsSync(cachePath)).toBe(false);
+    expect(readFileSync(outsideTarget)).toEqual(png);
   });
 
   it("reads a maximum-size invalid signature only once", () => {

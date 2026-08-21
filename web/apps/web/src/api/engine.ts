@@ -1841,30 +1841,10 @@ export async function generateManifestDraft(sourceId: number): Promise<{
   return engineFetch(`/sources/${sourceId}/manifest-draft`, { method: "POST" });
 }
 
-/**
- * URL for a part thumbnail. The optional `hex` and `cacheVersion` are appended
- * only as cache-busting query params (the server keys cached PNGs by the part's
- * stored filament color, not the query string). This makes a color change — or
- * a manual "Regenerate thumbnails" bump — produce a distinct URL so the browser
- * does not serve a stale cached image.
- */
-export async function partThumbnailUrl(
-  partId: number,
-  opts?: { hex?: string | null; cacheVersion?: number },
-): Promise<string> {
-  const base = resolveEngineUrl(`/parts/${partId}/thumbnail`);
-  const params = new URLSearchParams();
-  if (opts?.hex) params.set("hex", opts.hex);
-  if (opts?.cacheVersion) params.set("v", String(opts.cacheVersion));
-  const qs = params.toString();
-  return qs ? `${base}?${qs}` : base;
+export async function partThumbnailUrl(partId: number): Promise<string> {
+  return resolveEngineUrl(`/parts/${partId}/thumbnail`);
 }
 
-/**
- * Clear cached thumbnail/preview PNGs for every part in a plan so they
- * regenerate from the current filament colors. Returns how many cached files
- * were removed on the server.
- */
 export async function regeneratePlanThumbnails(
   profileId: number,
 ): Promise<{ cleared: number }> {
@@ -1873,12 +1853,48 @@ export async function regeneratePlanThumbnails(
   });
 }
 
-/** Upload a client-rendered PNG thumbnail after Preview3D renders (optional cache). */
-export async function uploadPartThumbnail(partId: number, pngBlob: Blob): Promise<void> {
+const ACCEPTED_MEDIA_BASIS_PATTERN = /^[0-9a-f]{64}$/;
+const ACCEPTED_RENDER_HEX_PATTERN = /^#[0-9a-f]{6}$/i;
+
+export type AcceptedPartMediaMetadata = {
+  readonly basis: string;
+  readonly renderHex: string | null;
+};
+
+export function acceptedPartMediaMetadata(response: Response): AcceptedPartMediaMetadata {
+  const etag = response.headers.get("ETag") ?? "";
+  const match = /^"([0-9a-f]{64})"$/.exec(etag);
+  if (!match) throw new Error("Response is missing a strong accepted media ETag");
+  const basis = match[1];
+  if (!basis) throw new Error("Response is missing an accepted media basis");
+  const rawHex = response.headers.get("X-Accepted-Render-Hex")?.trim() ?? "";
+  return {
+    basis,
+    renderHex: ACCEPTED_RENDER_HEX_PATTERN.test(rawHex) ? rawHex.toLowerCase() : null,
+  };
+}
+
+export function acceptedPartMediaRevalidationHeaders(basis: string | null): HeadersInit {
+  if (basis == null) return {};
+  if (!ACCEPTED_MEDIA_BASIS_PATTERN.test(basis)) {
+    throw new Error("Invalid accepted media basis");
+  }
+  return { "If-None-Match": `"${basis}"` };
+}
+
+export async function uploadPartThumbnail(
+  partId: number,
+  pngBlob: Blob,
+  meshBasis: string,
+): Promise<void> {
+  if (!ACCEPTED_MEDIA_BASIS_PATTERN.test(meshBasis)) {
+    throw new Error("Invalid accepted media basis");
+  }
   const form = new FormData();
   form.append("file", pngBlob, "thumbnail.png");
   const res = await fetch(resolveEngineUrl(`/parts/${partId}/thumbnail`), {
     method: "POST",
+    headers: { "If-Match": `"${meshBasis}"` },
     body: form,
   });
   if (!res.ok) {

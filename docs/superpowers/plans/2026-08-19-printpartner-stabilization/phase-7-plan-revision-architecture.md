@@ -441,6 +441,60 @@ skipped on case-insensitive macOS. The full server suite passed 148 files and
 1125 tests, with one file and three tests skipped. Server typecheck and root
 lint also passed.
 
+The first Unit 5b2b production cut moves only the accepted Part media loop.
+Part mesh, thumbnail, preview, thumbnail upload, and Plan thumbnail regeneration
+now locate a tenant-owned compatibility Part or Build, perform one accepted
+operational read when accepted-state evaluation is needed, and match Parts by
+the accepted projection coordinate. They do not use the current Source path,
+active Source revision, or mutable Part media facts. Legacy and untracked media
+remain unavailable. Tracked media opens and verifies the accepted descriptor;
+mesh responses hash and stream that same bounded descriptor.
+
+Mesh and derivative responses use strong content-derived ETags. Strong
+If-None-Match lists can revalidate a response, while weak validators do not
+match. A missing derivative returns the compatibility placeholder without an
+ETag and with `Cache-Control: no-store`, so a later upload cannot turn a stale
+placeholder into a 304 response. Real derivatives retain strong ETags and
+`private, no-cache`. Thumbnail upload requires the strong current mesh basis in
+If-Match, buffers at most 5 MiB, then performs its accepted read immediately
+before artifact verification and cache publication. An Apply during multipart
+reading therefore returns the stable stale-basis conflict without publishing
+either the old or new derivative.
+
+The single-reader constraint leaves a narrower race after that accepted read
+and before the atomic cache rename. An Apply in that interval may leave an
+orphaned old-basis PNG. The cache key contains the accepted artifact digest,
+role, color, variant, and format, so old bytes cannot be published under the new
+basis. Preventing publication after an Apply would require coordination with
+the accepted authority again, such as a second read or transaction-coupled
+filesystem publication. That coordination does not belong in this cut.
+
+Browser mesh, rendered blob, and IndexedDB entries are keyed by the 64-character
+accepted basis rather than Part ID. IndexedDB version 2 replaces the old Part-ID
+store. Each load revalidates the Part URL to discover the current basis; a 304
+uses only bytes stored under that basis, and a local miss triggers an
+unconditional fetch. A blocked database upgrade settles as a cache miss, late
+success after that failure closes its connection, and live connections close on
+version change. Invalid accepted metadata returns no thumbnail result without
+caching or uploading. Accepted thumbnail rendering uses the accepted response
+color. Preview3D may display a caller tint but uploads only when it equals the
+accepted response color. The in-memory accepted thumbnail cache has a 20 MiB
+LRU byte budget, and the Part-to-basis revalidation index shares the bounded
+mesh-cache capacity.
+
+Plan regeneration captures one accepted snapshot and removes only its current
+thumbnail and preview bases. Deletion fails closed for absent, symlinked, or
+non-directory cache roots while a contained final-entry symlink is unlinked
+without following its target. Accepted-media exception logs contain only coarse
+route identifiers. Source previews, Plan Review, checklist export, other
+exports, role-color working cache helpers, routes, and Review JSON remain
+unchanged. Production caller inventories pin both the accepted browser loop and
+the deferred working media gateways. The focused server suite passed 35 tests
+with one platform skip, and the focused web suite passed 27 tests. The full
+server suite passed 149 files and 1129 tests with one file and three tests
+skipped. The full web suite passed 98 files and 429 tests. Server and web
+typecheck, root lint, and `git diff --check` also passed.
+
 ## Module shape
 
 ```ts

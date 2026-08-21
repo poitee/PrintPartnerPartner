@@ -73,7 +73,11 @@ export async function registerCoreRoutes(
     dataDir: deps.dataDir,
     thumbsDir: deps.thumbsDir,
   });
-  await registerPartRoutes(app, { repo: deps.repo, thumbsDir: deps.thumbsDir });
+  await registerPartRoutes(app, {
+    repo: deps.repo,
+    reposDir: deps.reposDir,
+    thumbsDir: deps.thumbsDir,
+  });
   await registerExportRoutes(app, { dataDir: deps.dataDir });
   await registerImportRoutes(app, { repo: deps.repo });
   await registerSettingsRoutes(app, { repo: deps.repo, dataDir: deps.dataDir, config: deps.config });

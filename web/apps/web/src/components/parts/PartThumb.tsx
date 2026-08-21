@@ -1,6 +1,12 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { partThumbnailUrl } from "../../api/engine";
+import {
+  acceptedPartMediaMetadata,
+  acceptedPartMediaRevalidationHeaders,
+  partThumbnailUrl,
+} from "../../api/engine";
 import { generatePartThumbnail } from "../../lib/stlThumbnail";
+import { fetchWithRetry } from "../../lib/fetchWithRetry";
+import { acceptedThumbnailBlobCache } from "../../lib/acceptedThumbnailBlobCache";
 import {
   getThumbnailCacheVersion,
   subscribeThumbnailCache,
@@ -8,15 +14,6 @@ import {
 
 const DEFAULT_THUMB_PX = 96;
 
-/**
- * Lazy part thumbnail (IntersectionObserver). Tries the cheap server-cached
- * PNG first; the server returns a 1x1 transparent placeholder when nothing is
- * cached, in which case we fall back to rendering the STL client-side (which
- * also uploads the render to warm the server cache).
- *
- * Fix #6: passes a priority to the render queue so parts that are already
- * visible on screen jump ahead of parts still off-screen.
- */
 export default memo(function PartThumb({
   partId,
   tintHex,
@@ -29,15 +26,13 @@ export default memo(function PartThumb({
   tintHex?: string | null;
   compact?: boolean;
   sizePx?: number;
-  /** Load immediately (e.g. before printing) instead of waiting for scroll into view. */
   eager?: boolean;
-  /** Shown while the image is loading / unavailable (e.g. filename initials). */
   fallbackLabel?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const acceptedBasisRef = useRef<string | null>(null);
   const [src, setSrc] = useState<string | null>(null);
   const [visible, setVisible] = useState(eager);
-  // Fix #6: track whether the element is already intersecting (for priority)
   const [intersecting, setIntersecting] = useState(eager);
   const cacheVersion = useSyncExternalStore(
     subscribeThumbnailCache,
@@ -75,12 +70,16 @@ export default memo(function PartThumb({
     let objectUrl: string | null = null;
     let probe: HTMLImageElement | null = null;
 
-    // Fix #6: visible parts get priority 1, off-screen buffered parts get 0
     const priority = intersecting ? 1 : 0;
 
-    // Client STL render fallback; uploads the PNG so the server cache warms.
+    const clearObjectUrl = () => {
+      if (!objectUrl) return;
+      URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+    };
+
     const renderClientSide = () => {
-      void generatePartThumbnail(partId, tintHex, { priority }).then((url) => {
+      void generatePartThumbnail(partId, { priority }).then((url) => {
         if (cancelled) {
           if (url) URL.revokeObjectURL(url);
           return;
@@ -92,23 +91,54 @@ export default memo(function PartThumb({
       });
     };
 
-    void partThumbnailUrl(partId, { hex: tintHex, cacheVersion }).then((serverUrl) => {
-      if (cancelled) return;
-      // Probe off-DOM so the 1x1 placeholder never flashes in the UI.
-      probe = new Image();
-      probe.onload = () => {
-        if (cancelled) return;
-        if (probe && probe.naturalWidth > 1 && probe.naturalHeight > 1) {
-          setSrc(serverUrl);
-        } else {
-          renderClientSide();
+    const loadServerThumbnail = async () => {
+      try {
+        const serverUrl = await partThumbnailUrl(partId);
+        let response = await fetchWithRetry(serverUrl, {
+          init: {
+            headers: acceptedPartMediaRevalidationHeaders(acceptedBasisRef.current),
+          },
+          retryStatuses: [502, 503, 504],
+        });
+        if (!response.ok && response.status !== 304) return renderClientSide();
+        let metadata = acceptedPartMediaMetadata(response);
+        let blob =
+          response.status === 304 ? acceptedThumbnailBlobCache.get(metadata.basis) : null;
+        if (!blob) {
+          if (response.status === 304) {
+            response = await fetchWithRetry(serverUrl, { retryStatuses: [502, 503, 504] });
+            if (!response.ok) return renderClientSide();
+            metadata = acceptedPartMediaMetadata(response);
+          }
+          blob = await response.blob();
         }
-      };
-      probe.onerror = () => {
+        if (cancelled) return;
+        acceptedBasisRef.current = metadata.basis;
+        objectUrl = URL.createObjectURL(blob);
+        probe = new Image();
+        probe.onload = () => {
+          if (cancelled) return;
+          if (probe && probe.naturalWidth > 1 && probe.naturalHeight > 1) {
+            acceptedThumbnailBlobCache.set(metadata.basis, blob);
+            setSrc(objectUrl);
+          } else {
+            clearObjectUrl();
+            renderClientSide();
+          }
+        };
+        probe.onerror = () => {
+          if (!cancelled) {
+            clearObjectUrl();
+            renderClientSide();
+          }
+        };
+        probe.src = objectUrl;
+      } catch {
         if (!cancelled) renderClientSide();
-      };
-      probe.src = serverUrl;
-    });
+      }
+    };
+
+    void loadServerThumbnail();
 
     return () => {
       cancelled = true;
@@ -117,7 +147,7 @@ export default memo(function PartThumb({
         probe.onerror = null;
         probe = null;
       }
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      clearObjectUrl();
     };
   }, [visible, intersecting, partId, tintHex, cacheVersion]);
 

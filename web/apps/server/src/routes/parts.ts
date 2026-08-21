@@ -1,27 +1,72 @@
-import { createReadStream, mkdirSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { basename } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppRepository } from "../db/repository.js";
-import { resolvePartStl } from "../services/part-paths.js";
-import { resolvePartFilamentHex } from "../services/filament-catalog.js";
-import { clearPlanThumbnailCache } from "../services/plan-thumbnails.js";
-import {
-  cachedPngIfExists,
-  globalPreviewPath,
-  globalThumbnailPath,
-  PLACEHOLDER_PNG,
-  thumbnailCacheDigest,
-} from "../lib/thumbnails.js";
-import { safePathUnderRoot } from "../lib/secure-path.js";
+import type { AcceptedOperationalPart } from "../db/accepted-plan-operational.js";
+import { getColorById } from "../services/filament-catalog.js";
+import { PLACEHOLDER_PNG } from "../lib/thumbnails.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import { toAcceptedPartAssembledView } from "../services/accepted-plan-views.js";
+import { openVerifiedAcceptedArtifact } from "../services/accepted-artifacts.js";
+import {
+  ACCEPTED_MEDIA_PNG_MAX_BYTES,
+  acceptedMediaBasis,
+  readAcceptedMediaPng,
+  removeAcceptedMediaPng,
+  writeAcceptedMediaPng,
+} from "../lib/accepted-media-cache.js";
 
 const MESH_MAX_BYTES = 15 * 1024 * 1024;
 
 type RouteDeps = {
   repo: AppRepository;
+  reposDir: string;
   thumbsDir: string;
 };
+
+type AcceptedPartRequest =
+  | {
+      readonly kind: "ready";
+      readonly profileId: number;
+      readonly part: AcceptedOperationalPart;
+    }
+  | { readonly kind: "part_not_found" }
+  | {
+      readonly kind: "accepted_state_unavailable";
+      readonly reason: "compatibility_dirty" | "uninitialized";
+    };
+
+function readAcceptedPartRequest(deps: RouteDeps, partId: number): AcceptedPartRequest {
+  const projection = deps.repo.getPartRow(partId);
+  if (!projection) return { kind: "part_not_found" };
+  const accepted = deps.repo.readAcceptedPlanOperationalSnapshot(projection.profileId);
+  if (accepted.kind === "empty") return { kind: "part_not_found" };
+  if (accepted.kind !== "ready") {
+    return { kind: "accepted_state_unavailable", reason: accepted.kind };
+  }
+  const part = accepted.snapshot.parts.find((candidate) => candidate.projectionPartId === partId);
+  return part
+    ? { kind: "ready", profileId: projection.profileId, part }
+    : { kind: "part_not_found" };
+}
+
+function acceptedRenderHex(part: AcceptedOperationalPart): string | null {
+  const custom = part.filamentCustomHex?.trim() ?? "";
+  if (/^#[0-9a-f]{6}$/i.test(custom)) return custom.toLowerCase();
+  const catalog = part.filamentColorId ? getColorById(part.filamentColorId) : null;
+  const catalogHex = catalog?.hex.trim() ?? "";
+  return /^#[0-9a-f]{6}$/i.test(catalogHex) ? catalogHex.toLowerCase() : null;
+}
+
+function acceptedStateDetail(reason: "compatibility_dirty" | "uninitialized"): string {
+  return reason === "compatibility_dirty"
+    ? "Accepted Plan requires compatibility repair"
+    : "Accepted Plan operational state is not initialized";
+}
+
+function matchesStrongEtagList(value: string | string[] | undefined, etag: string): boolean {
+  if (typeof value !== "string") return false;
+  return value.split(",").some((candidate) => candidate.trim() === etag);
+}
 
 async function sendPartImage(
   deps: RouteDeps,
@@ -30,20 +75,71 @@ async function sendPartImage(
   preview: boolean,
 ) {
   const id = Number((request.params as { id: string }).id);
-  const part = deps.repo.getPartRow(id);
-  if (!part) return reply.status(404).send({ detail: "Part not found" });
-  const stl = resolvePartStl(deps.repo, part);
-  if (!stl) return reply.status(404).send({ detail: "STL not found for part" });
-  const hex = resolvePartFilamentHex(part);
-  const role = part.role || "primary";
-  const path = preview
-    ? globalPreviewPath(deps.thumbsDir, stl, role, hex)
-    : globalThumbnailPath(deps.thumbsDir, stl, role, hex);
-  const cached = cachedPngIfExists(path);
-  if (cached) {
-    return reply.header("Content-Type", "image/png").send(createReadStream(cached));
+  let profileId: number | null = null;
+  try {
+    const accepted = readAcceptedPartRequest(deps, id);
+    if (accepted.kind === "part_not_found") {
+      return reply.status(404).send({ detail: "Part not found" });
+    }
+    if (accepted.kind === "accepted_state_unavailable") {
+      return reply.status(409).send({ detail: acceptedStateDetail(accepted.reason) });
+    }
+    profileId = accepted.profileId;
+    const part = accepted.part;
+    if (part.artifact.kind === "unavailable") {
+      return reply.status(409).send({ detail: "Accepted Part media is unavailable" });
+    }
+    const verified = openVerifiedAcceptedArtifact({
+      reposDir: deps.reposDir,
+      artifact: part.artifact,
+      maxBytes: MESH_MAX_BYTES,
+    });
+    if (verified.kind !== "verified") {
+      if (verified.kind === "unavailable") {
+        return reply.status(409).send({ detail: "Accepted Part media is unavailable" });
+      }
+      return reply.status(409).send({ detail: "Accepted Part artifact is unavailable" });
+    }
+    verified.lease.close();
+    const hex = acceptedRenderHex(part);
+    const basis = acceptedMediaBasis({
+      expectedSha256: part.artifact.expectedSha256,
+      role: part.effectiveRole,
+      hex,
+      variant: preview ? "preview" : "thumbnail",
+    });
+    const cached = readAcceptedMediaPng({ thumbsDir: deps.thumbsDir, basis });
+    if (!cached) {
+      reply.header("Content-Type", "image/png").header("Cache-Control", "no-store");
+      if (hex) reply.header("X-Accepted-Render-Hex", hex);
+      return reply.send(PLACEHOLDER_PNG);
+    }
+    const etag = `"${basis}"`;
+    if (matchesStrongEtagList(request.headers["if-none-match"], etag)) {
+      reply.status(304).header("Cache-Control", "private, no-cache").header("ETag", etag);
+      if (hex) reply.header("X-Accepted-Render-Hex", hex);
+      return reply.send();
+    }
+    reply
+      .header("Content-Type", "image/png")
+      .header("Cache-Control", "private, no-cache")
+      .header("ETag", etag);
+    if (hex) reply.header("X-Accepted-Render-Hex", hex);
+    return reply.send(cached);
+  } catch (error) {
+    if (error instanceof AcceptedPlanOperationalIntegrityError) {
+      request.log.error(
+        { code: error.code, profileId, partId: id },
+        "Accepted Plan integrity failure",
+      );
+      return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+    }
+    request.log.error(
+      { failure: "unexpected", profileId, partId: id },
+      "Accepted Part media failed",
+    );
+    return reply.status(500).send({ detail: "Internal Server Error" });
   }
-  return reply.header("Content-Type", "image/png").send(PLACEHOLDER_PNG);
 }
 
 export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
@@ -142,63 +238,216 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/parts/:id/mesh", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    const part = deps.repo.getPartRow(id);
-    if (!part) return reply.status(404).send({ detail: "Part not found" });
-    const stl = resolvePartStl(deps.repo, part);
-    if (!stl) return reply.status(404).send({ detail: "STL not found for part" });
+    let profileId: number | null = null;
     try {
-      const size = statSync(stl).size;
-      if (size > MESH_MAX_BYTES) {
-        return reply.status(413).send({
-          detail: `STL exceeds ${MESH_MAX_BYTES / (1024 * 1024)}MB mesh limit`,
-        });
+      const accepted = readAcceptedPartRequest(deps, id);
+      if (accepted.kind === "part_not_found") {
+        return reply.status(404).send({ detail: "Part not found" });
       }
-    } catch {
-      return reply.status(404).send({ detail: "STL not readable" });
+      if (accepted.kind === "accepted_state_unavailable") {
+        return reply.status(409).send({ detail: acceptedStateDetail(accepted.reason) });
+      }
+      const part = accepted.part;
+      profileId = accepted.profileId;
+      if (part.artifact.kind === "unavailable") {
+        return reply.status(409).send({ detail: "Accepted Part media is unavailable" });
+      }
+      const hex = acceptedRenderHex(part);
+      const basis = acceptedMediaBasis({
+        expectedSha256: part.artifact.expectedSha256,
+        role: part.effectiveRole,
+        hex,
+        variant: "mesh",
+      });
+      const opened = openVerifiedAcceptedArtifact({
+        reposDir: deps.reposDir,
+        artifact: part.artifact,
+        maxBytes: MESH_MAX_BYTES,
+      });
+      if (opened.kind !== "verified") {
+        if (opened.kind === "unavailable") {
+          return reply.status(409).send({ detail: "Accepted Part media is unavailable" });
+        }
+        if (opened.reason === "too_large") {
+          return reply.status(413).send({
+            detail: `STL exceeds ${MESH_MAX_BYTES / (1024 * 1024)}MB mesh limit`,
+          });
+        }
+        return reply.status(409).send({ detail: "Accepted Part artifact is unavailable" });
+      }
+      const etag = `"${basis}"`;
+      if (matchesStrongEtagList(request.headers["if-none-match"], etag)) {
+        opened.lease.close();
+        reply.status(304).header("Cache-Control", "private, no-cache").header("ETag", etag);
+        if (hex) reply.header("X-Accepted-Render-Hex", hex);
+        return reply.send();
+      }
+      const stream = opened.lease.createReadStream();
+      const closeLease = () => opened.lease.close();
+      stream.once("end", closeLease);
+      stream.once("error", closeLease);
+      stream.once("close", closeLease);
+      const filename = basename(part.filename).replace(/["\r\n]/g, "_");
+      reply
+        .header("Content-Type", "model/stl")
+        .header("Content-Disposition", `inline; filename="${filename}"`)
+        .header("Content-Length", opened.lease.size)
+        .header("Cache-Control", "private, no-cache")
+        .header("ETag", etag);
+      if (hex) reply.header("X-Accepted-Render-Hex", hex);
+      return reply.send(stream);
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error(
+          { code: error.code, profileId, partId: id },
+          "Accepted Plan integrity failure",
+        );
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error(
+        { failure: "unexpected", profileId, partId: id },
+        "Accepted Part media failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
-    return reply
-      .header("Content-Type", "model/stl")
-      .header("Content-Disposition", `inline; filename="${basename(stl)}"`)
-      .send(createReadStream(stl));
   });
 
   app.get("/parts/:id/thumbnail", async (request, reply) => sendPartImage(deps, request, reply, false));
   app.get("/parts/:id/preview", async (request, reply) => sendPartImage(deps, request, reply, true));
 
-  // Clear cached thumbnail/preview PNGs for every part in a plan so the next
-  // render regenerates them from the current filament colors. Used by the
-  // "Regenerate thumbnails" action when colors look stale.
   app.post("/plans/:id/regenerate-thumbnails", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) {
-      return reply.status(404).send({ detail: "Profile not found" });
+    try {
+      if (!deps.repo.getProfile(id)) {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      const accepted = deps.repo.readAcceptedPlanOperationalSnapshot(id);
+      if (accepted.kind === "empty") return { cleared: 0 };
+      if (accepted.kind !== "ready") {
+        return reply.status(409).send({ detail: acceptedStateDetail(accepted.kind) });
+      }
+      let cleared = 0;
+      for (const part of accepted.snapshot.parts) {
+        if (part.artifact.kind !== "tracked") continue;
+        const hex = acceptedRenderHex(part);
+        for (const variant of ["thumbnail", "preview"] as const) {
+          const basis = acceptedMediaBasis({
+            expectedSha256: part.artifact.expectedSha256,
+            role: part.effectiveRole,
+            hex,
+            variant,
+          });
+          if (removeAcceptedMediaPng({ thumbsDir: deps.thumbsDir, basis })) cleared += 1;
+        }
+      }
+      return { cleared };
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error({ code: error.code, profileId: id }, "Accepted Plan integrity failure");
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error(
+        { failure: "unexpected", profileId: id },
+        "Accepted thumbnail regeneration failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
-    const cleared = clearPlanThumbnailCache(deps.repo, deps.thumbsDir, id);
-    return { cleared };
   });
 
   app.post("/parts/:id/thumbnail", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    const part = deps.repo.getPartRow(id);
-    if (!part) return reply.status(404).send({ detail: "Part not found" });
-    const stl = resolvePartStl(deps.repo, part);
-    if (!stl) return reply.status(404).send({ detail: "STL not found for part" });
-    const file = await request.file();
-    if (!file) return reply.status(400).send({ detail: "PNG file required" });
-    const buf = await file.toBuffer();
-    if (buf.length < 8 || buf[0] !== 0x89) {
-      return reply.status(400).send({ detail: "Expected PNG image" });
+    let profileId: number | null = null;
+    try {
+      const projection = deps.repo.getPartRow(id);
+      if (!projection) {
+        return reply.status(404).send({ detail: "Part not found" });
+      }
+      profileId = projection.profileId;
+      const ifMatch = request.headers["if-match"];
+      if (typeof ifMatch !== "string" || !/^"[0-9a-f]{64}"$/.test(ifMatch)) {
+        return reply.status(400).send({ detail: "Strong If-Match header required" });
+      }
+      const file = await request.file({ limits: { fileSize: ACCEPTED_MEDIA_PNG_MAX_BYTES } });
+      if (!file) return reply.status(400).send({ detail: "PNG file required" });
+      const buf = await file.toBuffer();
+      if (file.file.truncated || buf.length > ACCEPTED_MEDIA_PNG_MAX_BYTES) {
+        return reply.status(413).send({ detail: "PNG exceeds 5MB thumbnail limit" });
+      }
+
+      const accepted = deps.repo.readAcceptedPlanOperationalSnapshot(profileId);
+      if (accepted.kind === "empty") {
+        return reply.status(404).send({ detail: "Part not found" });
+      }
+      if (accepted.kind !== "ready") {
+        return reply.status(409).send({ detail: acceptedStateDetail(accepted.kind) });
+      }
+      const part = accepted.snapshot.parts.find(
+        (candidate) => candidate.projectionPartId === id,
+      );
+      if (!part) {
+        return reply.status(409).send({ detail: "Accepted Part media basis is stale" });
+      }
+      if (part.artifact.kind === "unavailable") {
+        return reply.status(409).send({ detail: "Accepted Part media is unavailable" });
+      }
+      const hex = acceptedRenderHex(part);
+      const meshBasis = acceptedMediaBasis({
+        expectedSha256: part.artifact.expectedSha256,
+        role: part.effectiveRole,
+        hex,
+        variant: "mesh",
+      });
+      if (ifMatch !== `"${meshBasis}"`) {
+        return reply.status(409).send({ detail: "Accepted Part media basis is stale" });
+      }
+      const verified = openVerifiedAcceptedArtifact({
+        reposDir: deps.reposDir,
+        artifact: part.artifact,
+        maxBytes: MESH_MAX_BYTES,
+      });
+      if (verified.kind !== "verified") {
+        return reply.status(409).send({ detail: "Accepted Part artifact is unavailable" });
+      }
+      verified.lease.close();
+      const thumbnailBasis = acceptedMediaBasis({
+        expectedSha256: part.artifact.expectedSha256,
+        role: part.effectiveRole,
+        hex,
+        variant: "thumbnail",
+      });
+      try {
+        writeAcceptedMediaPng({ thumbsDir: deps.thumbsDir, basis: thumbnailBasis, png: buf });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (message.includes("size limit")) {
+          return reply.status(413).send({ detail: "PNG exceeds 5MB thumbnail limit" });
+        }
+        if (message.includes("Invalid accepted media PNG")) {
+          return reply.status(400).send({ detail: "Expected PNG image" });
+        }
+        throw error;
+      }
+      return { saved: true, digest: thumbnailBasis };
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "FST_REQ_FILE_TOO_LARGE"
+      ) {
+        return reply.status(413).send({ detail: "PNG exceeds 5MB thumbnail limit" });
+      }
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error(
+          { code: error.code, profileId, partId: id },
+          "Accepted Plan integrity failure",
+        );
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error(
+        { failure: "unexpected", profileId, partId: id },
+        "Accepted Part media failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
-    const hex = resolvePartFilamentHex(part);
-    const role = part.role || "primary";
-    const digest = thumbnailCacheDigest(stl, role, hex);
-    if (!/^[a-f0-9]{16}$/.test(digest)) {
-      return reply.status(400).send({ detail: "Invalid thumbnail digest" });
-    }
-    const outPath = safePathUnderRoot(deps.thumbsDir, `${digest}.png`);
-    if (!outPath) return reply.status(400).send({ detail: "Invalid thumbnail path" });
-    mkdirSync(dirname(outPath), { recursive: true });
-    writeFileSync(outPath, buf);
-    return { saved: true, digest };
   });
 }

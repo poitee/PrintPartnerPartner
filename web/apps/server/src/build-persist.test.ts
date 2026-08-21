@@ -24,7 +24,7 @@ describe("Build persistence and STL preview", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("persists import rules, part patches, and serves mesh over HTTP", async () => {
+  it("persists import rules and Part patches without serving an unaccepted mesh", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-build-"));
     process.env.PRINT_PARTNER_DATA_DIR = dir;
     const config = loadConfig();
@@ -89,9 +89,8 @@ describe("Build persistence and STL preview", () => {
     expect(kitGetBody.kit?.selections?.head).toBe("sb");
 
     const meshRes = await app.inject({ method: "GET", url: `/parts/${partId}/mesh` });
-    expect(meshRes.statusCode).toBe(200);
-    expect(meshRes.headers["content-type"]).toContain("model/stl");
-    expect(meshRes.rawPayload.length).toBeGreaterThan(0);
+    expect(meshRes.statusCode).toBe(409);
+    expect(meshRes.json()).toEqual({ detail: "Accepted Plan requires compatibility repair" });
 
     const narrowRules = await app.inject({
       method: "PUT",
