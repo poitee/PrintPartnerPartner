@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { PrinterCheckoffLink, PrinterCheckoffUnit } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
+import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import type { IntegrationPort } from "../integrations/store.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
 import { getIntegrationConfig } from "../integrations/store.js";
@@ -13,7 +14,6 @@ import {
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import {
   createPrinterCheckoffLink,
-  getPrinterCheckoffLink,
   listAwaitingVerifyPrinterCheckoffLinks,
   listWatchingPrinterCheckoffLinks,
   loadPrinterCheckoffLinks,
@@ -431,38 +431,39 @@ export async function registerPrinterCheckoffRoutes(
       if (!linkId) {
         return sendProblem(reply, 400, "Bad Request", "link_id is required");
       }
-      const storedLink = getPrinterCheckoffLink(deps.repo, linkId);
-      if (
-        storedLink?.state === "awaiting_verify" &&
-        storedLink.units.length === 0
-      ) {
-        const mapped = mapNamesToProfileUnits(
-          deps.repo,
-          storedLink.profile_id,
-          storedLink.unlabeled_names ?? [],
-          storedLink.filename,
-        );
-        if (mapped.units.length > 0) {
-          const unmatched = (storedLink.unlabeled_names ?? []).filter(
-            (name) => !mapped.matchedNames.has(name),
+      let result;
+      try {
+        result = verifyPrinterCheckoff(deps.repo, linkId, body.decisions);
+      } catch (error) {
+        if (error instanceof AcceptedPlanOperationalIntegrityError) {
+          request.log.error(
+            { code: error.code, linkId },
+            "Accepted Plan integrity failure",
           );
-          updatePrinterCheckoffLink(
-            deps.repo,
-            storedLink.id,
-            {
-              units: mapped.units,
-              unlabeled_names: unmatched.length ? unmatched : undefined,
-            },
-            { requireState: "awaiting_verify" },
+          return sendProblem(
+            reply,
+            500,
+            "Internal Server Error",
+            "Accepted Plan data is inconsistent",
           );
         }
+        request.log.error(
+          { failure: "unexpected", linkId },
+          "Accepted printer verification failed",
+        );
+        return sendProblem(reply, 500, "Internal Server Error", "Internal Server Error");
       }
-      const result = verifyPrinterCheckoff(deps.repo, linkId, body.decisions);
       if ("error" in result) {
         return sendProblem(
           reply,
           result.status,
-          result.status === 404 ? "Not Found" : result.status === 409 ? "Conflict" : "Bad Request",
+          result.status === 404
+            ? "Not Found"
+            : result.status === 409
+              ? "Conflict"
+              : result.status === 503
+                ? "Service Unavailable"
+                : "Bad Request",
           result.error,
         );
       }

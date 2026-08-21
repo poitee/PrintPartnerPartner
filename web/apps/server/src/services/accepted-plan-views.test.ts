@@ -326,9 +326,22 @@ describe("accepted Plan views", () => {
   });
 
   it("keeps legacy accepted readers on the exact deferred allowlist", () => {
-    expect(productionCallers("getCheckoff")).toEqual([
-      { file: "assistant/tools.ts", count: 2 },
-    ]);
+    expect(productionCallers("getCheckoff")).toEqual([]);
     expect(productionCallers("getPartAssembled")).toEqual([]);
+    for (const symbol of [
+      "archiveProfile",
+      "patchPartProgress",
+      "patchPartAssembled",
+      "ensureProgressForPart",
+    ]) {
+      expect(productionCallers(symbol)).toEqual([]);
+    }
+    expect(productionCallers("printUnitTotals")).toEqual([
+      { file: "db/repository.ts", count: 1 },
+    ]);
+    expect(productionCallers("printUnitsByPartId")).toEqual([
+      { file: "db/repository.ts", count: 2 },
+      { file: "routes/printer-checkoff.ts", count: 1 },
+    ]);
   });
 });

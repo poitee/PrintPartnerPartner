@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { PrinterCheckoffLink, PrinterHostStatus } from "@print-partner/contracts";
 import {
   decideCheckoffReconcile,
-  confirmsRespectProgressPrefix,
   normalizePrinterFilename,
   parseCheckoffUnits,
   pendingCheckoffUnits,
@@ -56,12 +55,6 @@ describe("printer-checkoff helpers", () => {
         }),
       ),
     ).toEqual([{ part_id: 1, unit_index: 1 }]);
-  });
-
-  it("rejects confirm that would mark unconfirmed lower units", () => {
-    expect(confirmsRespectProgressPrefix([false, false], [1])).toBe(false);
-    expect(confirmsRespectProgressPrefix([false, false], [0, 1])).toBe(true);
-    expect(confirmsRespectProgressPrefix([true, false], [1])).toBe(true);
   });
 
   it("trims terminal links before active ones", () => {

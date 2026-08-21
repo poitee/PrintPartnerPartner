@@ -12,8 +12,27 @@ import { resolvePartStl } from "../services/part-paths.js";
 import { normalizePartRole } from "../services/role-filament.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import { toAcceptedCheckoffView } from "../services/accepted-plan-views.js";
+import { acceptedPlanBasis } from "../db/accepted-plan-progress.js";
 
 type RouteDeps = { repo: AppRepository; dataDir: string; reposDir: string; thumbsDir: string };
+
+function acceptedStateDetail(reason: "compatibility_dirty" | "uninitialized"): string {
+  return reason === "compatibility_dirty"
+    ? "Accepted Plan requires compatibility repair"
+    : "Accepted Plan operational state is not initialized";
+}
+
+function archiveAcceptedPlan(
+  deps: RouteDeps,
+  profile: { readonly id: number; readonly archivedAt: string | null },
+) {
+  if (profile.archivedAt) {
+    return { kind: "already_archived" as const, archivedAt: profile.archivedAt };
+  }
+  const accepted = deps.repo.readAcceptedPlanOperationalSnapshot(profile.id);
+  if (accepted.kind !== "ready") return accepted;
+  return deps.repo.archiveAcceptedPlan({ expected: acceptedPlanBasis(accepted.snapshot) });
+}
 
 export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.get("/plans", async () => ({ profiles: deps.repo.listProfiles() }));
@@ -49,8 +68,18 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       archived?: boolean;
       touch_last_used?: boolean;
     };
+    const archiveAttempted = body.archived === true;
     try {
-      if (!deps.repo.getProfile(id)) {
+      if (body.archived === true && !deps.repo.canMutateAcceptedPlan()) {
+        return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+      }
+      const archiveIdentity = body.archived === true
+        ? deps.repo.getOwnedProfileIdentity(id)
+        : null;
+      if (body.archived === true && !archiveIdentity) {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      if (body.archived !== true && !deps.repo.getProfile(id)) {
         return reply.status(404).send({ detail: "Profile not found" });
       }
       if (body.archived === false) {
@@ -59,7 +88,11 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
         });
       }
       let profile =
-        typeof body.name === "string" ? deps.repo.renameProfile(id, body.name) : deps.repo.getProfile(id)!;
+        typeof body.name === "string"
+          ? deps.repo.renameProfile(id, body.name)
+          : body.archived === true
+            ? null
+            : deps.repo.getProfile(id)!;
       if (body.special_request !== undefined) {
         profile = deps.repo.updateProfileSpecialRequest(
           id,
@@ -67,14 +100,41 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
         );
       }
       if (body.archived === true) {
-        profile = deps.repo.archiveProfile(id);
+        if (!archiveIdentity) {
+          return reply.status(404).send({ detail: "Profile not found" });
+        }
+        const archived = archiveAcceptedPlan(deps, archiveIdentity);
+        if (archived.kind === "compatibility_dirty" || archived.kind === "uninitialized") {
+          return reply.status(409).send({ detail: acceptedStateDetail(archived.kind) });
+        }
+        if (archived.kind === "accepted_state_unavailable") {
+          return reply.status(409).send({ detail: acceptedStateDetail(archived.reason) });
+        }
+        if (archived.kind === "stale_accepted_plan") {
+          return reply.status(409).send({ detail: "Accepted Plan changed; reload and retry" });
+        }
+        if (archived.kind === "transaction_unavailable") {
+          return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+        }
+        if (archived.kind === "empty" || archived.kind === "remaining") {
+          return reply.status(400).send({ detail: "Archive only when print remaining is 0" });
+        }
+        profile = deps.repo.getProfile(id)!;
       }
       if (body.touch_last_used === true) {
         profile = deps.repo.touchProfileLastUsed(id);
       }
-      return profile;
-    } catch (e) {
-      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+      return profile ?? deps.repo.getProfile(id)!;
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error({ code: error.code, profileId: id }, "Accepted Plan integrity failure");
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      if (!archiveAttempted) {
+        return reply.status(400).send({ detail: error instanceof Error ? error.message : String(error) });
+      }
+      request.log.error({ failure: "unexpected", profileId: id }, "Plan update failed");
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
 
@@ -93,12 +153,37 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.post("/plans/:id/archive", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     try {
-      if (!deps.repo.getProfile(id)) {
+      if (!deps.repo.canMutateAcceptedPlan()) {
+        return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+      }
+      const profile = deps.repo.getOwnedProfileIdentity(id);
+      if (!profile) {
         return reply.status(404).send({ detail: "Profile not found" });
       }
-      return deps.repo.archiveProfile(id);
-    } catch (e) {
-      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+      const archived = archiveAcceptedPlan(deps, profile);
+      if (archived.kind === "compatibility_dirty" || archived.kind === "uninitialized") {
+        return reply.status(409).send({ detail: acceptedStateDetail(archived.kind) });
+      }
+      if (archived.kind === "accepted_state_unavailable") {
+        return reply.status(409).send({ detail: acceptedStateDetail(archived.reason) });
+      }
+      if (archived.kind === "stale_accepted_plan") {
+        return reply.status(409).send({ detail: "Accepted Plan changed; reload and retry" });
+      }
+      if (archived.kind === "transaction_unavailable") {
+        return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+      }
+      if (archived.kind === "empty" || archived.kind === "remaining") {
+        return reply.status(400).send({ detail: "Archive only when print remaining is 0" });
+      }
+      return deps.repo.getProfile(id)!;
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error({ code: error.code, profileId: id }, "Accepted Plan integrity failure");
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error({ failure: "unexpected", profileId: id }, "Plan archive failed");
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
 

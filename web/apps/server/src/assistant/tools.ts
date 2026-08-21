@@ -4,7 +4,15 @@ import type { AssistantActionType, AssistantProposedAction, PrinterHostStatus } 
 import { isAssistantUiAction } from "@print-partner/contracts";
 import { listStlRelativePaths, safeRepoPath } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
-import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
+import {
+  AcceptedPlanOperationalIntegrityError,
+  type ReadAcceptedPlanOperationalSnapshotResult,
+} from "../db/accepted-plan-operational.js";
+import {
+  acceptedPlanBasis,
+  acceptedProgressSummary,
+  type AcceptedPlanBasis,
+} from "../db/accepted-plan-progress.js";
 import type { IntegrationPort } from "../integrations/store.js";
 import { loadKitCatalog } from "../services/kit-catalog.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
@@ -45,7 +53,7 @@ import {
   restorePlanSnapshotPayload,
 } from "../services/plan-snapshots.js";
 import { comparePlans } from "../services/plan-compare.js";
-import { logAppliedAction } from "../services/plan-decisions.js";
+import { appendPlanDecision, logAppliedAction } from "../services/plan-decisions.js";
 import { buildSyncAction } from "./sync-action.js";
 import {
   decisionFingerprint,
@@ -53,6 +61,70 @@ import {
 } from "./preferences-digest.js";
 
 const GITHUB_PAT_KEY = "github_pat";
+const SHA256_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+
+function parseAcceptedPlanBasis(value: unknown): AcceptedPlanBasis | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const profileId = row.profileId;
+  const planVersion = row.planVersion;
+  const revisionId = row.revisionId;
+  const revisionDigest = row.revisionDigest;
+  const requiredUnitMappingDigest = row.requiredUnitMappingDigest;
+  if (
+    typeof profileId !== "number" ||
+    !Number.isSafeInteger(profileId) ||
+    profileId <= 0 ||
+    typeof planVersion !== "number" ||
+    !Number.isSafeInteger(planVersion) ||
+    planVersion <= 0 ||
+    typeof revisionId !== "number" ||
+    !Number.isSafeInteger(revisionId) ||
+    revisionId <= 0 ||
+    typeof revisionDigest !== "string" ||
+    !SHA256_DIGEST_PATTERN.test(revisionDigest) ||
+    typeof requiredUnitMappingDigest !== "string" ||
+    !SHA256_DIGEST_PATTERN.test(requiredUnitMappingDigest)
+  ) {
+    return null;
+  }
+  return {
+    profileId,
+    planVersion,
+    revisionId,
+    revisionDigest,
+    requiredUnitMappingDigest,
+  };
+}
+
+function readAcceptedPlanForAssistant(
+  repo: AppRepository,
+  profileId: number,
+):
+  | {
+      readonly kind: "read";
+      readonly identity: { readonly id: number; readonly name: string; readonly archivedAt: string | null };
+      readonly accepted: ReadAcceptedPlanOperationalSnapshotResult;
+    }
+  | { readonly kind: "missing" }
+  | { readonly kind: "failure"; readonly detail: string } {
+  try {
+    const identity = repo.getOwnedProfileIdentity(profileId);
+    if (!identity) return { kind: "missing" };
+    return {
+      kind: "read",
+      identity,
+      accepted: repo.readAcceptedPlanOperationalSnapshot(profileId),
+    };
+  } catch (error) {
+    return {
+      kind: "failure",
+      detail: error instanceof AcceptedPlanOperationalIntegrityError
+        ? "Accepted Plan data is inconsistent"
+        : "Internal Server Error",
+    };
+  }
+}
 
 export type AssistantToolSpec = {
   name: string;
@@ -1103,19 +1175,30 @@ export async function invokeAssistantTool(
       }
 
       case "get_remaining": {
-        const planId = resolvePlanId(input, ctx);
+        const planId = resolvePlanId(input, ctx, false);
         if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
-        const profile = ctx.repo.getProfile(planId);
-        if (!profile) return { content: JSON.stringify({ error: "Plan not found" }) };
-        const checkoff = ctx.repo.getCheckoff(planId);
-        let totalUnits = 0;
-        let printedUnits = 0;
-        for (const part of checkoff.parts) {
-          const qty = Math.max(1, part.quantity_effective);
-          totalUnits += qty;
-          printedUnits += Math.min(qty, part.printed_count ?? 0);
+        const read = readAcceptedPlanForAssistant(ctx.repo, planId);
+        if (read.kind === "missing") {
+          return { content: JSON.stringify({ error: "Plan not found" }) };
         }
-        const remainingUnits = Math.max(0, totalUnits - printedUnits);
+        if (read.kind === "failure") {
+          return { content: JSON.stringify({ error: read.detail }) };
+        }
+        const accepted = read.accepted;
+        if (accepted.kind === "compatibility_dirty") {
+          return { content: JSON.stringify({ error: "Accepted Plan requires compatibility repair" }) };
+        }
+        if (accepted.kind === "uninitialized") {
+          return { content: JSON.stringify({ error: "Accepted Plan operational state is not initialized" }) };
+        }
+        const parts = accepted.kind === "ready"
+          ? accepted.snapshot.parts.filter((part) => part.included)
+          : [];
+        const { totalUnits, remainingUnits } = accepted.kind === "ready"
+          ? acceptedProgressSummary(accepted.snapshot)
+          : { totalUnits: 0, remainingUnits: 0 };
+        const printedUnits = totalUnits - remainingUnits;
+        const profile = accepted.kind === "ready" ? accepted.snapshot.profile : read.identity;
         const percent =
           totalUnits === 0
             ? 0
@@ -1124,14 +1207,14 @@ export async function invokeAssistantTool(
           content: JSON.stringify({
             plan_id: planId,
             plan_name: profile.name,
-            archived_at: profile.archived_at ?? null,
-            summary: checkoff.summary,
+            archived_at: profile.archivedAt,
+            summary: `${parts.filter((part) => part.units.every((unit) => unit.completed)).length}/${parts.length} parts fully printed · ${printedUnits}/${totalUnits} units`,
             printed_units: printedUnits,
             total_units: totalUnits,
             remaining_units: remainingUnits,
             percent,
-            can_archive: totalUnits > 0 && remainingUnits === 0 && !profile.archived_at,
-            part_count: checkoff.parts.length,
+            can_archive: totalUnits > 0 && remainingUnits === 0 && !profile.archivedAt,
+            part_count: parts.length,
           }),
         };
       }
@@ -2381,23 +2464,27 @@ export async function invokeAssistantTool(
       }
 
       case "archive_plan": {
-        const planId = resolvePlanId(input, ctx);
+        const planId = resolvePlanId(input, ctx, false);
         if (planId == null) {
           return { content: JSON.stringify({ error: "plan_id required" }) };
         }
-        const profile = ctx.repo.getProfile(planId);
-        if (!profile) {
+        const read = readAcceptedPlanForAssistant(ctx.repo, planId);
+        if (read.kind === "missing") {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
-        const checkoff = ctx.repo.getCheckoff(planId);
-        let totalUnits = 0;
-        let printedUnits = 0;
-        for (const part of checkoff.parts) {
-          const qty = Math.max(1, part.quantity_effective);
-          totalUnits += qty;
-          printedUnits += Math.min(qty, part.printed_count ?? 0);
+        if (read.kind === "failure") {
+          return { content: JSON.stringify({ error: read.detail }) };
         }
-        const remainingUnits = Math.max(0, totalUnits - printedUnits);
+        const accepted = read.accepted;
+        if (accepted.kind === "compatibility_dirty") {
+          return { content: JSON.stringify({ error: "Accepted Plan requires compatibility repair" }) };
+        }
+        if (accepted.kind === "uninitialized") {
+          return { content: JSON.stringify({ error: "Accepted Plan operational state is not initialized" }) };
+        }
+        const { totalUnits, remainingUnits } = accepted.kind === "ready"
+          ? acceptedProgressSummary(accepted.snapshot)
+          : { totalUnits: 0, remainingUnits: 0 };
         if (totalUnits <= 0 || remainingUnits > 0) {
           return {
             content: JSON.stringify({
@@ -2410,6 +2497,7 @@ export async function invokeAssistantTool(
         }
         const rationale =
           typeof input.rationale === "string" ? input.rationale.trim() : "";
+        const profile = accepted.kind === "ready" ? accepted.snapshot.profile : read.identity;
         return proposeChecked(
           ctx,
           "archive_plan",
@@ -2417,7 +2505,9 @@ export async function invokeAssistantTool(
           `Archive “${profile.name}”`,
           rationale ||
             `Archive plan ${planId} as a reusable template (remaining = 0).`,
-          {},
+          accepted.kind === "ready"
+            ? { accepted_basis: acceptedPlanBasis(accepted.snapshot) }
+            : {},
         );
       }
 
@@ -2607,7 +2697,13 @@ function mergeConfirmedSuggestedExcludes(
 export async function applyAssistantAction(
   action: AssistantProposedAction,
   deps: ApplyActionDeps,
-): Promise<{ ok: boolean; detail?: string; job_id?: string; result?: Record<string, unknown> }> {
+): Promise<{
+  ok: boolean;
+  status?: number;
+  detail?: string;
+  job_id?: string;
+  result?: Record<string, unknown>;
+}> {
   if (isAssistantUiAction(action.type)) {
     return {
       ok: false,
@@ -2615,13 +2711,27 @@ export async function applyAssistantAction(
     };
   }
 
+  if (action.type === "archive_plan" && !deps.repo.canMutateAcceptedPlan()) {
+    return { ok: false, status: 503, detail: "Accepted Plan update is unavailable" };
+  }
+
   const planId = action.plan_id;
+  let archiveIdentity: ReturnType<AppRepository["getOwnedProfileIdentity"]> = null;
   const skipPlanCheck =
     action.type === "propose_source_mapping" ||
     action.type === "start_sync" ||
     action.type === "propose_add_source" ||
     action.type === "import_guide_notes";
-  if (!skipPlanCheck && !deps.repo.getProfile(planId)) {
+  if (!skipPlanCheck && action.type === "archive_plan") {
+    try {
+      archiveIdentity = deps.repo.getOwnedProfileIdentity(planId);
+      if (!archiveIdentity) {
+        return { ok: false, detail: "Plan not found" };
+      }
+    } catch {
+      return { ok: false, status: 500, detail: "Internal Server Error" };
+    }
+  } else if (!skipPlanCheck && !deps.repo.getProfile(planId)) {
     return { ok: false, detail: "Plan not found" };
   }
   if (
@@ -3073,13 +3183,56 @@ export async function applyAssistantAction(
         break;
       }
       case "archive_plan": {
-        const archived = deps.repo.archiveProfile(planId);
+        const basis = parseAcceptedPlanBasis(action.params?.accepted_basis);
+        if (!basis) return { ok: false, detail: "Accepted Plan basis is missing" };
+        if (basis.profileId !== planId) {
+          return { ok: false, detail: "Accepted Plan basis does not match action Plan" };
+        }
+        let archived;
+        try {
+          archived = deps.repo.archiveAcceptedPlan({ expected: basis });
+        } catch (error) {
+          return {
+            ok: false,
+            status: 500,
+            detail: error instanceof AcceptedPlanOperationalIntegrityError
+              ? "Accepted Plan data is inconsistent"
+              : "Internal Server Error",
+          };
+        }
+        if (archived.kind === "remaining" || archived.kind === "empty") {
+          return { ok: false, detail: "Archive only when print remaining is 0" };
+        }
+        if (archived.kind === "accepted_state_unavailable") {
+          return {
+            ok: false,
+            detail: archived.reason === "compatibility_dirty"
+              ? "Accepted Plan requires compatibility repair"
+              : "Accepted Plan operational state is not initialized",
+          };
+        }
+        if (archived.kind === "stale_accepted_plan") {
+          return { ok: false, detail: "Accepted Plan changed; reload and retry" };
+        }
+        if (archived.kind === "transaction_unavailable") {
+          return {
+            ok: false,
+            status: 503,
+            detail: "Accepted Plan update is unavailable",
+          };
+        }
+        if (archived.kind !== "archived" && archived.kind !== "already_archived") {
+          return { ok: false, detail: "Accepted Plan archive failed" };
+        }
+        if (!archiveIdentity) {
+          return { ok: false, status: 500, detail: "Internal Server Error" };
+        }
         outcome = {
           ok: true,
           result: {
-            plan_id: archived.id,
-            name: archived.name,
-            archived_at: archived.archived_at,
+            plan_id: archiveIdentity.id,
+            name: archiveIdentity.name,
+            archived_at: archived.archivedAt,
           },
         };
         break;
@@ -3090,13 +3243,38 @@ export async function applyAssistantAction(
 
     if (outcome.ok && planId > 0) {
       try {
-        logAppliedAction(deps.repo, action, outcome.result ?? null);
+        if (action.type === "archive_plan" && archiveIdentity) {
+          appendPlanDecision(deps.repo, {
+            planId,
+            actor: "assistant",
+            kind: "applied_action",
+            actionType: action.type,
+            params: action.params ?? {},
+            label: action.label,
+            summary: action.summary,
+            result: outcome.result ?? null,
+          });
+        } else {
+          logAppliedAction(deps.repo, action, outcome.result ?? null);
+        }
       } catch {
         /* decision log is best-effort */
       }
     }
     return outcome;
-  } catch (e) {
-    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  } catch (error) {
+    if (action.type !== "archive_plan") {
+      return {
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+    return {
+      ok: false,
+      status: 500,
+      detail: error instanceof AcceptedPlanOperationalIntegrityError
+        ? "Accepted Plan data is inconsistent"
+        : "Internal Server Error",
+    };
   }
 }

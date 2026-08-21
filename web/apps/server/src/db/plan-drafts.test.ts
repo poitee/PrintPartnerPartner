@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +11,8 @@ import { backfillCurrentRequiredUnitSets } from "./required-units.js";
 import { getDb, SqliteDatabase } from "./client.js";
 import { AppRepository } from "./repository.js";
 import { MAX_PLAN_DRAFT_LIFECYCLE_VERSION } from "../services/plan-drafts.js";
+import { acceptedPlanBasis } from "./accepted-plan-progress.js";
+import { parseRequiredUnitToken } from "../services/required-units.js";
 
 const tempDirs: string[] = [];
 
@@ -2956,7 +2958,7 @@ describe("saved Plan drafts", () => {
     expect(
       repo.applyPlanChanges({ ...command, idempotencyKey: "apply-ready-draft-again" }),
     ).toEqual({ kind: "already_applied", receipt: first.receipt });
-    expect(() => repo.patchPartProgress(oldPartIds[0] ?? 0, 0, true)).toThrow(/not found/i);
+    expect(repo.getPartRow(oldPartIds[0] ?? 0)).toBeNull();
     database.close();
   });
 
@@ -3056,7 +3058,9 @@ describe("saved Plan drafts", () => {
       )
       .pluck()
       .get() as number;
-    repo.patchPartProgress(completedPartId, 0, false);
+    raw
+      .prepare("UPDATE print_progress SET completed = 0, assembled = 0 WHERE part_id = ?")
+      .run(completedPartId);
     const before = snapshotTables(raw, APPLY_STATE_TABLES);
     expect(repo.applyPlanChanges(command)).toEqual({
       kind: "reconciliation_required",
@@ -3249,6 +3253,12 @@ describe("saved Plan drafts", () => {
       "default",
       secondDatabase.reposDir,
     );
+    const acceptedBefore = secondRepo.readAcceptedPlanOperationalSnapshot(first.profile.id);
+    if (acceptedBefore.kind !== "ready") throw new Error("accepted Plan is not ready");
+    const oldUnit = acceptedBefore.snapshot.parts
+      .find((part) => part.projectionPartId === oldPart.id)
+      ?.units[0];
+    if (!oldUnit) throw new Error("accepted unit is missing");
     const nativeTransaction = first.repo.transaction.bind(first.repo);
     let injected = false;
     first.repo.transaction = <T>(
@@ -3257,7 +3267,13 @@ describe("saved Plan drafts", () => {
     ): T => {
       if (!injected) {
         injected = true;
-        secondRepo.patchPartProgress(oldPart.id, 0, true);
+        expect(
+          secondRepo.setAcceptedUnitCompletion({
+            expected: acceptedPlanBasis(acceptedBefore.snapshot),
+            token: parseRequiredUnitToken(oldUnit.token),
+            completed: true,
+          }).kind,
+        ).toBe("updated");
       }
       return nativeTransaction(fn, behavior);
     };
@@ -3273,8 +3289,112 @@ describe("saved Plan drafts", () => {
         .pluck()
         .get(newPartId),
     ).toBe(1);
-    expect(() => secondRepo.patchPartProgress(oldPart.id, 0, false)).toThrow(/not found/i);
+    expect(
+      secondRepo.setAcceptedUnitCompletion({
+        expected: acceptedPlanBasis(acceptedBefore.snapshot),
+        token: parseRequiredUnitToken(oldUnit.token),
+        completed: false,
+      }),
+    ).toEqual({ kind: "stale_accepted_plan" });
     secondDatabase.close();
+    first.database.close();
+  });
+
+  it("lets Apply commit before a paused accepted Progress command rejects its stale basis", async () => {
+    const first = readyTrackedApplyFixture();
+    const oldPart = first.raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? AND match_key = 'gear.stl'")
+      .get(first.profile.id) as { id: number };
+    const accepted = first.repo.readAcceptedPlanOperationalSnapshot(first.profile.id);
+    if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+    const unit = accepted.snapshot.parts
+      .find((part) => part.projectionPartId === oldPart.id)
+      ?.units[0];
+    if (!unit) throw new Error("accepted unit is missing");
+    const readyPath = join(first.root, "progress-child-ready");
+    const startPath = join(first.root, "progress-child-start");
+    const attemptedPath = join(first.root, "progress-child-attempted");
+    const child = spawn(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "-e",
+        `import { writeFileSync, existsSync } from "node:fs";
+import { getDb, SqliteDatabase } from "./src/db/client.ts";
+import { AppRepository } from "./src/db/repository.ts";
+import { parseRequiredUnitToken } from "./src/services/required-units.ts";
+const database = new SqliteDatabase(process.argv[1]);
+database.connect();
+const repo = new AppRepository(getDb(database), "default", database.reposDir);
+writeFileSync(process.argv[4], "ready");
+while (!existsSync(process.argv[5])) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+writeFileSync(process.argv[6], "attempted");
+const expected = JSON.parse(process.argv[2]);
+const result = repo.setAcceptedUnitCompletion({ expected, token: parseRequiredUnitToken(process.argv[3]), completed: true });
+process.stdout.write(JSON.stringify(result));
+database.close();`,
+        first.root,
+        JSON.stringify(acceptedPlanBasis(accepted.snapshot)),
+        unit.token,
+        readyPath,
+        startPath,
+        attemptedPath,
+      ],
+      { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let childOutput = "";
+    child.stdout?.on("data", (chunk: Buffer) => {
+      childOutput += chunk.toString("utf8");
+    });
+    let childError = "";
+    child.stderr?.on("data", (chunk: Buffer) => {
+      childError += chunk.toString("utf8");
+    });
+    const waitForFile = (path: string) => {
+      const deadline = Date.now() + 5_000;
+      while (!existsSync(path)) {
+        if (Date.now() >= deadline) {
+          throw new Error(`child barrier timed out: ${path}\n${childError}`);
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+      }
+    };
+    waitForFile(readyPath);
+    const nativeTransaction = first.repo.transaction.bind(first.repo);
+    let started = false;
+    first.repo.transaction = <T>(
+      fn: () => T,
+      behavior: "deferred" | "immediate" = "deferred",
+    ): T =>
+      nativeTransaction(() => {
+        if (!started) {
+          started = true;
+          writeFileSync(startPath, "start");
+          waitForFile(attemptedPath);
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        }
+        return fn();
+      }, behavior);
+
+    expect(first.repo.applyPlanChanges(first.command)).toMatchObject({ kind: "applied" });
+    const [exitCode] = await once(child, "exit");
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(childOutput)).toEqual({
+      kind: "stale_accepted_plan",
+    });
+    const newPartId = first.raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? AND match_key = 'gear.stl'")
+      .pluck()
+      .get(first.profile.id) as number;
+    expect(
+      first.raw
+        .prepare("SELECT completed FROM print_progress WHERE part_id = ? AND unit_index = 0")
+        .pluck()
+        .get(newPartId),
+    ).toBe(0);
+    expect(readFileSync(attemptedPath, "utf8")).toBe("attempted");
     first.database.close();
   });
 
@@ -3321,7 +3441,7 @@ database.close();`,
     first.database.close();
   });
 
-  it("keeps progress read APIs outside mutation transactions", () => {
+  it("uses a deferred transaction for the accepted Progress read", () => {
     const { database, profile, repo } = editableDraftFixture();
     const nativeTransaction = repo.transaction.bind(repo);
     const behaviors: Array<"deferred" | "immediate"> = [];
@@ -3332,8 +3452,8 @@ database.close();`,
       behaviors.push(behavior);
       return nativeTransaction(fn, behavior);
     };
-    repo.getCheckoff(profile.id);
-    expect(behaviors).toEqual([]);
+    repo.readAcceptedPlanOperationalSnapshot(profile.id);
+    expect(behaviors).toEqual(["deferred"]);
     database.close();
   });
 });

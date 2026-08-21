@@ -13,14 +13,8 @@ import {
   scanRepo,
   serializeImportRules,
   STL_NAMING_DEFAULTS_KEY,
-  progressSummary,
-  isFullyPrinted,
-  filterPrintChecklistRows,
-  toggleCheckoffUnit,
   ensureProgressRows,
   getPrintUnits,
-  getAssembledUnits,
-  setAssembledUnit,
   type MergePart,
   type ProgressRow,
   type StlNamingProfileDict,
@@ -54,8 +48,6 @@ import {
   type RoleFilamentDefault,
 } from "../services/role-filament-store.js";
 import { getColorById, resolvePartFilamentHex } from "../services/filament-catalog.js";
-import type { FilamentResolveContext } from "../services/filament-resolve.js";
-import { formatSpoolSummaryBadge } from "../integrations/spoolman-client.js";
 import { REMOTE_CHECKED_AT_KEY, REMOTE_UPDATE_STATUS_KEY } from "../services/source-update-check.js";
 import type {
   PartRow,
@@ -69,6 +61,8 @@ import type {
   PlanSnapshotSource,
   PlanSnapshotSummary,
   ProfileSummary,
+  PrintOutcomeEvent,
+  PrinterCheckoffLink,
   SourceRevision,
   SourceSummary,
   SourceNamingResponse,
@@ -163,6 +157,25 @@ import {
   readAcceptedPlanOperationalSnapshotInternal,
   type ReadAcceptedPlanOperationalSnapshotResult,
 } from "./accepted-plan-operational.js";
+import {
+  applyAcceptedUnitDecisionsInternal,
+  archiveAcceptedPlanInternal,
+  setAcceptedUnitAssemblyInternal,
+  setAcceptedUnitCompletionInternal,
+  type AcceptedPlanBasis,
+  type AcceptedProgressFailure,
+  type AcceptedUnitDecision,
+  type ArchiveAcceptedPlanResult,
+  type SetAcceptedUnitAssembly,
+  type SetAcceptedUnitAssemblyResult,
+  type SetAcceptedUnitCompletion,
+  type SetAcceptedUnitCompletionResult,
+} from "./accepted-plan-progress.js";
+import {
+  getPrinterCheckoffLink,
+  updatePrinterCheckoffLink,
+} from "../services/printer-checkoff-store.js";
+import { appendPrintOutcomes } from "../services/printer-outcomes-store.js";
 
 function docTitleFromPath(path: string): string {
   const base = basename(path);
@@ -911,6 +924,177 @@ export class AppRepository {
         sqlite: this.syncSqlite,
       });
     return this.syncSqlite ? this.transaction(read, "deferred") : read();
+  }
+
+  canMutateAcceptedPlan(): boolean {
+    return this.syncSqlite;
+  }
+
+  setAcceptedUnitCompletion(
+    command: SetAcceptedUnitCompletion,
+  ): SetAcceptedUnitCompletionResult {
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+    return this.transaction(
+      () =>
+        setAcceptedUnitCompletionInternal(
+          {
+            db: this.db,
+            schema: this.schema,
+            tenantId: this.tenantId,
+            reposDir: this.reposDir,
+            sqlite: true,
+          },
+          command,
+        ),
+      "immediate",
+    );
+  }
+
+  setAcceptedUnitAssembly(command: SetAcceptedUnitAssembly): SetAcceptedUnitAssemblyResult {
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+    return this.transaction(
+      () =>
+        setAcceptedUnitAssemblyInternal(
+          {
+            db: this.db,
+            schema: this.schema,
+            tenantId: this.tenantId,
+            reposDir: this.reposDir,
+            sqlite: true,
+          },
+          command,
+        ),
+      "immediate",
+    );
+  }
+
+  archiveAcceptedPlan(command: { readonly expected: AcceptedPlanBasis }): ArchiveAcceptedPlanResult {
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+    return this.transaction(
+      () =>
+        archiveAcceptedPlanInternal(
+          {
+            db: this.db,
+            schema: this.schema,
+            tenantId: this.tenantId,
+            reposDir: this.reposDir,
+            sqlite: true,
+          },
+          command.expected,
+        ),
+      "immediate",
+    );
+  }
+
+  verifyAcceptedPrint(command: {
+    readonly expected: AcceptedPlanBasis;
+    readonly linkId: string;
+    readonly expectedLink: PrinterCheckoffLink;
+    readonly decisions: readonly AcceptedUnitDecision[];
+  }):
+    | {
+        readonly kind: "verified";
+        readonly link: PrinterCheckoffLink;
+        readonly unitsConfirmed: number;
+        readonly unitsRejected: number;
+        readonly outcomes: readonly PrintOutcomeEvent[];
+      }
+    | AcceptedProgressFailure
+    | {
+        readonly kind:
+          | "link_not_found"
+          | "link_changed"
+          | "not_awaiting_verify"
+          | "invalid_decisions";
+      } {
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+    return this.transaction(() => {
+      const current = getPrinterCheckoffLink(this, command.linkId);
+      if (!current) return { kind: "link_not_found" as const };
+      if (JSON.stringify(current) !== JSON.stringify(command.expectedLink)) {
+        return { kind: "link_changed" as const };
+      }
+      if (current.state !== "awaiting_verify") {
+        return { kind: "not_awaiting_verify" as const };
+      }
+      const pending = new Set(
+        current.units
+          .filter(
+            (unit) =>
+              !current.resolved_units?.some(
+                (resolved) =>
+                  resolved.part_id === unit.part_id && resolved.unit_index === unit.unit_index,
+              ),
+          )
+          .map((unit) => `${unit.part_id}:${unit.unit_index}`),
+      );
+      const applied = applyAcceptedUnitDecisionsInternal(
+        {
+          db: this.db,
+          schema: this.schema,
+          tenantId: this.tenantId,
+          reposDir: this.reposDir,
+          sqlite: true,
+        },
+        command.expected,
+        command.decisions,
+        (resolved) =>
+          resolved.every((decision) => pending.has(`${decision.partId}:${decision.unitIndex}`)),
+      );
+      if (applied.kind !== "applied") return applied;
+      const resolvedUnits = [
+        ...(current.resolved_units ?? []),
+        ...applied.decisions.map((decision) => ({
+          part_id: decision.partId,
+          unit_index: decision.unitIndex,
+          result: decision.result,
+          ...(decision.result === "rejected" ? { reason: decision.reason } : {}),
+          ...(decision.note ? { note: decision.note } : {}),
+        })),
+      ];
+      const resolvedKeys = new Set(
+        resolvedUnits.map((decision) => `${decision.part_id}:${decision.unit_index}`),
+      );
+      const fullyDone = current.units.every((unit) =>
+        resolvedKeys.has(`${unit.part_id}:${unit.unit_index}`),
+      );
+      const updated = updatePrinterCheckoffLink(
+        this,
+        current.id,
+        {
+          resolved_units: resolvedUnits,
+          state: fullyDone ? "verified" : "awaiting_verify",
+          applied_at: fullyDone ? new Date().toISOString() : current.applied_at,
+          units_marked: (current.units_marked ?? 0) + applied.unitsConfirmed,
+        },
+        { requireState: "awaiting_verify" },
+      );
+      if (!updated) throw new Error("Accepted printer Checkoff update failed");
+      const outcomes = appendPrintOutcomes(
+        this,
+        applied.decisions.map((decision) => ({
+          profile_id: current.profile_id,
+          part_id: decision.partId,
+          unit_index: decision.unitIndex,
+          result: decision.result,
+          ...(decision.result === "rejected" ? { reason: decision.reason } : {}),
+          note: decision.note,
+          host_integration_id: current.integration_id,
+          filename: current.filename,
+          match_key: decision.matchKey,
+          role: decision.role,
+          filament_display: undefined,
+          link_id: current.id,
+        })),
+      );
+      return {
+        kind: "verified" as const,
+        link: updated,
+        unitsConfirmed: applied.unitsConfirmed,
+        unitsRejected: applied.decisions.filter((decision) => decision.result === "rejected").length,
+        outcomes,
+      };
+    }, "immediate");
   }
 
   readCurrentRequiredUnitSet(profileId: number): ReadCurrentRequiredUnitSetResult {
@@ -2954,7 +3138,6 @@ export class AppRepository {
     };
   }
 
-  /** Included-part print unit totals (same basis as archive remaining=0). */
   printUnitTotals(profileId: number): { totalUnits: number; remainingUnits: number } {
     const partRows = this.listPartRows(profileId).filter((p) => p.included);
     let totalUnits = 0;
@@ -3068,6 +3251,27 @@ export class AppRepository {
       .where(eq(this.schema.parts.profileId, id))
       .get();
     return this.toProfileSummary(profile, Number(partCount?.c ?? 0));
+  }
+
+  getOwnedProfileIdentity(id: number): {
+    readonly id: number;
+    readonly name: string;
+    readonly archivedAt: string | null;
+  } | null {
+    return this.db
+      .select({
+        id: this.schema.buildProfiles.id,
+        name: this.schema.buildProfiles.name,
+        archivedAt: this.schema.buildProfiles.archivedAt,
+      })
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, id),
+        ),
+      )
+      .get() ?? null;
   }
 
   getAcceptedPlanRevision(profileId: number): AcceptedPlanRevision | null {
@@ -6071,27 +6275,6 @@ export class AppRepository {
     return profile;
   }
 
-  archiveProfile(id: number): ProfileSummary {
-    const existing = this.getProfile(id);
-    if (!existing) throw new Error("Profile not found");
-    if (existing.archived_at) return existing;
-
-    const { totalUnits, remainingUnits } = this.printUnitTotals(id);
-    if (totalUnits <= 0 || remainingUnits > 0) {
-      throw new Error("Archive only when print remaining is 0");
-    }
-
-    const now = new Date().toISOString();
-    this.db
-      .update(this.schema.buildProfiles)
-      .set({ archivedAt: now })
-      .where(
-        and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)),
-      )
-      .run();
-    return this.getProfile(id)!;
-  }
-
   /** Unarchive is intentionally unsupported — duplicate an archived template instead. */
   unarchiveProfile(_id: number): never {
     throw new Error("Cannot unarchive; duplicate the archived template instead");
@@ -6884,12 +7067,6 @@ export class AppRepository {
     this.transaction(mutate, "immediate");
   }
 
-  ensureProgressForPart(part: PartDbRow): void {
-    if (!this.syncSqlite) throw new PlanTransactionUnavailableError();
-    this.requirePart(part.id);
-    this.ensureProgressForOwnedPart(part);
-  }
-
   printUnitsByPartId(profileId: number): Map<number, boolean[]> {
     const partRows = this.listPartRows(profileId);
     return this.printUnitsForPartRows(partRows);
@@ -6929,94 +7106,6 @@ export class AppRepository {
       out.set(part.id, getPrintUnits(byPart.get(part.id) ?? [], qty));
     }
     return out;
-  }
-
-  getCheckoff(profileId: number, ctx?: FilamentResolveContext) {
-    const partRows = this.listPartRows(profileId);
-    const unitsById = this.printUnitsForPartRows(partRows);
-    const displayRows = partRows.map((p) => {
-      const units = unitsById.get(p.id) ?? [];
-      const printedCount = units.filter(Boolean).length;
-      const resolved = ctx?.resolve(p.filamentColorId ?? null);
-      const catalogColor = !resolved && p.filamentColorId ? getColorById(p.filamentColorId) : null;
-      const hex = resolved?.hex ?? resolvePartFilamentHex(p);
-      const spoolSummary =
-        ctx?.spoolSummariesForPart(p.filamentColorId ?? null, p.spoolmanSpoolId ?? null) ?? [];
-      return {
-        id: p.id,
-        filename: p.filename,
-        match_key: p.matchKey,
-        relative_path: p.relativePath,
-        source_layer: p.sourceLayer,
-        role: p.role,
-        quantity_effective: p.quantityEffective,
-        printed_count: printedCount,
-        print_units: units,
-        missing: printedCount < Math.max(1, p.quantityEffective),
-        filament_display: resolved?.combo_label ?? catalogColor?.combo_label ?? "",
-        filament_hex: hex,
-        included: p.included,
-        ...(spoolSummary.length
-          ? {
-              spool_summary: spoolSummary,
-              spool_badge: formatSpoolSummaryBadge(spoolSummary),
-            }
-          : {}),
-      };
-    });
-    const checklist = filterPrintChecklistRows(displayRows);
-    return {
-      profile_id: profileId,
-      summary: progressSummary(checklist),
-      parts: checklist.map(({ included: _, ...row }) => row),
-    };
-  }
-
-  patchPartProgress(partId: number, unitIndex: number, completed: boolean) {
-    if (!this.syncSqlite) throw new PlanTransactionUnavailableError();
-    const mutate = () => {
-      const part = this.requirePart(partId);
-      const qty = Math.max(1, part.quantityEffective);
-      if (unitIndex >= qty) throw new Error("unit_index out of range");
-      this.ensureProgressForOwnedPart(part);
-      const rows = this.progressRowsForPart(partId);
-      const updated = toggleCheckoffUnit(rows, partId, qty, unitIndex, completed);
-      const partRowsOnly = updated.filter((r) => r.partId === partId);
-      this.saveProgressRowsForOwnedPart(partId, partRowsOnly);
-      const units = getPrintUnits(partRowsOnly, qty);
-      const printedCount = units.filter(Boolean).length;
-      return {
-        part_id: partId,
-        printed_count: printedCount,
-        print_units: units,
-        assembled_units: getAssembledUnits(partRowsOnly, qty),
-        missing: !isFullyPrinted({ quantity_effective: qty, printed_count: printedCount }),
-      };
-    };
-    return this.transaction(mutate, "immediate");
-  }
-
-  patchPartAssembled(partId: number, unitIndex: number, assembled: boolean) {
-    if (!this.syncSqlite) throw new PlanTransactionUnavailableError();
-    const mutate = () => {
-      const part = this.requirePart(partId);
-      const qty = Math.max(1, part.quantityEffective);
-      if (unitIndex < 0 || unitIndex >= qty) throw new Error("unit_index out of range");
-      this.ensureProgressForOwnedPart(part);
-      const rows = this.progressRowsForPart(partId);
-      const updated = setAssembledUnit(rows, partId, qty, unitIndex, assembled).filter(
-        (r) => r.partId === partId,
-      );
-      this.saveProgressRowsForOwnedPart(partId, updated);
-      const assembledUnits = getAssembledUnits(updated, qty);
-      const assembledCount = assembledUnits.filter(Boolean).length;
-      return {
-        part_id: partId,
-        assembled_count: assembledCount,
-        assembled_units: assembledUnits,
-      };
-    };
-    return this.transaction(mutate, "immediate");
   }
 
   patchPart(

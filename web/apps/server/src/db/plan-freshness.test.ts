@@ -75,7 +75,7 @@ describe("Plan freshness", () => {
       expect(repo.getProfile(unrelated.id)?.freshness.status).toBe("current");
 
       const partsBefore = repo.listParts(dependent.id).parts;
-      const checkoffBefore = repo.getCheckoff(dependent.id);
+      const acceptedBefore = repo.readAcceptedPlanOperationalSnapshot(dependent.id);
       const revisionB = activateRevision(repo, reposDir, first.source.id, "b", "solid b");
 
       expect(repo.getProfile(dependent.id)?.freshness).toMatchObject({
@@ -91,7 +91,7 @@ describe("Plan freshness", () => {
       });
       expect(repo.getProfile(unrelated.id)?.freshness.status).toBe("current");
       expect(repo.listParts(dependent.id).parts).toEqual(partsBefore);
-      expect(repo.getCheckoff(dependent.id)).toEqual(checkoffBefore);
+      expect(repo.readAcceptedPlanOperationalSnapshot(dependent.id)).toEqual(acceptedBefore);
     });
   });
 

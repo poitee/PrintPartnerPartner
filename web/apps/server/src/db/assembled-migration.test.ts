@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteDatabase, getDb } from "./client.js";
 import { AppRepository } from "./repository.js";
+import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
+import { backfillCurrentRequiredUnitSets } from "./required-units.js";
+import { acceptedPlanBasis } from "./accepted-plan-progress.js";
+import { parseRequiredUnitToken } from "../services/required-units.js";
 
 function assembledForPart(dataDir: string, partId: number) {
   const database = new Database(join(dataDir, "print-partner.db"), { readonly: true });
@@ -54,9 +58,13 @@ describe("print_progress.assembled migration", () => {
       repo.updateImportRules(source.id, ["x/"]);
       const plan = repo.createProfile("Plan", source.id);
       await repo.recomputeProfile(plan.id);
-      const partId = repo.getCheckoff(plan.id).parts[0].id;
-      repo.patchPartProgress(partId, 0, true);
-      repo.patchPartAssembled(partId, 0, true);
+      const partId = repo.listParts(plan.id).parts[0]!.id;
+      repo.patchPart(partId, { quantity_override: 1 });
+      const populated = new Database(join(dir, "print-partner.db"));
+      populated
+        .prepare("UPDATE print_progress SET completed = 1, assembled = 1 WHERE part_id = ?")
+        .run(partId);
+      populated.close();
       first.close();
 
       // 2. Rewind to the pre-assembled schema, so the next connect() sees exactly
@@ -116,7 +124,18 @@ describe("print_progress.assembled migration", () => {
       const plan = repo.createProfile("Plan", source.id);
       await repo.recomputeProfile(plan.id);
 
-      const partId = repo.getCheckoff(plan.id).parts[0].id;
+      const partId = repo.listParts(plan.id).parts[0]!.id;
+      repo.patchPart(partId, { quantity_override: 1 });
+      const raw = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
+      backfillAcceptedPlanRevisions(raw, "2026-08-21T16:00:00.000Z");
+      backfillCurrentRequiredUnitSets(raw, {
+        now: () => "2026-08-21T16:01:00.000Z",
+        tokenFactory: () => "ppu_00000000000000000000000000000001",
+      });
+      const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
+      if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+      const expected = acceptedPlanBasis(accepted.snapshot);
+      const token = parseRequiredUnitToken(accepted.snapshot.parts[0]!.units[0]!.token);
 
       expect(assembledForPart(dir, partId)).toMatchObject({
         assembled_count: 0,
@@ -124,11 +143,11 @@ describe("print_progress.assembled migration", () => {
       });
 
       // Write accessor is gated on the unit being printed first.
-      repo.patchPartAssembled(partId, 0, true);
+      repo.setAcceptedUnitAssembly({ expected, token, assembled: true });
       expect(assembledForPart(dir, partId).assembled_units).toEqual([false]);
 
-      repo.patchPartProgress(partId, 0, true);
-      repo.patchPartAssembled(partId, 0, true);
+      repo.setAcceptedUnitCompletion({ expected, token, completed: true });
+      repo.setAcceptedUnitAssembly({ expected, token, assembled: true });
       expect(assembledForPart(dir, partId)).toMatchObject({
         assembled_count: 1,
         assembled_units: [true],
@@ -145,16 +164,4 @@ describe("print_progress.assembled migration", () => {
     }
   });
 
-  it("rejects an out-of-range unit index on the write accessor", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-mig-rng-"));
-    const sqlite = new SqliteDatabase(dir);
-    try {
-      sqlite.connect();
-      const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
-      expect(() => repo.patchPartAssembled(999999, 0, true)).toThrow(/not found/i);
-    } finally {
-      sqlite.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
 });

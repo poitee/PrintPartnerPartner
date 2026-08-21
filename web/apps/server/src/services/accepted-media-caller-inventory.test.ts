@@ -86,9 +86,11 @@ describe("known accepted media production caller inventory", () => {
       ),
     }).toEqual({
       readAcceptedPlanOperationalSnapshot: [
+        "assistant/tools.ts",
         "routes/parts.ts",
         "routes/plans.ts",
         "services/accepted-plan-review.ts",
+        "services/printer-checkoff-verify.ts",
       ],
       getAcceptedProfileStlRoots: ["services/part-paths.ts"],
       resolvePartStl: [

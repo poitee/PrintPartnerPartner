@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { getDb, SqliteDatabase, type DrizzleDb } from "./client.js";
 import { AppRepository } from "./repository.js";
 import * as schema from "./schema.js";
+import { eq } from "drizzle-orm";
 
 function withRepo(fn: (repo: AppRepository, db: DrizzleDb) => void) {
   const dir = mkdtempSync(join(tmpdir(), "pp-db-"));
@@ -55,28 +56,14 @@ describe("AppRepository", () => {
     });
   });
 
-  it("rejects archive when remaining units are not zero", () => {
-    withRepo((repo, db) => {
-      const plan = repo.createProfile("In progress");
-      const part = insertIncludedPart(db, plan.id);
-      expect(repo.getProfile(plan.id)?.remaining_units).toBe(1);
-      expect(repo.getProfile(plan.id)?.total_units).toBe(1);
-      expect(() => repo.archiveProfile(plan.id)).toThrow(/remaining/i);
-      repo.patchPartProgress(part.id, 0, true);
-      expect(repo.getProfile(plan.id)?.remaining_units).toBe(0);
-      const archived = repo.archiveProfile(plan.id);
-      expect(archived.archived_at).toBeTruthy();
-      expect(repo.listProfiles().find((p) => p.id === plan.id)?.archived_at).toBeTruthy();
-      expect(() => repo.unarchiveProfile(plan.id)).toThrow(/unarchive/i);
-    });
-  });
-
   it("touches last_used_at and duplicates as a fresh non-archived spine plan", () => {
     withRepo((repo, db) => {
       const plan = repo.createProfile("Template");
-      const part = insertIncludedPart(db, plan.id);
-      repo.patchPartProgress(part.id, 0, true);
-      repo.archiveProfile(plan.id);
+      insertIncludedPart(db, plan.id);
+      db.update(schema.buildProfiles)
+        .set({ archivedAt: "2026-08-21T17:00:00.000Z" })
+        .where(eq(schema.buildProfiles.id, plan.id))
+        .run();
       const touched = repo.touchProfileLastUsed(plan.id);
       expect(touched.last_used_at).toBeTruthy();
 

@@ -13,7 +13,6 @@ import { backfillCurrentRequiredUnitSets } from "./required-units.js";
 import {
   AppRepository,
   PlanTransactionUnavailableError,
-  type PartDbRow,
   type SchemaTables,
 } from "./repository.js";
 import {
@@ -33,6 +32,7 @@ import {
   registerPostgresSyncQuery,
   unregisterPostgresSyncQuery,
 } from "./sync-db-bridge.js";
+import { parseRequiredUnitToken } from "../services/required-units.js";
 
 const roots: string[] = [];
 const protectedTables = [
@@ -582,58 +582,6 @@ describe("accepted Plan operational snapshot", () => {
     context.database.close();
   });
 
-  it("keeps compatibility progress reads read-only while preserving false-filled values", () => {
-    const context = fixture();
-    const profile = context.repo.createProfile("Read-only compatibility progress");
-    addPart(context.raw, profile.id);
-    context.raw
-      .prepare("UPDATE parts SET quantity_auto = 2, quantity_effective = 2 WHERE profile_id = ?")
-      .run(profile.id);
-    const partId = context.raw
-      .prepare("SELECT id FROM parts WHERE profile_id = ?")
-      .pluck()
-      .get(profile.id) as number;
-    const before = context.raw.prepare("SELECT * FROM print_progress ORDER BY id").all();
-
-    expect(context.repo.getCheckoff(profile.id).parts).toMatchObject([
-      { print_units: [false, false], printed_count: 0 },
-    ]);
-    expect(context.raw.prepare("SELECT * FROM print_progress ORDER BY id").all()).toEqual(before);
-
-    expect(context.repo.patchPartProgress(partId, 0, true)).toMatchObject({
-      print_units: [true, false],
-      assembled_units: [false, false],
-    });
-    expect(context.repo.patchPartAssembled(partId, 0, true)).toMatchObject({
-      assembled_units: [true, false],
-    });
-    expect(
-      context.raw
-        .prepare(
-          "SELECT unit_index, completed, assembled FROM print_progress WHERE part_id = ? ORDER BY unit_index",
-        )
-        .all(partId),
-    ).toEqual([
-      { unit_index: 0, completed: 1, assembled: 1 },
-      { unit_index: 1, completed: 0, assembled: 0 },
-    ]);
-    context.database.close();
-  });
-
-  it("keeps progress normalization behind explicit mutation callers", () => {
-    const source = readFileSync(new URL("./repository.ts", import.meta.url), "utf8");
-    const body = (start: string, end: string) =>
-      source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-    const callPattern = /this\.ensureProgressForOwnedPart\(/g;
-
-    expect(source.match(callPattern)).toHaveLength(4);
-    expect(body("ensureProgressForPart(", "printUnitsByPartId(")).toMatch(callPattern);
-    expect(body("patchPartProgress(", "patchPartAssembled(")).toMatch(callPattern);
-    expect(body("patchPartAssembled(", "patchPart(\n")).toMatch(callPattern);
-    expect(body("patchPart(\n", "buildMergePartsForProfile(")).toMatch(callPattern);
-    expect(body("getCheckoff(", "patchPartProgress(")).not.toMatch(callPattern);
-  });
-
   it("keeps WAL instrumentation and the raw loader out of the production API", () => {
     const source = readFileSync(
       new URL("./accepted-plan-operational.ts", import.meta.url),
@@ -1071,6 +1019,14 @@ describe("accepted Plan operational snapshot", () => {
     const statements: string[] = [];
     let terminalReads = 0;
     let mutationRejected = false;
+    const expected = {
+      profileId: 1,
+      planVersion: 1,
+      revisionId: 1,
+      revisionDigest: "a".repeat(64),
+      requiredUnitMappingDigest: "b".repeat(64),
+    };
+    const token = parseRequiredUnitToken("ppu_00000000000000000000000000000001");
     const holder: { repo?: AppRepository } = {};
     registerPostgresSyncQuery(postgres, ({ sql: query }) => {
       statements.push(query);
@@ -1078,11 +1034,9 @@ describe("accepted Plan operational snapshot", () => {
       if (normalized.includes('left join "plan_accepted_input_sets"')) {
         terminalReads += 1;
         if (terminalReads === 1) {
-          expect(() => holder.repo?.patchPartProgress(1, 0, true)).toThrowError(
-            expect.objectContaining<Partial<PlanTransactionUnavailableError>>({
-              code: "transaction_unavailable",
-            }),
-          );
+          expect(
+            holder.repo?.setAcceptedUnitCompletion({ expected, token, completed: true }),
+          ).toEqual({ kind: "transaction_unavailable" });
           mutationRejected = true;
         }
         return { rows: [[null, 0, null, null, null]], rowCount: 1 };
@@ -1151,7 +1105,7 @@ describe("accepted Plan operational snapshot", () => {
     }
   });
 
-  it("fails closed before any PostgreSQL query for compatibility progress mutations", () => {
+  it("fails closed before any PostgreSQL query for accepted progress mutations", () => {
     const postgres = drizzle({} as Pool, { schema: pgSchema });
     const statements: string[] = [];
     registerPostgresSyncQuery(postgres, ({ sql: query }) => {
@@ -1167,46 +1121,47 @@ describe("accepted Plan operational snapshot", () => {
       "/tmp/unused-accepted-operational",
       pgSchema as unknown as SchemaTables,
     );
-    const part = { id: 1, quantityEffective: 1 } as PartDbRow;
     try {
-      for (const mutation of [
-        () => repo.ensureProgressForPart(part),
-        () => repo.patchPartProgress(1, 0, true),
-        () => repo.patchPartAssembled(1, 0, true),
-        () => repo.patchPart(1, { quantity_override: 2 }),
-      ]) {
-        expect(mutation).toThrowError(
-          expect.objectContaining<Partial<PlanTransactionUnavailableError>>({
-            code: "transaction_unavailable",
-          }),
-        );
-      }
+      const expected = {
+        profileId: 1,
+        planVersion: 1,
+        revisionId: 1,
+        revisionDigest: "a".repeat(64),
+        requiredUnitMappingDigest: "b".repeat(64),
+      };
+      const token = parseRequiredUnitToken("ppu_00000000000000000000000000000001");
+      expect(repo.setAcceptedUnitCompletion({ expected, token, completed: true })).toEqual({
+        kind: "transaction_unavailable",
+      });
+      expect(repo.setAcceptedUnitAssembly({ expected, token, assembled: true })).toEqual({
+        kind: "transaction_unavailable",
+      });
+      expect(repo.archiveAcceptedPlan({ expected })).toEqual({ kind: "transaction_unavailable" });
+      expect(
+        repo.verifyAcceptedPrint({
+          expected,
+          linkId: "link-1",
+          expectedLink: {
+            id: "link-1",
+            profile_id: 1,
+            integration_id: "integration-1",
+            printer_id: "printer-1",
+            host_name: "Printer",
+            filename: "plate.gcode",
+            units: [{ part_id: 1, unit_index: 0 }],
+            state: "awaiting_verify",
+            saw_active: true,
+            created_at: "2026-08-21T00:00:00.000Z",
+          },
+          decisions: [{ token, result: "confirmed" }],
+        }),
+      ).toEqual({ kind: "transaction_unavailable" });
+      expect(() => repo.patchPart(1, { quantity_override: 2 })).toThrowError(
+        expect.objectContaining<Partial<PlanTransactionUnavailableError>>({
+          code: "transaction_unavailable",
+        }),
+      );
       expect(statements).toEqual([]);
-    } finally {
-      unregisterPostgresSyncQuery(postgres);
-    }
-  });
-
-  it("keeps compatibility progress reads SELECT-only on PostgreSQL", () => {
-    const postgres = drizzle({} as Pool, { schema: pgSchema });
-    const statements: string[] = [];
-    registerPostgresSyncQuery(postgres, ({ sql: query }) => {
-      statements.push(query);
-      if (query.toLowerCase().includes('from "build_profiles"')) {
-        return { rows: [[1]], rowCount: 1 };
-      }
-      return { rows: [], rowCount: 0 };
-    });
-    const repo = new AppRepository(
-      postgres,
-      "default",
-      "/tmp/unused-accepted-operational",
-      pgSchema as unknown as SchemaTables,
-    );
-    try {
-      expect(repo.getCheckoff(1)).toMatchObject({ profile_id: 1, parts: [] });
-      expect(statements.length).toBeGreaterThan(0);
-      expect(statements.every((statement) => /^select\b/i.test(statement.trim()))).toBe(true);
     } finally {
       unregisterPostgresSyncQuery(postgres);
     }

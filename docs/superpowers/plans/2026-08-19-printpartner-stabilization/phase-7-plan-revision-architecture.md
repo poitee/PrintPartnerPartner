@@ -534,12 +534,73 @@ skipped, 1154 tests passed, and 3 tests skipped. The full web suite passed 98
 files and 429 tests.
 Both typechecks, root lint, both production builds, and the diff check passed.
 
+The first operational cut makes immutable Required-unit tokens plus the complete
+accepted Plan basis the only internal identity for Progress writes. Manual
+completion and assembly routes use the tenant-owned compatibility Part only to
+locate its Build. They capture one request-scoped accepted operational snapshot,
+resolve the HTTP coordinate to a token, and pass that token and basis into a
+SQLite `IMMEDIATE` command. The command rereads the accepted aggregate and
+verifies tenant ownership, the complete basis, and the complete Progress row set
+before changing anything. It never repairs Progress on a read or failed command.
+Completion fills the prefix; clearing unit N clears N through the end and their
+assembly state. Assembly on an incomplete unit remains a successful no-op.
+Commands reject Progress and assembly changes after archive inside the same
+`IMMEDIATE` transaction. They enforce every coordinate in the accepted Required
+unit set while ignoring and preserving legal high-index rows left by an older
+accepted revision.
+
+Archive recomputes accepted included-unit totals inside the same transaction as
+the archive write. An already archived Plan remains idempotent without requiring
+accepted state. The existing combined Plan PATCH remains sequential, so a rename
+or special-request update can still survive a later archive failure. Successful
+HTTP archive responses and applied assistant archive results preserve their
+existing shapes while assistant proposals carry the accepted basis.
+Assistant Apply parses a canonical complete basis and binds it to the action
+Plan before any command. `get_remaining` and archive eligibility use accepted
+snapshot identity and Progress instead of the compatibility ProfileSummary
+reader. HTTP archive uses a narrow tenant-owned identity lookup before the
+command and reads ProfileSummary only to produce the existing successful
+response shape.
+
+Printer verification parses legacy Part and unit coordinates only at the JSON
+boundary, resolves them against one request-scoped accepted snapshot, and passes
+tokens to one outer `IMMEDIATE` command. That command rereads the accepted
+aggregate, rereads and compares the Checkoff link, validates prefix decisions,
+and commits Progress, link state, and outcome events together. GET and failed
+verification do not repair or rewrite legacy links.
+PostgreSQL fails closed before any command read because this unit has no native
+transaction implementation there. Logs and public errors expose only stable,
+coarse fields.
+
+Focused proofs cover both real two-connection archive and uncheck orderings, a
+paused reverse Apply race, injected printer verification rollback, strict
+cross-Plan assistant basis rejection with no writes or fact leakage, and
+query-free PostgreSQL failures across flat, versioned, printer, and assistant
+boundaries.
+
+The cut deletes `patchPartProgress`, `patchPartAssembled`,
+`ensureProgressForPart`, `getCheckoff`, `archiveProfile`,
+`applyCheckoffUnits`, and the prefix compatibility helper. ProfileSummary,
+Plate, printer queue and link schema, filesystem, and web UI remain deferred.
+`printUnitTotals` and `printUnitsByPartId` remain temporarily pinned to the
+ProfileSummary, merge-export, and legacy Checkoff name-mapping callers for the
+next read-authority unit. The focused migration suite passed 225 tests across
+13 files. The full server suite passed 154 files with one file skipped, 1174
+tests passed, and 3 tests skipped. The full web suite passed 98 files and 429
+tests. Both typechecks, root lint, both production builds, and the diff check
+passed.
+
 ## Module shape
 
 ```ts
 backfillAcceptedPlanRevisions(db): BackfillResult
 readAcceptedPlanRevision(buildId): AcceptedPlanRevision | null
 readAcceptedPlanOperationalSnapshot(buildId): ReadAcceptedPlanOperationalSnapshotResult
+acceptedProgressSummary(snapshot): AcceptedProgressSummary
+setAcceptedUnitCompletion(command): SetAcceptedUnitCompletionResult
+setAcceptedUnitAssembly(command): SetAcceptedUnitAssemblyResult
+archiveAcceptedPlan(command): ArchiveAcceptedPlanResult
+verifyAcceptedPrint(command): VerifyAcceptedPrintResult
 recomputePlanDraft(buildId, actorId): PlanDraft
 applyManifestToPlanDraft(draftId): PlanDraft
 diffPlanDraft(draftId): PlanDraftDiff

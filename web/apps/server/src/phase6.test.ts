@@ -6,6 +6,10 @@ import Database from "better-sqlite3";
 import { getDb, SqliteDatabase } from "./db/client.js";
 import { AppRepository } from "./db/repository.js";
 import { tenantStorage } from "./middleware/tenant-context.js";
+import { backfillAcceptedPlanRevisions } from "./db/accepted-plan-revisions.js";
+import { backfillCurrentRequiredUnitSets } from "./db/required-units.js";
+import { acceptedPlanBasis, type AcceptedPlanBasis } from "./db/accepted-plan-progress.js";
+import { parseRequiredUnitToken, type RequiredUnitToken } from "./services/required-units.js";
 
 describe("Phase 6 tenant isolation", () => {
   it("scopes sources and profiles per tenant", () => {
@@ -53,6 +57,8 @@ describe("Phase 6 tenant isolation", () => {
 
     let profileId = 0;
     let partId = 0;
+    let expected!: AcceptedPlanBasis;
+    let token!: RequiredUnitToken;
     tenantStorage.run("tenant-a", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
       const source = repo.createSource({
@@ -65,8 +71,19 @@ describe("Phase 6 tenant isolation", () => {
       profileId = repo.createProfile("Tenant A plan", source.id).id;
       expect(repo.recomputeProfile(profileId).merged).toBe(true);
       partId = repo.listParts(profileId).parts[0]!.id;
-      repo.patchPartProgress(partId, 0, true);
-      repo.patchPartAssembled(partId, 0, true);
+      repo.patchPart(partId, { quantity_override: 1 });
+      const raw = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
+      backfillAcceptedPlanRevisions(raw, "2026-08-21T14:00:00.000Z");
+      backfillCurrentRequiredUnitSets(raw, {
+        now: () => "2026-08-21T14:01:00.000Z",
+        tokenFactory: () => "ppu_00000000000000000000000000000001",
+      });
+      const accepted = repo.readAcceptedPlanOperationalSnapshot(profileId);
+      if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+      expected = acceptedPlanBasis(accepted.snapshot);
+      token = parseRequiredUnitToken(accepted.snapshot.parts[0]!.units[0]!.token);
+      repo.setAcceptedUnitCompletion({ expected, token, completed: true });
+      repo.setAcceptedUnitAssembly({ expected, token, assembled: true });
     });
 
     tenantStorage.run("tenant-b", () => {
@@ -74,8 +91,12 @@ describe("Phase 6 tenant isolation", () => {
       expect(repo.getProfile(profileId)).toBeNull();
       expect(repo.getPartRow(partId)).toBeNull();
       expect(() => repo.patchPart(partId, { included: false })).toThrow("Part not found");
-      expect(() => repo.patchPartProgress(partId, 0, false)).toThrow("Part not found");
-      expect(() => repo.patchPartAssembled(partId, 0, false)).toThrow("Part not found");
+      expect(repo.setAcceptedUnitCompletion({ expected, token, completed: false })).toEqual({
+        kind: "unit_not_found",
+      });
+      expect(repo.setAcceptedUnitAssembly({ expected, token, assembled: false })).toEqual({
+        kind: "unit_not_found",
+      });
       expect(() => repo.listParts(profileId)).toThrow("Profile not found");
       expect(() => repo.recomputeProfile(profileId)).toThrow("Profile not found");
       expect(() => repo.buildMergePartsForProfile(profileId)).toThrow("Profile not found");
@@ -94,7 +115,11 @@ describe("Phase 6 tenant isolation", () => {
     tenantStorage.run("tenant-a", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
       expect(repo.getPartRow(partId)?.included).toBe(true);
-      expect(repo.getCheckoff(profileId).parts[0]?.print_units).toEqual([true]);
+      const accepted = repo.readAcceptedPlanOperationalSnapshot(profileId);
+      expect(accepted).toMatchObject({
+        kind: "ready",
+        snapshot: { parts: [{ units: [{ completed: true, assembled: true }] }] },
+      });
       const raw = new Database(join(dir, "print-partner.db"), { readonly: true });
       try {
         expect(
@@ -154,7 +179,7 @@ describe("Phase 6 tenant isolation", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("replaces stale cross-tenant progress rows for an owned part", () => {
+  it("fails closed on stale cross-tenant accepted Progress rows", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-progress-owner-repair-"));
     const sqlite = new SqliteDatabase(dir);
     sqlite.connect();
@@ -171,20 +196,33 @@ describe("Phase 6 tenant isolation", () => {
     const profile = repo.createProfile("Progress plan", source.id);
     expect(repo.recomputeProfile(profile.id).merged).toBe(true);
     const partId = repo.listParts(profile.id).parts[0]!.id;
-    repo.patchPartProgress(partId, 0, true);
+    repo.patchPart(partId, { quantity_override: 1 });
 
     const native = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
+    backfillAcceptedPlanRevisions(native, "2026-08-21T15:00:00.000Z");
+    backfillCurrentRequiredUnitSets(native, {
+      now: () => "2026-08-21T15:01:00.000Z",
+      tokenFactory: () => "ppu_00000000000000000000000000000001",
+    });
+    const accepted = repo.readAcceptedPlanOperationalSnapshot(profile.id);
+    if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
     native.prepare("UPDATE print_progress SET tenant_id = ? WHERE part_id = ?").run(
       "stale-tenant",
       partId,
     );
 
-    expect(repo.patchPartProgress(partId, 0, false).print_units).toEqual([false]);
+    expect(() =>
+      repo.setAcceptedUnitCompletion({
+        expected: acceptedPlanBasis(accepted.snapshot),
+        token: parseRequiredUnitToken(accepted.snapshot.parts[0]!.units[0]!.token),
+        completed: false,
+      }),
+    ).toThrowError(/progress is corrupt/i);
     expect(
       native
         .prepare("SELECT tenant_id FROM print_progress WHERE part_id = ?")
         .all(partId),
-    ).toEqual([{ tenant_id: "default" }]);
+    ).toEqual([{ tenant_id: "stale-tenant" }]);
 
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });

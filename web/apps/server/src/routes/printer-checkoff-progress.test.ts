@@ -18,6 +18,9 @@ import {
   listUnattributedPrints,
   saveUnattributedPrint,
 } from "../services/unattributed-print-store.js";
+import type Database from "better-sqlite3";
+import { backfillAcceptedPlanRevisions } from "../db/accepted-plan-revisions.js";
+import { backfillCurrentRequiredUnitSets } from "../db/required-units.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -40,6 +43,14 @@ async function setup() {
   const plan = repo.createProfile("Progress", source.id);
   repo.recomputeProfile(plan.id);
   const bracket = repo.listParts(plan.id).parts.find((p) => p.filename === "bracket.stl")!;
+  repo.patchPart(bracket.id, { quantity_override: 1 });
+  const raw = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
+  backfillAcceptedPlanRevisions(raw, "2026-08-21T12:00:00.000Z");
+  let token = 1;
+  backfillCurrentRequiredUnitSets(raw, {
+    now: () => "2026-08-21T12:01:00.000Z",
+    tokenFactory: () => `ppu_${(token++).toString(16).padStart(32, "0")}`,
+  });
 
   repo.setSetting("integrations", JSON.stringify([{
     id: "prusa-1",
@@ -192,7 +203,6 @@ describe("printer progress route", () => {
     );
     saveUnattributedPrint(repo, stale);
     const setSetting = vi.spyOn(repo, "setSetting");
-    const ensureProgressForPart = vi.spyOn(repo, "ensureProgressForPart");
 
     const awaiting = await app.inject({
       method: "GET",
@@ -205,7 +215,6 @@ describe("printer progress route", () => {
       }],
     });
     expect(getPrinterCheckoffLink(repo, link.id)?.units).toEqual([]);
-    expect(ensureProgressForPart).not.toHaveBeenCalled();
     expect(setSetting).not.toHaveBeenCalled();
     const storedPrint = listUnattributedPrints(repo).find((p) => p.id === stale.id);
     expect(storedPrint?.claimed_at).toBeUndefined();
@@ -228,7 +237,6 @@ describe("printer progress route", () => {
       filename: "unknown.bgcode",
     });
     const getProfilePartRows = vi.spyOn(repo, "getProfilePartRows");
-    const ensureProgressForPart = vi.spyOn(repo, "ensureProgressForPart");
     const setSetting = vi.spyOn(repo, "setSetting");
     let now = Date.now();
     const dateNow = vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -247,11 +255,10 @@ describe("printer progress route", () => {
     expect(first.json().links[0]).toMatchObject({ id: link.id, units: [] });
     expect(second.json().links[0]).toMatchObject({ id: link.id, units: [] });
     expect(getProfilePartRows).toHaveBeenCalledTimes(1);
-    expect(ensureProgressForPart).not.toHaveBeenCalled();
     expect(setSetting).not.toHaveBeenCalled();
   });
 
-  it("repairs and persists an empty link only when verify applies confirm and reject decisions", async () => {
+  it("does not repair or persist an empty legacy link during failed verify", async () => {
     const { app, repo, plan, bracket, repoPath } = await setup();
     writeFileSync(join(repoPath, "parts", "frame.stl"), "solid");
     repo.recomputeProfile(plan.id);
@@ -295,29 +302,12 @@ describe("printer progress route", () => {
         ],
       },
     });
-    expect(verify.statusCode).toBe(200);
-    expect(verify.json()).toMatchObject({
-      units_confirmed: 1,
-      units_rejected: 1,
-      link: {
-        state: "verified",
-        units: [
-          { part_id: bracket.id, unit_index: 0 },
-          { part_id: frame.id, unit_index: 0 },
-        ],
-      },
-    });
-    expect(getPrinterCheckoffLink(repo, link.id)?.units).toEqual([
-      { part_id: bracket.id, unit_index: 0 },
-      { part_id: frame.id, unit_index: 0 },
-    ]);
-    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([true]);
-    expect(repo.printUnitsByPartId(plan.id).get(frame.id)).toEqual([false]);
-    expect(listUnattributedPrints(repo)).toContainEqual(expect.objectContaining({
-      id: stale.id,
-      claimed_profile_id: plan.id,
-      claimed_at: expect.any(String),
-    }));
+    expect(verify.statusCode).toBe(400);
+    expect(getPrinterCheckoffLink(repo, link.id)?.units).toEqual([]);
+    expect(repo.printUnitsByPartId(plan.id).get(bracket.id)).toEqual([false]);
+    const unchanged = listUnattributedPrints(repo).find((row) => row.id === stale.id);
+    expect(unchanged).toBeDefined();
+    expect(unchanged).not.toHaveProperty("claimed_profile_id");
   });
 
   it("persists Progress when the same API receives a valid mapped unit", async () => {

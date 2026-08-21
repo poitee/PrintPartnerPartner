@@ -12,6 +12,8 @@ import { buildStlTreePayload, progressSummary } from "@print-partner/domain";
 import { exportProfileStlPack, exportStlPackJobMessage, STL_EXPORT_MISSING_HINT } from "./services/export-stl-pack.js";
 import { backfillAcceptedPlanRevisions } from "./db/accepted-plan-revisions.js";
 import { backfillCurrentRequiredUnitSets } from "./db/required-units.js";
+import { acceptedPlanBasis } from "./db/accepted-plan-progress.js";
+import { parseRequiredUnitToken } from "./services/required-units.js";
 
 describe("Phase 3 APIs", () => {
   it("builds STL tree from repo folder", () => {
@@ -39,15 +41,24 @@ describe("Phase 3 APIs", () => {
     const plan = repo.createProfile("Plan", source.id);
     await repo.recomputeProfile(plan.id);
 
-    const checkoff = repo.getCheckoff(plan.id);
-    expect(checkoff.parts.length).toBeGreaterThan(0);
-    const partId = checkoff.parts[0].id;
-    const patched = repo.patchPartProgress(partId, 0, true);
-    expect(patched.printed_count).toBe(1);
-    expect(patched.missing).toBe(false);
-
-    const again = repo.getCheckoff(plan.id);
-    expect(progressSummary(again.parts)).toContain("1/");
+    const partId = repo.listParts(plan.id).parts[0]!.id;
+    repo.patchPart(partId, { quantity_override: 1 });
+    const raw = new Database(join(dir, "print-partner.db"));
+    backfillAcceptedPlanRevisions(raw, "2026-08-21T06:00:00.000Z");
+    backfillCurrentRequiredUnitSets(raw, {
+      now: () => "2026-08-21T06:01:00.000Z",
+      tokenFactory: () => "ppu_00000000000000000000000000000001",
+    });
+    raw.close();
+    const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
+    if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+    const patched = repo.setAcceptedUnitCompletion({
+      expected: acceptedPlanBasis(accepted.snapshot),
+      token: parseRequiredUnitToken(accepted.snapshot.parts[0]!.units[0]!.token),
+      completed: true,
+    });
+    expect(patched).toMatchObject({ kind: "updated", body: { printed_count: 1, missing: false } });
+    expect(progressSummary([{ quantity_effective: 1, printed_count: 1 }])).toContain("1/");
 
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
@@ -68,18 +79,8 @@ describe("Phase 3 APIs", () => {
     const plan = repo.createProfile("Plan", source.id);
     await repo.recomputeProfile(plan.id);
 
-    const checkoff = repo.getCheckoff(plan.id);
-    const partId = checkoff.parts[0].id;
-
-    expect(repo.patchPartProgress(partId, 0, false).assembled_units).toEqual([false]);
-
-    repo.patchPartProgress(partId, 0, true);
-    const patched = repo.patchPartAssembled(partId, 0, true);
-    expect(patched.assembled_count).toBe(1);
-    expect(patched.assembled_units).toEqual([true]);
-
-    const unset = repo.patchPartAssembled(partId, 0, false);
-    expect(unset.assembled_units).toEqual([false]);
+    const partId = repo.listParts(plan.id).parts[0]!.id;
+    repo.patchPart(partId, { quantity_override: 1 });
 
     const raw = new Database(join(dir, "print-partner.db"));
     raw.pragma("foreign_keys = ON");
@@ -89,6 +90,23 @@ describe("Phase 3 APIs", () => {
       tokenFactory: () => "ppu_00000000000000000000000000000001",
     });
     raw.close();
+    const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
+    if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+    const expected = acceptedPlanBasis(accepted.snapshot);
+    const token = parseRequiredUnitToken(accepted.snapshot.parts[0]!.units[0]!.token);
+    expect(repo.setAcceptedUnitCompletion({ expected, token, completed: false })).toMatchObject({
+      kind: "updated",
+      body: { assembled_units: [false] },
+    });
+    repo.setAcceptedUnitCompletion({ expected, token, completed: true });
+    expect(repo.setAcceptedUnitAssembly({ expected, token, assembled: true })).toMatchObject({
+      kind: "updated",
+      body: { assembled_count: 1, assembled_units: [true] },
+    });
+    expect(repo.setAcceptedUnitAssembly({ expected, token, assembled: false })).toMatchObject({
+      kind: "updated",
+      body: { assembled_units: [false] },
+    });
     const config = loadConfig();
     const ports = createSelfHostPorts(dir);
     await ports.db.connect();

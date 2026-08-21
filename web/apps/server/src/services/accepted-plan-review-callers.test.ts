@@ -90,8 +90,6 @@ function repository(
 ) {
   const mutations = {
     patchPart: vi.fn(),
-    patchPartProgress: vi.fn(),
-    patchPartAssembled: vi.fn(),
   };
   return {
     reposDir: "/unused/repos",
@@ -454,8 +452,6 @@ describe("accepted Plan Review callers", () => {
     expect(JSON.parse(newResult.content).plan_name).toBe("New accepted");
     expect(repo.readAcceptedPlanOperationalSnapshot).toHaveBeenCalledTimes(2);
     expect(repo.patchPart).not.toHaveBeenCalled();
-    expect(repo.patchPartProgress).not.toHaveBeenCalled();
-    expect(repo.patchPartAssembled).not.toHaveBeenCalled();
     expect(JSON.stringify(snapshots)).toBe(before);
   });
 

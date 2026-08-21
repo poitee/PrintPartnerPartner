@@ -1,7 +1,10 @@
 import { basename } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppRepository } from "../db/repository.js";
-import type { AcceptedOperationalPart } from "../db/accepted-plan-operational.js";
+import type {
+  AcceptedOperationalPart,
+  AcceptedPlanOperationalSnapshot,
+} from "../db/accepted-plan-operational.js";
 import { PLACEHOLDER_PNG } from "../lib/thumbnails.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import { toAcceptedPartAssembledView } from "../services/accepted-plan-views.js";
@@ -16,6 +19,8 @@ import {
   ACCEPTED_PART_MESH_MAX_BYTES,
   acceptedPartMediaIdentity,
 } from "../services/accepted-part-media.js";
+import { acceptedPlanBasis, type AcceptedProgressFailure } from "../db/accepted-plan-progress.js";
+import { parseRequiredUnitToken } from "../services/required-units.js";
 
 type RouteDeps = {
   repo: AppRepository;
@@ -28,6 +33,7 @@ type AcceptedPartRequest =
       readonly kind: "ready";
       readonly profileId: number;
       readonly part: AcceptedOperationalPart;
+      readonly snapshot: AcceptedPlanOperationalSnapshot;
     }
   | { readonly kind: "part_not_found" }
   | {
@@ -45,7 +51,7 @@ function readAcceptedPartRequest(deps: RouteDeps, partId: number): AcceptedPartR
   }
   const part = accepted.snapshot.parts.find((candidate) => candidate.projectionPartId === partId);
   return part
-    ? { kind: "ready", profileId: projection.profileId, part }
+    ? { kind: "ready", profileId: projection.profileId, part, snapshot: accepted.snapshot }
     : { kind: "part_not_found" };
 }
 
@@ -53,6 +59,22 @@ function acceptedStateDetail(reason: "compatibility_dirty" | "uninitialized"): s
   return reason === "compatibility_dirty"
     ? "Accepted Plan requires compatibility repair"
     : "Accepted Plan operational state is not initialized";
+}
+
+function sendAcceptedProgressFailure(reply: FastifyReply, failure: AcceptedProgressFailure) {
+  if (failure.kind === "accepted_state_unavailable") {
+    return reply.status(409).send({ detail: acceptedStateDetail(failure.reason) });
+  }
+  if (failure.kind === "stale_accepted_plan") {
+    return reply.status(409).send({ detail: "Accepted Plan changed; reload and retry" });
+  }
+  if (failure.kind === "transaction_unavailable") {
+    return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+  }
+  if (failure.kind === "plan_archived") {
+    return reply.status(409).send({ detail: "Archived Plan Progress cannot be changed" });
+  }
+  return reply.status(404).send({ detail: "Part unit not found" });
 }
 
 function matchesStrongEtagList(value: string | string[] | undefined, etag: string): boolean {
@@ -162,12 +184,51 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
     if (body.unit_index == null || body.completed == null) {
       return reply.status(400).send({ detail: "unit_index and completed required" });
     }
+    if (
+      typeof body.completed !== "boolean" ||
+      !Number.isInteger(body.unit_index) ||
+      body.unit_index < 0
+    ) {
+      return reply.status(400).send({
+        detail: "unit_index must be a non-negative integer and completed a boolean",
+      });
+    }
+    if (!deps.repo.canMutateAcceptedPlan()) {
+      return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+    }
+    let profileId: number | null = null;
     try {
-      return deps.repo.patchPartProgress(id, body.unit_index, body.completed);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      const code = msg.includes("out of range") ? 400 : msg.includes("not found") ? 404 : 400;
-      return reply.status(code).send({ detail: msg });
+      const accepted = readAcceptedPartRequest(deps, id);
+      if (accepted.kind === "part_not_found") {
+        return reply.status(404).send({ detail: "Part not found" });
+      }
+      if (accepted.kind === "accepted_state_unavailable") {
+        return reply.status(409).send({ detail: acceptedStateDetail(accepted.reason) });
+      }
+      profileId = accepted.profileId;
+      const unit = accepted.part.units[body.unit_index];
+      if (!unit) return reply.status(400).send({ detail: "unit_index out of range" });
+      const result = deps.repo.setAcceptedUnitCompletion({
+        expected: acceptedPlanBasis(accepted.snapshot),
+        token: parseRequiredUnitToken(unit.token),
+        completed: body.completed,
+      });
+      return result.kind === "updated"
+        ? result.body
+        : sendAcceptedProgressFailure(reply, result);
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error(
+          { code: error.code, profileId, partId: id },
+          "Accepted Plan integrity failure",
+        );
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error(
+        { failure: "unexpected", profileId, partId: id },
+        "Accepted Plan Progress update failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
 
@@ -213,15 +274,51 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
     if (body.unit_index == null || body.assembled == null) {
       return reply.status(400).send({ detail: "unit_index and assembled required" });
     }
-    if (typeof body.assembled !== "boolean" || !Number.isInteger(body.unit_index)) {
-      return reply.status(400).send({ detail: "unit_index must be an integer and assembled a boolean" });
+    if (
+      typeof body.assembled !== "boolean" ||
+      !Number.isInteger(body.unit_index) ||
+      body.unit_index < 0
+    ) {
+      return reply.status(400).send({
+        detail: "unit_index must be a non-negative integer and assembled a boolean",
+      });
     }
+    if (!deps.repo.canMutateAcceptedPlan()) {
+      return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+    }
+    let profileId: number | null = null;
     try {
-      return deps.repo.patchPartAssembled(id, body.unit_index, body.assembled);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      const code = msg.includes("out of range") ? 400 : msg.includes("not found") ? 404 : 400;
-      return reply.status(code).send({ detail: msg });
+      const accepted = readAcceptedPartRequest(deps, id);
+      if (accepted.kind === "part_not_found") {
+        return reply.status(404).send({ detail: "Part not found" });
+      }
+      if (accepted.kind === "accepted_state_unavailable") {
+        return reply.status(409).send({ detail: acceptedStateDetail(accepted.reason) });
+      }
+      profileId = accepted.profileId;
+      const unit = accepted.part.units[body.unit_index];
+      if (!unit) return reply.status(400).send({ detail: "unit_index out of range" });
+      const result = deps.repo.setAcceptedUnitAssembly({
+        expected: acceptedPlanBasis(accepted.snapshot),
+        token: parseRequiredUnitToken(unit.token),
+        assembled: body.assembled,
+      });
+      return result.kind === "updated"
+        ? result.body
+        : sendAcceptedProgressFailure(reply, result);
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error(
+          { code: error.code, profileId, partId: id },
+          "Accepted Plan integrity failure",
+        );
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error(
+        { failure: "unexpected", profileId, partId: id },
+        "Accepted Plan assembly update failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
 
