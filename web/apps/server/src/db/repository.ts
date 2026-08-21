@@ -155,8 +155,14 @@ import {
 import { resolveStoredSnapshotPath } from "./stored-snapshot-path.js";
 import {
   readAcceptedPlanOperationalSnapshotInternal,
+  type AcceptedPlanCorruptionCode,
   type ReadAcceptedPlanOperationalSnapshotResult,
 } from "./accepted-plan-operational.js";
+import {
+  MAX_ACCEPTED_PROGRESS_SUMMARY_BATCH,
+  readAcceptedPlanProgressBatch,
+  type AcceptedPlanProgressRead,
+} from "./accepted-plan-progress-summary.js";
 import {
   applyAcceptedUnitDecisionsInternal,
   archiveAcceptedPlanInternal,
@@ -260,6 +266,53 @@ export type ProfileHeader = {
   readonly archived_at: string | null;
   readonly last_used_at: string | null;
 };
+
+export type AcceptedProfileProgress =
+  | {
+      readonly kind: "ready";
+      readonly totalUnits: number;
+      readonly remainingUnits: number;
+    }
+  | { readonly kind: "empty" }
+  | {
+      readonly kind: "unavailable";
+      readonly reason: "compatibility_dirty" | "uninitialized";
+    }
+  | {
+      readonly kind: "integrity_failure";
+      readonly code: AcceptedPlanCorruptionCode;
+    }
+  | { readonly kind: "concurrent_update" };
+
+export type AcceptedProfileSummary = Readonly<{
+  header: ProfileHeader;
+  progress: AcceptedProfileProgress;
+}>;
+
+export type ReadAcceptedProfileSummary =
+  | { readonly kind: "found"; readonly summary: AcceptedProfileSummary }
+  | { readonly kind: "missing" };
+
+function acceptedProfileProgress(
+  read: Exclude<AcceptedPlanProgressRead, { kind: "missing" }>,
+): AcceptedProfileProgress {
+  switch (read.kind) {
+    case "ready":
+      return {
+        kind: "ready",
+        totalUnits: read.totalUnits,
+        remainingUnits: read.remainingUnits,
+      };
+    case "empty":
+      return { kind: "empty" };
+    case "unavailable":
+      return { kind: "unavailable", reason: read.reason };
+    case "integrity_failure":
+      return { kind: "integrity_failure", code: read.code };
+    case "concurrent_update":
+      return { kind: "concurrent_update" };
+  }
+}
 
 export type OwnedProfileIdentity = {
   readonly id: number;
@@ -3002,6 +3055,34 @@ export class AppRepository {
     });
   }
 
+  listAcceptedProfileSummaries(): readonly AcceptedProfileSummary[] {
+    const headers = this.listProfileHeaders();
+    const summaries: AcceptedProfileSummary[] = [];
+    for (
+      let offset = 0;
+      offset < headers.length;
+      offset += MAX_ACCEPTED_PROGRESS_SUMMARY_BATCH
+    ) {
+      const chunk = headers.slice(offset, offset + MAX_ACCEPTED_PROGRESS_SUMMARY_BATCH);
+      const reads = readAcceptedPlanProgressBatch(
+        {
+          db: this.db,
+          schema: this.schema,
+          tenantId: this.tenantId,
+          sqlite: this.syncSqlite,
+        },
+        chunk.map(({ id }) => id),
+      );
+      for (const header of chunk) {
+        const read = reads.get(header.id);
+        if (!read) throw new Error("Accepted Plan Progress result is missing");
+        if (read.kind === "missing") continue;
+        summaries.push({ header, progress: acceptedProfileProgress(read) });
+      }
+    }
+    return summaries;
+  }
+
   private buildPlanFreshnessContext(profileIds: readonly number[]): PlanFreshnessContext {
     const layers = profileIds.length
       ? this.db
@@ -3292,6 +3373,26 @@ export class AppRepository {
       Number(partCount?.c ?? 0),
       this.planFreshness(profile),
     );
+  }
+
+  readAcceptedProfileSummary(profileId: number): ReadAcceptedProfileSummary {
+    const header = this.getProfileHeader(profileId);
+    if (!header) return { kind: "missing" };
+    const read = readAcceptedPlanProgressBatch(
+      {
+        db: this.db,
+        schema: this.schema,
+        tenantId: this.tenantId,
+        sqlite: this.syncSqlite,
+      },
+      [profileId],
+    ).get(profileId);
+    if (!read) throw new Error("Accepted Plan Progress result is missing");
+    if (read.kind === "missing") return { kind: "missing" };
+    return {
+      kind: "found",
+      summary: { header, progress: acceptedProfileProgress(read) },
+    };
   }
 
   getOwnedProfileIdentity(id: number): OwnedProfileIdentity | null {

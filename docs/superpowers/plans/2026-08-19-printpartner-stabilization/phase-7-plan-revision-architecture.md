@@ -637,6 +637,20 @@ and 40 tests. The full server suite passed 157 files with one file skipped, 1208
 tests passed, and 3 tests skipped. Server typecheck, full web lint, the final
 no-comments audit, and the diff check passed.
 
+Progress summary Unit 3a adds private accepted Profile summary composition and
+two pure presenters without changing contracts, routes, callers, or UI. The
+list reader preserves `ProfileHeader` name order, divides IDs into batches of at
+most 64, and omits a Plan only when its accepted read returns `missing`. The
+detail reader returns the same tenant-safe `missing` result for absent or
+foreign-owned Plans. Unexpected accepted-read errors still propagate.
+
+`ProfileHeader` freshness intentionally reads current Source selection and
+Source naming configuration. The accepted Progress portion adds no Source row,
+Source naming, artifact, media, or filesystem read. Exact 64, 65, and 129 Plan
+proofs used 11, 15, and 22 total queries and 1, 2, and 3 accepted batches. The
+focused composition and presenter suite passed 2 files and 9 tests. Server
+typecheck, root lint, the no-comments audit, and the diff check passed.
+
 ## Module shape
 
 ```ts
