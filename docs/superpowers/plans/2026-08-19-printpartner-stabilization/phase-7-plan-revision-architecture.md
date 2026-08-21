@@ -590,6 +590,34 @@ tests passed, and 3 tests skipped. The full web suite passed 98 files and 429
 tests. Both typechecks, root lint, both production builds, and the diff check
 passed.
 
+The accepted Progress summary foundation adds one private bounded batch reader
+without changing routes, contracts, callers, or UI. It accepts at most 64
+positive unique Plan IDs and returns a per-Plan union for ready, empty,
+compatibility-dirty, uninitialized, integrity, concurrent-update, and missing
+state. Ready counts come only from the accepted revision, immutable Required
+unit mapping, and current Progress at accepted projection coordinates. Missing
+Progress remains incomplete, and legal surplus Progress is ignored without
+being changed. The reader does not load Source snapshots, filesystem paths,
+artifacts, or media.
+
+The summary reader and the complete accepted operational reader share the same
+pure pointer, revision, accepted-input, projection, Required-unit, and Progress
+validators. SQLite reads each batch in one `DEFERRED` transaction. PostgreSQL
+uses terminal identity reads before and after one bulk load, preserves stable
+Plans, and retries only the changed subset once. Foreign-owned Plans normalize
+to a stable missing identity and cannot become integrity or concurrent-update
+results. Stable row faults are attributed to their owning Plan during the bulk
+pass, so one damaged Plan does not abort peers or trigger per-Plan query loops.
+Unexpected database failures still fail the collection.
+
+Paginated reads use keyset cursors. Numeric pages contain at most 256 rows,
+text pages contain at most 16 rows, and `IN` lists contain at most 64 values.
+Stored text retains the 64 KiB UTF-8 row limit. Focused summary coverage passed
+26 tests, and the summary plus accepted operational suite passed 113 tests.
+The full server suite passed 155 files with one file skipped, 1200 tests passed,
+and 3 tests skipped. Server typecheck, root lint, the no-comments audit, and the
+diff check passed.
+
 ## Module shape
 
 ```ts

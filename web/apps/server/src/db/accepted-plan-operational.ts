@@ -183,10 +183,11 @@ function validateStoredRequiredUnit(token: string, objectName: string): void {
 }
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-const ACCEPTED_READ_PAGE_SIZE = 256;
-const ACCEPTED_TEXT_PAGE_SIZE = 16;
+export const ACCEPTED_READ_PAGE_SIZE = 256;
+export const ACCEPTED_TEXT_PAGE_SIZE = 16;
+export const ACCEPTED_IN_LIST_SIZE = 64;
 
-function chunks<T>(items: readonly T[], size = ACCEPTED_READ_PAGE_SIZE): T[][] {
+function chunks<T>(items: readonly T[], size = ACCEPTED_IN_LIST_SIZE): T[][] {
   const result: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
     result.push(items.slice(index, index + size));
@@ -216,6 +217,8 @@ function storedTextBytes(sqlite: boolean, columns: readonly AnyColumn[]): SQL<nu
   );
 }
 
+export const acceptedPlanStoredTextBytes = storedTextBytes;
+
 function validateStoredTextBytes(
   bytes: number,
   code: AcceptedPlanCorruptionCode,
@@ -225,6 +228,8 @@ function validateStoredTextBytes(
     corrupt(code, message);
   }
 }
+
+export const validateAcceptedPlanStoredTextBytes = validateStoredTextBytes;
 
 function isPositiveSafeInteger(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
@@ -285,6 +290,406 @@ function revisionDigestParts(
   }));
 }
 
+export type AcceptedPlanValidatedPart = {
+  readonly revisionPart: typeof defaultSchema.planRevisionParts.$inferSelect;
+  readonly projectionPart: typeof defaultSchema.parts.$inferSelect;
+};
+
+export type AcceptedPlanPointerValidation =
+  | { readonly kind: "missing" }
+  | { readonly kind: "empty" }
+  | { readonly kind: "compatibility_dirty" }
+  | {
+      readonly kind: "ready";
+      readonly profile: typeof defaultSchema.buildProfiles.$inferSelect & {
+        readonly acceptedPlanRevisionId: number;
+      };
+    };
+
+export const validateAcceptedPlanPointerRows = (input: {
+  readonly tenantId: string;
+  readonly profile: typeof defaultSchema.buildProfiles.$inferSelect | undefined;
+  readonly hasCompatibilityPart: boolean;
+  readonly hasAcceptedInput: boolean;
+  readonly hasHistoricalRevision: boolean;
+}): AcceptedPlanPointerValidation => {
+  const { profile } = input;
+  if (!profile || profile.tenantId !== input.tenantId) return { kind: "missing" };
+  if (!Number.isSafeInteger(profile.acceptedPlanVersion) || profile.acceptedPlanVersion < 0) {
+    corrupt("pointer", "Accepted Plan pointer is corrupt");
+  }
+  if (profile.acceptedPlanRevisionId == null) {
+    if (profile.acceptedPlanVersion === 0 && input.hasHistoricalRevision) {
+      corrupt("pointer", "Accepted Plan history has no pointer");
+    }
+    if (
+      profile.acceptedPlanVersion > 0 ||
+      input.hasCompatibilityPart ||
+      input.hasAcceptedInput
+    ) {
+      return { kind: "compatibility_dirty" };
+    }
+    return { kind: "empty" };
+  }
+  if (profile.acceptedPlanVersion === 0) {
+    corrupt("pointer", "Accepted Plan pointer has a zero version");
+  }
+  return {
+    kind: "ready",
+    profile: {
+      ...profile,
+      acceptedPlanRevisionId: profile.acceptedPlanRevisionId,
+    },
+  };
+};
+
+export const validateAcceptedPlanRevisionRows = (input: {
+  readonly tenantId: string;
+  readonly profileId: number;
+  readonly revision: typeof defaultSchema.planRevisions.$inferSelect;
+  readonly parent: { readonly tenantId: string; readonly profileId: number } | null;
+  readonly revisionParts: readonly (typeof defaultSchema.planRevisionParts.$inferSelect)[];
+}): void => {
+  const { revision } = input;
+  if (
+    revision.tenantId !== input.tenantId ||
+    revision.profileId !== input.profileId ||
+    !Number.isSafeInteger(revision.revisionNumber) ||
+    revision.revisionNumber <= 0 ||
+    revision.digestFormat !== PLAN_REVISION_DIGEST_FORMAT ||
+    !isCanonicalTimestamp(revision.createdAt) ||
+    !isCanonicalTimestamp(revision.acceptedAt) ||
+    revision.createdBy.length === 0 ||
+    revision.acceptedBy.length === 0 ||
+    ((revision.provenanceKind === "legacy" && revision.inputSetId != null) ||
+      (revision.provenanceKind === "tracked" && revision.inputSetId == null))
+  ) {
+    corrupt("revision", "Accepted Plan revision is corrupt");
+  }
+  if (
+    revision.parentRevisionId != null &&
+    (!input.parent ||
+      input.parent.tenantId !== input.tenantId ||
+      input.parent.profileId !== input.profileId)
+  ) {
+    corrupt("revision", "Accepted Plan revision parent is corrupt");
+  }
+  if (
+    input.revisionParts.some(
+      (part) => !isPositiveSafeInteger(part.id) || part.tenantId !== input.tenantId,
+    )
+  ) {
+    corrupt("revision", "Accepted Plan revision Part ownership is corrupt");
+  }
+  if (
+    digestPlanRevisionParts(revisionDigestParts(input.revisionParts)) !== revision.snapshotDigest
+  ) {
+    corrupt("revision_digest", "Accepted Plan revision digest is corrupt");
+  }
+};
+
+export const validateAcceptedPlanInputHeaderRows = (input: {
+  readonly tenantId: string;
+  readonly profileId: number;
+  readonly revision: typeof defaultSchema.planRevisions.$inferSelect;
+  readonly acceptedInput:
+    | typeof defaultSchema.planAcceptedInputSets.$inferSelect
+    | undefined;
+  readonly inputSet: typeof defaultSchema.planRevisionInputSets.$inferSelect | undefined;
+}): "legacy" | "format1" | "format2" => {
+  if (input.revision.provenanceKind === "legacy") {
+    if (input.revision.inputSetId != null || input.acceptedInput) {
+      corrupt("accepted_inputs", "Legacy accepted Plan has input provenance");
+    }
+    return "legacy";
+  }
+  const inputSetId = input.revision.inputSetId;
+  if (
+    input.revision.provenanceKind !== "tracked" ||
+    inputSetId == null ||
+    !input.acceptedInput ||
+    input.acceptedInput.tenantId !== input.tenantId ||
+    input.acceptedInput.profileId !== input.profileId ||
+    input.acceptedInput.inputSetId !== inputSetId ||
+    input.acceptedInput.acceptedAt !== input.revision.acceptedAt ||
+    !input.inputSet ||
+    input.inputSet.id !== inputSetId ||
+    input.inputSet.tenantId !== input.tenantId ||
+    input.inputSet.profileId !== input.profileId ||
+    input.inputSet.publishedAt == null ||
+    !isCanonicalTimestamp(input.inputSet.recordedAt) ||
+    !isCanonicalTimestamp(input.inputSet.publishedAt) ||
+    !Number.isSafeInteger(input.inputSet.expectedInputCount) ||
+    input.inputSet.expectedInputCount < 0 ||
+    (input.inputSet.formatVersion !== 1 && input.inputSet.formatVersion !== 2)
+  ) {
+    corrupt("accepted_inputs", "Accepted Plan input header is corrupt");
+  }
+  return input.inputSet.formatVersion === 1 ? "format1" : "format2";
+};
+
+export const validateAcceptedPlanProjectionRows = (input: {
+  readonly tenantId: string;
+  readonly revisionParts: readonly (typeof defaultSchema.planRevisionParts.$inferSelect)[];
+  readonly projectionRows: readonly (typeof defaultSchema.parts.$inferSelect)[];
+  readonly revisionBooleans: ReadonlyMap<
+    number,
+    { readonly included: unknown; readonly geometrySame: unknown }
+  >;
+  readonly projectionBooleans: ReadonlyMap<
+    number,
+    { readonly included: unknown; readonly geometrySame: unknown }
+  >;
+}): readonly AcceptedPlanValidatedPart[] => {
+  if (
+    input.projectionRows.length !== input.revisionParts.length ||
+    input.projectionRows.some(
+      (row) =>
+        row.tenantId !== input.tenantId ||
+        !isPositiveSafeInteger(row.id) ||
+        storedBoolean(input.projectionBooleans.get(row.id)?.included) == null ||
+        (input.projectionBooleans.get(row.id)?.geometrySame != null &&
+          storedBoolean(input.projectionBooleans.get(row.id)?.geometrySame) == null),
+    ) ||
+    input.revisionParts.some(
+      (row) =>
+        storedBoolean(input.revisionBooleans.get(row.id)?.included) == null ||
+        (input.revisionBooleans.get(row.id)?.geometrySame != null &&
+          storedBoolean(input.revisionBooleans.get(row.id)?.geometrySame) == null),
+    )
+  ) {
+    corrupt("projection", "Accepted Plan Part booleans or ownership are corrupt");
+  }
+  const projectionById = new Map(input.projectionRows.map((row) => [row.id, row]));
+  const projectionIds = new Set<number>();
+  const partKeys = new Set<string>();
+  const validated = [...input.revisionParts]
+    .sort((left, right) => left.id - right.id)
+    .map((part): AcceptedPlanValidatedPart => {
+      if (
+        !isPositiveSafeInteger(part.projectionPartId ?? 0) ||
+        projectionIds.has(part.projectionPartId!) ||
+        part.partKey.length === 0 ||
+        partKeys.has(part.partKey) ||
+        !isPositiveSafeInteger(part.quantityInferred) ||
+        part.quantityInferred > 10_000 ||
+        (part.quantityOverride != null &&
+          (!isPositiveSafeInteger(part.quantityOverride) || part.quantityOverride > 10_000)) ||
+        !isPositiveSafeInteger(part.quantityEffective) ||
+        part.quantityEffective > 10_000 ||
+        part.quantityEffective !== (part.quantityOverride ?? part.quantityInferred)
+      ) {
+        corrupt("projection", "Accepted Plan revision Part identity is corrupt");
+      }
+      projectionIds.add(part.projectionPartId!);
+      partKeys.add(part.partKey);
+      const projection = projectionById.get(part.projectionPartId!);
+      const effectiveRole = part.roleOverride ?? part.roleInferred;
+      if (
+        !projection ||
+        projection.matchKey !== part.partKey ||
+        projection.relativePath !== part.relativePath ||
+        projection.filename !== part.filename ||
+        projection.sourceLayer !== part.sourceLayer ||
+        projection.status !== part.status ||
+        projection.role !== effectiveRole ||
+        projection.filamentColorId !== part.filamentColorId ||
+        projection.filamentCustomHex !== part.filamentCustomHex ||
+        projection.spoolmanSpoolId !== part.spoolmanSpoolId ||
+        projection.quantityAuto !== part.quantityInferred ||
+        projection.quantityOverride !== part.quantityOverride ||
+        projection.quantityEffective !== part.quantityEffective ||
+        projection.included !== part.included ||
+        projection.notes !== part.notes ||
+        projection.githubBlobUrl !== part.githubBlobUrl ||
+        projection.geometrySame !== part.geometrySame ||
+        projection.requirement !== part.requirement ||
+        projection.optionGroupId !== part.optionGroupId ||
+        projection.manifestSource !== part.manifestSource
+      ) {
+        corrupt("projection", "Accepted Plan projection differs from its revision");
+      }
+      return { revisionPart: part, projectionPart: projection };
+    });
+  if (projectionById.size !== projectionIds.size) {
+    corrupt("projection", "Accepted Plan projection has extra Parts");
+  }
+  return validated;
+};
+
+export type AcceptedPlanRequiredUnitMappingRow =
+  typeof defaultSchema.planRevisionRequiredUnits.$inferSelect;
+export type AcceptedPlanRequiredUnitRow = typeof defaultSchema.requiredUnits.$inferSelect;
+export type AcceptedPlanProgressRow = {
+  readonly id: number;
+  readonly tenantId: string;
+  readonly partId: number;
+  readonly unitIndex: number;
+  readonly completed: unknown;
+  readonly assembled: unknown;
+};
+
+export const validateAcceptedPlanRequiredUnitRows = (input: {
+  readonly tenantId: string;
+  readonly profileId: number;
+  readonly revisionId: number;
+  readonly requiredSet: typeof defaultSchema.planRevisionRequiredUnitSets.$inferSelect;
+  readonly parts: readonly {
+    readonly revisionPartId: number;
+    readonly included: boolean;
+    readonly quantityEffective: number;
+  }[];
+  readonly mappings: readonly AcceptedPlanRequiredUnitMappingRow[];
+  readonly units: readonly AcceptedPlanRequiredUnitRow[];
+  readonly creationRevisions: readonly {
+    readonly id: number;
+    readonly tenantId: string;
+    readonly profileId: number;
+  }[];
+  readonly createdHere: readonly AcceptedPlanRequiredUnitRow[];
+}): {
+  readonly mappingDigest: string;
+  readonly byPart: ReadonlyMap<number, readonly UnitWithoutProgress[]>;
+} => {
+  const expectedUnitCount = input.parts.reduce(
+    (sum, part) => sum + part.quantityEffective,
+    0,
+  );
+  if (
+    input.requiredSet.tenantId !== input.tenantId ||
+    input.requiredSet.profileId !== input.profileId ||
+    input.requiredSet.format !== REQUIRED_UNIT_MAP_FORMAT ||
+    !Number.isSafeInteger(input.requiredSet.expectedUnitCount) ||
+    input.requiredSet.expectedUnitCount !== expectedUnitCount ||
+    input.mappings.length !== expectedUnitCount
+  ) {
+    corrupt("required_unit_map", "Accepted Plan Required-unit header or mappings are corrupt");
+  }
+  const unitByToken = new Map(input.units.map((unit) => [unit.token, unit]));
+  const creationById = new Map(input.creationRevisions.map((revision) => [revision.id, revision]));
+  const partById = new Map(input.parts.map((part) => [part.revisionPartId, part]));
+  const nextIndex = new Map<number, number>();
+  const seenTokens = new Set<string>();
+  const seenObjectNames = new Set<string>();
+  const byPart = new Map<number, UnitWithoutProgress[]>();
+  const digestRows = [...input.mappings]
+    .sort(
+      (left, right) =>
+        left.revisionPartId - right.revisionPartId ||
+        left.unitIndex - right.unitIndex ||
+        left.tenantId.localeCompare(right.tenantId),
+    )
+    .map((mapping) => {
+      const part = partById.get(mapping.revisionPartId);
+      const unit = unitByToken.get(mapping.requiredUnitToken);
+      const creationRevision = unit ? creationById.get(unit.createdInRevisionId) : null;
+      const expectedIndex = part ? (nextIndex.get(mapping.revisionPartId) ?? 0) : -1;
+      if (
+        mapping.tenantId !== input.tenantId ||
+        mapping.revisionId !== input.revisionId ||
+        !part ||
+        mapping.unitIndex !== expectedIndex ||
+        mapping.unitIndex >= part.quantityEffective ||
+        seenTokens.has(mapping.requiredUnitToken) ||
+        !unit ||
+        unit.tenantId !== input.tenantId ||
+        unit.profileId !== input.profileId ||
+        !creationRevision ||
+        creationRevision.tenantId !== input.tenantId ||
+        creationRevision.profileId !== input.profileId
+      ) {
+        corrupt("required_unit_map", "Accepted Plan Required-unit ownership is corrupt");
+      }
+      validateStoredRequiredUnit(unit.token, unit.objectName);
+      const objectNameKey = unit.objectName.toLowerCase();
+      if (seenObjectNames.has(objectNameKey)) {
+        corrupt("required_unit_map", "Accepted Plan Required-unit Object name is duplicated");
+      }
+      seenTokens.add(unit.token);
+      seenObjectNames.add(objectNameKey);
+      nextIndex.set(mapping.revisionPartId, expectedIndex + 1);
+      const partUnits = byPart.get(mapping.revisionPartId) ?? [];
+      partUnits.push({
+        unitIndex: mapping.unitIndex,
+        required: part.included,
+        token: unit.token,
+        objectName: unit.objectName,
+      });
+      byPart.set(mapping.revisionPartId, partUnits);
+      return {
+        revisionPartId: mapping.revisionPartId,
+        unitIndex: mapping.unitIndex,
+        token: unit.token,
+        objectName: unit.objectName,
+      };
+    });
+  for (const part of input.parts) {
+    if ((nextIndex.get(part.revisionPartId) ?? 0) !== part.quantityEffective) {
+      corrupt("required_unit_map", "Accepted Plan Required-unit coordinates are incomplete");
+    }
+  }
+  if (
+    input.createdHere.some(
+      (unit) =>
+        unit.tenantId !== input.tenantId ||
+        unit.profileId !== input.profileId ||
+        !seenTokens.has(unit.token),
+    )
+  ) {
+    corrupt("required_unit_map", "Accepted Plan Required unit is orphaned");
+  }
+  let digest: string;
+  try {
+    digest = digestRequiredUnitMap({
+      revisionId: input.revisionId,
+      expectedUnitCount,
+      rows: digestRows,
+    });
+  } catch {
+    corrupt("required_unit_map", "Accepted Plan Required-unit digest input is corrupt");
+  }
+  if (digest !== input.requiredSet.mappingDigest) {
+    corrupt("required_unit_map", "Accepted Plan Required-unit digest is corrupt");
+  }
+  return { mappingDigest: digest, byPart };
+};
+
+export const validateAcceptedPlanProgressRows = (input: {
+  readonly tenantId: string;
+  readonly parts: readonly {
+    readonly projectionPartId: number;
+    readonly quantityEffective: number;
+  }[];
+  readonly rows: readonly AcceptedPlanProgressRow[];
+}): ReadonlyMap<string, { readonly completed: boolean; readonly assembled: boolean }> => {
+  const currentCoordinates = new Set(
+    input.parts.flatMap((part) =>
+      Array.from(
+        { length: part.quantityEffective },
+        (_, unitIndex) => `${part.projectionPartId}:${unitIndex}`,
+      ),
+    ),
+  );
+  const progress = new Map<string, { completed: boolean; assembled: boolean }>();
+  for (const row of input.rows) {
+    const key = `${row.partId}:${row.unitIndex}`;
+    if (!currentCoordinates.has(key)) continue;
+    const completed = storedBoolean(row.completed);
+    const assembled = storedBoolean(row.assembled);
+    if (
+      row.tenantId !== input.tenantId ||
+      progress.has(key) ||
+      completed == null ||
+      assembled == null ||
+      (assembled && !completed)
+    ) {
+      corrupt("progress", "Accepted Plan progress is corrupt");
+    }
+    progress.set(key, { completed, assembled });
+  }
+  return progress;
+};
+
 type AcceptedInputState =
   | { readonly kind: "legacy" }
   | { readonly kind: "format1" }
@@ -337,24 +742,17 @@ function loadAcceptedInputs(input: {
 }): AcceptedInputState {
   const { db, schema, tenantId, profileId, reposDir, revision, acceptedInputs } = input;
   if (revision.provenanceKind === "legacy") {
-    if (revision.inputSetId != null || acceptedInputs.length !== 0) {
-      corrupt("accepted_inputs", "Legacy accepted Plan has input provenance");
-    }
+    validateAcceptedPlanInputHeaderRows({
+      tenantId,
+      profileId,
+      revision,
+      acceptedInput: acceptedInputs[0],
+      inputSet: undefined,
+    });
     return { kind: "legacy" };
   }
-  if (revision.provenanceKind !== "tracked" || revision.inputSetId == null) {
+  if (revision.inputSetId == null) {
     corrupt("revision", "Accepted Plan revision provenance is corrupt");
-  }
-  const accepted = acceptedInputs[0];
-  if (
-    acceptedInputs.length !== 1 ||
-    !accepted ||
-    accepted.tenantId !== tenantId ||
-    accepted.profileId !== profileId ||
-    accepted.inputSetId !== revision.inputSetId ||
-    accepted.acceptedAt !== revision.acceptedAt
-  ) {
-    corrupt("accepted_inputs", "Accepted Plan input selection is corrupt");
   }
   const setText = db
     .select({
@@ -380,19 +778,14 @@ function loadAcceptedInputs(input: {
     .from(schema.planRevisionInputSets)
     .where(eq(schema.planRevisionInputSets.id, revision.inputSetId))
     .get();
-  if (
-    !set ||
-    set.tenantId !== tenantId ||
-    set.profileId !== profileId ||
-    set.publishedAt == null ||
-    !isCanonicalTimestamp(set.recordedAt) ||
-    !isCanonicalTimestamp(set.publishedAt) ||
-    !Number.isSafeInteger(set.expectedInputCount) ||
-    set.expectedInputCount < 0 ||
-    (set.formatVersion !== 1 && set.formatVersion !== 2)
-  ) {
-    corrupt("accepted_inputs", "Accepted Plan input set is corrupt");
-  }
+  validateAcceptedPlanInputHeaderRows({
+    tenantId,
+    profileId,
+    revision,
+    acceptedInput: acceptedInputs.length === 1 ? acceptedInputs[0] : undefined,
+    inputSet: set,
+  });
+  if (!set) corrupt("accepted_inputs", "Accepted Plan input set is corrupt");
   let lastInputPreflightId: number | null = null;
   while (true) {
     const page: Array<{ readonly id: number; readonly bytes: number }> = db
@@ -779,78 +1172,24 @@ function loadAcceptedParts(input: {
         .all(),
     );
   }
-  if (
-    revisionBooleanEvidence.length !== revisionParts.length ||
-    revisionBooleanEvidence.some(
-      (row) =>
-        storedBoolean(row.included) == null ||
-        (row.geometrySame != null && storedBoolean(row.geometrySame) == null),
-    ) ||
-    projectionBooleanEvidence.length !== projectionRows.length ||
-    projectionBooleanEvidence.some(
-      (row) =>
-        storedBoolean(row.included) == null ||
-        (row.geometrySame != null && storedBoolean(row.geometrySame) == null),
-    )
-  ) {
-    corrupt("projection", "Accepted Plan Part booleans are corrupt");
-  }
-  if (
-    projectionRows.length !== revisionParts.length ||
-    projectionRows.some((row) => row.tenantId !== tenantId)
-  ) {
-    corrupt("projection", "Accepted Plan projection ownership is corrupt");
-  }
-  const projectionById = new Map(projectionRows.map((row) => [row.id, row]));
-  const projectionIds = new Set<number>();
-  const partKeys = new Set<string>();
-  const loaded = [...revisionParts]
-    .sort((left, right) => left.id - right.id)
-    .map((part): LoadedAcceptedPart => {
-      if (
-        !isPositiveSafeInteger(part.id) ||
-        !isPositiveSafeInteger(part.projectionPartId ?? 0) ||
-        projectionIds.has(part.projectionPartId!) ||
-        part.partKey.length === 0 ||
-        partKeys.has(part.partKey) ||
-        !isPositiveSafeInteger(part.quantityInferred) ||
-        part.quantityInferred > 10_000 ||
-        (part.quantityOverride != null &&
-          (!isPositiveSafeInteger(part.quantityOverride) || part.quantityOverride > 10_000)) ||
-        !isPositiveSafeInteger(part.quantityEffective) ||
-        part.quantityEffective > 10_000 ||
-        part.quantityEffective !== (part.quantityOverride ?? part.quantityInferred)
-      ) {
-        corrupt("projection", "Accepted Plan revision Part identity is corrupt");
-      }
-      projectionIds.add(part.projectionPartId!);
-      partKeys.add(part.partKey);
-      const projection = projectionById.get(part.projectionPartId!);
+  return validateAcceptedPlanProjectionRows({
+    tenantId,
+    revisionParts,
+    projectionRows,
+    revisionBooleans: new Map(
+      revisionBooleanEvidence.map((row) => [
+        row.id,
+        { included: row.included, geometrySame: row.geometrySame },
+      ]),
+    ),
+    projectionBooleans: new Map(
+      projectionBooleanEvidence.map((row) => [
+        row.id,
+        { included: row.included, geometrySame: row.geometrySame },
+      ]),
+    ),
+  }).map(({ revisionPart: part }): LoadedAcceptedPart => {
       const effectiveRole = part.roleOverride ?? part.roleInferred;
-      if (
-        !projection ||
-        projection.matchKey !== part.partKey ||
-        projection.relativePath !== part.relativePath ||
-        projection.filename !== part.filename ||
-        projection.sourceLayer !== part.sourceLayer ||
-        projection.status !== part.status ||
-        projection.role !== effectiveRole ||
-        projection.filamentColorId !== part.filamentColorId ||
-        projection.filamentCustomHex !== part.filamentCustomHex ||
-        projection.spoolmanSpoolId !== part.spoolmanSpoolId ||
-        projection.quantityAuto !== part.quantityInferred ||
-        projection.quantityOverride !== part.quantityOverride ||
-        projection.quantityEffective !== part.quantityEffective ||
-        projection.included !== part.included ||
-        projection.notes !== part.notes ||
-        projection.githubBlobUrl !== part.githubBlobUrl ||
-        projection.geometrySame !== part.geometrySame ||
-        projection.requirement !== part.requirement ||
-        projection.optionGroupId !== part.optionGroupId ||
-        projection.manifestSource !== part.manifestSource
-      ) {
-        corrupt("projection", "Accepted Plan projection differs from its revision");
-      }
       let artifact: AcceptedOperationalArtifact;
       if (inputState.kind === "legacy" || inputState.kind === "format1") {
         artifact = { kind: "unavailable", reason: "legacy" };
@@ -878,7 +1217,7 @@ function loadAcceptedParts(input: {
           };
         }
       }
-      return {
+    return {
         included: part.included,
         quantityEffective: part.quantityEffective,
         value: {
@@ -907,12 +1246,8 @@ function loadAcceptedParts(input: {
           manifestSource: part.manifestSource,
           artifact,
         },
-      };
-    });
-  if (projectionById.size !== projectionIds.size) {
-    corrupt("projection", "Accepted Plan projection has extra Parts");
-  }
-  return loaded;
+    };
+  });
 }
 
 type UnitWithoutProgress = Omit<AcceptedOperationalUnit, "completed" | "assembled">;
@@ -931,16 +1266,6 @@ function loadRequiredUnits(input: {
   readonly byPart: ReadonlyMap<number, readonly UnitWithoutProgress[]>;
 } {
   const { db, schema, tenantId, profileId, revisionId, requiredSet, parts, sqlite } = input;
-  const expectedUnitCount = parts.reduce((sum, part) => sum + part.quantityEffective, 0);
-  if (
-    requiredSet.tenantId !== tenantId ||
-    requiredSet.profileId !== profileId ||
-    requiredSet.format !== REQUIRED_UNIT_MAP_FORMAT ||
-    !Number.isSafeInteger(requiredSet.expectedUnitCount) ||
-    requiredSet.expectedUnitCount !== expectedUnitCount
-  ) {
-    corrupt("required_unit_map", "Accepted Plan Required-unit header is corrupt");
-  }
   let lastMappingPreflight:
     | { readonly revisionPartId: number; readonly unitIndex: number; readonly tenantId: string }
     | null = null;
@@ -1063,9 +1388,6 @@ function loadRequiredUnits(input: {
       tenantId: last.tenantId,
     };
   }
-  if (mappings.length !== expectedUnitCount) {
-    corrupt("required_unit_map", "Accepted Plan Required-unit mappings are incomplete");
-  }
   const tokens = mappings.map((mapping) => mapping.requiredUnitToken);
   const units: Array<typeof defaultSchema.requiredUnits.$inferSelect> = [];
   for (const tokenChunk of chunks(tokens, ACCEPTED_TEXT_PAGE_SIZE)) {
@@ -1099,7 +1421,6 @@ function loadRequiredUnits(input: {
         .all(),
     );
   }
-  const unitByToken = new Map(units.map((unit) => [unit.token, unit]));
   const creationRevisionIds = [...new Set(units.map((unit) => unit.createdInRevisionId))];
   const creationRevisions: Array<{ id: number; tenantId: string; profileId: number }> = [];
   for (const revisionIds of chunks(creationRevisionIds, ACCEPTED_TEXT_PAGE_SIZE)) {
@@ -1131,61 +1452,6 @@ function loadRequiredUnits(input: {
         .orderBy(asc(schema.planRevisions.id))
         .all(),
     );
-  }
-  const creationById = new Map(creationRevisions.map((revision) => [revision.id, revision]));
-  const partById = new Map(parts.map((part) => [part.value.revisionPartId, part]));
-  const nextIndex = new Map<number, number>();
-  const seenTokens = new Set<string>();
-  const seenObjectNames = new Set<string>();
-  const byPart = new Map<number, UnitWithoutProgress[]>();
-  const digestRows = mappings.map((mapping) => {
-    const part = partById.get(mapping.revisionPartId);
-    const unit = unitByToken.get(mapping.requiredUnitToken);
-    const creationRevision = unit ? creationById.get(unit.createdInRevisionId) : null;
-    const expectedIndex = part ? (nextIndex.get(mapping.revisionPartId) ?? 0) : -1;
-    if (
-      mapping.tenantId !== tenantId ||
-      mapping.revisionId !== revisionId ||
-      !part ||
-      mapping.unitIndex !== expectedIndex ||
-      mapping.unitIndex >= part.quantityEffective ||
-      seenTokens.has(mapping.requiredUnitToken) ||
-      !unit ||
-      unit.tenantId !== tenantId ||
-      unit.profileId !== profileId ||
-      !creationRevision ||
-      creationRevision.tenantId !== tenantId ||
-      creationRevision.profileId !== profileId
-    ) {
-      corrupt("required_unit_map", "Accepted Plan Required-unit ownership is corrupt");
-    }
-    validateStoredRequiredUnit(unit.token, unit.objectName);
-    const objectNameKey = unit.objectName.toLowerCase();
-    if (seenObjectNames.has(objectNameKey)) {
-      corrupt("required_unit_map", "Accepted Plan Required-unit Object name is duplicated");
-    }
-    seenTokens.add(unit.token);
-    seenObjectNames.add(objectNameKey);
-    nextIndex.set(mapping.revisionPartId, expectedIndex + 1);
-    const partUnits = byPart.get(mapping.revisionPartId) ?? [];
-    partUnits.push({
-      unitIndex: mapping.unitIndex,
-      required: part.included,
-      token: unit.token,
-      objectName: unit.objectName,
-    });
-    byPart.set(mapping.revisionPartId, partUnits);
-    return {
-      revisionPartId: mapping.revisionPartId,
-      unitIndex: mapping.unitIndex,
-      token: unit.token,
-      objectName: unit.objectName,
-    };
-  });
-  for (const part of parts) {
-    if ((nextIndex.get(part.value.revisionPartId) ?? 0) !== part.quantityEffective) {
-      corrupt("required_unit_map", "Accepted Plan Required-unit coordinates are incomplete");
-    }
   }
   let lastCreatedPreflightToken: string | null = null;
   while (true) {
@@ -1242,30 +1508,21 @@ function loadRequiredUnits(input: {
     if (page.length < ACCEPTED_TEXT_PAGE_SIZE) break;
     lastCreatedToken = page.at(-1)!.token;
   }
-  if (
-    createdHere.some(
-      (unit) =>
-        unit.tenantId !== tenantId ||
-        unit.profileId !== profileId ||
-        !seenTokens.has(unit.token),
-    )
-  ) {
-    corrupt("required_unit_map", "Accepted Plan Required unit is orphaned");
-  }
-  let digest: string;
-  try {
-    digest = digestRequiredUnitMap({
-      revisionId,
-      expectedUnitCount,
-      rows: digestRows,
-    });
-  } catch {
-    corrupt("required_unit_map", "Accepted Plan Required-unit digest input is corrupt");
-  }
-  if (digest !== requiredSet.mappingDigest) {
-    corrupt("required_unit_map", "Accepted Plan Required-unit digest is corrupt");
-  }
-  return { mappingDigest: digest, byPart };
+  return validateAcceptedPlanRequiredUnitRows({
+    tenantId,
+    profileId,
+    revisionId,
+    requiredSet,
+    parts: parts.map((part) => ({
+      revisionPartId: part.value.revisionPartId,
+      included: part.included,
+      quantityEffective: part.quantityEffective,
+    })),
+    mappings,
+    units,
+    creationRevisions,
+    createdHere,
+  });
 }
 
 function loadProgress(input: {
@@ -1278,14 +1535,6 @@ function loadProgress(input: {
   const { db, schema, tenantId, parts } = input;
   const projectionIds = parts.map((part) => part.value.projectionPartId);
   if (projectionIds.length === 0) return new Map();
-  const currentCoordinates = new Set(
-    parts.flatMap((part) =>
-      Array.from(
-        { length: part.quantityEffective },
-        (_, unitIndex) => `${part.value.projectionPartId}:${unitIndex}`,
-      ),
-    ),
-  );
   const rows: Array<{
     id: number;
     tenantId: string;
@@ -1348,24 +1597,14 @@ function loadProgress(input: {
       lastProgressId = page.at(-1)!.id;
     }
   }
-  const progress = new Map<string, { completed: boolean; assembled: boolean }>();
-  for (const row of rows) {
-    const key = `${row.partId}:${row.unitIndex}`;
-    if (!currentCoordinates.has(key)) continue;
-    const completed = storedBoolean(row.completed);
-    const assembled = storedBoolean(row.assembled);
-    if (
-      row.tenantId !== tenantId ||
-      progress.has(key) ||
-      completed == null ||
-      assembled == null ||
-      (assembled && !completed)
-    ) {
-      corrupt("progress", "Accepted Plan progress is corrupt");
-    }
-    progress.set(key, { completed, assembled });
-  }
-  return progress;
+  return validateAcceptedPlanProgressRows({
+    tenantId,
+    parts: parts.map((part) => ({
+      projectionPartId: part.value.projectionPartId,
+      quantityEffective: part.quantityEffective,
+    })),
+    rows,
+  });
 }
 
 type AcceptedTerminalIdentity = {
@@ -1448,10 +1687,6 @@ function loadAcceptedPlanOperationalSnapshot(
     .from(schema.buildProfiles)
     .where(eq(schema.buildProfiles.id, profileId))
     .get();
-  if (!profile || profile.tenantId !== tenantId) throw new Error("Profile not found");
-  if (!Number.isSafeInteger(profile.acceptedPlanVersion) || profile.acceptedPlanVersion < 0) {
-    corrupt("pointer", "Accepted Plan pointer is corrupt");
-  }
   const compatibilityPart = db
     .select({ id: schema.parts.id })
     .from(schema.parts)
@@ -1479,27 +1714,21 @@ function loadAcceptedPlanOperationalSnapshot(
     .from(schema.planAcceptedInputSets)
     .where(eq(schema.planAcceptedInputSets.profileId, profileId))
     .all();
-  if (profile.acceptedPlanRevisionId == null) {
-    if (profile.acceptedPlanVersion === 0) {
-      const historicalRevision = db
-        .select({ id: schema.planRevisions.id })
-        .from(schema.planRevisions)
-        .where(eq(schema.planRevisions.profileId, profileId))
-        .get();
-      if (historicalRevision) corrupt("pointer", "Accepted Plan history has no pointer");
-    }
-    if (
-      profile.acceptedPlanVersion > 0 ||
-      compatibilityPart != null ||
-      acceptedInputs.length > 0
-    ) {
-      return { kind: "compatibility_dirty" };
-    }
-    return { kind: "empty" };
-  }
-  if (profile.acceptedPlanVersion === 0) {
-    corrupt("pointer", "Accepted Plan pointer has a zero version");
-  }
+  const historicalRevision = db
+    .select({ id: schema.planRevisions.id })
+    .from(schema.planRevisions)
+    .where(eq(schema.planRevisions.profileId, profileId))
+    .get();
+  const pointer = validateAcceptedPlanPointerRows({
+    tenantId,
+    profile,
+    hasCompatibilityPart: compatibilityPart != null,
+    hasAcceptedInput: acceptedInputs.length > 0,
+    hasHistoricalRevision: historicalRevision != null,
+  });
+  if (pointer.kind === "missing") throw new Error("Profile not found");
+  if (pointer.kind === "empty" || pointer.kind === "compatibility_dirty") return pointer;
+  const acceptedProfile = pointer.profile;
   const revisionText = db
     .select({
       bytes: storedTextBytes(dependencies.sqlite, [
@@ -1514,7 +1743,7 @@ function loadAcceptedPlanOperationalSnapshot(
       ]),
     })
     .from(schema.planRevisions)
-    .where(eq(schema.planRevisions.id, profile.acceptedPlanRevisionId))
+    .where(eq(schema.planRevisions.id, acceptedProfile.acceptedPlanRevisionId))
     .get();
   if (revisionText) {
     validateStoredTextBytes(
@@ -1526,30 +1755,13 @@ function loadAcceptedPlanOperationalSnapshot(
   const revision = db
     .select()
     .from(schema.planRevisions)
-    .where(eq(schema.planRevisions.id, profile.acceptedPlanRevisionId))
+    .where(eq(schema.planRevisions.id, acceptedProfile.acceptedPlanRevisionId))
     .get();
-  if (
-    !revision ||
-    revision.tenantId !== tenantId ||
-    revision.profileId !== profileId ||
-    !Number.isSafeInteger(revision.revisionNumber) ||
-    revision.revisionNumber <= 0 ||
-    revision.digestFormat !== PLAN_REVISION_DIGEST_FORMAT ||
-    !isCanonicalTimestamp(revision.createdAt) ||
-    !isCanonicalTimestamp(revision.acceptedAt) ||
-    revision.createdBy.length === 0 ||
-    revision.acceptedBy.length === 0
-  ) {
-    corrupt("revision", "Accepted Plan revision is corrupt");
-  }
-  if (
-    (revision.provenanceKind === "legacy" && revision.inputSetId != null) ||
-    (revision.provenanceKind === "tracked" && revision.inputSetId == null)
-  ) {
-    corrupt("revision", "Accepted Plan revision provenance is corrupt");
-  }
-  if (revision.parentRevisionId != null) {
-    const parent = db
+  if (!revision) corrupt("revision", "Accepted Plan revision is corrupt");
+  const parent =
+    revision.parentRevisionId == null
+      ? null
+      : db
       .select({
         tenantId: schema.planRevisions.tenantId,
         profileId: schema.planRevisions.profileId,
@@ -1557,10 +1769,6 @@ function loadAcceptedPlanOperationalSnapshot(
       .from(schema.planRevisions)
       .where(eq(schema.planRevisions.id, revision.parentRevisionId))
       .get();
-    if (!parent || parent.tenantId !== tenantId || parent.profileId !== profileId) {
-      corrupt("revision", "Accepted Plan revision parent is corrupt");
-    }
-  }
   let lastRevisionPartPreflightId: number | null = null;
   while (true) {
     const page = db
@@ -1632,12 +1840,13 @@ function loadAcceptedPlanOperationalSnapshot(
     if (page.length < ACCEPTED_TEXT_PAGE_SIZE) break;
     lastRevisionPartId = page.at(-1)!.id;
   }
-  if (revisionParts.some((part) => part.tenantId !== tenantId)) {
-    corrupt("revision", "Accepted Plan revision Part ownership is corrupt");
-  }
-  if (digestPlanRevisionParts(revisionDigestParts(revisionParts)) !== revision.snapshotDigest) {
-    corrupt("revision_digest", "Accepted Plan revision digest is corrupt");
-  }
+  validateAcceptedPlanRevisionRows({
+    tenantId,
+    profileId,
+    revision,
+    parent: parent ?? null,
+    revisionParts,
+  });
   const inputState = loadAcceptedInputs({
     db,
     schema,
@@ -1720,13 +1929,13 @@ function loadAcceptedPlanOperationalSnapshot(
     snapshot: {
       format: "accepted-plan-operational-v1",
       profile: {
-        id: profile.id,
-        name: profile.name,
-        orderNumber: profile.orderNumber,
-        specialRequest: profile.specialRequest,
-        archivedAt: profile.archivedAt,
+        id: acceptedProfile.id,
+        name: acceptedProfile.name,
+        orderNumber: acceptedProfile.orderNumber,
+        specialRequest: acceptedProfile.specialRequest,
+        archivedAt: acceptedProfile.archivedAt,
       },
-      planVersion: profile.acceptedPlanVersion,
+      planVersion: acceptedProfile.acceptedPlanVersion,
       revisionId: revision.id,
       revisionNumber: revision.revisionNumber,
       revisionDigest: revision.snapshotDigest,
