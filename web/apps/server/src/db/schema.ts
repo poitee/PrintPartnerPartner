@@ -334,6 +334,10 @@ export const planDrafts = sqliteTable(
       (): AnySQLiteColumn => planDraftRequiredUnitReconciliations.id,
       { onDelete: "set null" },
     ),
+    consumedRevisionId: integer("consumed_revision_id").references(() => planRevisions.id, {
+      onDelete: "cascade",
+    }),
+    consumedAt: text("consumed_at"),
     digestFormat: text("digest_format").notNull(),
     snapshotDigest: text("snapshot_digest").notNull(),
     createdBy: text("created_by").notNull(),
@@ -370,6 +374,13 @@ export const planDrafts = sqliteTable(
             AND ${t.rebasedFromSnapshotDigest} IS NOT NULL
             AND ${t.rebasedFromLifecycleVersion} >= 0
             AND ${t.rebasedFromLifecycleVersion} <= 2147483647)`,
+    ),
+    check(
+      "chk_plan_drafts_consumption",
+      sql`(${t.consumedRevisionId} IS NULL AND ${t.consumedAt} IS NULL)
+          OR (${t.state} = 'consumed'
+            AND ${t.consumedRevisionId} IS NOT NULL
+            AND ${t.consumedAt} IS NOT NULL)`,
     ),
   ],
 );
@@ -569,6 +580,68 @@ export const planDraftRequiredUnitAssignments = sqliteTable(
       "chk_plan_draft_required_unit_assignments_kind",
       sql`(${t.kind} = 'reuse' AND ${t.requiredUnitToken} IS NOT NULL)
           OR (${t.kind} = 'create' AND ${t.requiredUnitToken} IS NULL)`,
+    ),
+  ],
+);
+
+export const planApplyRequests = sqliteTable(
+  "plan_apply_requests",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    tenantId: text("tenant_id").notNull(),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    draftId: integer("draft_id")
+      .notNull()
+      .references(() => planDrafts.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestFormat: text("request_format").notNull(),
+    requestDigest: text("request_digest").notNull(),
+    expectedSnapshotDigest: text("expected_snapshot_digest").notNull(),
+    expectedLifecycleVersion: integer("expected_lifecycle_version").notNull(),
+    expectedBaseRevisionId: integer("expected_base_revision_id").references(
+      () => planRevisions.id,
+      { onDelete: "cascade" },
+    ),
+    expectedBasePlanVersion: integer("expected_base_plan_version").notNull(),
+    reconciliationId: integer("reconciliation_id")
+      .notNull()
+      .references(() => planDraftRequiredUnitReconciliations.id, { onDelete: "cascade" }),
+    reconciliationDigest: text("reconciliation_digest").notNull(),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => planRevisions.id, { onDelete: "cascade" }),
+    planVersion: integer("plan_version").notNull(),
+    revisionDigest: text("revision_digest").notNull(),
+    requiredUnitMappingDigest: text("required_unit_mapping_digest").notNull(),
+    draftLifecycleVersion: integer("draft_lifecycle_version").notNull(),
+    appliedAt: text("applied_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_apply_requests_tenant_actor_profile_key").on(
+      t.tenantId,
+      t.actorId,
+      t.profileId,
+      t.idempotencyKey,
+    ),
+    uniqueIndex("uq_plan_apply_requests_tenant_profile_draft").on(
+      t.tenantId,
+      t.profileId,
+      t.draftId,
+    ),
+    check("chk_plan_apply_requests_format", sql`${t.requestFormat} = 'plan-apply-request-v1'`),
+    check(
+      "chk_plan_apply_requests_base",
+      sql`(${t.expectedBaseRevisionId} IS NULL AND ${t.expectedBasePlanVersion} = 0)
+          OR (${t.expectedBaseRevisionId} IS NOT NULL AND ${t.expectedBasePlanVersion} > 0)`,
+    ),
+    check(
+      "chk_plan_apply_requests_versions",
+      sql`${t.expectedLifecycleVersion} BETWEEN 0 AND 2147483646
+          AND ${t.draftLifecycleVersion} = ${t.expectedLifecycleVersion} + 1
+          AND ${t.planVersion} = ${t.expectedBasePlanVersion} + 1`,
     ),
   ],
 );
@@ -959,7 +1032,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 24;
+export const currentSchemaVersion = 25;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -985,7 +1058,14 @@ export const schemaMigrations: string[] = [
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tenant_id TEXT NOT NULL DEFAULT 'default',
     name TEXT NOT NULL,
-    order_number TEXT
+    order_number TEXT,
+    special_request TEXT,
+    config_modified_at TEXT,
+    last_recomputed_at TEXT,
+    archived_at TEXT,
+    last_used_at TEXT,
+    accepted_plan_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE SET NULL,
+    accepted_plan_version INTEGER NOT NULL DEFAULT 0
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS uq_profiles_tenant_name ON build_profiles (tenant_id, name)`,
   `CREATE TABLE IF NOT EXISTS profile_layers (
@@ -2244,5 +2324,139 @@ export const schemaMigrations: string[] = [
       )
     BEGIN
       SELECT RAISE(ABORT, 'Plan draft Required-unit selection violation');
+    END`,
+  `ALTER TABLE plan_drafts ADD COLUMN consumed_revision_id INTEGER
+    REFERENCES plan_revisions(id) ON DELETE CASCADE`,
+  `ALTER TABLE plan_drafts ADD COLUMN consumed_at TEXT`,
+  `CREATE TABLE IF NOT EXISTS plan_apply_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    draft_id INTEGER NOT NULL REFERENCES plan_drafts(id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_format TEXT NOT NULL CHECK (request_format = 'plan-apply-request-v1'),
+    request_digest TEXT NOT NULL,
+    expected_snapshot_digest TEXT NOT NULL,
+    expected_lifecycle_version INTEGER NOT NULL CHECK (
+      expected_lifecycle_version BETWEEN 0 AND 2147483646
+    ),
+    expected_base_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    expected_base_plan_version INTEGER NOT NULL,
+    reconciliation_id INTEGER NOT NULL
+      REFERENCES plan_draft_required_unit_reconciliations(id) ON DELETE CASCADE,
+    reconciliation_digest TEXT NOT NULL,
+    revision_id INTEGER NOT NULL REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    plan_version INTEGER NOT NULL,
+    revision_digest TEXT NOT NULL,
+    required_unit_mapping_digest TEXT NOT NULL,
+    draft_lifecycle_version INTEGER NOT NULL CHECK (
+      draft_lifecycle_version BETWEEN 1 AND 2147483647
+    ),
+    applied_at TEXT NOT NULL,
+    CHECK (
+      (expected_base_revision_id IS NULL AND expected_base_plan_version = 0)
+      OR (expected_base_revision_id IS NOT NULL AND expected_base_plan_version > 0)
+    ),
+    CHECK (plan_version = expected_base_plan_version + 1),
+    CHECK (draft_lifecycle_version = expected_lifecycle_version + 1)
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_apply_requests_tenant_actor_profile_key
+    ON plan_apply_requests (tenant_id, actor_id, profile_id, idempotency_key)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_apply_requests_tenant_profile_draft
+    ON plan_apply_requests (tenant_id, profile_id, draft_id)`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_consumption_insert
+    BEFORE INSERT ON plan_drafts
+    WHEN (NEW.state = 'consumed' AND (
+      NEW.consumed_revision_id IS NULL OR NEW.consumed_at IS NULL
+    )) OR (NEW.state <> 'consumed' AND (
+      NEW.consumed_revision_id IS NOT NULL OR NEW.consumed_at IS NOT NULL
+    ))
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft consumption violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_drafts_consumption_update
+    BEFORE UPDATE OF state, lifecycle_version, consumed_revision_id, consumed_at ON plan_drafts
+    WHEN (
+      (NEW.consumed_revision_id IS NULL) <> (NEW.consumed_at IS NULL)
+    ) OR (
+      NEW.state <> 'consumed'
+      AND (NEW.consumed_revision_id IS NOT NULL OR NEW.consumed_at IS NOT NULL)
+    ) OR (
+      OLD.state = 'consumed'
+      AND (
+        OLD.consumed_revision_id IS NOT NEW.consumed_revision_id
+        OR OLD.consumed_at IS NOT NEW.consumed_at
+      )
+    ) OR (
+      OLD.state <> 'consumed'
+      AND NEW.state = 'consumed'
+      AND (
+        NEW.consumed_revision_id IS NULL
+        OR NEW.consumed_at IS NULL
+        OR NOT EXISTS (
+          SELECT 1
+            FROM plan_revisions revision
+            JOIN build_profiles profile
+              ON profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
+           WHERE revision.id = NEW.consumed_revision_id
+             AND revision.tenant_id = NEW.tenant_id
+             AND revision.profile_id = NEW.profile_id
+             AND revision.parent_revision_id IS NEW.base_revision_id
+             AND profile.accepted_plan_revision_id = revision.id
+             AND profile.accepted_plan_version = NEW.base_plan_version + 1
+        )
+      )
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan draft consumption violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_apply_requests_ownership_insert
+    BEFORE INSERT ON plan_apply_requests
+    WHEN NOT EXISTS (
+      SELECT 1
+        FROM plan_drafts draft
+        JOIN plan_draft_required_unit_reconciliations reconciliation
+          ON reconciliation.id = NEW.reconciliation_id
+         AND reconciliation.tenant_id = NEW.tenant_id
+         AND reconciliation.profile_id = NEW.profile_id
+         AND reconciliation.draft_id = NEW.draft_id
+         AND reconciliation.finalized_at IS NOT NULL
+        JOIN plan_revisions revision
+          ON revision.id = NEW.revision_id
+         AND revision.tenant_id = NEW.tenant_id
+         AND revision.profile_id = NEW.profile_id
+        JOIN build_profiles profile
+          ON profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
+       WHERE draft.id = NEW.draft_id
+         AND draft.tenant_id = NEW.tenant_id
+         AND draft.profile_id = NEW.profile_id
+         AND draft.state = 'consumed'
+         AND draft.consumed_revision_id = NEW.revision_id
+         AND draft.lifecycle_version = NEW.draft_lifecycle_version
+         AND draft.base_revision_id IS NEW.expected_base_revision_id
+         AND draft.base_plan_version = NEW.expected_base_plan_version
+         AND reconciliation.reconciliation_digest = NEW.reconciliation_digest
+         AND revision.parent_revision_id IS NEW.expected_base_revision_id
+         AND revision.snapshot_digest = NEW.revision_digest
+         AND profile.accepted_plan_revision_id = NEW.revision_id
+         AND profile.accepted_plan_version = NEW.plan_version
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan Apply request ownership violation');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_apply_requests_immutable_update
+    BEFORE UPDATE ON plan_apply_requests
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan Apply request is immutable');
+    END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_plan_apply_requests_immutable_delete
+    BEFORE DELETE ON plan_apply_requests
+    WHEN EXISTS (
+      SELECT 1 FROM build_profiles profile
+       WHERE profile.id = OLD.profile_id AND profile.tenant_id = OLD.tenant_id
+    )
+    BEGIN
+      SELECT RAISE(ABORT, 'Plan Apply request is immutable');
     END`,
 ];

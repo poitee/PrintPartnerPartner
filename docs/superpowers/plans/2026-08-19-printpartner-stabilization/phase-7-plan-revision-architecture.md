@@ -284,11 +284,34 @@ retry cannot pair an old result with a newer selection. PostgreSQL exposes the
 schema and verified reads, while reconciliation mutation remains fail closed
 until native transactions exist.
 
-Unit 4 must recompute the authoritative live progress basis inside the same
-transaction that publishes the Plan. If it differs from the selected snapshot,
-Apply rejects the stale reconciliation with zero writes and requires a new
-reconciliation. Frozen assignments are never applied against a changed
-selection basis.
+Unit 4 provides one idempotent `applyPlanChanges` command. PostgreSQL fails
+closed until it has a native transaction implementation. SQLite performs the
+complete publication in one immediate transaction. It verifies the current
+v2 draft, accepted base, pinned inputs, compatibility projection, selected
+ready reconciliation, live selection basis, production references, and saved
+Plate plan before the first write. A changed selection basis returns a stale
+reconciliation result with zero writes. Checkoff progress updates use the same
+immediate transaction boundary, so a concurrent update commits wholly before
+Apply or rejects its old Part coordinate wholly after Apply.
+
+Input freshness compares the live Build attachment identity, order, and Source
+layer with the saved draft. Apply validates tracked draft inputs against their
+immutable Source revisions and publishes those pinned rows. A later Source
+revision or naming change does not rewrite or invalidate the reviewed draft.
+
+Apply allocates bounded new Required-unit identities before writing, detaches
+the accepted pointer, publishes an immutable accepted revision and input set,
+replaces compatibility Parts with fresh IDs, freezes the Required-unit map,
+translates live `print_progress`, clears only the saved Plate layout, advances
+the accepted pointer and Plan version, consumes the draft, and records one
+immutable scalar receipt. Reused tokens keep their Object names and latest
+progress. Created tokens start missing. Exact receipt retries return the stored
+result before freshness checks, while another key for the consumed draft
+returns the same verified receipt. The `plan-revision-parts-v1` digest remains
+byte compatible and excludes database projection IDs.
+Historical receipt verification binds the immutable request, consumed draft,
+reconciliation, revision, and Required-unit mapping. It does not require that
+revision to remain the Build's current accepted pointer.
 
 Reconciliation uses stable Source identity, a non-null artifact digest, and
 effective role as physical-equivalence evidence. The prior revision link is a

@@ -331,6 +331,10 @@ export const planDrafts = pgTable(
       (): AnyPgColumn => planDraftRequiredUnitReconciliations.id,
       { onDelete: "set null" },
     ),
+    consumedRevisionId: integer("consumed_revision_id").references(() => planRevisions.id, {
+      onDelete: "cascade",
+    }),
+    consumedAt: text("consumed_at"),
     digestFormat: text("digest_format").notNull(),
     snapshotDigest: text("snapshot_digest").notNull(),
     createdBy: text("created_by").notNull(),
@@ -364,6 +368,13 @@ export const planDrafts = pgTable(
             AND ${t.rebasedFromSnapshotDigest} IS NOT NULL
             AND ${t.rebasedFromLifecycleVersion} >= 0
             AND ${t.rebasedFromLifecycleVersion} <= 2147483647)`,
+    ),
+    check(
+      "chk_plan_drafts_consumption",
+      sql`(${t.consumedRevisionId} IS NULL AND ${t.consumedAt} IS NULL)
+          OR (${t.state} = 'consumed'
+            AND ${t.consumedRevisionId} IS NOT NULL
+            AND ${t.consumedAt} IS NOT NULL)`,
     ),
   ],
 );
@@ -563,6 +574,68 @@ export const planDraftRequiredUnitAssignments = pgTable(
       "chk_plan_draft_required_unit_assignments_kind",
       sql`(${t.kind} = 'reuse' AND ${t.requiredUnitToken} IS NOT NULL)
           OR (${t.kind} = 'create' AND ${t.requiredUnitToken} IS NULL)`,
+    ),
+  ],
+);
+
+export const planApplyRequests = pgTable(
+  "plan_apply_requests",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: text("tenant_id").notNull(),
+    profileId: integer("profile_id")
+      .notNull()
+      .references(() => buildProfiles.id, { onDelete: "cascade" }),
+    draftId: integer("draft_id")
+      .notNull()
+      .references(() => planDrafts.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestFormat: text("request_format").notNull(),
+    requestDigest: text("request_digest").notNull(),
+    expectedSnapshotDigest: text("expected_snapshot_digest").notNull(),
+    expectedLifecycleVersion: integer("expected_lifecycle_version").notNull(),
+    expectedBaseRevisionId: integer("expected_base_revision_id").references(
+      () => planRevisions.id,
+      { onDelete: "cascade" },
+    ),
+    expectedBasePlanVersion: integer("expected_base_plan_version").notNull(),
+    reconciliationId: integer("reconciliation_id")
+      .notNull()
+      .references(() => planDraftRequiredUnitReconciliations.id, { onDelete: "cascade" }),
+    reconciliationDigest: text("reconciliation_digest").notNull(),
+    revisionId: integer("revision_id")
+      .notNull()
+      .references(() => planRevisions.id, { onDelete: "cascade" }),
+    planVersion: integer("plan_version").notNull(),
+    revisionDigest: text("revision_digest").notNull(),
+    requiredUnitMappingDigest: text("required_unit_mapping_digest").notNull(),
+    draftLifecycleVersion: integer("draft_lifecycle_version").notNull(),
+    appliedAt: text("applied_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_plan_apply_requests_tenant_actor_profile_key").on(
+      t.tenantId,
+      t.actorId,
+      t.profileId,
+      t.idempotencyKey,
+    ),
+    uniqueIndex("uq_plan_apply_requests_tenant_profile_draft").on(
+      t.tenantId,
+      t.profileId,
+      t.draftId,
+    ),
+    check("chk_plan_apply_requests_format", sql`${t.requestFormat} = 'plan-apply-request-v1'`),
+    check(
+      "chk_plan_apply_requests_base",
+      sql`(${t.expectedBaseRevisionId} IS NULL AND ${t.expectedBasePlanVersion} = 0)
+          OR (${t.expectedBaseRevisionId} IS NOT NULL AND ${t.expectedBasePlanVersion} > 0)`,
+    ),
+    check(
+      "chk_plan_apply_requests_versions",
+      sql`${t.expectedLifecycleVersion} BETWEEN 0 AND 2147483646
+          AND ${t.draftLifecycleVersion} = ${t.expectedLifecycleVersion} + 1
+          AND ${t.planVersion} = ${t.expectedBasePlanVersion} + 1`,
     ),
   ],
 );
@@ -950,4 +1023,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 24;
+export const currentSchemaVersion = 25;

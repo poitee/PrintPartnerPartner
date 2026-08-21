@@ -1489,6 +1489,153 @@ export const postgresPostInitMigrations: string[] = [
       END IF;
     END
   $block$`,
+  `ALTER TABLE plan_drafts ADD COLUMN IF NOT EXISTS consumed_revision_id INTEGER
+    REFERENCES plan_revisions(id) ON DELETE CASCADE`,
+  `ALTER TABLE plan_drafts ADD COLUMN IF NOT EXISTS consumed_at TEXT`,
+  `CREATE TABLE IF NOT EXISTS plan_apply_requests (
+    id SERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    profile_id INTEGER NOT NULL REFERENCES build_profiles(id) ON DELETE CASCADE,
+    draft_id INTEGER NOT NULL REFERENCES plan_drafts(id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_format TEXT NOT NULL CONSTRAINT chk_plan_apply_requests_format
+      CHECK (request_format = 'plan-apply-request-v1'),
+    request_digest TEXT NOT NULL,
+    expected_snapshot_digest TEXT NOT NULL,
+    expected_lifecycle_version INTEGER NOT NULL,
+    expected_base_revision_id INTEGER REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    expected_base_plan_version INTEGER NOT NULL,
+    reconciliation_id INTEGER NOT NULL
+      REFERENCES plan_draft_required_unit_reconciliations(id) ON DELETE CASCADE,
+    reconciliation_digest TEXT NOT NULL,
+    revision_id INTEGER NOT NULL REFERENCES plan_revisions(id) ON DELETE CASCADE,
+    plan_version INTEGER NOT NULL,
+    revision_digest TEXT NOT NULL,
+    required_unit_mapping_digest TEXT NOT NULL,
+    draft_lifecycle_version INTEGER NOT NULL,
+    applied_at TEXT NOT NULL,
+    CONSTRAINT chk_plan_apply_requests_base CHECK (
+      (expected_base_revision_id IS NULL AND expected_base_plan_version = 0)
+      OR (expected_base_revision_id IS NOT NULL AND expected_base_plan_version > 0)
+    ),
+    CONSTRAINT chk_plan_apply_requests_versions CHECK (
+      expected_lifecycle_version BETWEEN 0 AND 2147483646
+      AND draft_lifecycle_version = expected_lifecycle_version + 1
+      AND plan_version = expected_base_plan_version + 1
+    )
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_apply_requests_tenant_actor_profile_key
+    ON plan_apply_requests (tenant_id, actor_id, profile_id, idempotency_key)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_apply_requests_tenant_profile_draft
+    ON plan_apply_requests (tenant_id, profile_id, draft_id)`,
+  `CREATE OR REPLACE FUNCTION validate_plan_draft_consumption() RETURNS trigger AS $function$
+    BEGIN
+      IF TG_OP = 'INSERT' THEN
+        IF (NEW.state = 'consumed' AND (
+          NEW.consumed_revision_id IS NULL OR NEW.consumed_at IS NULL
+        )) OR (NEW.state <> 'consumed' AND (
+          NEW.consumed_revision_id IS NOT NULL OR NEW.consumed_at IS NOT NULL
+        )) THEN
+          RAISE EXCEPTION 'Plan draft consumption violation';
+        END IF;
+        RETURN NEW;
+      END IF;
+      IF (NEW.consumed_revision_id IS NULL) <> (NEW.consumed_at IS NULL)
+        OR (NEW.state <> 'consumed' AND (
+          NEW.consumed_revision_id IS NOT NULL OR NEW.consumed_at IS NOT NULL
+        ))
+        OR (OLD.state = 'consumed' AND (
+          OLD.consumed_revision_id IS DISTINCT FROM NEW.consumed_revision_id
+          OR OLD.consumed_at IS DISTINCT FROM NEW.consumed_at
+        ))
+        OR (OLD.state <> 'consumed' AND NEW.state = 'consumed' AND (
+          NEW.consumed_revision_id IS NULL
+          OR NEW.consumed_at IS NULL
+          OR NOT EXISTS (
+            SELECT 1
+              FROM plan_revisions revision
+              JOIN build_profiles profile
+                ON profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
+             WHERE revision.id = NEW.consumed_revision_id
+               AND revision.tenant_id = NEW.tenant_id
+               AND revision.profile_id = NEW.profile_id
+               AND revision.parent_revision_id IS NOT DISTINCT FROM NEW.base_revision_id
+               AND profile.accepted_plan_revision_id = revision.id
+               AND profile.accepted_plan_version = NEW.base_plan_version + 1
+          )
+        )) THEN
+        RAISE EXCEPTION 'Plan draft consumption violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION validate_plan_apply_request_insert() RETURNS trigger AS $function$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+          FROM plan_drafts draft
+          JOIN plan_draft_required_unit_reconciliations reconciliation
+            ON reconciliation.id = NEW.reconciliation_id
+           AND reconciliation.tenant_id = NEW.tenant_id
+           AND reconciliation.profile_id = NEW.profile_id
+           AND reconciliation.draft_id = NEW.draft_id
+           AND reconciliation.finalized_at IS NOT NULL
+          JOIN plan_revisions revision
+            ON revision.id = NEW.revision_id
+           AND revision.tenant_id = NEW.tenant_id
+           AND revision.profile_id = NEW.profile_id
+          JOIN build_profiles profile
+            ON profile.id = NEW.profile_id AND profile.tenant_id = NEW.tenant_id
+         WHERE draft.id = NEW.draft_id
+           AND draft.tenant_id = NEW.tenant_id
+           AND draft.profile_id = NEW.profile_id
+           AND draft.state = 'consumed'
+           AND draft.consumed_revision_id = NEW.revision_id
+           AND draft.lifecycle_version = NEW.draft_lifecycle_version
+           AND draft.base_revision_id IS NOT DISTINCT FROM NEW.expected_base_revision_id
+           AND draft.base_plan_version = NEW.expected_base_plan_version
+           AND reconciliation.reconciliation_digest = NEW.reconciliation_digest
+           AND revision.parent_revision_id IS NOT DISTINCT FROM NEW.expected_base_revision_id
+           AND revision.snapshot_digest = NEW.revision_digest
+           AND profile.accepted_plan_revision_id = NEW.revision_id
+           AND profile.accepted_plan_version = NEW.plan_version
+      ) THEN
+        RAISE EXCEPTION 'Plan Apply request ownership violation';
+      END IF;
+      RETURN NEW;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `CREATE OR REPLACE FUNCTION enforce_plan_apply_request_immutable() RETURNS trigger AS $function$
+    BEGIN
+      IF TG_OP = 'UPDATE' OR EXISTS (
+        SELECT 1 FROM build_profiles profile
+         WHERE profile.id = OLD.profile_id AND profile.tenant_id = OLD.tenant_id
+      ) THEN
+        RAISE EXCEPTION 'Plan Apply request is immutable';
+      END IF;
+      RETURN OLD;
+    END
+  $function$ LANGUAGE plpgsql`,
+  `DO $block$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_drafts_consumption_write') THEN
+        CREATE TRIGGER trg_plan_drafts_consumption_write
+          BEFORE INSERT OR UPDATE OF state, lifecycle_version, consumed_revision_id, consumed_at
+          ON plan_drafts FOR EACH ROW EXECUTE FUNCTION validate_plan_draft_consumption();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_apply_requests_ownership_insert') THEN
+        CREATE TRIGGER trg_plan_apply_requests_ownership_insert
+          BEFORE INSERT ON plan_apply_requests
+          FOR EACH ROW EXECUTE FUNCTION validate_plan_apply_request_insert();
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_plan_apply_requests_immutable_write') THEN
+        CREATE TRIGGER trg_plan_apply_requests_immutable_write
+          BEFORE UPDATE OR DELETE ON plan_apply_requests
+          FOR EACH ROW EXECUTE FUNCTION enforce_plan_apply_request_immutable();
+      END IF;
+    END
+  $block$`,
 ];
 
 export class PostgresDatabase {

@@ -64,6 +64,8 @@ export type PlanDraftSnapshot = {
   basePlanVersion: number;
   state: PlanDraftState;
   lifecycleVersion: number;
+  consumedRevisionId?: number | null;
+  consumedAt?: string | null;
   origin: PlanDraftOrigin;
   digestFormat: string;
   snapshotDigest: string;

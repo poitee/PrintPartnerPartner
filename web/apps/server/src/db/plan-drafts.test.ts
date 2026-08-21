@@ -1,5 +1,7 @@
 import Database from "better-sqlite3";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +26,20 @@ const ACCEPTED_STATE_TABLES = [
   "plan_accepted_input_sets",
   "build_profiles",
   "app_settings",
+];
+
+const APPLY_STATE_TABLES = [
+  ...ACCEPTED_STATE_TABLES,
+  "required_units",
+  "plan_revision_required_unit_sets",
+  "plan_revision_required_units",
+  "plan_drafts",
+  "plan_draft_inputs",
+  "plan_draft_parts",
+  "plan_draft_required_unit_reconciliations",
+  "plan_draft_required_unit_decisions",
+  "plan_draft_required_unit_assignments",
+  "plan_apply_requests",
 ];
 
 function snapshotTables(raw: Database.Database, tables: readonly string[]) {
@@ -125,6 +141,156 @@ function editableDraftFixture() {
   });
   if (created.kind !== "created") throw new Error("editable test draft was not created");
   return { ...context, profile, source, draft: created.draft };
+}
+
+function readyApplyFixture(
+  decisionKind: "accept_prior_completion" | "select_exact_predecessor" =
+    "accept_prior_completion",
+) {
+  const context = editableDraftFixture();
+  backfillCurrentRequiredUnitSets(context.raw, {
+    tokenFactory: (() => {
+      let value = 500;
+      return () => `ppu_${(value++).toString(16).padStart(32, "0")}`;
+    })(),
+  });
+  const decisions = context.draft.parts.map((part) => {
+    if (part.baseRevisionPartId == null) throw new Error("test predecessor is missing");
+    return {
+      kind: decisionKind,
+      targetDraftPartId: part.id,
+      predecessorRevisionPartId: part.baseRevisionPartId,
+    };
+  });
+  const reconciled = context.repo.savePlanDraftRequiredUnitReconciliation({
+    profileId: context.profile.id,
+    draftId: context.draft.id,
+    expectedSnapshotDigest: context.draft.snapshotDigest,
+    decisions,
+    actorId: "test:user",
+    idempotencyKey: "apply-ready-reconciliation",
+  });
+  if (reconciled.kind !== "saved") throw new Error("test reconciliation was not saved");
+  const command = {
+    profileId: context.profile.id,
+    draftId: context.draft.id,
+    expectedSnapshotDigest: reconciled.draft.snapshotDigest,
+    expectedLifecycleVersion: 0,
+    expectedBase: {
+      kind: "revision" as const,
+      revisionId: context.draft.baseRevisionId ?? 0,
+      planVersion: context.draft.basePlanVersion,
+    },
+    actorId: "test:user",
+    idempotencyKey: "apply-ready-draft",
+  };
+  return { ...context, reconciled, command };
+}
+
+function readyTrackedApplyFixture() {
+  const context = fixture();
+  const tracked = trackedSource({
+    repo: context.repo,
+    database: context.database,
+    name: "Tracked editable source",
+    files: { "bracket.stl": "solid bracket", "gear.stl": "solid gear" },
+  });
+  const profile = context.repo.createProfile("Tracked editable Build", tracked.source.id);
+  const insertPart = context.raw.prepare(
+    `INSERT INTO parts (
+      tenant_id, profile_id, match_key, relative_path, filename, source_layer,
+      status, role, quantity_auto, quantity_effective, included, notes
+    ) VALUES ('default', ?, ?, ?, ?, 'base:Tracked editable source',
+      'base', 'primary', 1, 1, 1, '')`,
+  );
+  const bracket = insertPart.run(profile.id, "bracket.stl", "bracket.stl", "bracket.stl");
+  insertPart.run(profile.id, "gear.stl", "gear.stl", "gear.stl");
+  context.raw
+    .prepare(
+      `INSERT INTO print_progress (tenant_id, part_id, unit_index, completed, assembled)
+       VALUES ('default', ?, 0, 1, 1)`,
+    )
+    .run(Number(bracket.lastInsertRowid));
+  backfillAcceptedPlanRevisions(context.raw, "2026-08-20T12:00:00.000Z");
+  const accepted = context.repo.getAcceptedPlanRevision(profile.id);
+  if (!accepted) throw new Error("test accepted revision is missing");
+  const firstCreated = context.repo.recomputePlanDraft({
+    profileId: profile.id,
+    actor: "test:user",
+    idempotencyKey: "tracked-first-apply-draft",
+  });
+  if (firstCreated.kind !== "created") throw new Error("tracked first draft was not created");
+  backfillCurrentRequiredUnitSets(context.raw, {
+    tokenFactory: (() => {
+      let value = 600;
+      return () => `ppu_${(value++).toString(16).padStart(32, "0")}`;
+    })(),
+  });
+  const firstDecisions = firstCreated.draft.parts.map((part) => {
+    if (part.baseRevisionPartId == null) throw new Error("test predecessor is missing");
+    return {
+      kind: "accept_prior_completion" as const,
+      targetDraftPartId: part.id,
+      predecessorRevisionPartId: part.baseRevisionPartId,
+    };
+  });
+  const firstReconciled = context.repo.savePlanDraftRequiredUnitReconciliation({
+    profileId: profile.id,
+    draftId: firstCreated.draft.id,
+    expectedSnapshotDigest: firstCreated.draft.snapshotDigest,
+    decisions: firstDecisions,
+    actorId: "test:user",
+    idempotencyKey: "tracked-first-apply-reconciliation",
+  });
+  if (firstReconciled.kind !== "saved") throw new Error("tracked first reconciliation failed");
+  const firstCommand = {
+    profileId: profile.id,
+    draftId: firstCreated.draft.id,
+    expectedSnapshotDigest: firstReconciled.draft.snapshotDigest,
+    expectedLifecycleVersion: 0,
+    expectedBase: { kind: "revision" as const, revisionId: accepted.id, planVersion: 1 },
+    actorId: "test:user",
+    idempotencyKey: "tracked-first-apply",
+  };
+  const firstApplied = context.repo.applyPlanChanges(firstCommand);
+  if (firstApplied.kind !== "applied") throw new Error("tracked first Apply failed");
+  const created = context.repo.recomputePlanDraft({
+    profileId: profile.id,
+    actor: "test:user",
+    idempotencyKey: "tracked-second-apply-draft",
+  });
+  if (created.kind !== "created") throw new Error("tracked second draft was not created");
+  const reconciled = context.repo.savePlanDraftRequiredUnitReconciliation({
+    profileId: profile.id,
+    draftId: created.draft.id,
+    expectedSnapshotDigest: created.draft.snapshotDigest,
+    decisions: [],
+    actorId: "test:user",
+    idempotencyKey: "tracked-second-apply-reconciliation",
+  });
+  if (reconciled.kind !== "saved") throw new Error("tracked second reconciliation failed");
+  return {
+    ...context,
+    profile,
+    draft: created.draft,
+    reconciled,
+    tracked,
+    firstCommand,
+    firstReceipt: firstApplied.receipt,
+    command: {
+      profileId: profile.id,
+      draftId: created.draft.id,
+      expectedSnapshotDigest: reconciled.draft.snapshotDigest,
+      expectedLifecycleVersion: 0,
+      expectedBase: {
+        kind: "revision" as const,
+        revisionId: firstApplied.receipt.revisionId,
+        planVersion: firstApplied.receipt.planVersion,
+      },
+      actorId: "test:user",
+      idempotencyKey: "tracked-apply",
+    },
+  };
 }
 
 function advanceEmptyAcceptedRevision(input: {
@@ -717,7 +883,7 @@ describe("saved Plan drafts", () => {
       raw
         .prepare("UPDATE plan_drafts SET state = 'consumed', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
         .run(created.draft.id),
-    ).toThrow(/transition/i);
+    ).toThrow(/transition|consumption/i);
     expect(() =>
       raw
         .prepare("UPDATE plan_drafts SET state = 'open', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
@@ -733,6 +899,7 @@ describe("saved Plan drafts", () => {
         .prepare("UPDATE plan_draft_parts SET notes = notes WHERE draft_id = ?")
         .run(created.draft.id),
     ).not.toThrow();
+    raw.exec("DROP TRIGGER trg_plan_drafts_consumption_update");
     expect(() =>
       raw
         .prepare("UPDATE plan_drafts SET state = 'consumed', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
@@ -1071,6 +1238,8 @@ describe("saved Plan drafts", () => {
 
     const consumed = editableDraftFixture();
     consumed.raw
+      .exec("DROP TRIGGER trg_plan_drafts_consumption_update");
+    consumed.raw
       .prepare("UPDATE plan_drafts SET state = 'consumed', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
       .run(consumed.draft.id);
     expect(
@@ -1385,6 +1554,8 @@ describe("saved Plan drafts", () => {
     wrongSource.database.close();
 
     const consumed = editableDraftFixture();
+    consumed.raw
+      .exec("DROP TRIGGER trg_plan_drafts_consumption_update");
     consumed.raw
       .prepare("UPDATE plan_drafts SET state = 'consumed', lifecycle_version = lifecycle_version + 1 WHERE id = ?")
       .run(consumed.draft.id);
@@ -2263,6 +2434,14 @@ describe("saved Plan drafts", () => {
   it("upgrades a v23 draft without rewriting its v1 snapshot", () => {
     const { database, raw, profile, draft, root } = editableDraftFixture();
     raw.exec(`
+      DROP TRIGGER IF EXISTS trg_plan_apply_requests_immutable_delete;
+      DROP TRIGGER IF EXISTS trg_plan_apply_requests_immutable_update;
+      DROP TRIGGER IF EXISTS trg_plan_apply_requests_ownership_insert;
+      DROP TRIGGER IF EXISTS trg_plan_drafts_consumption_update;
+      DROP TRIGGER IF EXISTS trg_plan_drafts_consumption_insert;
+      DROP TABLE plan_apply_requests;
+      ALTER TABLE plan_drafts DROP COLUMN consumed_at;
+      ALTER TABLE plan_drafts DROP COLUMN consumed_revision_id;
       DROP TRIGGER IF EXISTS trg_plan_drafts_required_unit_selection_update;
       DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_assignments_immutable_delete;
       DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_assignments_immutable_update;
@@ -2293,8 +2472,87 @@ describe("saved Plan drafts", () => {
             WHERE tenant_id = 'default' AND key = 'schema_version'`,
         )
         .get(),
-    ).toEqual({ value: "24" });
+    ).toEqual({ value: "25" });
     migrated.close();
+  });
+
+  it("upgrades v24 drafts with legacy consumption and no invented receipt", () => {
+    const { database, raw, profile, draft, root } = editableDraftFixture();
+    raw.exec("DROP TRIGGER trg_plan_drafts_consumption_update");
+    raw
+      .prepare(
+        "UPDATE plan_drafts SET state = 'consumed', lifecycle_version = 1 WHERE id = ?",
+      )
+      .run(draft.id);
+    raw.prepare(
+      `INSERT INTO plan_drafts (
+        tenant_id, profile_id, base_revision_id, base_plan_version, state,
+        lifecycle_version, rebased_from_draft_id, rebased_from_lifecycle_version,
+        rebased_from_snapshot_digest, current_required_unit_reconciliation_id,
+        digest_format, snapshot_digest, created_by, idempotency_key, created_at
+      ) SELECT tenant_id, profile_id, base_revision_id, base_plan_version, 'open', 0,
+        NULL, NULL, NULL, NULL, digest_format, snapshot_digest, created_by, 'v24-open',
+        created_at FROM plan_drafts WHERE id = ?`,
+    ).run(draft.id);
+    raw.prepare(
+      `INSERT INTO plan_drafts (
+        tenant_id, profile_id, base_revision_id, base_plan_version, state,
+        lifecycle_version, rebased_from_draft_id, rebased_from_lifecycle_version,
+        rebased_from_snapshot_digest, current_required_unit_reconciliation_id,
+        digest_format, snapshot_digest, created_by, idempotency_key, created_at
+      ) SELECT tenant_id, profile_id, base_revision_id, base_plan_version, 'abandoned', 1,
+        NULL, NULL, NULL, NULL, digest_format, snapshot_digest, created_by, 'v24-abandoned',
+        created_at FROM plan_drafts WHERE id = ?`,
+    ).run(draft.id);
+    raw.exec(`
+      DROP TRIGGER IF EXISTS trg_plan_apply_requests_immutable_delete;
+      DROP TRIGGER IF EXISTS trg_plan_apply_requests_immutable_update;
+      DROP TRIGGER IF EXISTS trg_plan_apply_requests_ownership_insert;
+      DROP TRIGGER IF EXISTS trg_plan_drafts_consumption_insert;
+      DROP TABLE plan_apply_requests;
+      ALTER TABLE plan_drafts DROP COLUMN consumed_at;
+      ALTER TABLE plan_drafts DROP COLUMN consumed_revision_id;
+      UPDATE app_settings SET value = '24'
+       WHERE tenant_id = 'default' AND key = 'schema_version';
+    `);
+    database.close();
+
+    const migrated = new SqliteDatabase(root);
+    migrated.connect();
+    const migratedRaw = (migrated as unknown as { sqlite: Database.Database }).sqlite;
+    const migratedRepo = new AppRepository(getDb(migrated), "default", migrated.reposDir);
+    expect(migratedRepo.getPlanDraft(profile.id, draft.id)).toMatchObject({
+      state: "consumed",
+      consumedRevisionId: null,
+      consumedAt: null,
+    });
+    expect(
+      migratedRaw.prepare("SELECT state FROM plan_drafts ORDER BY id").all(),
+    ).toEqual([{ state: "consumed" }, { state: "open" }, { state: "abandoned" }]);
+    expect(migratedRaw.prepare("SELECT count(*) AS count FROM plan_apply_requests").get()).toEqual({
+      count: 0,
+    });
+    expect(() =>
+      migratedRaw.prepare(
+        `INSERT INTO plan_drafts (
+          tenant_id, profile_id, base_revision_id, base_plan_version, state,
+          lifecycle_version, digest_format, snapshot_digest, created_by,
+          idempotency_key, created_at
+        ) SELECT tenant_id, profile_id, base_revision_id, base_plan_version, 'consumed',
+          1, digest_format, snapshot_digest, created_by, 'new-legacy-consumed', created_at
+          FROM plan_drafts WHERE id = ?`,
+      ).run(draft.id),
+    ).toThrow(/consumption/i);
+    migrated.close();
+
+    const reopened = new SqliteDatabase(root);
+    reopened.connect();
+    expect(
+      (reopened as unknown as { sqlite: Database.Database }).sqlite
+        .prepare("SELECT value FROM app_settings WHERE key = 'schema_version'")
+        .get(),
+    ).toEqual({ value: "25" });
+    reopened.close();
   });
 
   it("appends an unresolved reconciliation before a complete ready replacement", () => {
@@ -2630,5 +2888,452 @@ describe("saved Plan drafts", () => {
     ).toEqual({ kind: "superseded", reconciliationId: first.reconciliation.id });
     secondDatabase.close();
     firstConnection.database.close();
+  });
+
+  it("atomically applies a ready selected draft", () => {
+    const { database, raw, profile, repo, draft, command } = readyApplyFixture();
+    const oldPartIds = raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? ORDER BY id")
+      .pluck()
+      .all(profile.id) as number[];
+    const first = repo.applyPlanChanges(command);
+    expect(first).toMatchObject({ kind: "applied", receipt: { planVersion: 2 } });
+    if (first.kind !== "applied") throw new Error("test Plan was not applied");
+    const accepted = repo.getAcceptedPlanRevision(profile.id);
+    if (!accepted) throw new Error("test accepted revision is missing");
+    expect(accepted).toMatchObject({
+      id: first.receipt.revisionId,
+      parentRevisionId: draft.baseRevisionId,
+      snapshotDigest: first.receipt.revisionDigest,
+    });
+    const compatibility = raw
+      .prepare("SELECT * FROM parts WHERE profile_id = ? ORDER BY id")
+      .all(profile.id) as Array<Record<string, unknown>>;
+    expect(compatibility.map((part) => part.id)).not.toEqual(oldPartIds);
+    expect(compatibility.every((part) => !oldPartIds.includes(part.id as number))).toBe(true);
+    expect(accepted.parts.map((part) => part.projectionPartId)).toEqual(
+      compatibility.map((part) => part.id),
+    );
+    expect(
+      accepted.parts.map((part) => ({
+        partKey: part.partKey,
+        role: part.effectiveRole,
+        quantity: part.quantityEffective,
+        included: part.included,
+      })),
+    ).toEqual(
+      compatibility.map((part) => ({
+        partKey: part.match_key,
+        role: part.role,
+        quantity: part.quantity_effective,
+        included: Boolean(part.included),
+      })),
+    );
+    const requiredUnits = repo.readCurrentRequiredUnitSet(profile.id);
+    if (requiredUnits.kind !== "ready") throw new Error("test Required-unit set is missing");
+    expect(requiredUnits.mappingDigest).toBe(first.receipt.requiredUnitMappingDigest);
+    const expectedUnitCount = draft.parts.reduce(
+      (total, part) => total + part.quantityEffective,
+      0,
+    );
+    expect(requiredUnits.units).toHaveLength(expectedUnitCount);
+    expect(requiredUnits.units.filter((unit) => unit.completed)).toHaveLength(1);
+    expect(requiredUnits.units.filter((unit) => unit.assembled)).toHaveLength(1);
+    expect(raw.prepare("SELECT COUNT(*) FROM print_progress").pluck().get()).toBe(
+      expectedUnitCount,
+    );
+    expect(raw.prepare("SELECT COUNT(*) FROM plan_apply_requests").pluck().get()).toBe(1);
+    expect(repo.getPlanDraft(profile.id, draft.id)).toMatchObject({
+      state: "consumed",
+      lifecycleVersion: 1,
+      consumedRevisionId: first.receipt.revisionId,
+      consumedAt: first.receipt.appliedAt,
+    });
+    expect(repo.applyPlanChanges(command)).toEqual({ kind: "existing", receipt: first.receipt });
+    expect(
+      repo.applyPlanChanges({ ...command, expectedSnapshotDigest: "e".repeat(64) }),
+    ).toEqual({ kind: "idempotency_conflict" });
+    expect(
+      repo.applyPlanChanges({ ...command, idempotencyKey: "apply-ready-draft-again" }),
+    ).toEqual({ kind: "already_applied", receipt: first.receipt });
+    expect(() => repo.patchPartProgress(oldPartIds[0] ?? 0, 0, true)).toThrow(/not found/i);
+    database.close();
+  });
+
+  it("replays a historical receipt after a later accepted Plan", () => {
+    const first = readyTrackedApplyFixture();
+    expect(first.repo.applyPlanChanges(first.command)).toMatchObject({ kind: "applied" });
+    expect(first.repo.applyPlanChanges(first.firstCommand)).toEqual({
+      kind: "existing",
+      receipt: first.firstReceipt,
+    });
+    first.database.close();
+  });
+
+  it("replays a historical receipt after compatibility invalidates the pointer", () => {
+    const { database, raw, profile, repo, command } = readyApplyFixture();
+    const applied = repo.applyPlanChanges(command);
+    if (applied.kind !== "applied") throw new Error("test Plan was not applied");
+    raw
+      .prepare("UPDATE parts SET notes = 'legacy edit' WHERE profile_id = ?")
+      .run(profile.id);
+    expect(
+      raw
+        .prepare("SELECT accepted_plan_revision_id FROM build_profiles WHERE id = ?")
+        .pluck()
+        .get(profile.id),
+    ).toBeNull();
+    expect(repo.applyPlanChanges(command)).toEqual({
+      kind: "existing",
+      receipt: applied.receipt,
+    });
+    database.close();
+  });
+
+  it("publishes pinned draft inputs after Source revision and naming move", () => {
+    const first = readyTrackedApplyFixture();
+    const layersBefore = snapshotTables(first.raw, ["profile_layers"]);
+    const observed = first.repo.getProjectRow(first.tracked.source.id);
+    if (!observed) throw new Error("test Source is missing");
+    const locator = `${first.tracked.source.id}/revisions/b`;
+    const snapshotRoot = join(first.database.reposDir, locator);
+    mkdirSync(snapshotRoot, { recursive: true });
+    writeFileSync(join(snapshotRoot, "bracket.stl"), "changed bracket");
+    writeFileSync(join(snapshotRoot, "gear.stl"), "changed gear");
+    const movedRevision = first.repo.recordSourceRevision({
+      sourceId: first.tracked.source.id,
+      upstreamRevisionKey: "b",
+      manifestDigest: "e".repeat(64),
+      snapshotLocator: locator,
+      syncedAt: "2026-08-20T16:00:00.000Z",
+      completeness: "complete",
+    });
+    first.repo.activateSourceRevision({
+      sourceId: first.tracked.source.id,
+      revisionId: movedRevision.id,
+      observed,
+    });
+    const naming = first.repo.getGlobalNaming();
+    expect(
+      first.repo.saveSourceNaming(first.tracked.source.id, {
+        kind: "override",
+        profile: {
+          ...naming,
+          quantity: { ...naming.quantity, default: naming.quantity.default + 1 },
+        },
+      }),
+    ).toMatchObject({ kind: "saved" });
+    const applied = first.repo.applyPlanChanges(first.command);
+    expect(applied).toMatchObject({ kind: "applied" });
+    if (applied.kind !== "applied") throw new Error("pinned draft was not applied");
+    const accepted = first.repo.getAcceptedPlanRevision(first.profile.id);
+    if (!accepted?.inputSetId) throw new Error("accepted input set is missing");
+    expect(
+      first.raw
+        .prepare(
+          `SELECT source_revision_id, manifest_digest
+             FROM plan_revision_inputs
+            WHERE input_set_id = ?`,
+        )
+        .get(accepted.inputSetId),
+    ).toEqual({
+      source_revision_id: first.tracked.revision.id,
+      manifest_digest: first.tracked.revision.manifest_digest,
+    });
+    expect(snapshotTables(first.raw, ["profile_layers"])).toEqual(layersBefore);
+    first.database.close();
+  });
+
+  it("returns stale without writes when selected progress evidence changes", () => {
+    const { database, raw, profile, repo, command } = readyApplyFixture();
+    const completedPartId = raw
+      .prepare(
+        `SELECT part_id
+           FROM print_progress
+          WHERE completed = 1
+          ORDER BY part_id, unit_index
+          LIMIT 1`,
+      )
+      .pluck()
+      .get() as number;
+    repo.patchPartProgress(completedPartId, 0, false);
+    const before = snapshotTables(raw, APPLY_STATE_TABLES);
+    expect(repo.applyPlanChanges(command)).toEqual({
+      kind: "reconciliation_required",
+      reason: "stale",
+    });
+    expect(snapshotTables(raw, APPLY_STATE_TABLES)).toEqual(before);
+    expect(repo.getAcceptedPlanRevision(profile.id)?.id).toBe(command.expectedBase.revisionId);
+    database.close();
+  });
+
+  it("rolls back every publication write and retries cleanly", () => {
+    const { database, raw, repo, command } = readyApplyFixture();
+    const before = snapshotTables(raw, APPLY_STATE_TABLES);
+    raw.exec(
+      `CREATE TRIGGER fail_plan_apply_receipt
+       BEFORE INSERT ON plan_apply_requests
+       BEGIN
+         SELECT RAISE(ABORT, 'injected Apply failure');
+       END`,
+    );
+    expect(() => repo.applyPlanChanges(command)).toThrow(/injected Apply failure/i);
+    expect(snapshotTables(raw, APPLY_STATE_TABLES)).toEqual(before);
+    raw.exec("DROP TRIGGER fail_plan_apply_receipt");
+    expect(repo.applyPlanChanges(command)).toMatchObject({ kind: "applied" });
+    expect(raw.prepare("SELECT COUNT(*) FROM plan_apply_requests").pluck().get()).toBe(1);
+    database.close();
+  });
+
+  it("exhausts colliding tokens before any publication write", () => {
+    const { database, raw, repo, command } = readyApplyFixture();
+    const collidingToken = raw
+      .prepare("SELECT token FROM required_units ORDER BY token LIMIT 1")
+      .pluck()
+      .get() as string;
+    const collidingRepo = new AppRepository(
+      getDb(database),
+      "default",
+      database.reposDir,
+      undefined,
+      { tokenFactory: () => collidingToken },
+    );
+    const before = snapshotTables(raw, APPLY_STATE_TABLES);
+    expect(collidingRepo.applyPlanChanges(command)).toEqual({ kind: "token_allocation_failed" });
+    expect(snapshotTables(raw, APPLY_STATE_TABLES)).toEqual(before);
+    expect(repo.getPlanDraft(command.profileId, command.draftId)?.state).toBe("open");
+    database.close();
+  });
+
+  it("blocks active production, rejects corrupt state, and clears only Plate layout", () => {
+    const { database, raw, profile, repo, command } = readyApplyFixture();
+    const oldPartId = raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? ORDER BY id LIMIT 1")
+      .pluck()
+      .get(profile.id) as number;
+    repo.setSetting(
+      "printer.checkoff_links",
+      JSON.stringify([
+        {
+          profile_id: profile.id,
+          state: "watching",
+          units: [{ part_id: oldPartId, unit_index: 0 }],
+        },
+      ]),
+    );
+    const blockedBefore = snapshotTables(raw, APPLY_STATE_TABLES);
+    expect(repo.applyPlanChanges(command)).toEqual({
+      kind: "production_active",
+      checkoffLinkCount: 1,
+      sendQueueItemCount: 0,
+    });
+    expect(snapshotTables(raw, APPLY_STATE_TABLES)).toEqual(blockedBefore);
+    repo.setSetting("printer.send_queue", "{broken");
+    const corruptBefore = snapshotTables(raw, APPLY_STATE_TABLES);
+    expect(() => repo.applyPlanChanges(command)).toThrow(/send queue.*corrupt/i);
+    expect(snapshotTables(raw, APPLY_STATE_TABLES)).toEqual(corruptBefore);
+    repo.setSetting("printer.send_queue", "[]");
+    repo.setSetting(
+      "printer.checkoff_links",
+      JSON.stringify([
+        {
+          profile_id: profile.id,
+          state: "verified",
+          units: [{ part_id: oldPartId, unit_index: 0 }],
+        },
+      ]),
+    );
+    repo.setSetting(
+      `print_plan:${profile.id}`,
+      JSON.stringify({
+        enabled_printer_ids: ["voron"],
+        grouping_strategy: "height_band",
+        group_assignments: { "bracket.stl": "hardware" },
+        plate_layout: {
+          spacing_mm: 6,
+          pool: [{ match_key: "bracket.stl", unit: 1 }],
+          printers: [],
+        },
+      }),
+    );
+    expect(repo.applyPlanChanges(command)).toMatchObject({ kind: "applied" });
+    expect(JSON.parse(repo.getSetting(`print_plan:${profile.id}`) ?? "null")).toEqual({
+      enabled_printer_ids: ["voron"],
+      group_assignments: { "bracket.stl": "hardware" },
+      grouping_strategy: "height_band",
+      plate_layout: null,
+    });
+    database.close();
+  });
+
+  it("publishes the first accepted Plan from a clean empty baseline", () => {
+    const { database, raw, repo } = fixture();
+    const sourceRoot = join(database.reposDir, "empty-apply-source");
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(join(sourceRoot, "first.stl"), "solid first");
+    const source = repo.createSource({
+      name: "Empty Apply source",
+      source_kind: "local",
+      local_path: sourceRoot,
+    });
+    const profile = repo.createProfile("Empty Apply Build", source.id);
+    const created = repo.recomputePlanDraft({
+      profileId: profile.id,
+      actor: "test:user",
+      idempotencyKey: "empty-apply-draft",
+    });
+    if (created.kind !== "created") throw new Error("empty Apply draft was not created");
+    const reconciled = repo.savePlanDraftRequiredUnitReconciliation({
+      profileId: profile.id,
+      draftId: created.draft.id,
+      expectedSnapshotDigest: created.draft.snapshotDigest,
+      decisions: [],
+      actorId: "test:user",
+      idempotencyKey: "empty-apply-reconciliation",
+    });
+    if (reconciled.kind !== "saved") throw new Error("empty Apply reconciliation failed");
+    expect(
+      repo.applyPlanChanges({
+        profileId: profile.id,
+        draftId: created.draft.id,
+        expectedSnapshotDigest: reconciled.draft.snapshotDigest,
+        expectedLifecycleVersion: 0,
+        expectedBase: { kind: "empty", planVersion: 0 },
+        actorId: "test:user",
+        idempotencyKey: "empty-apply",
+      }),
+    ).toMatchObject({ kind: "applied", receipt: { planVersion: 1 } });
+    expect(raw.prepare("SELECT COUNT(*) FROM parts WHERE profile_id = ?").pluck().get(profile.id)).toBe(
+      1,
+    );
+    const currentUnits = repo.readCurrentRequiredUnitSet(profile.id);
+    expect(currentUnits).toMatchObject({ kind: "ready" });
+    if (currentUnits.kind !== "ready") throw new Error("empty Apply mapping is missing");
+    expect(currentUnits.units).toHaveLength(1);
+    database.close();
+  });
+
+  it("cascades every applied Build-owned v25 row", () => {
+    const { database, raw, profile, repo, command } = readyApplyFixture();
+    expect(repo.applyPlanChanges(command)).toMatchObject({ kind: "applied" });
+    expect(raw.prepare("SELECT COUNT(*) FROM plan_apply_requests").pluck().get()).toBe(1);
+    expect(() => repo.deleteProfile(profile.id)).not.toThrow();
+    for (const table of [
+      "plan_apply_requests",
+      "plan_drafts",
+      "plan_revisions",
+      "plan_revision_required_unit_sets",
+      "plan_revision_required_units",
+      "required_units",
+      "parts",
+      "print_progress",
+    ]) {
+      expect(raw.prepare(`SELECT COUNT(*) FROM ${table}`).pluck().get()).toBe(0);
+    }
+    database.close();
+  });
+
+  it("serializes a two-connection Checkoff patch before Apply and copies it", () => {
+    const first = readyTrackedApplyFixture();
+    const oldPart = first.raw
+      .prepare(
+        `SELECT p.id, p.match_key
+           FROM parts p
+          WHERE p.profile_id = ? AND p.match_key = 'gear.stl'`,
+      )
+      .get(first.profile.id) as { id: number; match_key: string };
+    const secondDatabase = new SqliteDatabase(first.root);
+    secondDatabase.connect();
+    const secondRepo = new AppRepository(
+      getDb(secondDatabase),
+      "default",
+      secondDatabase.reposDir,
+    );
+    const nativeTransaction = first.repo.transaction.bind(first.repo);
+    let injected = false;
+    first.repo.transaction = <T>(
+      fn: () => T,
+      behavior: "deferred" | "immediate" = "deferred",
+    ): T => {
+      if (!injected) {
+        injected = true;
+        secondRepo.patchPartProgress(oldPart.id, 0, true);
+      }
+      return nativeTransaction(fn, behavior);
+    };
+    expect(first.repo.applyPlanChanges(first.command)).toMatchObject({ kind: "applied" });
+    const newPartId = first.raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? AND match_key = ?")
+      .pluck()
+      .get(first.profile.id, oldPart.match_key) as number;
+    expect(newPartId).not.toBe(oldPart.id);
+    expect(
+      first.raw
+        .prepare("SELECT completed FROM print_progress WHERE part_id = ? AND unit_index = 0")
+        .pluck()
+        .get(newPartId),
+    ).toBe(1);
+    expect(() => secondRepo.patchPartProgress(oldPart.id, 0, false)).toThrow(/not found/i);
+    secondDatabase.close();
+    first.database.close();
+  });
+
+  it("waits across a normalization delete and copies the committed progress", async () => {
+    const first = readyTrackedApplyFixture();
+    const oldPart = first.raw
+      .prepare("SELECT id, match_key FROM parts WHERE profile_id = ? AND match_key = 'gear.stl'")
+      .get(first.profile.id) as { id: number; match_key: string };
+    const child = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import Database from "better-sqlite3";
+const database = new Database(process.argv[1]);
+database.pragma("busy_timeout = 5000");
+database.exec("BEGIN IMMEDIATE");
+database.prepare("DELETE FROM print_progress WHERE part_id = ?").run(Number(process.argv[2]));
+process.stdout.write("deleted\\n");
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+database.prepare("INSERT INTO print_progress (tenant_id, part_id, unit_index, completed, assembled) VALUES ('default', ?, 0, 1, 0)").run(Number(process.argv[2]));
+database.exec("COMMIT");
+database.close();`,
+        first.database.dbPath,
+        String(oldPart.id),
+      ],
+      { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
+    );
+    if (!child.stdout) throw new Error("normalization barrier stdout is missing");
+    await once(child.stdout, "data");
+    expect(first.repo.applyPlanChanges(first.command)).toMatchObject({ kind: "applied" });
+    const [exitCode] = await once(child, "exit");
+    expect(exitCode).toBe(0);
+    const newPartId = first.raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? AND match_key = ?")
+      .pluck()
+      .get(first.profile.id, oldPart.match_key) as number;
+    expect(
+      first.raw
+        .prepare("SELECT completed FROM print_progress WHERE part_id = ? AND unit_index = 0")
+        .pluck()
+        .get(newPartId),
+    ).toBe(1);
+    first.database.close();
+  });
+
+  it("normalizes progress from read APIs inside IMMEDIATE", () => {
+    const { database, profile, repo } = editableDraftFixture();
+    const nativeTransaction = repo.transaction.bind(repo);
+    const behaviors: Array<"deferred" | "immediate"> = [];
+    repo.transaction = <T>(
+      fn: () => T,
+      behavior: "deferred" | "immediate" = "deferred",
+    ): T => {
+      behaviors.push(behavior);
+      return nativeTransaction(fn, behavior);
+    };
+    repo.getCheckoff(profile.id);
+    expect(behaviors).toContain("immediate");
+    database.close();
   });
 });

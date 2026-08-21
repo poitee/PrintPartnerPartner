@@ -1,7 +1,10 @@
 import type Database from "better-sqlite3";
-import { createHash } from "node:crypto";
+import {
+  digestPlanRevisionParts,
+  PLAN_REVISION_DIGEST_FORMAT,
+} from "../services/plan-publication.js";
 
-export const PLAN_REVISION_DIGEST_FORMAT = "plan-revision-parts-v1";
+export { PLAN_REVISION_DIGEST_FORMAT };
 export const ACCEPTED_PLAN_REVISION_SCHEMA_VERSION = 19;
 
 type LegacyProfile = {
@@ -35,41 +38,32 @@ type LegacyPart = {
   manifest_source: string | null;
 };
 
-function canonicalSnapshot(parts: readonly LegacyPart[]): string {
-  const canonicalParts = parts
-    .map((part) => ({
-      part_key: part.match_key,
-      relative_path: part.relative_path,
+function snapshotDigest(parts: readonly LegacyPart[]): string {
+  return digestPlanRevisionParts(
+    parts.map((part) => ({
+      partKey: part.match_key,
+      relativePath: part.relative_path,
       filename: part.filename,
-      source_layer: part.source_layer,
+      sourceLayer: part.source_layer,
       status: part.status,
-      role_inferred: part.role,
-      role_override: null,
-      filament_color_id: part.filament_color_id,
-      filament_custom_hex: part.filament_custom_hex,
-      spoolman_spool_id: part.spoolman_spool_id,
-      quantity_inferred: part.quantity_auto,
-      quantity_override: part.quantity_override,
-      quantity_effective: part.quantity_effective,
+      roleInferred: part.role,
+      roleOverride: null,
+      filamentColorId: part.filament_color_id,
+      filamentCustomHex: part.filament_custom_hex,
+      spoolmanSpoolId: part.spoolman_spool_id,
+      quantityInferred: part.quantity_auto,
+      quantityOverride: part.quantity_override,
+      quantityEffective: part.quantity_effective,
       included: part.included === 1,
       notes: part.notes,
-      github_blob_url: part.github_blob_url,
-      geometry_same: part.geometry_same == null ? null : part.geometry_same === 1,
+      githubBlobUrl: part.github_blob_url,
+      geometrySame: part.geometry_same == null ? null : part.geometry_same === 1,
       requirement: part.requirement,
-      option_group_id: part.option_group_id,
-      manifest_source: part.manifest_source,
-      artifact_digest: null,
-    }))
-    .map((part) => ({ part, serialized: JSON.stringify(part) }))
-    .sort((left, right) =>
-      left.serialized < right.serialized ? -1 : left.serialized > right.serialized ? 1 : 0,
-    )
-    .map(({ part }) => part);
-  return JSON.stringify({ format: PLAN_REVISION_DIGEST_FORMAT, parts: canonicalParts });
-}
-
-function snapshotDigest(parts: readonly LegacyPart[]): string {
-  return createHash("sha256").update(canonicalSnapshot(parts)).digest("hex");
+      optionGroupId: part.option_group_id,
+      manifestSource: part.manifest_source,
+      artifactDigest: null,
+    })),
+  );
 }
 
 export function backfillAcceptedPlanRevisions(

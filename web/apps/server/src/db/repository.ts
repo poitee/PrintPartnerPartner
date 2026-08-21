@@ -7,6 +7,8 @@ import {
   namingProfileFromDict,
   parseSourceNamingMetadata,
   parseSourceNamingMetadataStrict,
+  kitPrintPlanFromDict,
+  kitPrintPlanToDict,
   resolveNamingProfile,
   scanRepo,
   serializeImportRules,
@@ -118,8 +120,10 @@ import {
 import { sha256File } from "../services/artifact-digest.js";
 import {
   digestRequiredUnitMap,
+  generateRequiredUnitToken,
   parseRequiredUnitToken,
   REQUIRED_UNIT_MAP_FORMAT,
+  requiredUnitObjectName,
   validateRequiredUnitObjectName,
 } from "../services/required-units.js";
 import {
@@ -139,6 +143,13 @@ import {
   type RequiredUnitReconciliationDecision,
   type RequiredUnitSelectionBasisRow,
 } from "../services/required-unit-reconciliation.js";
+import {
+  digestPlanRevisionParts,
+  PLAN_REVISION_DIGEST_FORMAT,
+  preparePlanPublication,
+  publishedPlanPartsMatch,
+  type PlanPublicationBaseUnit,
+} from "../services/plan-publication.js";
 
 function docTitleFromPath(path: string): string {
   const base = basename(path);
@@ -169,6 +180,7 @@ export type SchemaTables = Pick<
   | "planDraftRequiredUnitReconciliations"
   | "planDraftRequiredUnitDecisions"
   | "planDraftRequiredUnitAssignments"
+  | "planApplyRequests"
   | "sourceDocs"
   | "sourceNotes"
   | "planDecisions"
@@ -219,6 +231,7 @@ export type PlanDraftInputRow = typeof defaultSchema.planDraftInputs.$inferSelec
 export type PlanDraftPartRow = typeof defaultSchema.planDraftParts.$inferSelect;
 export type PlanDraftRequiredUnitReconciliationRow =
   typeof defaultSchema.planDraftRequiredUnitReconciliations.$inferSelect;
+export type PlanApplyRequestRow = typeof defaultSchema.planApplyRequests.$inferSelect;
 
 export type RequiredUnitView = {
   readonly token: string;
@@ -275,6 +288,56 @@ export type SavePlanDraftRequiredUnitReconciliationResult =
   | { readonly kind: "required_unit_set_unavailable" }
   | { readonly kind: "not_open"; readonly state: "abandoned" | "consumed" }
   | { readonly kind: "not_found" }
+  | { readonly kind: "transaction_unavailable" };
+
+export type AcceptedPlanBase =
+  | { readonly kind: "empty"; readonly planVersion: 0 }
+  | {
+      readonly kind: "revision";
+      readonly revisionId: number;
+      readonly planVersion: number;
+    };
+
+export type ApplyPlanChangesCommand = {
+  readonly profileId: number;
+  readonly draftId: number;
+  readonly expectedSnapshotDigest: string;
+  readonly expectedLifecycleVersion: number;
+  readonly expectedBase: AcceptedPlanBase;
+  readonly actorId: string;
+  readonly idempotencyKey: string;
+};
+
+export type AppliedPlanReceipt = {
+  readonly profileId: number;
+  readonly draftId: number;
+  readonly revisionId: number;
+  readonly planVersion: number;
+  readonly draftLifecycleVersion: number;
+  readonly revisionDigest: string;
+  readonly requiredUnitMappingDigest: string;
+  readonly appliedAt: string;
+};
+
+export type ApplyPlanChangesResult =
+  | { readonly kind: "applied" | "existing" | "already_applied"; readonly receipt: AppliedPlanReceipt }
+  | { readonly kind: "idempotency_conflict" }
+  | { readonly kind: "not_found" }
+  | { readonly kind: "not_open"; readonly state: "abandoned" | "consumed" }
+  | { readonly kind: "draft_changed" }
+  | { readonly kind: "build_archived" }
+  | { readonly kind: "accepted_baseline_required" }
+  | { readonly kind: "base_changed" }
+  | {
+      readonly kind: "reconciliation_required";
+      readonly reason: "missing" | "unresolved" | "stale";
+    }
+  | {
+      readonly kind: "production_active";
+      readonly checkoffLinkCount: number;
+      readonly sendQueueItemCount: number;
+    }
+  | { readonly kind: "token_allocation_failed" }
   | { readonly kind: "transaction_unavailable" };
 
 export type RecomputePlanDraftResult =
@@ -620,6 +683,55 @@ function sha256Digest(value: string, label: string): string {
   return normalized;
 }
 
+const PLAN_APPLY_REQUEST_FORMAT = "plan-apply-request-v1";
+
+function positiveSafeId(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function planApplyRequestDigest(input: {
+  readonly profileId: number;
+  readonly draftId: number;
+  readonly expectedSnapshotDigest: string;
+  readonly expectedLifecycleVersion: number;
+  readonly expectedBaseRevisionId: number | null;
+  readonly expectedBasePlanVersion: number;
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        format: PLAN_APPLY_REQUEST_FORMAT,
+        profile_id: input.profileId,
+        draft_id: input.draftId,
+        expected_snapshot_digest: input.expectedSnapshotDigest,
+        expected_lifecycle_version: input.expectedLifecycleVersion,
+        expected_base_revision_id: input.expectedBaseRevisionId,
+        expected_base_plan_version: input.expectedBasePlanVersion,
+      }),
+    )
+    .digest("hex");
+}
+
+function applyJsonRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value == null || Array.isArray(value)) {
+    throw new Error(`${label} is corrupt`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function applySettingArray(value: string | null, label: string): unknown[] {
+  if (value == null || value.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch {
+    throw new Error(`${label} is corrupt`);
+  }
+  if (!Array.isArray(parsed)) throw new Error(`${label} is corrupt`);
+  return parsed;
+}
+
 function planInputTrackingKind(value: string): PlanRevisionInput["tracking_kind"] {
   return value === "untracked" ? "untracked" : "revision";
 }
@@ -701,6 +813,10 @@ export class AppRepository {
     private readonly defaultTenantId = DEFAULT_TENANT_ID,
     reposDir: string,
     schema: SchemaTables = defaultSchema,
+    private readonly planApplyDependencies: {
+      readonly clock?: () => Date;
+      readonly tokenFactory?: () => string;
+    } = {},
   ) {
     this.syncSqlite = isSyncSqliteDrizzle(db);
     this.db = asSyncDb(db);
@@ -797,7 +913,13 @@ export class AppRepository {
     if (profile.acceptedPlanVersion <= 0) {
       throw new Error("Accepted Plan baseline is corrupt");
     }
-    const revisionId = profile.acceptedPlanRevisionId;
+    return this.readRequiredUnitSetByRevision(profileId, profile.acceptedPlanRevisionId);
+  }
+
+  private readRequiredUnitSetByRevision(
+    profileId: number,
+    revisionId: number,
+  ): ReadCurrentRequiredUnitSetResult {
     const revision = this.db
       .select({ id: this.schema.planRevisions.id })
       .from(this.schema.planRevisions)
@@ -2121,10 +2243,50 @@ export class AppRepository {
     };
   }
 
-  publishPlanRevisionInputs(
+  private currentPlanAttachmentIdentity(profileId: number): Array<{
+    readonly sourceId: number;
+    readonly sourceLayer: string;
+    readonly layerOrder: number;
+  }> {
+    this.requireProfile(profileId);
+    const layers = this.db
+      .select()
+      .from(this.schema.profileLayers)
+      .where(
+        and(
+          eq(this.schema.profileLayers.tenantId, this.tenantId),
+          eq(this.schema.profileLayers.profileId, profileId),
+        ),
+      )
+      .orderBy(asc(this.schema.profileLayers.layerOrder))
+      .all();
+    const sourceIds = new Set<number>();
+    const identity: Array<{
+      sourceId: number;
+      sourceLayer: string;
+      layerOrder: number;
+    }> = [];
+    for (const layer of layers) {
+      if (layer.projectId == null) continue;
+      if (sourceIds.has(layer.projectId)) {
+        throw new Error("A Source can only be attached to a Plan once");
+      }
+      sourceIds.add(layer.projectId);
+      const source = this.getProjectRow(layer.projectId);
+      if (!source) throw new Error("Plan Source not found");
+      identity.push({
+        sourceId: source.id,
+        sourceLayer: `${layer.layerType}:${source.name}`,
+        layerOrder: layer.layerOrder,
+      });
+    }
+    return identity;
+  }
+
+  private validatePlanRevisionInputs(
     profileId: number,
     inputs: readonly PlanRevisionInput[],
-  ): PlanRevisionInputSet {
+  ): ReturnType<typeof canonicalPlanInputs> {
     this.requireProfile(profileId);
     const canonical = canonicalPlanInputs(
       inputs.map((input) => ({
@@ -2167,9 +2329,18 @@ export class AppRepository {
         throw new Error("Untracked Plan input cannot carry revision identity");
       }
     }
+    return canonical;
+  }
+
+  publishPlanRevisionInputs(
+    profileId: number,
+    inputs: readonly PlanRevisionInput[],
+    publishedAt?: string,
+  ): PlanRevisionInputSet {
+    const canonical = this.validatePlanRevisionInputs(profileId, inputs);
 
     const inputSetDigest = digestPlanInputs(canonical);
-    const recordedAt = new Date().toISOString();
+    const recordedAt = publishedAt ?? new Date().toISOString();
     this.db
       .insert(this.schema.planRevisionInputSets)
       .values({
@@ -2245,7 +2416,7 @@ export class AppRepository {
     if (!setRow.publishedAt) {
       this.db
         .update(this.schema.planRevisionInputSets)
-        .set({ publishedAt: new Date().toISOString() })
+        .set({ publishedAt: publishedAt ?? new Date().toISOString() })
         .where(
           and(
             eq(this.schema.planRevisionInputSets.tenantId, this.tenantId),
@@ -2998,6 +3169,8 @@ export class AppRepository {
       basePlanVersion: row.basePlanVersion,
       state: row.state,
       lifecycleVersion: row.lifecycleVersion,
+      consumedRevisionId: row.consumedRevisionId,
+      consumedAt: row.consumedAt,
       origin: this.planDraftOrigin(row),
       digestFormat: row.digestFormat,
       snapshotDigest: row.snapshotDigest,
@@ -4345,6 +4518,959 @@ export class AppRepository {
     }, "immediate");
   }
 
+  private appliedPlanReceipt(row: PlanApplyRequestRow): AppliedPlanReceipt {
+    if (
+      row.requestFormat !== PLAN_APPLY_REQUEST_FORMAT ||
+      row.requestDigest !==
+        planApplyRequestDigest({
+          profileId: row.profileId,
+          draftId: row.draftId,
+          expectedSnapshotDigest: row.expectedSnapshotDigest,
+          expectedLifecycleVersion: row.expectedLifecycleVersion,
+          expectedBaseRevisionId: row.expectedBaseRevisionId,
+          expectedBasePlanVersion: row.expectedBasePlanVersion,
+        }) ||
+      row.planVersion !== row.expectedBasePlanVersion + 1 ||
+      row.draftLifecycleVersion !== row.expectedLifecycleVersion + 1
+    ) {
+      throw new Error("Plan Apply receipt is corrupt");
+    }
+    const draft = this.db
+      .select({
+        state: this.schema.planDrafts.state,
+        lifecycleVersion: this.schema.planDrafts.lifecycleVersion,
+        snapshotDigest: this.schema.planDrafts.snapshotDigest,
+        baseRevisionId: this.schema.planDrafts.baseRevisionId,
+        basePlanVersion: this.schema.planDrafts.basePlanVersion,
+        reconciliationId: this.schema.planDrafts.currentRequiredUnitReconciliationId,
+        consumedRevisionId: this.schema.planDrafts.consumedRevisionId,
+        consumedAt: this.schema.planDrafts.consumedAt,
+      })
+      .from(this.schema.planDrafts)
+      .where(
+        and(
+          eq(this.schema.planDrafts.tenantId, this.tenantId),
+          eq(this.schema.planDrafts.profileId, row.profileId),
+          eq(this.schema.planDrafts.id, row.draftId),
+        ),
+      )
+      .get();
+    const reconciliation = this.db
+      .select({
+        profileId: this.schema.planDraftRequiredUnitReconciliations.profileId,
+        draftId: this.schema.planDraftRequiredUnitReconciliations.draftId,
+        digest: this.schema.planDraftRequiredUnitReconciliations.reconciliationDigest,
+        finalizedAt: this.schema.planDraftRequiredUnitReconciliations.finalizedAt,
+      })
+      .from(this.schema.planDraftRequiredUnitReconciliations)
+      .where(
+        and(
+          eq(this.schema.planDraftRequiredUnitReconciliations.tenantId, this.tenantId),
+          eq(this.schema.planDraftRequiredUnitReconciliations.id, row.reconciliationId),
+        ),
+      )
+      .get();
+    const revision = this.db
+      .select({
+        profileId: this.schema.planRevisions.profileId,
+        parentRevisionId: this.schema.planRevisions.parentRevisionId,
+        digest: this.schema.planRevisions.snapshotDigest,
+      })
+      .from(this.schema.planRevisions)
+      .where(
+        and(
+          eq(this.schema.planRevisions.tenantId, this.tenantId),
+          eq(this.schema.planRevisions.profileId, row.profileId),
+          eq(this.schema.planRevisions.id, row.revisionId),
+        ),
+      )
+      .get();
+    const mapping = this.db
+      .select({
+        profileId: this.schema.planRevisionRequiredUnitSets.profileId,
+        revisionId: this.schema.planRevisionRequiredUnitSets.revisionId,
+        digest: this.schema.planRevisionRequiredUnitSets.mappingDigest,
+      })
+      .from(this.schema.planRevisionRequiredUnitSets)
+      .where(
+        and(
+          eq(this.schema.planRevisionRequiredUnitSets.tenantId, this.tenantId),
+          eq(this.schema.planRevisionRequiredUnitSets.profileId, row.profileId),
+          eq(this.schema.planRevisionRequiredUnitSets.revisionId, row.revisionId),
+        ),
+      )
+      .get();
+    const verifiedReconciliation = this.readSavedRequiredUnitReconciliation(
+      row.reconciliationId,
+    );
+    const verifiedMapping = this.readRequiredUnitSetByRevision(
+      row.profileId,
+      row.revisionId,
+    );
+    if (
+      !draft ||
+      draft.state !== "consumed" ||
+      draft.lifecycleVersion !== row.draftLifecycleVersion ||
+      draft.snapshotDigest !== row.expectedSnapshotDigest ||
+      draft.baseRevisionId !== row.expectedBaseRevisionId ||
+      draft.basePlanVersion !== row.expectedBasePlanVersion ||
+      draft.reconciliationId !== row.reconciliationId ||
+      draft.consumedRevisionId !== row.revisionId ||
+      draft.consumedAt !== row.appliedAt ||
+      !reconciliation ||
+      reconciliation.profileId !== row.profileId ||
+      reconciliation.draftId !== row.draftId ||
+      reconciliation.digest !== row.reconciliationDigest ||
+      reconciliation.finalizedAt == null ||
+      verifiedReconciliation.reconciliationDigest !== row.reconciliationDigest ||
+      revision?.profileId !== row.profileId ||
+      revision.parentRevisionId !== row.expectedBaseRevisionId ||
+      revision?.digest !== row.revisionDigest ||
+      mapping?.profileId !== row.profileId ||
+      mapping.revisionId !== row.revisionId ||
+      mapping?.digest !== row.requiredUnitMappingDigest ||
+      verifiedMapping.kind !== "ready" ||
+      verifiedMapping.mappingDigest !== row.requiredUnitMappingDigest
+    ) {
+      throw new Error("Plan Apply receipt linkage is corrupt");
+    }
+    return {
+      profileId: row.profileId,
+      draftId: row.draftId,
+      revisionId: row.revisionId,
+      planVersion: row.planVersion,
+      draftLifecycleVersion: row.draftLifecycleVersion,
+      revisionDigest: row.revisionDigest,
+      requiredUnitMappingDigest: row.requiredUnitMappingDigest,
+      appliedAt: row.appliedAt,
+    };
+  }
+
+  private strictProductionState(profileId: number): {
+    readonly checkoffLinkCount: number;
+    readonly sendQueueItemCount: number;
+  } {
+    const checkoffStates = new Set([
+      "watching",
+      "awaiting_verify",
+      "host_failed",
+      "dismissed",
+      "verified",
+      "applied",
+    ]);
+    let checkoffLinkCount = 0;
+    for (const value of applySettingArray(
+      this.getSetting("printer.checkoff_links"),
+      "Printer Checkoff links",
+    )) {
+      const row = applyJsonRecord(value, "Printer Checkoff link");
+      if (
+        typeof row.state !== "string" ||
+        !checkoffStates.has(row.state) ||
+        !Number.isSafeInteger(row.profile_id) ||
+        (row.profile_id as number) <= 0 ||
+        !Array.isArray(row.units)
+      ) {
+        throw new Error("Printer Checkoff links are corrupt");
+      }
+      for (const unit of row.units) {
+        const coordinate = applyJsonRecord(unit, "Printer Checkoff coordinate");
+        if (
+          !Number.isSafeInteger(coordinate.part_id) ||
+          (coordinate.part_id as number) <= 0 ||
+          !Number.isSafeInteger(coordinate.unit_index) ||
+          (coordinate.unit_index as number) < 0
+        ) {
+          throw new Error("Printer Checkoff links are corrupt");
+        }
+      }
+      if (
+        row.profile_id === profileId &&
+        (row.state === "watching" || row.state === "awaiting_verify")
+      ) {
+        checkoffLinkCount += 1;
+      }
+    }
+    const queueStates = new Set(["queued", "sending", "done", "error", "cancelled"]);
+    let sendQueueItemCount = 0;
+    for (const value of applySettingArray(
+      this.getSetting("printer.send_queue"),
+      "Printer send queue",
+    )) {
+      const row = applyJsonRecord(value, "Printer send queue item");
+      if (typeof row.state !== "string" || !queueStates.has(row.state)) {
+        throw new Error("Printer send queue is corrupt");
+      }
+      const explicitProfileId =
+        row.profile_id == null
+          ? null
+          : Number.isSafeInteger(row.profile_id) && (row.profile_id as number) > 0
+            ? (row.profile_id as number)
+            : NaN;
+      if (Number.isNaN(explicitProfileId)) throw new Error("Printer send queue is corrupt");
+      const units = row.checkoff_units == null ? [] : row.checkoff_units;
+      if (!Array.isArray(units)) throw new Error("Printer send queue is corrupt");
+      const coordinateOwners = new Set<number>();
+      for (const unit of units) {
+        const coordinate = applyJsonRecord(unit, "Printer queue coordinate");
+        if (
+          !Number.isSafeInteger(coordinate.part_id) ||
+          (coordinate.part_id as number) <= 0 ||
+          !Number.isSafeInteger(coordinate.unit_index) ||
+          (coordinate.unit_index as number) < 0
+        ) {
+          throw new Error("Printer send queue is corrupt");
+        }
+        const part = this.db
+          .select({ profileId: this.schema.parts.profileId })
+          .from(this.schema.parts)
+          .where(
+            and(
+              eq(this.schema.parts.tenantId, this.tenantId),
+              eq(this.schema.parts.id, coordinate.part_id as number),
+            ),
+          )
+          .get();
+        if (part) coordinateOwners.add(part.profileId);
+      }
+      if (
+        coordinateOwners.size > 1 ||
+        (explicitProfileId != null &&
+          [...coordinateOwners].some((owner) => owner !== explicitProfileId))
+      ) {
+        throw new Error("Printer send queue ownership is corrupt");
+      }
+      const owner = explicitProfileId ?? [...coordinateOwners][0] ?? null;
+      if (
+        owner === profileId &&
+        (row.state === "queued" || row.state === "sending" || row.state === "error")
+      ) {
+        sendQueueItemCount += 1;
+      }
+    }
+    return { checkoffLinkCount, sendQueueItemCount };
+  }
+
+  private clearedPlatePlan(profileId: number): string | null {
+    const value = this.getSetting(`print_plan:${profileId}`);
+    if (value == null || value.trim() === "") return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value) as unknown;
+    } catch {
+      throw new Error("Stored Print Plan is corrupt");
+    }
+    const record = applyJsonRecord(parsed, "Stored Print Plan");
+    let decoded: ReturnType<typeof kitPrintPlanFromDict>;
+    try {
+      decoded = kitPrintPlanFromDict(record);
+    } catch {
+      throw new Error("Stored Print Plan is corrupt");
+    }
+    return JSON.stringify({ ...kitPrintPlanToDict(decoded), plate_layout: null }, null, 2);
+  }
+
+  applyPlanChanges(command: ApplyPlanChangesCommand): ApplyPlanChangesResult {
+    const profileId = positiveSafeId(command.profileId, "Build ID");
+    const draftId = positiveSafeId(command.draftId, "Plan draft ID");
+    const expectedSnapshotDigest = sha256Digest(
+      command.expectedSnapshotDigest,
+      "Expected Plan draft snapshot digest",
+    );
+    if (
+      !Number.isSafeInteger(command.expectedLifecycleVersion) ||
+      command.expectedLifecycleVersion < 0 ||
+      command.expectedLifecycleVersion > 2_147_483_646
+    ) {
+      throw new Error("Expected Plan draft lifecycle version is invalid");
+    }
+    const actorId = requiredText(command.actorId, "Plan Apply actor");
+    const idempotencyKey = requiredText(command.idempotencyKey, "Plan Apply idempotency key");
+    if (actorId.length > 200 || idempotencyKey.length > 200) {
+      throw new Error("Plan Apply actor and idempotency key must be at most 200 characters");
+    }
+    let expectedBaseRevisionId: number | null;
+    let expectedBasePlanVersion: number;
+    if (command.expectedBase.kind === "empty") {
+      if (command.expectedBase.planVersion !== 0) throw new Error("Empty Plan base is invalid");
+      expectedBaseRevisionId = null;
+      expectedBasePlanVersion = 0;
+    } else {
+      expectedBaseRevisionId = positiveSafeId(
+        command.expectedBase.revisionId,
+        "Expected Plan revision ID",
+      );
+      if (
+        !Number.isSafeInteger(command.expectedBase.planVersion) ||
+        command.expectedBase.planVersion <= 0
+      ) {
+        throw new Error("Expected Plan version is invalid");
+      }
+      expectedBasePlanVersion = command.expectedBase.planVersion;
+    }
+    const requestDigest = planApplyRequestDigest({
+      profileId,
+      draftId,
+      expectedSnapshotDigest,
+      expectedLifecycleVersion: command.expectedLifecycleVersion,
+      expectedBaseRevisionId,
+      expectedBasePlanVersion,
+    });
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+
+    return this.transaction((): ApplyPlanChangesResult => {
+      const keyed = this.db
+        .select()
+        .from(this.schema.planApplyRequests)
+        .where(
+          and(
+            eq(this.schema.planApplyRequests.tenantId, this.tenantId),
+            eq(this.schema.planApplyRequests.actorId, actorId),
+            eq(this.schema.planApplyRequests.profileId, profileId),
+            eq(this.schema.planApplyRequests.idempotencyKey, idempotencyKey),
+          ),
+        )
+        .get();
+      if (keyed) {
+        return keyed.requestDigest === requestDigest
+          ? { kind: "existing", receipt: this.appliedPlanReceipt(keyed) }
+          : { kind: "idempotency_conflict" };
+      }
+      const appliedDraft = this.db
+        .select()
+        .from(this.schema.planApplyRequests)
+        .where(
+          and(
+            eq(this.schema.planApplyRequests.tenantId, this.tenantId),
+            eq(this.schema.planApplyRequests.profileId, profileId),
+            eq(this.schema.planApplyRequests.draftId, draftId),
+          ),
+        )
+        .get();
+      if (appliedDraft) {
+        return { kind: "already_applied", receipt: this.appliedPlanReceipt(appliedDraft) };
+      }
+      const profile = this.db
+        .select()
+        .from(this.schema.buildProfiles)
+        .where(
+          and(
+            eq(this.schema.buildProfiles.tenantId, this.tenantId),
+            eq(this.schema.buildProfiles.id, profileId),
+          ),
+        )
+        .get();
+      if (!profile) return { kind: "not_found" };
+      if (profile.archivedAt != null) return { kind: "build_archived" };
+      const draftHeader = this.db
+        .select()
+        .from(this.schema.planDrafts)
+        .where(
+          and(
+            eq(this.schema.planDrafts.tenantId, this.tenantId),
+            eq(this.schema.planDrafts.profileId, profileId),
+            eq(this.schema.planDrafts.id, draftId),
+          ),
+        )
+        .get();
+      if (!draftHeader) return { kind: "not_found" };
+      if (draftHeader.state !== "open") return { kind: "not_open", state: draftHeader.state };
+      if (
+        draftHeader.lifecycleVersion !== command.expectedLifecycleVersion ||
+        draftHeader.snapshotDigest !== expectedSnapshotDigest ||
+        draftHeader.digestFormat !== PLAN_DRAFT_SELECTION_DIGEST_FORMAT
+      ) {
+        return { kind: "draft_changed" };
+      }
+      if (this.planDraftNeedsAcceptedBaseline(profileId, {
+        baseRevisionId: profile.acceptedPlanRevisionId,
+        basePlanVersion: profile.acceptedPlanVersion,
+      })) {
+        return { kind: "accepted_baseline_required" };
+      }
+      if (
+        profile.acceptedPlanRevisionId !== expectedBaseRevisionId ||
+        profile.acceptedPlanVersion !== expectedBasePlanVersion ||
+        draftHeader.baseRevisionId !== expectedBaseRevisionId ||
+        draftHeader.basePlanVersion !== expectedBasePlanVersion
+      ) {
+        return { kind: "base_changed" };
+      }
+      const draft = this.getPlanDraft(profileId, draftId);
+      if (!draft) return { kind: "not_found" };
+      const draftInputs = canonicalPlanInputs(
+        draft.inputs.map((input) => ({
+          source_id: input.sourceId,
+          source_layer: input.sourceLayer,
+          layer_order: input.layerOrder,
+          tracking_kind: input.trackingKind,
+          source_revision_id: input.sourceRevisionId,
+          manifest_digest: input.manifestDigest,
+          effective_naming_digest: input.effectiveNamingDigest,
+        })),
+      );
+      const liveAttachments = this.currentPlanAttachmentIdentity(profileId);
+      const draftAttachments = draftInputs
+        .map((input) => ({
+          sourceId: input.source_id,
+          sourceLayer: input.source_layer,
+          layerOrder: input.layer_order,
+        }))
+        .sort(
+          (left, right) =>
+            left.layerOrder - right.layerOrder || left.sourceId - right.sourceId,
+        );
+      if (JSON.stringify(liveAttachments) !== JSON.stringify(draftAttachments)) {
+        return { kind: "draft_changed" };
+      }
+      this.validatePlanRevisionInputs(profileId, draftInputs);
+      if (expectedBaseRevisionId != null) {
+        const accepted = this.getAcceptedPlanRevision(profileId);
+        if (
+          !accepted ||
+          accepted.id !== expectedBaseRevisionId ||
+          accepted.digestFormat !== PLAN_REVISION_DIGEST_FORMAT ||
+          digestPlanRevisionParts(accepted.parts) !== accepted.snapshotDigest
+        ) {
+          throw new Error("Accepted Plan revision digest is corrupt");
+        }
+        const compatibility = this.db
+          .select()
+          .from(this.schema.parts)
+          .where(
+            and(
+              eq(this.schema.parts.tenantId, this.tenantId),
+              eq(this.schema.parts.profileId, profileId),
+            ),
+          )
+          .all();
+        const compatibilityById = new Map(compatibility.map((part) => [part.id, part]));
+        if (
+          compatibility.length !== accepted.parts.length ||
+          accepted.parts.some((part) => {
+            const projected =
+              part.projectionPartId == null ? null : compatibilityById.get(part.projectionPartId);
+            return (
+              !projected ||
+              projected.matchKey !== part.partKey ||
+              projected.relativePath !== part.relativePath ||
+              projected.filename !== part.filename ||
+              projected.sourceLayer !== part.sourceLayer ||
+              projected.status !== part.status ||
+              projected.role !== part.effectiveRole ||
+              projected.filamentColorId !== part.filamentColorId ||
+              projected.filamentCustomHex !== part.filamentCustomHex ||
+              projected.spoolmanSpoolId !== part.spoolmanSpoolId ||
+              projected.quantityAuto !== part.quantityInferred ||
+              projected.quantityOverride !== part.quantityOverride ||
+              projected.quantityEffective !== part.quantityEffective ||
+              projected.included !== part.included ||
+              projected.notes !== part.notes ||
+              projected.githubBlobUrl !== part.githubBlobUrl ||
+              projected.geometrySame !== part.geometrySame ||
+              projected.requirement !== part.requirement ||
+              projected.optionGroupId !== part.optionGroupId ||
+              projected.manifestSource !== part.manifestSource
+            );
+          })
+        ) {
+          throw new Error("Accepted Plan compatibility projection is corrupt");
+        }
+      }
+      if (draftHeader.currentRequiredUnitReconciliationId == null) {
+        return { kind: "reconciliation_required", reason: "missing" };
+      }
+      const reconciliation = this.readSavedRequiredUnitReconciliation(
+        draftHeader.currentRequiredUnitReconciliationId,
+      );
+      if (reconciliation.resultKind !== "ready") {
+        return { kind: "reconciliation_required", reason: "unresolved" };
+      }
+      const planningDigest = digestPlanDraft(draft);
+      if (
+        reconciliation.planningDigest !== planningDigest ||
+        reconciliation.baseRevisionId !== expectedBaseRevisionId
+      ) {
+        throw new Error("Selected Required-unit reconciliation is corrupt");
+      }
+      const base = this.requiredUnitReconciliationBase(profileId, draft);
+      if (
+        base.kind !== "ready" ||
+        base.mappingDigest !== reconciliation.baseMappingDigest
+      ) {
+        return { kind: "reconciliation_required", reason: "stale" };
+      }
+      const baseUnits = base.parts.flatMap((part) =>
+        part.units.map((unit) => ({ ...unit, revisionPartId: part.id })),
+      );
+      const baseByToken = new Map(baseUnits.map((unit) => [unit.token, unit]));
+      const liveBasis = reconciliation.selectionBasis.map((row) => {
+        const current = baseByToken.get(row.token);
+        if (
+          !current ||
+          current.revisionPartId !== row.revisionPartId ||
+          current.priorIndex !== row.priorIndex ||
+          current.createdAt !== row.createdAt
+        ) {
+          throw new Error("Required-unit reconciliation basis identity is corrupt");
+        }
+        return { ...row, completed: current.completed, assembled: current.assembled };
+      });
+      if (
+        digestRequiredUnitSelectionBasis({
+          baseMappingDigest: base.mappingDigest,
+          rows: liveBasis,
+        }) !== reconciliation.selectionBasisDigest
+      ) {
+        return { kind: "reconciliation_required", reason: "stale" };
+      }
+      const objectNames = new Map<string, string>();
+      if (baseUnits.length > 0) {
+        for (const unit of this.db
+          .select({
+            token: this.schema.requiredUnits.token,
+            objectName: this.schema.requiredUnits.objectName,
+          })
+          .from(this.schema.requiredUnits)
+          .where(
+            and(
+              eq(this.schema.requiredUnits.tenantId, this.tenantId),
+              eq(this.schema.requiredUnits.profileId, profileId),
+              inArray(this.schema.requiredUnits.token, baseUnits.map((unit) => unit.token)),
+            ),
+          )
+          .all()) {
+          objectNames.set(unit.token, unit.objectName);
+        }
+      }
+      const publicationBaseUnits: PlanPublicationBaseUnit[] = baseUnits.map((unit) => {
+        const objectName = objectNames.get(unit.token);
+        if (!objectName) throw new Error("Required-unit Object name is missing");
+        return {
+          token: unit.token,
+          objectName,
+          completed: unit.completed,
+          assembled: unit.assembled,
+        };
+      });
+      const production = this.strictProductionState(profileId);
+      if (production.checkoffLinkCount > 0 || production.sendQueueItemCount > 0) {
+        return { kind: "production_active", ...production };
+      }
+      const clearedPlatePlan = this.clearedPlatePlan(profileId);
+      const prepared = preparePlanPublication({
+        draft,
+        assignments: reconciliation.assignments,
+        baseUnits: publicationBaseUnits,
+      });
+      const existingTokens = new Set(
+        this.db.select({ token: this.schema.requiredUnits.token }).from(this.schema.requiredUnits).all()
+          .map((row) => row.token),
+      );
+      const existingObjectNames = new Set(
+        this.db
+          .select({ objectName: this.schema.requiredUnits.objectName })
+          .from(this.schema.requiredUnits)
+          .all()
+          .map((row) => row.objectName.toLowerCase()),
+      );
+      const partById = new Map(prepared.parts.map((part) => [part.draftPartId, part]));
+      const allocated = new Map<string, { token: string; objectName: string }>();
+      for (const assignment of prepared.mappings) {
+        if (assignment.kind !== "create") continue;
+        const part = partById.get(assignment.draftPartId);
+        if (!part) throw new Error("Plan publication Part is missing");
+        let chosen: { token: string; objectName: string } | null = null;
+        for (let attempt = 0; attempt < 32; attempt += 1) {
+          try {
+            const token = parseRequiredUnitToken(
+              this.planApplyDependencies.tokenFactory?.() ?? generateRequiredUnitToken(),
+            );
+            const objectName = requiredUnitObjectName(part.filename, token);
+            if (!existingTokens.has(token) && !existingObjectNames.has(objectName.toLowerCase())) {
+              chosen = { token, objectName };
+              existingTokens.add(token);
+              existingObjectNames.add(objectName.toLowerCase());
+              break;
+            }
+          } catch {
+            chosen = null;
+          }
+        }
+        if (!chosen) return { kind: "token_allocation_failed" };
+        allocated.set(`${assignment.draftPartId}:${assignment.unitIndex}`, chosen);
+      }
+      const appliedAt = (this.planApplyDependencies.clock?.() ?? new Date()).toISOString();
+      const detached = this.db
+        .update(this.schema.buildProfiles)
+        .set({ acceptedPlanRevisionId: null })
+        .where(
+          and(
+            eq(this.schema.buildProfiles.tenantId, this.tenantId),
+            eq(this.schema.buildProfiles.id, profileId),
+            expectedBaseRevisionId == null
+              ? isNull(this.schema.buildProfiles.acceptedPlanRevisionId)
+              : eq(this.schema.buildProfiles.acceptedPlanRevisionId, expectedBaseRevisionId),
+            eq(this.schema.buildProfiles.acceptedPlanVersion, expectedBasePlanVersion),
+          ),
+        )
+        .run();
+      if (detached.changes !== 1) throw new Error("Accepted Plan pointer detach failed");
+      const inputSet = this.publishPlanRevisionInputs(profileId, draftInputs, appliedAt);
+      const revisionNumber = this.db
+        .select({ value: sql<number>`COALESCE(MAX(${this.schema.planRevisions.revisionNumber}), 0) + 1` })
+        .from(this.schema.planRevisions)
+        .where(
+          and(
+            eq(this.schema.planRevisions.tenantId, this.tenantId),
+            eq(this.schema.planRevisions.profileId, profileId),
+          ),
+        )
+        .get()?.value;
+      if (!revisionNumber) throw new Error("Plan revision number could not be allocated");
+      const revision = this.db
+        .insert(this.schema.planRevisions)
+        .values({
+          tenantId: this.tenantId,
+          profileId,
+          revisionNumber,
+          parentRevisionId: expectedBaseRevisionId,
+          inputSetId: inputSet.id,
+          provenanceKind: "tracked",
+          digestFormat: PLAN_REVISION_DIGEST_FORMAT,
+          snapshotDigest: prepared.revisionDigest,
+          createdBy: actorId,
+          acceptedBy: actorId,
+          createdAt: appliedAt,
+          acceptedAt: appliedAt,
+        })
+        .returning({ id: this.schema.planRevisions.id })
+        .get();
+      if (!revision) throw new Error("Plan revision could not be created");
+      const oldPartIds = this.db
+        .select({ id: this.schema.parts.id })
+        .from(this.schema.parts)
+        .where(
+          and(
+            eq(this.schema.parts.tenantId, this.tenantId),
+            eq(this.schema.parts.profileId, profileId),
+          ),
+        )
+        .all()
+        .map((row) => row.id);
+      this.db
+        .delete(this.schema.parts)
+        .where(
+          and(
+            eq(this.schema.parts.tenantId, this.tenantId),
+            eq(this.schema.parts.profileId, profileId),
+          ),
+        )
+        .run();
+      const projectionByDraftPart = new Map<number, number>();
+      const revisionPartByDraftPart = new Map<number, number>();
+      for (const part of prepared.parts) {
+        const projection = this.db
+          .insert(this.schema.parts)
+          .values({
+            tenantId: this.tenantId,
+            profileId,
+            matchKey: part.partKey,
+            relativePath: part.relativePath,
+            filename: part.filename,
+            sourceLayer: part.sourceLayer,
+            status: part.status,
+            role: part.effectiveRole,
+            filamentColorId: part.filamentColorId,
+            filamentCustomHex: part.filamentCustomHex,
+            spoolmanSpoolId: part.spoolmanSpoolId,
+            quantityAuto: part.quantityInferred,
+            quantityOverride: part.quantityOverride,
+            quantityEffective: part.quantityEffective,
+            included: part.included,
+            notes: part.notes,
+            githubBlobUrl: part.githubBlobUrl,
+            geometrySame: part.geometrySame,
+            requirement: part.requirement,
+            optionGroupId: part.optionGroupId,
+            manifestSource: part.manifestSource,
+          })
+          .returning({ id: this.schema.parts.id })
+          .get();
+        if (!projection) throw new Error("Compatibility Part could not be created");
+        if (oldPartIds.includes(projection.id)) throw new Error("Compatibility Part ID was reused");
+        projectionByDraftPart.set(part.draftPartId, projection.id);
+        const revisionPart = this.db
+          .insert(this.schema.planRevisionParts)
+          .values({
+            tenantId: this.tenantId,
+            revisionId: revision.id,
+            projectionPartId: projection.id,
+            partKey: part.partKey,
+            relativePath: part.relativePath,
+            filename: part.filename,
+            sourceLayer: part.sourceLayer,
+            status: part.status,
+            roleInferred: part.roleInferred,
+            roleOverride: part.roleOverride,
+            filamentColorId: part.filamentColorId,
+            filamentCustomHex: part.filamentCustomHex,
+            spoolmanSpoolId: part.spoolmanSpoolId,
+            quantityInferred: part.quantityInferred,
+            quantityOverride: part.quantityOverride,
+            quantityEffective: part.quantityEffective,
+            included: part.included,
+            notes: part.notes,
+            githubBlobUrl: part.githubBlobUrl,
+            geometrySame: part.geometrySame,
+            requirement: part.requirement,
+            optionGroupId: part.optionGroupId,
+            manifestSource: part.manifestSource,
+            artifactDigest: part.artifactDigest,
+          })
+          .returning({ id: this.schema.planRevisionParts.id })
+          .get();
+        if (!revisionPart) throw new Error("Accepted Plan revision Part could not be created");
+        revisionPartByDraftPart.set(part.draftPartId, revisionPart.id);
+      }
+      for (const allocatedUnit of allocated.values()) {
+        this.db
+          .insert(this.schema.requiredUnits)
+          .values({
+            token: allocatedUnit.token,
+            tenantId: this.tenantId,
+            profileId,
+            createdInRevisionId: revision.id,
+            objectName: allocatedUnit.objectName,
+            createdAt: appliedAt,
+          })
+          .run();
+      }
+      const mappingRows: Array<{
+        revisionPartId: number;
+        unitIndex: number;
+        token: string;
+        objectName: string;
+      }> = [];
+      for (const assignment of prepared.mappings) {
+        const revisionPartId = revisionPartByDraftPart.get(assignment.draftPartId);
+        if (!revisionPartId) throw new Error("Accepted revision Part mapping is missing");
+        const allocatedUnit = allocated.get(
+          `${assignment.draftPartId}:${assignment.unitIndex}`,
+        );
+        const token = assignment.kind === "reuse" ? assignment.token : allocatedUnit?.token;
+        if (!token) throw new Error("Required-unit assignment token is missing");
+        const objectName =
+          assignment.kind === "reuse" ? objectNames.get(token) : allocatedUnit?.objectName;
+        if (!objectName) throw new Error("Required-unit Object name is missing");
+        this.db
+          .insert(this.schema.planRevisionRequiredUnits)
+          .values({
+            tenantId: this.tenantId,
+            revisionId: revision.id,
+            revisionPartId,
+            unitIndex: assignment.unitIndex,
+            requiredUnitToken: token,
+          })
+          .run();
+        mappingRows.push({ revisionPartId, unitIndex: assignment.unitIndex, token, objectName });
+      }
+      const mappingDigest = digestRequiredUnitMap({
+        revisionId: revision.id,
+        expectedUnitCount: prepared.expectedUnitCount,
+        rows: mappingRows,
+      });
+      this.db
+        .insert(this.schema.planRevisionRequiredUnitSets)
+        .values({
+          revisionId: revision.id,
+          tenantId: this.tenantId,
+          profileId,
+          format: REQUIRED_UNIT_MAP_FORMAT,
+          expectedUnitCount: prepared.expectedUnitCount,
+          mappingDigest,
+          createdAt: appliedAt,
+        })
+        .run();
+      const progressBySlot = new Map(
+        prepared.progress.map((row) => [`${row.draftPartId}:${row.unitIndex}`, row]),
+      );
+      for (const assignment of prepared.mappings) {
+        const projectionPartId = projectionByDraftPart.get(assignment.draftPartId);
+        const progress = progressBySlot.get(
+          `${assignment.draftPartId}:${assignment.unitIndex}`,
+        );
+        if (!projectionPartId || !progress) throw new Error("Published progress target is missing");
+        this.db
+          .insert(this.schema.printProgress)
+          .values({
+            tenantId: this.tenantId,
+            partId: projectionPartId,
+            unitIndex: assignment.unitIndex,
+            completed: progress.completed,
+            assembled: progress.assembled,
+          })
+          .run();
+      }
+      this.acceptPlanRevisionInputSet(profileId, inputSet.id, appliedAt);
+      if (clearedPlatePlan != null) this.setSetting(`print_plan:${profileId}`, clearedPlatePlan);
+      const pointed = this.db
+        .update(this.schema.buildProfiles)
+        .set({
+          acceptedPlanRevisionId: revision.id,
+          acceptedPlanVersion: expectedBasePlanVersion + 1,
+          lastRecomputedAt: appliedAt,
+        })
+        .where(
+          and(
+            eq(this.schema.buildProfiles.tenantId, this.tenantId),
+            eq(this.schema.buildProfiles.id, profileId),
+            isNull(this.schema.buildProfiles.acceptedPlanRevisionId),
+            eq(this.schema.buildProfiles.acceptedPlanVersion, expectedBasePlanVersion),
+          ),
+        )
+        .run();
+      if (pointed.changes !== 1) throw new Error("Accepted Plan pointer publication failed");
+      const consumed = this.db
+        .update(this.schema.planDrafts)
+        .set({
+          state: "consumed",
+          lifecycleVersion: command.expectedLifecycleVersion + 1,
+          consumedRevisionId: revision.id,
+          consumedAt: appliedAt,
+        })
+        .where(
+          and(
+            eq(this.schema.planDrafts.tenantId, this.tenantId),
+            eq(this.schema.planDrafts.profileId, profileId),
+            eq(this.schema.planDrafts.id, draftId),
+            eq(this.schema.planDrafts.state, "open"),
+            eq(this.schema.planDrafts.lifecycleVersion, command.expectedLifecycleVersion),
+            eq(this.schema.planDrafts.snapshotDigest, expectedSnapshotDigest),
+            eq(
+              this.schema.planDrafts.currentRequiredUnitReconciliationId,
+              reconciliation.id,
+            ),
+          ),
+        )
+        .run();
+      if (consumed.changes !== 1) throw new Error("Plan draft consumption failed");
+      const receiptRow = this.db
+        .insert(this.schema.planApplyRequests)
+        .values({
+          tenantId: this.tenantId,
+          profileId,
+          draftId,
+          actorId,
+          idempotencyKey,
+          requestFormat: PLAN_APPLY_REQUEST_FORMAT,
+          requestDigest,
+          expectedSnapshotDigest,
+          expectedLifecycleVersion: command.expectedLifecycleVersion,
+          expectedBaseRevisionId,
+          expectedBasePlanVersion,
+          reconciliationId: reconciliation.id,
+          reconciliationDigest: reconciliation.reconciliationDigest,
+          revisionId: revision.id,
+          planVersion: expectedBasePlanVersion + 1,
+          revisionDigest: prepared.revisionDigest,
+          requiredUnitMappingDigest: mappingDigest,
+          draftLifecycleVersion: command.expectedLifecycleVersion + 1,
+          appliedAt,
+        })
+        .returning()
+        .get();
+      if (!receiptRow) throw new Error("Plan Apply receipt could not be created");
+      const receipt = this.appliedPlanReceipt(receiptRow);
+      const accepted = this.getAcceptedPlanRevision(profileId);
+      const requiredUnits = this.readCurrentRequiredUnitSet(profileId);
+      const consumedDraft = this.getPlanDraft(profileId, draftId);
+      const acceptedInput = this.db
+        .select({
+          inputSetId: this.schema.planAcceptedInputSets.inputSetId,
+          acceptedAt: this.schema.planAcceptedInputSets.acceptedAt,
+        })
+        .from(this.schema.planAcceptedInputSets)
+        .where(
+          and(
+            eq(this.schema.planAcceptedInputSets.tenantId, this.tenantId),
+            eq(this.schema.planAcceptedInputSets.profileId, profileId),
+          ),
+        )
+        .get();
+      const compatibility = this.db
+        .select()
+        .from(this.schema.parts)
+        .where(
+          and(
+            eq(this.schema.parts.tenantId, this.tenantId),
+            eq(this.schema.parts.profileId, profileId),
+          ),
+        )
+        .all();
+      const revisionParity =
+        accepted != null &&
+        publishedPlanPartsMatch({
+          preparedParts: prepared.parts,
+          revisionParts: accepted.parts,
+          projectionParts: compatibility,
+          revisionPartIdByDraftPart: revisionPartByDraftPart,
+          projectionPartIdByDraftPart: projectionByDraftPart,
+        });
+      const publishedProgress = new Map(
+        requiredUnits.kind === "ready"
+          ? requiredUnits.units.map((unit) => [
+              `${unit.revisionPartId}:${unit.unitIndex}`,
+              unit,
+            ])
+          : [],
+      );
+      const progressParity = prepared.mappings.every((assignment) => {
+        const revisionPartId = revisionPartByDraftPart.get(assignment.draftPartId);
+        const progress = progressBySlot.get(
+          `${assignment.draftPartId}:${assignment.unitIndex}`,
+        );
+        const allocatedUnit = allocated.get(
+          `${assignment.draftPartId}:${assignment.unitIndex}`,
+        );
+        const token = assignment.kind === "reuse" ? assignment.token : allocatedUnit?.token;
+        const published =
+          revisionPartId == null
+            ? null
+            : publishedProgress.get(`${revisionPartId}:${assignment.unitIndex}`);
+        return (
+          progress != null &&
+          token != null &&
+          published?.token === token &&
+          published.completed === progress.completed &&
+          published.assembled === progress.assembled
+        );
+      });
+      if (
+        !accepted ||
+        accepted.id !== revision.id ||
+        accepted.inputSetId !== inputSet.id ||
+        accepted.snapshotDigest !== prepared.revisionDigest ||
+        digestPlanRevisionParts(accepted.parts) !== prepared.revisionDigest ||
+        !acceptedInput ||
+        acceptedInput.inputSetId !== inputSet.id ||
+        acceptedInput.acceptedAt !== appliedAt ||
+        compatibility.length !== prepared.parts.length ||
+        !revisionParity ||
+        requiredUnits.kind !== "ready" ||
+        requiredUnits.mappingDigest !== mappingDigest ||
+        requiredUnits.units.length !== prepared.expectedUnitCount ||
+        !progressParity ||
+        consumedDraft?.state !== "consumed" ||
+        consumedDraft.consumedRevisionId !== revision.id ||
+        consumedDraft.consumedAt !== appliedAt
+      ) {
+        throw new Error("Applied Plan verification failed");
+      }
+      return { kind: "applied", receipt };
+    }, "immediate");
+  }
+
   editPlanDraftParts(input: {
     readonly profileId: number;
     readonly draftId: number;
@@ -4742,10 +5868,20 @@ export class AppRepository {
   }
 
   deleteProfile(id: number): void {
-    this.db
-      .delete(this.schema.buildProfiles)
-      .where(and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)))
-      .run();
+    const mutate = () => {
+      if (this.syncSqlite) this.db.run(sql.raw("PRAGMA defer_foreign_keys = ON"));
+      this.db
+        .delete(this.schema.buildProfiles)
+        .where(
+          and(
+            eq(this.schema.buildProfiles.tenantId, this.tenantId),
+            eq(this.schema.buildProfiles.id, id),
+          ),
+        )
+        .run();
+    };
+    if (this.syncSqlite) this.transaction(mutate, "immediate");
+    else mutate();
   }
 
   renameProfile(id: number, name: string): ProfileSummary {
@@ -5476,10 +6612,14 @@ export class AppRepository {
   }
 
   private ensureProgressForOwnedPart(part: PartDbRow): void {
-    const rows = this.progressRowsForPart(part.id);
-    const qty = Math.max(1, part.quantityEffective);
-    const ensured = ensureProgressRows(rows, part.id, qty);
-    this.saveProgressRowsForOwnedPart(part.id, ensured);
+    const mutate = () => {
+      const rows = this.progressRowsForPart(part.id);
+      const qty = Math.max(1, part.quantityEffective);
+      const ensured = ensureProgressRows(rows, part.id, qty);
+      this.saveProgressRowsForOwnedPart(part.id, ensured);
+    };
+    if (this.syncSqlite) this.transaction(mutate, "immediate");
+    else mutate();
   }
 
   ensureProgressForPart(part: PartDbRow): void {
@@ -5648,47 +6788,48 @@ export class AppRepository {
   }
 
   patchPartProgress(partId: number, unitIndex: number, completed: boolean) {
-    const part = this.requirePart(partId);
-    const qty = Math.max(1, part.quantityEffective);
-    if (unitIndex >= qty) throw new Error("unit_index out of range");
-    this.ensureProgressForOwnedPart(part);
-    const rows = this.progressRowsForPart(partId);
-    const updated = toggleCheckoffUnit(rows, partId, qty, unitIndex, completed);
-    const partRowsOnly = updated.filter((r) => r.partId === partId);
-    this.saveProgressRowsForOwnedPart(partId, partRowsOnly);
-    const units = getPrintUnits(partRowsOnly, qty);
-    const printedCount = units.filter(Boolean).length;
-    return {
-      part_id: partId,
-      printed_count: printedCount,
-      print_units: units,
-      // Un-printing a unit also clears its assembled flag (domain rule in
-      // setPrintedUnitCount). Return the post-toggle assembled state so the
-      // checkoff UI never keeps a stale "Assembled" pip on a unit the user
-      // just un-printed — otherwise re-checking the print resurrects it.
-      assembled_units: getAssembledUnits(partRowsOnly, qty),
-      missing: !isFullyPrinted({ quantity_effective: qty, printed_count: printedCount }),
+    const mutate = () => {
+      const part = this.requirePart(partId);
+      const qty = Math.max(1, part.quantityEffective);
+      if (unitIndex >= qty) throw new Error("unit_index out of range");
+      this.ensureProgressForOwnedPart(part);
+      const rows = this.progressRowsForPart(partId);
+      const updated = toggleCheckoffUnit(rows, partId, qty, unitIndex, completed);
+      const partRowsOnly = updated.filter((r) => r.partId === partId);
+      this.saveProgressRowsForOwnedPart(partId, partRowsOnly);
+      const units = getPrintUnits(partRowsOnly, qty);
+      const printedCount = units.filter(Boolean).length;
+      return {
+        part_id: partId,
+        printed_count: printedCount,
+        print_units: units,
+        assembled_units: getAssembledUnits(partRowsOnly, qty),
+        missing: !isFullyPrinted({ quantity_effective: qty, printed_count: printedCount }),
+      };
     };
+    return this.syncSqlite ? this.transaction(mutate, "immediate") : mutate();
   }
 
   patchPartAssembled(partId: number, unitIndex: number, assembled: boolean) {
-    const part = this.requirePart(partId);
-    const qty = Math.max(1, part.quantityEffective);
-    if (unitIndex < 0 || unitIndex >= qty) throw new Error("unit_index out of range");
-    this.ensureProgressForOwnedPart(part);
-    const rows = this.progressRowsForPart(partId);
-    // Domain owns the rule that an unprinted unit can't be assembled.
-    const updated = setAssembledUnit(rows, partId, qty, unitIndex, assembled).filter(
-      (r) => r.partId === partId,
-    );
-    this.saveProgressRowsForOwnedPart(partId, updated);
-    const assembledUnits = getAssembledUnits(updated, qty);
-    const assembledCount = assembledUnits.filter(Boolean).length;
-    return {
-      part_id: partId,
-      assembled_count: assembledCount,
-      assembled_units: assembledUnits,
+    const mutate = () => {
+      const part = this.requirePart(partId);
+      const qty = Math.max(1, part.quantityEffective);
+      if (unitIndex < 0 || unitIndex >= qty) throw new Error("unit_index out of range");
+      this.ensureProgressForOwnedPart(part);
+      const rows = this.progressRowsForPart(partId);
+      const updated = setAssembledUnit(rows, partId, qty, unitIndex, assembled).filter(
+        (r) => r.partId === partId,
+      );
+      this.saveProgressRowsForOwnedPart(partId, updated);
+      const assembledUnits = getAssembledUnits(updated, qty);
+      const assembledCount = assembledUnits.filter(Boolean).length;
+      return {
+        part_id: partId,
+        assembled_count: assembledCount,
+        assembled_units: assembledUnits,
+      };
     };
+    return this.syncSqlite ? this.transaction(mutate, "immediate") : mutate();
   }
 
   /** Read accessor: the assembled state of every unit of a single part. */

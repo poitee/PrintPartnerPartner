@@ -34,6 +34,14 @@ function markAsV18(raw: Database.Database): void {
 
 function downgradeToV18(raw: Database.Database): void {
   raw.exec(`
+    DROP TRIGGER IF EXISTS trg_plan_apply_requests_immutable_delete;
+    DROP TRIGGER IF EXISTS trg_plan_apply_requests_immutable_update;
+    DROP TRIGGER IF EXISTS trg_plan_apply_requests_ownership_insert;
+    DROP TRIGGER IF EXISTS trg_plan_drafts_consumption_update;
+    DROP TRIGGER IF EXISTS trg_plan_drafts_consumption_insert;
+    DROP TABLE plan_apply_requests;
+    ALTER TABLE plan_drafts DROP COLUMN consumed_at;
+    ALTER TABLE plan_drafts DROP COLUMN consumed_revision_id;
     DROP TRIGGER IF EXISTS trg_plan_drafts_required_unit_selection_update;
     DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_assignments_immutable_delete;
     DROP TRIGGER IF EXISTS trg_plan_draft_required_unit_assignments_immutable_update;

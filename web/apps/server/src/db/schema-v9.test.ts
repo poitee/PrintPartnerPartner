@@ -73,6 +73,33 @@ const V24_TABLES = [
   "plan_draft_required_unit_assignments",
 ];
 
+const V25_TABLES = ["plan_apply_requests"];
+
+const V25_COLUMNS: Record<string, string[]> = {
+  plan_apply_requests: [
+    "id",
+    "tenant_id",
+    "profile_id",
+    "draft_id",
+    "actor_id",
+    "idempotency_key",
+    "request_format",
+    "request_digest",
+    "expected_snapshot_digest",
+    "expected_lifecycle_version",
+    "expected_base_revision_id",
+    "expected_base_plan_version",
+    "reconciliation_id",
+    "reconciliation_digest",
+    "revision_id",
+    "plan_version",
+    "revision_digest",
+    "required_unit_mapping_digest",
+    "draft_lifecycle_version",
+    "applied_at",
+  ],
+};
+
 const V24_COLUMNS: Record<string, string[]> = {
   plan_draft_required_unit_reconciliations: [
     "id",
@@ -368,7 +395,7 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v24 tables and records schema version 24", () => {
+  it("creates the v15-v25 tables and records schema version 25", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
       for (const table of [
@@ -379,6 +406,7 @@ describe("schema v9-v13 (SQLite)", () => {
         ...V20_TABLES,
         ...V23_TABLES,
         ...V24_TABLES,
+        ...V25_TABLES,
       ]) {
         expect(tables, `missing table ${table}`).toContain(table);
       }
@@ -386,7 +414,7 @@ describe("schema v9-v13 (SQLite)", () => {
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "24" });
+      ).toMatchObject({ value: "25" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -406,6 +434,30 @@ describe("schema v9-v13 (SQLite)", () => {
       for (const [table, expected] of Object.entries(V18_COLUMNS)) {
         expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
       }
+    });
+  });
+
+  it("creates v25 Apply receipts and consumption guards", () => {
+    withSqlite((sqlite) => {
+      for (const [table, expected] of Object.entries(V25_COLUMNS)) {
+        expect(sqliteColumnNames(sqlite, table)).toEqual(expect.arrayContaining(expected));
+      }
+      expect(sqliteColumnNames(sqlite, "plan_drafts")).toEqual(
+        expect.arrayContaining(["consumed_revision_id", "consumed_at"]),
+      );
+      const triggers = rawSqlite(sqlite)
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'")
+        .all()
+        .map((row) => (row as { name: string }).name);
+      expect(triggers).toEqual(
+        expect.arrayContaining([
+          "trg_plan_drafts_consumption_insert",
+          "trg_plan_drafts_consumption_update",
+          "trg_plan_apply_requests_ownership_insert",
+          "trg_plan_apply_requests_immutable_update",
+          "trg_plan_apply_requests_immutable_delete",
+        ]),
+      );
     });
   });
 
@@ -968,8 +1020,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(24);
-    expect(pgSchema.currentSchemaVersion).toBe(24);
+    expect(sqliteSchema.currentSchemaVersion).toBe(25);
+    expect(pgSchema.currentSchemaVersion).toBe(25);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -1153,6 +1205,20 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
       "trg_plan_draft_required_unit_assignments_immutable_write",
     );
     expect(POSTGRES_DDL).toContain("trg_plan_drafts_required_unit_selection_update");
+  });
+
+  it("creates the v25 Apply receipt and consumption guards in Postgres", () => {
+    for (const [table, expected] of Object.entries(V25_COLUMNS)) {
+      expect(pgCreatedColumns(table)).toEqual(expect.arrayContaining(expected));
+    }
+    expect(pgAddedColumns("plan_drafts")).toEqual(
+      expect.arrayContaining(["consumed_revision_id", "consumed_at"]),
+    );
+    expect(POSTGRES_DDL).toContain("uq_plan_apply_requests_tenant_actor_profile_key");
+    expect(POSTGRES_DDL).toContain("uq_plan_apply_requests_tenant_profile_draft");
+    expect(POSTGRES_DDL).toContain("trg_plan_drafts_consumption_write");
+    expect(POSTGRES_DDL).toContain("trg_plan_apply_requests_ownership_insert");
+    expect(POSTGRES_DDL).toContain("trg_plan_apply_requests_immutable_write");
   });
 
   it("adds v13 profile-sync provenance columns on slicer profile tables", () => {
