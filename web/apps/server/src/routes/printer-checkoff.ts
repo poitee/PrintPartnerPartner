@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { PrinterCheckoffLink, PrinterCheckoffUnit } from "@print-partner/contracts";
+import type { PrinterCheckoffLink } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import type { IntegrationPort } from "../integrations/store.js";
@@ -13,11 +13,9 @@ import {
 } from "../services/printer-checkoff-verify.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import {
-  createPrinterCheckoffLink,
   listAwaitingVerifyPrinterCheckoffLinks,
   listWatchingPrinterCheckoffLinks,
   loadPrinterCheckoffLinks,
-  updatePrinterCheckoffLink,
 } from "../services/printer-checkoff-store.js";
 import { summarizePrintOutcomes } from "../services/printer-outcomes-store.js";
 import {
@@ -92,103 +90,16 @@ async function buildCandidatesFromObjectNames(
   return candidates;
 }
 
-function mapNamesToProfileUnits(
-  repo: AppRepository,
-  profileId: number,
-  objectNames: string[],
-  fallbackFilename?: string,
-): {
-  units: PrinterCheckoffUnit[];
-  matchedNames: Set<string>;
-  grouped: ReturnType<typeof groupObjectsByPart>;
-  matched: ReturnType<typeof matchObjectsToFilenames>;
-} {
-  const partRows = repo.getProfilePartRows(profileId);
-  const completedByPart = repo.printUnitsByPartId(profileId);
-
-  const mapCandidates = (names: string[]) => {
-    const grouped = groupObjectsByPart(names);
-    const matched = matchObjectsToFilenames(
-      grouped,
-      partRows.map((part) => part.filename).filter(Boolean),
-    );
-    const units: PrinterCheckoffUnit[] = [];
-    const used = new Set<string>();
-    const matchedNames = new Set<string>();
-
-    for (const [objectKey, matchedFiles] of matched) {
-      const plateMatch = grouped.get(objectKey);
-      if (!plateMatch || matchedFiles.length === 0) continue;
-      let remaining = plateMatch.count;
-      for (const filename of matchedFiles) {
-        if (remaining === 0) break;
-        const part = partRows.find(
-          (row) => row.filename.toLowerCase() === filename.toLowerCase(),
-        );
-        if (!part) continue;
-        const qty = Math.max(1, part.quantityEffective);
-        const completed =
-          completedByPart.get(part.id) ?? Array.from({ length: qty }, () => false);
-        for (let unitIndex = 0; unitIndex < qty && remaining > 0; unitIndex += 1) {
-          const key = `${part.id}:${unitIndex}`;
-          if (completed[unitIndex] || used.has(key)) continue;
-          used.add(key);
-          units.push({ part_id: part.id, unit_index: unitIndex });
-          remaining -= 1;
-        }
-        if (remaining < plateMatch.count) {
-          for (const object of plateMatch.objects) matchedNames.add(object.name);
-        }
-      }
-    }
-    return { units, matchedNames, grouped, matched };
-  };
-
-  const mapped = mapCandidates(objectNames);
-  if (mapped.units.length > 0 || !fallbackFilename?.trim()) return mapped;
-  return mapCandidates([fallbackFilename]);
-}
-
-const failedVirtualRepairs = new WeakMap<AppRepository, Set<string>>();
-
-function virtualRepairSignature(link: PrinterCheckoffLink): string {
-  return JSON.stringify([
-    link.id,
-    link.profile_id,
-    link.filename,
-    link.unlabeled_names ?? [],
-  ]);
-}
-
-function virtualizeEmptyAwaitingLinks(
+function repairEmptyAwaitingLinks(
   repo: AppRepository,
   links: PrinterCheckoffLink[],
+  beforeRepair: (link: PrinterCheckoffLink) => void,
 ): PrinterCheckoffLink[] {
   return links.map((link) => {
     if (link.state !== "awaiting_verify" || link.units.length > 0) return link;
-    const signature = virtualRepairSignature(link);
-    const repoFailures = failedVirtualRepairs.get(repo);
-    if (repoFailures?.has(signature)) return link;
-    const mapped = mapNamesToProfileUnits(
-      repo,
-      link.profile_id,
-      link.unlabeled_names ?? [],
-      link.filename,
-    );
-    if (mapped.units.length === 0) {
-      const failures = repoFailures ?? new Set<string>();
-      failures.add(signature);
-      if (!repoFailures) failedVirtualRepairs.set(repo, failures);
-      return link;
-    }
-    const unmatched = (link.unlabeled_names ?? []).filter(
-      (name) => !mapped.matchedNames.has(name),
-    );
-    return {
-      ...link,
-      units: mapped.units,
-      unlabeled_names: unmatched.length ? unmatched : undefined,
-    };
+    beforeRepair(link);
+    const repaired = repo.materializeAcceptedPrinterLink({ kind: "repair", expectedLink: link });
+    return repaired.kind === "repaired" ? repaired.link : link;
   });
 }
 
@@ -249,49 +160,61 @@ export async function registerPrinterCheckoffRoutes(
   app: FastifyInstance,
   deps: RouteDeps,
 ): Promise<void> {
-  app.get("/printer-checkoff", async (request) => {
-    const query = request.query as {
-      state?: string;
-      integration_id?: string;
-      profile_id?: string;
-    };
-    const integrationId = query.integration_id?.trim();
-    const profileIdRaw = query.profile_id?.trim();
-    const profileId =
-      profileIdRaw && Number.isInteger(Number(profileIdRaw))
-        ? Number(profileIdRaw)
-        : undefined;
+  app.get("/printer-checkoff", async (request, reply) => {
+    let repairContext: { linkId: string; profileId: number } | undefined;
+    try {
+      const query = request.query as {
+        state?: string;
+        integration_id?: string;
+        profile_id?: string;
+      };
+      const integrationId = query.integration_id?.trim();
+      const profileIdRaw = query.profile_id?.trim();
+      const profileId =
+        profileIdRaw && Number.isInteger(Number(profileIdRaw))
+          ? Number(profileIdRaw)
+          : undefined;
 
-    if (query.state === "watching") {
-      return { links: listWatchingPrinterCheckoffLinks(deps.repo, integrationId) };
-    }
-    if (query.state === "awaiting_verify") {
-      let links = listAwaitingVerifyPrinterCheckoffLinks(deps.repo, profileId);
-      links = virtualizeEmptyAwaitingLinks(deps.repo, links);
-      if (integrationId) {
-        links = links.filter((l) => l.integration_id === integrationId);
+      if (query.state === "watching") {
+        return { links: listWatchingPrinterCheckoffLinks(deps.repo, integrationId) };
       }
+      let links =
+        query.state === "awaiting_verify"
+          ? listAwaitingVerifyPrinterCheckoffLinks(deps.repo, profileId)
+          : loadPrinterCheckoffLinks(deps.repo);
+      if (integrationId) {
+        links = links.filter((link) => link.integration_id === integrationId);
+      }
+      if (profileId != null) {
+        links = links.filter((link) => link.profile_id === profileId);
+      }
+      if (
+        query.state === "host_failed" ||
+        query.state === "dismissed" ||
+        query.state === "verified" ||
+        query.state === "applied"
+      ) {
+        const want = query.state === "applied" ? "verified" : query.state;
+        links = links.filter((link) => link.state === want);
+      }
+      links = repairEmptyAwaitingLinks(deps.repo, links, (link) => {
+        repairContext = { linkId: link.id, profileId: link.profile_id };
+      });
       return { links };
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error(
+          { failure: "integrity", code: error.code, ...repairContext },
+          "Accepted printer link repair failed",
+        );
+      } else {
+        request.log.error(
+          { failure: "unexpected", ...repairContext },
+          "Accepted printer link repair failed",
+        );
+      }
+      return sendProblem(reply, 500, "Internal Server Error", "Internal Server Error");
     }
-
-    let links = loadPrinterCheckoffLinks(deps.repo);
-    links = virtualizeEmptyAwaitingLinks(deps.repo, links);
-    if (integrationId) {
-      links = links.filter((l) => l.integration_id === integrationId);
-    }
-    if (profileId != null) {
-      links = links.filter((l) => l.profile_id === profileId);
-    }
-    if (
-      query.state === "host_failed" ||
-      query.state === "dismissed" ||
-      query.state === "verified" ||
-      query.state === "applied"
-    ) {
-      const want = query.state === "applied" ? "verified" : query.state;
-      links = links.filter((l) => l.state === want);
-    }
-    return { links };
   });
 
   app.post(
@@ -332,19 +255,17 @@ export async function registerPrinterCheckoffRoutes(
             normalizePrinterFilename(link.filename) === normalizedFilename,
         );
         if (!existing && !existingLink) {
-          // Fetch object list from Moonraker
           const objectNames = await getObjectListForIntegration(
             deps.repo,
             integrationId,
           );
-          // Compute candidates
           const candidates = await buildCandidatesFromObjectNames(
             deps.repo,
             objectNames,
           );
           const unattributedPrint = createUnattributedPrint(
             integrationId,
-            "default", // printer_id - use "default" for Moonraker's single printer
+            "default",
             integrationSummary.name || "Printer",
             status.filename,
             objectNames,
@@ -360,52 +281,72 @@ export async function registerPrinterCheckoffRoutes(
         integrationId,
       );
 
-      // Auto-create watching link when a new print is detected on a printer with a default plan binding
       if (
         (status.state === "printing" || status.state === "paused") &&
         status.filename
       ) {
         const normalizedFilename = normalizePrinterFilename(status.filename);
 
-        // Check if there's already a watching link for this integration+filename
         const watching = listWatchingPrinterCheckoffLinks(deps.repo, integrationId);
         const alreadyWatching = watching.some(
           (l) => normalizePrinterFilename(l.filename) === normalizedFilename,
         );
 
         if (!alreadyWatching) {
-          // Look up default plan binding for this integration
-          const bindingsRaw = deps.repo.getSetting("printer.plan_bindings");
-          const bindings: Array<{ integration_id: string; profile_id: number | null }> =
-            bindingsRaw ? JSON.parse(bindingsRaw) : [];
-          const binding = bindings.find((b) => b.integration_id === integrationId);
-
-          if (binding?.profile_id) {
-            // Fetch object list and match to parts
-            const objectNames = await getObjectListForIntegration(deps.repo, integrationId);
-            const mapping = mapNamesToProfileUnits(
-              deps.repo,
-              binding.profile_id,
-              objectNames,
-              status.filename,
-            );
-            const { units } = mapping;
-
-            // Get printer_id from fleet
-            const fleet = loadFleet(deps.repo);
-            const machine = fleet.find((m) => m.integration_id === integrationId);
-
-            // Create watching link
-            const createdLink = createPrinterCheckoffLink(deps.repo, {
-              profile_id: binding.profile_id,
-              integration_id: integrationId,
-              printer_id: machine?.id ?? integrationId,
-              host_name: integrationSummary.name,
-              filename: normalizePrinterFilename(status.filename) || status.filename,
-              units,
-              started: false,
-            });
-            if (createdLink) createdLinks.push(createdLink);
+          let attributionProfileId: number | undefined;
+          try {
+            const bindingsRaw = deps.repo.getSetting("printer.plan_bindings");
+            const bindings: Array<{ integration_id: string; profile_id: number | null }> =
+              bindingsRaw ? JSON.parse(bindingsRaw) : [];
+            const binding = bindings.find((b) => b.integration_id === integrationId);
+            if (binding?.profile_id) {
+              attributionProfileId = binding.profile_id;
+              const objectNames = await getObjectListForIntegration(
+                deps.repo,
+                integrationId,
+              );
+              const fleet = loadFleet(deps.repo);
+              const machine = fleet.find((m) => m.integration_id === integrationId);
+              const created = deps.repo.materializeAcceptedPrinterLink({
+                kind: "create",
+                profileId: binding.profile_id,
+                objectNames,
+                fallbackFilename: status.filename,
+                link: {
+                  integrationId,
+                  printerId: machine?.id ?? integrationId,
+                  hostName: integrationSummary.name,
+                  filename: normalizePrinterFilename(status.filename) || status.filename,
+                  started: false,
+                },
+              });
+              if (created.kind === "created") createdLinks.push(created.link);
+            }
+          } catch (error) {
+            if (error instanceof AcceptedPlanOperationalIntegrityError) {
+              request.log.error(
+                {
+                  failure: "integrity",
+                  code: error.code,
+                  ...(attributionProfileId == null
+                    ? {}
+                    : { profileId: attributionProfileId }),
+                  integrationId,
+                },
+                "Accepted printer auto-attribution failed",
+              );
+            } else {
+              request.log.error(
+                {
+                  failure: "unexpected",
+                  ...(attributionProfileId == null
+                    ? {}
+                    : { profileId: attributionProfileId }),
+                  integrationId,
+                },
+                "Accepted printer auto-attribution failed",
+              );
+            }
           }
         }
       }
@@ -576,67 +517,71 @@ export async function registerPrinterCheckoffRoutes(
         return sendProblem(reply, 409, "Conflict", "Print already claimed");
       }
 
-      // Find matching parts in the profile for each candidate
-      const partRows = deps.repo.getProfilePartRows(profileId);
-      const units: Array<{ part_id: number; unit_index: number }> = [];
-
-      for (const candidate of print.candidates) {
-        if (!candidate.matching_filenames.length) continue;
-        // Find parts in this profile that match
-        const matchingParts = partRows.filter((p) =>
-          candidate.matching_filenames.some(
-            (mf) => mf.toLowerCase() === p.filename.toLowerCase(),
-          ),
-        );
-        for (const part of matchingParts) {
-          // Add units for each copy on the plate
-          const qty = Math.max(1, part.quantityEffective);
-          for (let i = 0; i < Math.min(candidate.copy_count, qty); i++) {
-            units.push({ part_id: part.id, unit_index: i });
-          }
+      let materialized: ReturnType<AppRepository["materializeAcceptedPrinterLink"]>;
+      try {
+        materialized = deps.repo.materializeAcceptedPrinterLink({
+          kind: "claim",
+          profileId,
+          expectedPrint: print,
+        });
+      } catch (error) {
+        if (error instanceof AcceptedPlanOperationalIntegrityError) {
+          request.log.error(
+            { failure: "integrity", code: error.code, profileId, printId: print.id },
+            "Accepted printer claim failed",
+          );
+        } else {
+          request.log.error(
+            { failure: "unexpected", profileId, printId: print.id },
+            "Accepted printer claim failed",
+          );
         }
+        return sendProblem(reply, 500, "Internal Server Error", "Internal Server Error");
       }
-
-      // Create a CheckoffLink directly in awaiting_verify state
-      const link = createPrinterCheckoffLink(deps.repo, {
-        profile_id: profileId,
-        integration_id: print.integration_id,
-        printer_id: print.printer_id,
-        host_name: print.host_name,
-        filename: print.filename,
-        units,
-        started: true,
-      });
-      if (!link) {
-        return sendProblem(reply, 500, "Internal Server Error", "Failed to create checkoff link");
+      switch (materialized.kind) {
+        case "claimed":
+          return { link: materialized.link, ok: true };
+        case "transaction_unavailable":
+          return sendProblem(
+            reply,
+            503,
+            "Service Unavailable",
+            "Accepted Plan update is unavailable",
+          );
+        case "empty":
+          return sendProblem(reply, 409, "Conflict", "Accepted Plan has no required units");
+        case "accepted_state_unavailable":
+          return sendProblem(
+            reply,
+            409,
+            "Conflict",
+            materialized.reason === "compatibility_dirty"
+              ? "Accepted Plan requires compatibility repair"
+              : "Accepted Plan operational state is not initialized",
+          );
+        case "no_match":
+          return sendProblem(
+            reply,
+            409,
+            "Conflict",
+            "Print does not map to an incomplete accepted Plan unit",
+          );
+        case "already_linked":
+          return sendProblem(reply, 409, "Conflict", "Print is already linked");
+        case "print_changed":
+          return sendProblem(
+            reply,
+            409,
+            "Conflict",
+            "Print changed or was already claimed",
+          );
+        default:
+          request.log.error(
+            { failure: "unexpected", profileId, printId: print.id },
+            "Accepted printer claim failed",
+          );
+          return sendProblem(reply, 500, "Internal Server Error", "Internal Server Error");
       }
-
-      // Immediately transition to awaiting_verify
-      const updated = updatePrinterCheckoffLink(
-        deps.repo,
-        link.id,
-        {
-          state: "awaiting_verify",
-          host_outcome: "success",
-          completed_at: print.completed_at,
-          saw_active: true,
-        },
-        { requireState: "watching" },
-      );
-
-      // Mark matching history as claimed only on this explicit claim action.
-      claimMatchingUnattributedPrints(deps.repo, updated ?? link);
-
-      // Update the default plan binding for this printer to the claimed plan
-      const bindingsRaw = deps.repo.getSetting("printer.plan_bindings");
-      const claimBindings: Array<{ integration_id: string; profile_id: number | null; updated_at: string }> =
-        bindingsRaw ? JSON.parse(bindingsRaw) : [];
-      const claimIdx = claimBindings.findIndex((b) => b.integration_id === print.integration_id);
-      const claimEntry = { integration_id: print.integration_id, profile_id: profileId, updated_at: new Date().toISOString() };
-      if (claimIdx >= 0) claimBindings[claimIdx] = claimEntry; else claimBindings.push(claimEntry);
-      deps.repo.setSetting("printer.plan_bindings", JSON.stringify(claimBindings));
-
-      return { link: updated ?? link, ok: true };
     },
   );
 

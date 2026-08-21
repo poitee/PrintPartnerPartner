@@ -177,10 +177,57 @@ import {
   type SetAcceptedUnitCompletionResult,
 } from "./accepted-plan-progress.js";
 import {
+  createPrinterCheckoffLink,
   getPrinterCheckoffLink,
+  loadPrinterCheckoffLinks,
   updatePrinterCheckoffLink,
 } from "../services/printer-checkoff-store.js";
+import { normalizePrinterFilename } from "../services/printer-checkoff.js";
 import { appendPrintOutcomes } from "../services/printer-outcomes-store.js";
+import {
+  resolveAcceptedPrinterAttribution,
+  type MaterializeAcceptedPrinterLinkCommand,
+  type MaterializeAcceptedPrinterLinkResult,
+} from "./accepted-printer-attribution.js";
+import {
+  claimUnattributedPrint,
+  listUnattributedPrints,
+  type UnattributedPrint,
+} from "../services/unattributed-print-store.js";
+
+type PrinterPlanBinding = Readonly<{
+  integration_id: string;
+  profile_id: number | null;
+  updated_at: string;
+}>;
+
+function parsePrinterPlanBindings(raw: string | null | undefined): PrinterPlanBinding[] {
+  if (!raw?.trim()) return [];
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new Error("Printer Plan bindings are corrupt");
+  }
+  if (!Array.isArray(value)) throw new Error("Printer Plan bindings are corrupt");
+  return value.map((item) => {
+    const row = applyJsonRecord(item, "Printer Plan binding");
+    if (
+      typeof row.integration_id !== "string" ||
+      !row.integration_id.trim() ||
+      (row.profile_id !== null &&
+        (!Number.isSafeInteger(row.profile_id) || Number(row.profile_id) <= 0)) ||
+      typeof row.updated_at !== "string"
+    ) {
+      throw new Error("Printer Plan bindings are corrupt");
+    }
+    return {
+      integration_id: row.integration_id,
+      profile_id: row.profile_id === null ? null : Number(row.profile_id),
+      updated_at: row.updated_at,
+    };
+  });
+}
 
 function docTitleFromPath(path: string): string {
   const base = basename(path);
@@ -998,6 +1045,157 @@ export class AppRepository {
 
   canMutateAcceptedPlan(): boolean {
     return this.syncSqlite;
+  }
+
+  materializeAcceptedPrinterLink(
+    command: MaterializeAcceptedPrinterLinkCommand,
+  ): MaterializeAcceptedPrinterLinkResult {
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+    return this.transaction(() => {
+      let profileId: number;
+      let objectNames: readonly string[];
+      let fallbackFilename: string;
+      let claimPrint: Readonly<UnattributedPrint> | undefined;
+      if (command.kind === "repair") {
+        const current = getPrinterCheckoffLink(this, command.expectedLink.id);
+        if (!current) return { kind: "link_not_found" as const };
+        if (JSON.stringify(current) !== JSON.stringify(command.expectedLink)) {
+          return { kind: "link_changed" as const };
+        }
+        if (current.state !== "awaiting_verify" || current.units.length > 0) {
+          return { kind: "not_repairable" as const };
+        }
+        profileId = current.profile_id;
+        objectNames = current.unlabeled_names ?? [];
+        fallbackFilename = current.filename;
+      } else if (command.kind === "create") {
+        profileId = command.profileId;
+        objectNames = command.objectNames;
+        fallbackFilename = command.fallbackFilename ?? command.link.filename;
+      } else {
+        profileId = command.profileId;
+        const current = listUnattributedPrints(this).find(
+          (print) => print.id === command.expectedPrint.id,
+        );
+        if (
+          !current ||
+          current.claimed_at ||
+          current.dismissed ||
+          JSON.stringify(current) !== JSON.stringify(command.expectedPrint)
+        ) {
+          return { kind: "print_changed" as const };
+        }
+        claimPrint = current;
+        objectNames = current.gcode_objects;
+        fallbackFilename = current.filename;
+      }
+
+      const accepted = readAcceptedPlanOperationalSnapshotInternal({
+        db: this.db,
+        schema: this.schema,
+        tenantId: this.tenantId,
+        profileId,
+        reposDir: this.reposDir,
+        sqlite: true,
+      });
+      if (accepted.kind === "empty") return { kind: "empty" as const };
+      if (accepted.kind !== "ready") {
+        return { kind: "accepted_state_unavailable" as const, reason: accepted.kind };
+      }
+      const attribution = resolveAcceptedPrinterAttribution(accepted.snapshot, {
+        objectNames,
+        fallbackFilename,
+      });
+      if (attribution.units.length === 0) return { kind: "no_match" as const };
+      const units = attribution.units.map((unit) => ({ ...unit }));
+      const unlabeledNames = attribution.unmatchedObjectNames.length
+        ? [...attribution.unmatchedObjectNames]
+        : undefined;
+
+      if (command.kind === "repair") {
+        const link = updatePrinterCheckoffLink(
+          this,
+          command.expectedLink.id,
+          { units, unlabeled_names: unlabeledNames },
+          { requireState: "awaiting_verify" },
+        );
+        if (!link) return { kind: "link_changed" as const };
+        return { kind: "repaired" as const, link, attribution };
+      }
+
+      const linkInput =
+        command.kind === "claim"
+          ? {
+              integrationId: command.expectedPrint.integration_id,
+              printerId: command.expectedPrint.printer_id,
+              hostName: command.expectedPrint.host_name,
+              filename: command.expectedPrint.filename,
+              started: true,
+            }
+          : command.link;
+      const normalizedFilename = normalizePrinterFilename(linkInput.filename);
+      const alreadyLinked = loadPrinterCheckoffLinks(this).some(
+        (link) =>
+          (link.state === "watching" || link.state === "awaiting_verify") &&
+          link.integration_id === linkInput.integrationId &&
+          normalizePrinterFilename(link.filename) === normalizedFilename,
+      );
+      if (alreadyLinked) return { kind: "already_linked" as const };
+      const link = createPrinterCheckoffLink(this, {
+        profile_id: profileId,
+        integration_id: linkInput.integrationId,
+        printer_id: linkInput.printerId,
+        host_name: linkInput.hostName,
+        filename: linkInput.filename,
+        units,
+        unlabeled_names: unlabeledNames,
+        started: linkInput.started,
+      });
+      if (!link) throw new Error("Accepted printer link creation failed");
+      if (command.kind === "claim") {
+        if (!claimPrint) throw new Error("Accepted printer claim lost its print");
+        const awaiting = updatePrinterCheckoffLink(
+          this,
+          link.id,
+          {
+            state: "awaiting_verify",
+            host_outcome: "success",
+            completed_at: claimPrint.completed_at,
+            saw_active: true,
+          },
+          { requireState: "watching" },
+        );
+        if (!awaiting) throw new Error("Accepted printer claim transition failed");
+        for (const print of listUnattributedPrints(this)) {
+          if (
+            !print.claimed_at &&
+            !print.dismissed &&
+            print.integration_id === claimPrint.integration_id &&
+            normalizePrinterFilename(print.filename) === normalizedFilename
+          ) {
+            if (!claimUnattributedPrint(this, print.id, profileId)) {
+              throw new Error("Accepted printer claim history update failed");
+            }
+          }
+        }
+        const bindings = parsePrinterPlanBindings(
+          this.getSetting("printer.plan_bindings"),
+        );
+        const binding = {
+          integration_id: claimPrint.integration_id,
+          profile_id: profileId,
+          updated_at: new Date().toISOString(),
+        } satisfies PrinterPlanBinding;
+        const bindingIndex = bindings.findIndex(
+          (candidate) => candidate.integration_id === claimPrint.integration_id,
+        );
+        if (bindingIndex >= 0) bindings[bindingIndex] = binding;
+        else bindings.push(binding);
+        this.setSetting("printer.plan_bindings", JSON.stringify(bindings));
+        return { kind: "claimed" as const, link: awaiting, attribution };
+      }
+      return { kind: "created" as const, link, attribution };
+    }, "immediate");
   }
 
   setAcceptedUnitCompletion(

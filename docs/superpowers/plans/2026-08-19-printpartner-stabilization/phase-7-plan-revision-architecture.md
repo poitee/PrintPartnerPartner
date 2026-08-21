@@ -564,8 +564,9 @@ Printer verification parses legacy Part and unit coordinates only at the JSON
 boundary, resolves them against one request-scoped accepted snapshot, and passes
 tokens to one outer `IMMEDIATE` command. That command rereads the accepted
 aggregate, rereads and compares the Checkoff link, validates prefix decisions,
-and commits Progress, link state, and outcome events together. GET and failed
-verification do not repair or rewrite legacy links.
+and commits Progress, link state, and outcome events together. Failed
+verification does not repair or rewrite legacy links. The printer Checkoff GET
+repair described below is a separate command and never writes Progress.
 PostgreSQL fails closed before any command read because this unit has no native
 transaction implementation there. Logs and public errors expose only stable,
 coarse fields.
@@ -579,9 +580,9 @@ boundaries.
 The cut deletes `patchPartProgress`, `patchPartAssembled`,
 `ensureProgressForPart`, `getCheckoff`, `archiveProfile`,
 `applyCheckoffUnits`, and the prefix compatibility helper. Later summary work
-also deletes `printUnitTotals`. `printUnitsByPartId` remains for merge export and
-legacy Checkoff name mapping. Plate, printer queue and link schema, and the
-filesystem remain deferred.
+also deletes `printUnitTotals`. Merge export remains the only
+`printUnitsByPartId` caller after the printer attribution cut described below.
+Plate, printer queue and link schema, and the filesystem remain deferred.
 
 The accepted Progress summary foundation adds one private bounded batch reader
 without changing routes, contracts, callers, or UI. It accepts at most 64
@@ -686,6 +687,44 @@ accepted state, archive only active complete ready Plans with a positive total,
 and merge only `last_used_at` from delayed touch responses. The old repository
 `getProfile`, `listProfiles`, and `printUnitTotals` methods no longer exist.
 
+## Accepted printer attribution
+
+Host-observed auto-create, explicit unattributed claim, and empty-link repair use
+one pure accepted attribution model. The model keys each printer observation by
+input occurrence. Exact case-insensitive Required-unit `objectName` matches run
+before legacy filename matches, so a legacy observation cannot consume a unit
+reserved by a later exact observation. Legacy matching succeeds only when the
+filename identifies one accepted Part. The model consumes each included,
+required, incomplete unit once and preserves unmatched duplicate observations
+in input order. A recognized completed canonical name suppresses the fallback
+filename.
+
+One repository command owns the SQLite `IMMEDIATE` transaction. The command
+rereads the accepted Plan state inside the transaction, computes attribution,
+and either creates an auto watching link, claims an exact open unattributed
+print, or repairs an exact expected empty awaiting link. A claim commits the
+awaiting link, matching claim history, and printer Plan binding together. The
+repair is durable. GET filters the requested Plan, integration, and state before
+repair and never returns coordinates that exist only in memory. PostgreSQL
+returns `transaction_unavailable` before the command runs a query. Empty,
+compatibility-dirty, uninitialized, unmatched, and unavailable accepted states
+do not create a link or write Progress.
+
+An empty watching or awaiting link still counts as active production. Apply
+returns `production_active` without changing the accepted basis or reattributing
+the link. GET and claim return generic `500` responses for integrity and
+unexpected command failures. Auto-reconcile keeps its normal `200` response
+because host reconciliation may already have committed an update. Those error
+logs contain only stable failure classes and coarse IDs.
+
+The Checkoff link schema and `PrinterCheckoffUnit` wire coordinates do not
+change. Verification still resolves those coordinates to accepted unit tokens
+inside its atomic command. Browser proposal behavior, upload and Bambu
+contracts, and the SQL workflow do not change. Focused attribution, command,
+route, parser, verification, Apply, and caller-inventory coverage passed 118
+tests. The full server suite passed 163 files with one file skipped, 1275 tests
+passed, and 3 tests skipped. Server typecheck and root lint passed.
+
 ## Module shape
 
 ```ts
@@ -697,6 +736,8 @@ setAcceptedUnitCompletion(command): SetAcceptedUnitCompletionResult
 setAcceptedUnitAssembly(command): SetAcceptedUnitAssemblyResult
 archiveAcceptedPlan(command): ArchiveAcceptedPlanResult
 verifyAcceptedPrint(command): VerifyAcceptedPrintResult
+resolveAcceptedPrinterAttribution(snapshot, observation): AcceptedPrinterAttribution
+materializeAcceptedPrinterLink(command): MaterializeAcceptedPrinterLinkResult
 recomputePlanDraft(buildId, actorId): PlanDraft
 applyManifestToPlanDraft(draftId): PlanDraft
 diffPlanDraft(draftId): PlanDraftDiff

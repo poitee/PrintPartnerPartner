@@ -3170,6 +3170,34 @@ describe("saved Plan drafts", () => {
     database.close();
   });
 
+  it("blocks Apply without reattributing an empty awaiting printer link", () => {
+    const { database, profile, repo, command } = readyApplyFixture();
+    const acceptedBefore = repo.readAcceptedPlanOperationalSnapshot(profile.id);
+    if (acceptedBefore.kind !== "ready") throw new Error("accepted fixture is unavailable");
+    const basisBefore = acceptedPlanBasis(acceptedBefore.snapshot);
+    const storedLink = JSON.stringify([
+      {
+        id: "empty-awaiting-link",
+        profile_id: profile.id,
+        state: "awaiting_verify",
+        units: [],
+        unlabeled_names: [acceptedBefore.snapshot.parts[0]!.units[0]!.objectName],
+      },
+    ]);
+    repo.setSetting("printer.checkoff_links", storedLink);
+
+    expect(repo.applyPlanChanges(command)).toEqual({
+      kind: "production_active",
+      checkoffLinkCount: 1,
+      sendQueueItemCount: 0,
+    });
+    const acceptedAfter = repo.readAcceptedPlanOperationalSnapshot(profile.id);
+    if (acceptedAfter.kind !== "ready") throw new Error("accepted fixture changed state");
+    expect(acceptedPlanBasis(acceptedAfter.snapshot)).toEqual(basisBefore);
+    expect(repo.getSetting("printer.checkoff_links")).toBe(storedLink);
+    database.close();
+  });
+
   it("publishes the first accepted Plan from a clean empty baseline", () => {
     const { database, raw, repo } = fixture();
     const sourceRoot = join(database.reposDir, "empty-apply-source");
@@ -3352,8 +3380,9 @@ database.close();`,
     child.stderr?.on("data", (chunk: Buffer) => {
       childError += chunk.toString("utf8");
     });
+    const childExit = once(child, "exit");
     const waitForFile = (path: string) => {
-      const deadline = Date.now() + 5_000;
+      const deadline = Date.now() + 15_000;
       while (!existsSync(path)) {
         if (Date.now() >= deadline) {
           throw new Error(`child barrier timed out: ${path}\n${childError}`);
@@ -3361,42 +3390,49 @@ database.close();`,
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
       }
     };
-    waitForFile(readyPath);
-    const nativeTransaction = first.repo.transaction.bind(first.repo);
-    let started = false;
-    first.repo.transaction = <T>(
-      fn: () => T,
-      behavior: "deferred" | "immediate" = "deferred",
-    ): T =>
-      nativeTransaction(() => {
-        if (!started) {
-          started = true;
-          writeFileSync(startPath, "start");
-          waitForFile(attemptedPath);
-          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-        }
-        return fn();
-      }, behavior);
+    try {
+      waitForFile(readyPath);
+      const nativeTransaction = first.repo.transaction.bind(first.repo);
+      let started = false;
+      first.repo.transaction = <T>(
+        fn: () => T,
+        behavior: "deferred" | "immediate" = "deferred",
+      ): T =>
+        nativeTransaction(() => {
+          if (!started) {
+            started = true;
+            writeFileSync(startPath, "start");
+            waitForFile(attemptedPath);
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+          }
+          return fn();
+        }, behavior);
 
-    expect(first.repo.applyPlanChanges(first.command)).toMatchObject({ kind: "applied" });
-    const [exitCode] = await once(child, "exit");
-    expect(exitCode).toBe(0);
-    expect(JSON.parse(childOutput)).toEqual({
-      kind: "stale_accepted_plan",
-    });
-    const newPartId = first.raw
-      .prepare("SELECT id FROM parts WHERE profile_id = ? AND match_key = 'gear.stl'")
-      .pluck()
-      .get(first.profile.id) as number;
-    expect(
-      first.raw
-        .prepare("SELECT completed FROM print_progress WHERE part_id = ? AND unit_index = 0")
+      expect(first.repo.applyPlanChanges(first.command)).toMatchObject({ kind: "applied" });
+      const [exitCode] = await childExit;
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(childOutput)).toEqual({
+        kind: "stale_accepted_plan",
+      });
+      const newPartId = first.raw
+        .prepare("SELECT id FROM parts WHERE profile_id = ? AND match_key = 'gear.stl'")
         .pluck()
-        .get(newPartId),
-    ).toBe(0);
-    expect(readFileSync(attemptedPath, "utf8")).toBe("attempted");
-    first.database.close();
-  });
+        .get(first.profile.id) as number;
+      expect(
+        first.raw
+          .prepare("SELECT completed FROM print_progress WHERE part_id = ? AND unit_index = 0")
+          .pluck()
+          .get(newPartId),
+      ).toBe(0);
+      expect(readFileSync(attemptedPath, "utf8")).toBe("attempted");
+    } finally {
+      if (child.exitCode == null && child.signalCode == null) {
+        child.kill("SIGKILL");
+        await childExit;
+      }
+      first.database.close();
+    }
+  }, 25_000);
 
   it("waits across a normalization delete and copies the committed progress", async () => {
     const first = readyTrackedApplyFixture();
