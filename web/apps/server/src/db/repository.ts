@@ -150,6 +150,13 @@ import {
   publishedPlanPartsMatch,
   type PlanPublicationBaseUnit,
 } from "../services/plan-publication.js";
+import {
+  canonicalWorkingSources,
+  workingSourceSelection,
+  workingSourcesEqual,
+  type WorkingSource,
+  type WorkingSourceSelection,
+} from "../services/working-plan-sources.js";
 
 function docTitleFromPath(path: string): string {
   const base = basename(path);
@@ -390,6 +397,14 @@ export type RebasePlanDraftResult =
   | { readonly kind: "not_found" }
   | { readonly kind: "no_layers" | "no_stls" | "would_wipe" }
   | { readonly kind: "transaction_unavailable" };
+
+export type ReplaceWorkingPlanSourcesResult =
+  | {
+      readonly kind: "updated" | "unchanged";
+      readonly selection: WorkingSourceSelection;
+    }
+  | { readonly kind: "conflict"; readonly selection: WorkingSourceSelection }
+  | { readonly kind: "not_found" | "build_archived" | "transaction_unavailable" };
 
 type StoredRebasePlanDraftResult = Extract<
   RebasePlanDraftResult,
@@ -6112,6 +6127,122 @@ export class AppRepository {
       .where(eq(this.schema.profileLayers.id, layerId))
       .run();
     this.markProfileConfigModified(layer.profileId);
+  }
+
+  readWorkingPlanSources(profileId: number): WorkingSourceSelection | null {
+    const profile = this.db
+      .select({ id: this.schema.buildProfiles.id })
+      .from(this.schema.buildProfiles)
+      .where(
+        and(
+          eq(this.schema.buildProfiles.tenantId, this.tenantId),
+          eq(this.schema.buildProfiles.id, profileId),
+        ),
+      )
+      .get();
+    if (!profile) return null;
+    const layers = this.db
+      .select()
+      .from(this.schema.profileLayers)
+      .where(eq(this.schema.profileLayers.profileId, profileId))
+      .orderBy(asc(this.schema.profileLayers.layerOrder), asc(this.schema.profileLayers.id))
+      .all();
+    const sources = layers.map((layer): WorkingSource => {
+      if (layer.tenantId !== this.tenantId || layer.projectId == null) {
+        throw new Error("Working Source selection ownership is corrupt");
+      }
+      const source = this.db
+        .select({ id: this.schema.projects.id })
+        .from(this.schema.projects)
+        .where(
+          and(
+            eq(this.schema.projects.tenantId, this.tenantId),
+            eq(this.schema.projects.id, layer.projectId),
+          ),
+        )
+        .get();
+      if (!source) throw new Error("Working Source selection ownership is corrupt");
+      if (layer.layerType !== "base" && layer.layerType !== "addon") {
+        throw new Error("Working Source selection kind is corrupt");
+      }
+      return { kind: layer.layerType, sourceId: source.id };
+    });
+    return workingSourceSelection(sources);
+  }
+
+  replaceWorkingPlanSources(command: {
+    readonly profileId: number;
+    readonly expectedDigest: string;
+    readonly sources: readonly WorkingSource[];
+  }): ReplaceWorkingPlanSourcesResult {
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+    if (!/^[a-f0-9]{64}$/.test(command.expectedDigest)) {
+      throw new Error("Expected Working Source digest is invalid");
+    }
+    const target = workingSourceSelection(canonicalWorkingSources(command.sources));
+    return this.transaction((): ReplaceWorkingPlanSourcesResult => {
+      const profile = this.db
+        .select()
+        .from(this.schema.buildProfiles)
+        .where(
+          and(
+            eq(this.schema.buildProfiles.tenantId, this.tenantId),
+            eq(this.schema.buildProfiles.id, command.profileId),
+          ),
+        )
+        .get();
+      if (!profile) return { kind: "not_found" };
+      if (profile.archivedAt != null) return { kind: "build_archived" };
+      if (target.sources.length > 0) {
+        const sourceIds = target.sources.map((source) => source.sourceId);
+        const ownedSources = this.db
+          .select({ id: this.schema.projects.id })
+          .from(this.schema.projects)
+          .where(
+            and(
+              eq(this.schema.projects.tenantId, this.tenantId),
+              inArray(this.schema.projects.id, sourceIds),
+            ),
+          )
+          .all();
+        if (ownedSources.length !== sourceIds.length) return { kind: "not_found" };
+      }
+      const current = this.readWorkingPlanSources(command.profileId);
+      if (!current) return { kind: "not_found" };
+      if (workingSourcesEqual(current.sources, target.sources)) {
+        return { kind: "unchanged", selection: current };
+      }
+      if (current.digest !== command.expectedDigest) {
+        return { kind: "conflict", selection: current };
+      }
+      this.db
+        .delete(this.schema.profileLayers)
+        .where(
+          and(
+            eq(this.schema.profileLayers.tenantId, this.tenantId),
+            eq(this.schema.profileLayers.profileId, command.profileId),
+          ),
+        )
+        .run();
+      target.sources.forEach((source, layerOrder) => {
+        this.db
+          .insert(this.schema.profileLayers)
+          .values({
+            tenantId: this.tenantId,
+            profileId: command.profileId,
+            layerOrder,
+            layerType: source.kind,
+            projectId: source.sourceId,
+          })
+          .run();
+      });
+      this.markProfileConfigModified(command.profileId);
+      const persisted = this.readWorkingPlanSources(command.profileId);
+      if (!persisted || !workingSourcesEqual(persisted.sources, target.sources)) {
+        throw new Error("Working Source selection verification failed");
+      }
+      return { kind: "updated", selection: persisted };
+    }, "immediate");
   }
 
   replaceLayer(layerId: number, projectId: number): void {

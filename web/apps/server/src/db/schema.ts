@@ -1032,7 +1032,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 25;
+export const currentSchemaVersion = 26;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -1577,28 +1577,6 @@ export const schemaMigrations: string[] = [
     END`,
   `CREATE TRIGGER IF NOT EXISTS trg_parts_invalidate_accepted_revision_delete
     AFTER DELETE ON parts
-    BEGIN
-      UPDATE build_profiles
-         SET accepted_plan_revision_id = NULL
-       WHERE id = OLD.profile_id AND tenant_id = OLD.tenant_id;
-    END`,
-  `CREATE TRIGGER IF NOT EXISTS trg_profile_layers_invalidate_accepted_revision_insert
-    AFTER INSERT ON profile_layers
-    BEGIN
-      UPDATE build_profiles
-         SET accepted_plan_revision_id = NULL
-       WHERE id = NEW.profile_id AND tenant_id = NEW.tenant_id;
-    END`,
-  `CREATE TRIGGER IF NOT EXISTS trg_profile_layers_invalidate_accepted_revision_update
-    AFTER UPDATE ON profile_layers
-    BEGIN
-      UPDATE build_profiles
-         SET accepted_plan_revision_id = NULL
-       WHERE (id = OLD.profile_id AND tenant_id = OLD.tenant_id)
-          OR (id = NEW.profile_id AND tenant_id = NEW.tenant_id);
-    END`,
-  `CREATE TRIGGER IF NOT EXISTS trg_profile_layers_invalidate_accepted_revision_delete
-    AFTER DELETE ON profile_layers
     BEGIN
       UPDATE build_profiles
          SET accepted_plan_revision_id = NULL

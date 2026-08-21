@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
 import { getDb, SqliteDatabase } from "./client.js";
+import { repairCompatibilityDirtyBuilds } from "./compatibility-dirty-repair.js";
 import { AppRepository } from "./repository.js";
+import { backfillCurrentRequiredUnitSets } from "./required-units.js";
+import { digestPlanRevisionParts } from "../services/plan-publication.js";
 
 const tempDirs: string[] = [];
 
@@ -662,7 +665,7 @@ describe("accepted Plan revision backfill", () => {
     migrated.close();
   });
 
-  it("marks legacy Part and layer writes as compatibility-dirty", () => {
+  it("keeps accepted Source selection separate from compatibility Part dirtiness", () => {
     const { dir, database } = createDatabase();
     const raw = rawDatabase(database);
     const partProfile = repository(database).createProfile("Mutable Part projection");
@@ -690,7 +693,7 @@ describe("accepted Plan revision backfill", () => {
       .run(layerProfile.id);
 
     expect(repo.getAcceptedPlanRevision(partProfile.id)).toBeNull();
-    expect(repo.getAcceptedPlanRevision(layerProfile.id)).toBeNull();
+    expect(repo.getAcceptedPlanRevision(layerProfile.id)?.id).toBe(layerRevision.id);
     expect(
       rawDatabase(migrated)
         .prepare(
@@ -712,7 +715,519 @@ describe("accepted Plan revision backfill", () => {
     migrated.close();
   });
 
-  it("invalidates both Builds when a compatibility row changes owner", () => {
+  it("repairs a v25 dirty compatibility baseline with fresh required-unit identity", () => {
+    const { dir, database } = createDatabase();
+    const raw = rawDatabase(database);
+    const profile = repository(database).createProfile("Dirty v25 repair");
+    const partId = Number(
+      raw
+        .prepare(
+          `INSERT INTO parts (
+            tenant_id, profile_id, match_key, relative_path, filename, source_layer,
+            status, role, quantity_auto, quantity_effective, included, notes
+          ) VALUES ('default', ?, 'repair', '', 'repair.stl', '', 'base', 'primary', 2, 2, 1, '')`,
+        )
+        .run(profile.id).lastInsertRowid,
+    );
+    raw.prepare(
+      `INSERT INTO print_progress (tenant_id, part_id, unit_index, completed, assembled)
+       VALUES ('default', ?, 0, 1, 1)`,
+    ).run(partId);
+    downgradeToV18(raw);
+    database.close();
+
+    const initialTokens = [
+      "ppu_00000000000000000000000000000001",
+      "ppu_00000000000000000000000000000002",
+    ];
+    const migrated = new SqliteDatabase(dir, {
+      now: () => "2026-08-20T10:00:00.000Z",
+      tokenFactory: () => {
+        const token = initialTokens.shift();
+        if (!token) throw new Error("initial token exhausted");
+        return token;
+      },
+    });
+    migrated.connect();
+    const migratedRepo = repository(migrated);
+    const firstRevision = migratedRepo.getAcceptedPlanRevision(profile.id)!;
+    const firstMapping = migratedRepo.readCurrentRequiredUnitSet(profile.id);
+    if (firstMapping.kind !== "ready") throw new Error("initial mapping not ready");
+    migratedRepo.patchPart(partId, { included: false });
+    const migratedRaw = rawDatabase(migrated);
+    migratedRaw
+      .prepare(
+        `UPDATE app_settings SET value = '25'
+          WHERE tenant_id = 'default' AND key = 'schema_version'`,
+      )
+      .run();
+    expect(
+      migratedRaw
+        .prepare(
+          `SELECT accepted_plan_revision_id, accepted_plan_version
+             FROM build_profiles WHERE id = ?`,
+        )
+        .get(profile.id),
+    ).toEqual({ accepted_plan_revision_id: null, accepted_plan_version: 1 });
+    const partsBefore = migratedRaw.prepare("SELECT * FROM parts WHERE profile_id = ?").all(
+      profile.id,
+    );
+    const progressBefore = migratedRaw
+      .prepare("SELECT * FROM print_progress WHERE part_id = ? ORDER BY unit_index")
+      .all(partId);
+    migrated.close();
+
+    const repairTokens = [
+      "ppu_00000000000000000000000000000003",
+      "ppu_00000000000000000000000000000004",
+    ];
+    const repaired = new SqliteDatabase(dir, {
+      now: () => "2026-08-20T11:00:00.000Z",
+      tokenFactory: () => {
+        const token = repairTokens.shift();
+        if (!token) throw new Error("repair token exhausted");
+        return token;
+      },
+    });
+    repaired.connect();
+    const repairedRepo = repository(repaired);
+    const repairedRaw = rawDatabase(repaired);
+    const accepted = repairedRepo.getAcceptedPlanRevision(profile.id);
+    const mapping = repairedRepo.readCurrentRequiredUnitSet(profile.id);
+
+    expect(accepted).toMatchObject({
+      parentRevisionId: firstRevision.id,
+      planVersion: 2,
+      provenanceKind: "legacy",
+      parts: [expect.objectContaining({ projectionPartId: partId, included: false })],
+    });
+    expect(repairedRaw.prepare("SELECT * FROM parts WHERE profile_id = ?").all(profile.id)).toEqual(
+      partsBefore,
+    );
+    expect(
+      repairedRaw
+        .prepare("SELECT * FROM print_progress WHERE part_id = ? ORDER BY unit_index")
+        .all(partId),
+    ).toEqual(progressBefore);
+    expect(mapping).toMatchObject({ kind: "ready", units: expect.any(Array) });
+    if (mapping.kind !== "ready") throw new Error("repaired mapping not ready");
+    expect(mapping.revisionId).toBe(accepted?.id);
+    expect(mapping.units.map((unit) => unit.token)).toEqual([
+      "ppu_00000000000000000000000000000003",
+      "ppu_00000000000000000000000000000004",
+    ]);
+    expect(mapping.units.map((unit) => unit.required)).toEqual([false, false]);
+    expect(mapping.units.map((unit) => [unit.completed, unit.assembled])).toEqual([
+      [true, true],
+      [false, false],
+    ]);
+    expect(mapping.units.map((unit) => unit.token)).not.toEqual(
+      firstMapping.units.map((unit) => unit.token),
+    );
+    const repairedRevisionCount = repairedRaw
+      .prepare("SELECT count(*) AS count FROM plan_revisions WHERE profile_id = ?")
+      .get(profile.id);
+    const repairedUnitCount = repairedRaw
+      .prepare("SELECT count(*) AS count FROM required_units WHERE profile_id = ?")
+      .get(profile.id);
+    repaired.close();
+
+    const reopened = new SqliteDatabase(dir, {
+      tokenFactory: () => {
+        throw new Error("idempotent reopen allocated a token");
+      },
+    });
+    reopened.connect();
+    expect(repository(reopened).getAcceptedPlanRevision(profile.id)?.id).toBe(accepted?.id);
+    expect(
+      rawDatabase(reopened)
+        .prepare("SELECT count(*) AS count FROM plan_revisions WHERE profile_id = ?")
+        .get(profile.id),
+    ).toEqual(repairedRevisionCount);
+    expect(
+      rawDatabase(reopened)
+        .prepare("SELECT count(*) AS count FROM required_units WHERE profile_id = ?")
+        .get(profile.id),
+    ).toEqual(repairedUnitCount);
+    reopened.close();
+  });
+
+  it("repairs an empty positive-version Build and leaves a truly empty Build untouched", () => {
+    const { dir, database } = createDatabase();
+    const repo = repository(database);
+    const dirty = repo.createProfile("Empty dirty Build");
+    const untouched = repo.createProfile("Empty new Build");
+    const raw = rawDatabase(database);
+    raw.prepare(
+      "UPDATE build_profiles SET accepted_plan_version = 3 WHERE id = ?",
+    ).run(dirty.id);
+    raw.prepare(
+      `UPDATE app_settings SET value = '25'
+        WHERE tenant_id = 'default' AND key = 'schema_version'`,
+    ).run();
+    database.close();
+
+    const repaired = new SqliteDatabase(dir);
+    repaired.connect();
+    const repairedRepo = repository(repaired);
+    expect(repairedRepo.getAcceptedPlanRevision(dirty.id)).toMatchObject({
+      planVersion: 4,
+      provenanceKind: "legacy",
+      parts: [],
+    });
+    expect(repairedRepo.readCurrentRequiredUnitSet(dirty.id)).toMatchObject({
+      kind: "ready",
+      units: [],
+    });
+    expect(repairedRepo.getAcceptedPlanRevision(untouched.id)).toBeNull();
+    expect(repairedRepo.readCurrentRequiredUnitSet(untouched.id)).toEqual({
+      kind: "unavailable",
+      reason: "no_accepted_revision",
+    });
+    repaired.close();
+  });
+
+  it("upgrades a clean v25 Build without replacing accepted identity", () => {
+    const { dir, database } = createDatabase();
+    const raw = rawDatabase(database);
+    const profile = repository(database).createProfile("Clean v25 Build");
+    raw.prepare(
+      `INSERT INTO parts (
+        tenant_id, profile_id, match_key, relative_path, filename, source_layer,
+        status, role, quantity_auto, quantity_effective, included, notes
+      ) VALUES ('default', ?, 'clean', '', 'clean.stl', '', 'base', 'primary', 1, 1, 1, '')`,
+    ).run(profile.id);
+    backfillAcceptedPlanRevisions(raw, "2026-08-20T10:00:00.000Z");
+    backfillCurrentRequiredUnitSets(raw, {
+      now: () => "2026-08-20T10:00:00.000Z",
+      tokenFactory: () => "ppu_00000000000000000000000000000001",
+    });
+    const acceptedId = repository(database).getAcceptedPlanRevision(profile.id)!.id;
+    const revisionsBefore = raw
+      .prepare("SELECT * FROM plan_revisions WHERE profile_id = ? ORDER BY id")
+      .all(profile.id);
+    const unitsBefore = raw
+      .prepare("SELECT * FROM required_units WHERE profile_id = ? ORDER BY token")
+      .all(profile.id);
+    raw.exec(`
+      CREATE TRIGGER trg_profile_layers_invalidate_accepted_revision_insert
+      AFTER INSERT ON profile_layers
+      BEGIN
+        UPDATE build_profiles SET accepted_plan_revision_id = NULL
+         WHERE id = NEW.profile_id AND tenant_id = NEW.tenant_id;
+      END;
+      CREATE TRIGGER trg_profile_layers_invalidate_accepted_revision_update
+      AFTER UPDATE ON profile_layers
+      BEGIN
+        UPDATE build_profiles SET accepted_plan_revision_id = NULL
+         WHERE id = NEW.profile_id AND tenant_id = NEW.tenant_id;
+      END;
+      CREATE TRIGGER trg_profile_layers_invalidate_accepted_revision_delete
+      AFTER DELETE ON profile_layers
+      BEGIN
+        UPDATE build_profiles SET accepted_plan_revision_id = NULL
+         WHERE id = OLD.profile_id AND tenant_id = OLD.tenant_id;
+      END;
+      UPDATE app_settings SET value = '25'
+       WHERE tenant_id = 'default' AND key = 'schema_version';
+    `);
+    database.close();
+
+    const upgraded = new SqliteDatabase(dir, {
+      tokenFactory: () => {
+        throw new Error("clean migration allocated a token");
+      },
+    });
+    upgraded.connect();
+    const upgradedRaw = rawDatabase(upgraded);
+    expect(repository(upgraded).getAcceptedPlanRevision(profile.id)?.id).toBe(acceptedId);
+    expect(
+      upgradedRaw.prepare("SELECT * FROM plan_revisions WHERE profile_id = ? ORDER BY id").all(
+        profile.id,
+      ),
+    ).toEqual(revisionsBefore);
+    expect(
+      upgradedRaw.prepare("SELECT * FROM required_units WHERE profile_id = ? ORDER BY token").all(
+        profile.id,
+      ),
+    ).toEqual(unitsBefore);
+    expect(
+      upgradedRaw
+        .prepare(
+          `SELECT count(*) AS count FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name LIKE 'trg_profile_layers_invalidate_accepted_revision_%'`,
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    upgraded.close();
+  });
+
+  it("rolls back a failed repair before dropping legacy layer invalidation", () => {
+    const { dir, database } = createDatabase();
+    const profile = repository(database).createProfile("Repair rollback");
+    const raw = rawDatabase(database);
+    raw.prepare(
+      `INSERT INTO parts (
+        tenant_id, profile_id, match_key, relative_path, filename, source_layer,
+        status, role, quantity_auto, quantity_effective, included, notes
+      ) VALUES ('default', ?, 'rollback', '', 'rollback.stl', '', 'base', 'primary', 2, 2, 1, '')`,
+    ).run(profile.id);
+    raw.exec(`
+      CREATE TRIGGER trg_profile_layers_invalidate_accepted_revision_insert
+      AFTER INSERT ON profile_layers
+      BEGIN
+        UPDATE build_profiles
+           SET accepted_plan_revision_id = NULL
+         WHERE id = NEW.profile_id AND tenant_id = NEW.tenant_id;
+      END;
+    `);
+    raw.prepare(
+      `UPDATE app_settings SET value = '25'
+        WHERE tenant_id = 'default' AND key = 'schema_version'`,
+    ).run();
+    database.close();
+
+    const failing = new SqliteDatabase(dir, {
+      tokenFactory: () => {
+        throw new Error("repair token failure");
+      },
+    });
+    expect(() => failing.connect()).toThrow("repair token failure");
+    failing.close();
+
+    const afterFailure = new Database(join(dir, "print-partner.db"));
+    expect(
+      afterFailure
+        .prepare(
+          `SELECT accepted_plan_revision_id, accepted_plan_version
+             FROM build_profiles WHERE id = ?`,
+        )
+        .get(profile.id),
+    ).toEqual({ accepted_plan_revision_id: null, accepted_plan_version: 0 });
+    expect(
+      afterFailure
+        .prepare("SELECT count(*) AS count FROM plan_revisions WHERE profile_id = ?")
+        .get(profile.id),
+    ).toEqual({ count: 0 });
+    expect(
+      afterFailure
+        .prepare(
+          `SELECT count(*) AS count FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name = 'trg_profile_layers_invalidate_accepted_revision_insert'`,
+        )
+        .get(),
+    ).toEqual({ count: 1 });
+    afterFailure.close();
+  });
+
+  it("fails closed on a v25 dirty Part owned by another tenant", () => {
+    const { dir, database } = createDatabase();
+    const raw = rawDatabase(database);
+    const profile = repository(database).createProfile("Repair tenant guard");
+    raw.prepare(
+      `INSERT INTO parts (
+        tenant_id, profile_id, match_key, relative_path, filename, source_layer,
+        status, role, quantity_auto, quantity_effective, included, notes
+      ) VALUES ('farm-b', ?, 'foreign', '', 'foreign.stl', '', 'base', 'primary', 1, 1, 1, '')`,
+    ).run(profile.id);
+    raw.prepare(
+      `UPDATE app_settings SET value = '25'
+        WHERE tenant_id = 'default' AND key = 'schema_version'`,
+    ).run();
+    database.close();
+
+    const upgraded = new SqliteDatabase(dir);
+    expect(() => upgraded.connect()).toThrow(/tenant does not match owning Build/i);
+    upgraded.close();
+  });
+
+  it("repairs a layer race before removing invalidation and stamping v26", () => {
+    const { dir, database } = createDatabase();
+    const raw = rawDatabase(database);
+    const profile = repository(database).createProfile("Layer cutover race");
+    const layerId = Number(
+      raw
+        .prepare(
+          `INSERT INTO profile_layers (tenant_id, profile_id, layer_order, layer_type, project_id)
+           VALUES ('default', ?, 0, 'base', NULL)`,
+        )
+        .run(profile.id).lastInsertRowid,
+    );
+    backfillAcceptedPlanRevisions(raw, "2026-08-20T10:00:00.000Z");
+    backfillCurrentRequiredUnitSets(raw, { now: () => "2026-08-20T10:00:00.000Z" });
+    const firstRevisionId = repository(database).getAcceptedPlanRevision(profile.id)!.id;
+    raw.exec(`
+      CREATE TRIGGER trg_profile_layers_invalidate_accepted_revision_update
+      AFTER UPDATE ON profile_layers
+      BEGIN
+        UPDATE build_profiles SET accepted_plan_revision_id = NULL
+         WHERE id = NEW.profile_id AND tenant_id = NEW.tenant_id;
+      END;
+      UPDATE app_settings SET value = '25'
+       WHERE tenant_id = 'default' AND key = 'schema_version';
+    `);
+    database.close();
+    const racer = new Database(join(dir, "print-partner.db"));
+    racer.pragma("journal_mode = WAL");
+    racer.pragma("foreign_keys = ON");
+    let raced = false;
+    const upgraded = new SqliteDatabase(dir, {
+      beforeCompatibilityCutover: () => {
+        racer.prepare("UPDATE profile_layers SET layer_order = 1 WHERE id = ?").run(layerId);
+        raced = true;
+      },
+    });
+    upgraded.connect();
+    const accepted = repository(upgraded).getAcceptedPlanRevision(profile.id);
+    expect(raced).toBe(true);
+    expect(accepted).toMatchObject({ parentRevisionId: firstRevisionId, planVersion: 2 });
+    expect(
+      rawDatabase(upgraded)
+        .prepare("SELECT value FROM app_settings WHERE key = 'schema_version'")
+        .get(),
+    ).toEqual({ value: "26" });
+    expect(
+      rawDatabase(upgraded)
+        .prepare(
+          `SELECT count(*) AS count FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name = 'trg_profile_layers_invalidate_accepted_revision_update'`,
+        )
+        .get(),
+    ).toEqual({ count: 0 });
+    racer.close();
+    upgraded.close();
+  });
+
+  it("rejects a tenant-poisoned accepted input before repair publication", () => {
+    const { dir, database } = createDatabase();
+    const raw = rawDatabase(database);
+    const profile = repository(database).createProfile("Poisoned accepted input");
+    const inputSetId = Number(
+      raw
+        .prepare(
+          `INSERT INTO plan_revision_input_sets (
+            tenant_id, profile_id, input_set_digest, expected_input_count,
+            format_version, recorded_at, published_at
+          ) VALUES ('default', ?, ?, 0, 2, ?, ?)`,
+        )
+        .run(
+          profile.id,
+          "b".repeat(64),
+          "2026-08-20T10:00:00.000Z",
+          "2026-08-20T10:00:00.000Z",
+        ).lastInsertRowid,
+    );
+    raw.prepare(
+      `INSERT INTO plan_accepted_input_sets (tenant_id, profile_id, input_set_id, accepted_at)
+       VALUES ('farm-b', ?, ?, ?)`,
+    ).run(profile.id, inputSetId, "2026-08-20T10:00:00.000Z");
+    raw.prepare(
+      `INSERT INTO parts (
+        tenant_id, profile_id, match_key, relative_path, filename, source_layer,
+        status, role, quantity_auto, quantity_effective, included, notes
+      ) VALUES ('default', ?, 'poisoned', '', 'poisoned.stl', '', 'base', 'primary', 1, 1, 1, '')`,
+    ).run(profile.id);
+    raw.prepare(
+      `UPDATE app_settings SET value = '25'
+        WHERE tenant_id = 'default' AND key = 'schema_version'`,
+    ).run();
+    database.close();
+
+    const upgraded = new SqliteDatabase(dir);
+    expect(() => upgraded.connect()).toThrow(/accepted input set .* does not belong/i);
+    upgraded.close();
+    const inspect = new Database(join(dir, "print-partner.db"));
+    expect(
+      inspect
+        .prepare(
+          `SELECT accepted_plan_revision_id, accepted_plan_version
+             FROM build_profiles WHERE id = ?`,
+        )
+        .get(profile.id),
+    ).toEqual({ accepted_plan_revision_id: null, accepted_plan_version: 0 });
+    expect(inspect.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get()).toEqual(
+      { value: "25" },
+    );
+    expect(
+      inspect
+        .prepare(
+          `SELECT tenant_id, input_set_id
+             FROM plan_accepted_input_sets WHERE profile_id = ?`,
+        )
+        .get(profile.id),
+    ).toEqual({ tenant_id: "farm-b", input_set_id: inputSetId });
+    inspect.close();
+  });
+
+  it("rejects an empty negative accepted Plan version before v26", () => {
+    const { dir, database } = createDatabase();
+    const profile = repository(database).createProfile("Negative Plan version");
+    const raw = rawDatabase(database);
+    raw.prepare("UPDATE build_profiles SET accepted_plan_version = -1 WHERE id = ?").run(
+      profile.id,
+    );
+    raw.prepare(
+      `UPDATE app_settings SET value = '25'
+        WHERE tenant_id = 'default' AND key = 'schema_version'`,
+    ).run();
+    database.close();
+
+    const upgraded = new SqliteDatabase(dir);
+    expect(() => upgraded.connect()).toThrow(/invalid accepted Plan version/i);
+    upgraded.close();
+    const inspect = new Database(join(dir, "print-partner.db"));
+    expect(inspect.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get()).toEqual(
+      { value: "25" },
+    );
+    inspect.close();
+  });
+
+  it("counts only compatibility repairs that publish", () => {
+    const { database } = createDatabase();
+    const raw = rawDatabase(database);
+    const profile = repository(database).createProfile("Concurrent repair summary");
+    raw.prepare("UPDATE build_profiles SET accepted_plan_version = 1 WHERE id = ?").run(
+      profile.id,
+    );
+    const winnerRevisionId = Number(
+      raw
+        .prepare(
+          `INSERT INTO plan_revisions (
+            tenant_id, profile_id, revision_number, parent_revision_id, input_set_id,
+            provenance_kind, digest_format, snapshot_digest, created_by, accepted_by,
+            created_at, accepted_at
+          ) VALUES ('default', ?, 1, NULL, NULL, 'legacy', 'plan-revision-parts-v1', ?,
+                    'test', 'test', ?, ?)`,
+        )
+        .run(
+          profile.id,
+          digestPlanRevisionParts([]),
+          "2026-08-20T10:00:00.000Z",
+          "2026-08-20T10:00:00.000Z",
+        ).lastInsertRowid,
+    );
+    const result = repairCompatibilityDirtyBuilds(raw, {
+      beforeBuildRepair: (profileId) => {
+        raw.prepare(
+          `UPDATE build_profiles
+              SET accepted_plan_revision_id = ?, accepted_plan_version = 1
+            WHERE id = ?`,
+        ).run(winnerRevisionId, profileId);
+      },
+    });
+    expect(result).toEqual({
+      buildsRepaired: 0,
+      revisionsCreated: 0,
+      partsCaptured: 0,
+      unitsCreated: 0,
+    });
+    database.close();
+  });
+
+  it("invalidates Part owners but preserves accepted baselines across layer moves", () => {
     const { dir, database } = createDatabase();
     const raw = rawDatabase(database);
     const partFrom = repository(database).createProfile("Part from");
@@ -739,6 +1254,8 @@ describe("accepted Plan revision backfill", () => {
     const migrated = new SqliteDatabase(dir);
     migrated.connect();
     const migratedRaw = rawDatabase(migrated);
+    const layerFromRevisionId = repository(migrated).getAcceptedPlanRevision(layerFrom.id)!.id;
+    const layerToRevisionId = repository(migrated).getAcceptedPlanRevision(layerTo.id)!.id;
     migratedRaw.prepare("UPDATE parts SET profile_id = ? WHERE id = ?").run(
       partTo.id,
       Number(part.lastInsertRowid),
@@ -757,13 +1274,20 @@ describe("accepted Plan revision backfill", () => {
             ORDER BY id`,
         )
         .all(partFrom.id, partTo.id, layerFrom.id, layerTo.id),
-    ).toEqual(
-      [partFrom.id, partTo.id, layerFrom.id, layerTo.id].map((id) => ({
-        id,
-        accepted_plan_revision_id: null,
+    ).toEqual([
+      { id: partFrom.id, accepted_plan_revision_id: null, accepted_plan_version: 1 },
+      { id: partTo.id, accepted_plan_revision_id: null, accepted_plan_version: 1 },
+      {
+        id: layerFrom.id,
+        accepted_plan_revision_id: layerFromRevisionId,
         accepted_plan_version: 1,
-      })),
-    );
+      },
+      {
+        id: layerTo.id,
+        accepted_plan_revision_id: layerToRevisionId,
+        accepted_plan_version: 1,
+      },
+    ]);
     migrated.close();
   });
 });

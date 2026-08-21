@@ -1023,4 +1023,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 25;
+export const currentSchemaVersion = 26;

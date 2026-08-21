@@ -395,7 +395,7 @@ describe("schema v9-v13 (SQLite)", () => {
     });
   });
 
-  it("creates the v15-v25 tables and records schema version 25", () => {
+  it("creates the v15-v26 tables and records schema version 26", () => {
     withSqlite((sqlite) => {
       const tables = sqliteTableNames(sqlite);
       for (const table of [
@@ -414,7 +414,7 @@ describe("schema v9-v13 (SQLite)", () => {
         rawSqlite(sqlite)
           .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
           .get("default", "schema_version") as { value: string },
-      ).toMatchObject({ value: "25" });
+      ).toMatchObject({ value: "26" });
       expect(sqliteColumnNames(sqlite, "projects")).toContain(
         "current_source_revision_id",
       );
@@ -458,6 +458,20 @@ describe("schema v9-v13 (SQLite)", () => {
           "trg_plan_apply_requests_immutable_delete",
         ]),
       );
+      expect(triggers).toEqual(
+        expect.arrayContaining([
+          "trg_parts_invalidate_accepted_revision_insert",
+          "trg_parts_invalidate_accepted_revision_update",
+          "trg_parts_invalidate_accepted_revision_delete",
+        ]),
+      );
+      for (const trigger of [
+        "trg_profile_layers_invalidate_accepted_revision_insert",
+        "trg_profile_layers_invalidate_accepted_revision_update",
+        "trg_profile_layers_invalidate_accepted_revision_delete",
+      ]) {
+        expect(triggers).not.toContain(trigger);
+      }
     });
   });
 
@@ -1020,8 +1034,8 @@ function pgAddedColumns(table: string): string[] {
 
 describe("schema v9-v13 (Postgres DDL parity)", () => {
   it("keeps SQLite and Postgres schema_version constants in lockstep", () => {
-    expect(sqliteSchema.currentSchemaVersion).toBe(25);
-    expect(pgSchema.currentSchemaVersion).toBe(25);
+    expect(sqliteSchema.currentSchemaVersion).toBe(26);
+    expect(pgSchema.currentSchemaVersion).toBe(26);
   });
 
   it("creates every table declared in schema-pg.ts", () => {
@@ -1111,7 +1125,12 @@ describe("schema v9-v13 (Postgres DDL parity)", () => {
     expect(POSTGRES_DDL).toContain("trg_plan_revisions_immutable");
     expect(POSTGRES_DDL).toContain("trg_plan_revision_parts_immutable");
     expect(POSTGRES_DDL).toContain("trg_parts_invalidate_accepted_revision");
-    expect(POSTGRES_DDL).toContain("trg_profile_layers_invalidate_accepted_revision");
+    expect(POSTGRES_DDL).not.toMatch(
+      /CREATE TRIGGER trg_profile_layers_invalidate_accepted_revision/i,
+    );
+    expect(POSTGRES_DDL).toMatch(
+      /DROP TRIGGER IF EXISTS trg_profile_layers_invalidate_accepted_revision ON profile_layers/i,
+    );
     expect(POSTGRES_DDL).toContain("trg_plan_revision_part_projection_owner");
   });
 

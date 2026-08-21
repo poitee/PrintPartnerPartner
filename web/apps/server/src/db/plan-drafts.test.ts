@@ -2472,7 +2472,7 @@ describe("saved Plan drafts", () => {
             WHERE tenant_id = 'default' AND key = 'schema_version'`,
         )
         .get(),
-    ).toEqual({ value: "25" });
+    ).toEqual({ value: "26" });
     migrated.close();
   });
 
@@ -2551,7 +2551,7 @@ describe("saved Plan drafts", () => {
       (reopened as unknown as { sqlite: Database.Database }).sqlite
         .prepare("SELECT value FROM app_settings WHERE key = 'schema_version'")
         .get(),
-    ).toEqual({ value: "25" });
+    ).toEqual({ value: "26" });
     reopened.close();
   });
 

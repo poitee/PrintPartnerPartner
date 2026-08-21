@@ -216,8 +216,8 @@ One native SQLite transaction performs these operations:
 4. Clear the accepted pointer without changing its version. This write is
    temporary and remains inside the transaction.
 5. Publish the immutable revision, parts, and accepted Source input rows.
-6. Replace the accepted `profile_layers` projection and its pinned Source
-   revisions.
+6. Leave the working `profile_layers` selection unchanged. Accepted Source
+   input rows remain pinned to the published revision.
 7. Reconcile Required-unit tokens and their completion state.
 8. Refresh `parts` and `print_progress` compatibility projections.
 9. Compare and swap `(NULL, expected version)` to the new revision and the
@@ -331,6 +331,32 @@ The artifact digest comes from streamed STL bytes for new tracked drafts.
 Legacy or untracked rows may have no digest and therefore cannot claim exact
 content reconciliation.
 
+Unit 5a separates accepted state from working Source selection. SQLite repairs
+each compatibility-dirty v25 Build before removing Source-layer pointer
+invalidation. The repair snapshots the live compatibility Parts into a new
+legacy accepted revision, advances the Plan version, clears the obsolete
+accepted input selection, allocates fresh Build-owned Required-unit identities,
+and maps live Checkoff without changing Part IDs or progress rows. A null
+accepted pointer with a positive version is repaired even when the Build is
+empty. A null pointer at version zero is left alone only when no live Parts
+exist. Each Build repair is atomic and restart-safe. PostgreSQL has schema and
+trigger parity but performs no synthetic repair without native transactions.
+SQLite repeats the dirty repair behind a final immediate cutover barrier. That
+barrier validates Plan versions and accepted-input ownership, removes the
+legacy layer triggers, and records schema v26 in the same transaction. A layer
+write that commits before the barrier is repaired; one that arrives after the
+barrier observes the accepted and working separation.
+
+The ordered `plan-source-selection-v1` value is the working input authority.
+It is empty or contains one base Source followed by unique add-ons, with at
+most 64 Sources. `replaceWorkingPlanSources` validates tenant ownership and an
+active Build, compares the complete canonical target before the expected
+digest, and replaces the complete layer set in one SQLite immediate
+transaction. An exact retry returns unchanged even with an old expected
+digest. A different stale target returns conflict. The command changes only
+working layers and `config_modified_at`; accepted revisions, accepted input
+selection, drafts, compatibility Parts, and Checkoff stay unchanged.
+
 ## Module shape
 
 ```ts
@@ -367,8 +393,9 @@ replay.
    Checkoff. Unit 3b owns reconciliation and saved decisions.
 4. Add the atomic, idempotent apply command and refresh compatibility
    projections inside its transaction.
-5. Move Plan callers to drafts, migrate accepted readers, then delete direct
-   accepted-part and layer mutation paths.
+5. Separate accepted state from working Source selection, repair existing
+   SQLite compatibility-dirty Builds, then migrate callers away from direct
+   accepted-part mutation paths.
 
 ## Verification
 

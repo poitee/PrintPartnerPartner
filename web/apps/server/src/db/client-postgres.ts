@@ -678,11 +678,7 @@ export const postgresPostInitMigrations: string[] = [
           AFTER INSERT OR UPDATE OR DELETE ON parts
           FOR EACH ROW EXECUTE FUNCTION invalidate_accepted_plan_revision();
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_profile_layers_invalidate_accepted_revision') THEN
-        CREATE TRIGGER trg_profile_layers_invalidate_accepted_revision
-          AFTER INSERT OR UPDATE OR DELETE ON profile_layers
-          FOR EACH ROW EXECUTE FUNCTION invalidate_accepted_plan_revision();
-      END IF;
+      DROP TRIGGER IF EXISTS trg_profile_layers_invalidate_accepted_revision ON profile_layers;
     END
   $block$`,
   `CREATE TABLE IF NOT EXISTS plan_drafts (

@@ -15,8 +15,18 @@ import {
   type RequiredUnitBackfillCommandResult,
   type RequiredUnitBackfillDependencies,
 } from "./required-units.js";
+import {
+  COMPATIBILITY_DIRTY_REPAIR_SCHEMA_VERSION,
+  repairCompatibilityDirtyBuilds,
+  type CompatibilityDirtyRepairDependencies,
+} from "./compatibility-dirty-repair.js";
 
 export type DrizzleDb = BetterSQLite3Database<typeof schema>;
+
+type SqliteMigrationDependencies = RequiredUnitBackfillDependencies &
+  CompatibilityDirtyRepairDependencies & {
+    readonly beforeCompatibilityCutover?: () => void;
+  };
 
 function parseSchemaVersion(value: string | undefined): number {
   if (value == null) return 0;
@@ -37,7 +47,7 @@ export class SqliteDatabase {
 
   constructor(
     dataDir: string,
-    private readonly requiredUnitBackfillDependencies: RequiredUnitBackfillDependencies = {},
+    private readonly requiredUnitBackfillDependencies: SqliteMigrationDependencies = {},
   ) {
     this.dataDir = dataDir;
     this.dbPath = join(dataDir, "print-partner.db");
@@ -215,6 +225,9 @@ export class SqliteDatabase {
     if (versionBeforeMigration < REQUIRED_UNIT_SCHEMA_VERSION) {
       backfillCurrentRequiredUnitSets(this.sqlite, this.requiredUnitBackfillDependencies);
     }
+    if (versionBeforeMigration < COMPATIBILITY_DIRTY_REPAIR_SCHEMA_VERSION) {
+      repairCompatibilityDirtyBuilds(this.sqlite, this.requiredUnitBackfillDependencies);
+    }
 
     // Performance indexes (idempotent — IF NOT EXISTS)
     this.sqlite.exec(`
@@ -235,6 +248,47 @@ export class SqliteDatabase {
       CREATE INDEX IF NOT EXISTS idx_buildprofiles_last_used
         ON build_profiles(tenant_id, last_used_at);
     `);
+    if (versionBeforeMigration < COMPATIBILITY_DIRTY_REPAIR_SCHEMA_VERSION) {
+      this.requiredUnitBackfillDependencies.beforeCompatibilityCutover?.();
+      const finalizeCompatibilityCutover = this.sqlite.transaction(() => {
+        repairCompatibilityDirtyBuilds(this.sqlite!, this.requiredUnitBackfillDependencies);
+        const dirty = this.sqlite!
+          .prepare(
+            `SELECT profile.id
+               FROM build_profiles profile
+              WHERE profile.accepted_plan_revision_id IS NULL
+                AND (
+                  profile.accepted_plan_version <> 0
+                  OR EXISTS (
+                    SELECT 1 FROM parts part
+                     WHERE part.tenant_id = profile.tenant_id
+                       AND part.profile_id = profile.id
+                  )
+                )
+              LIMIT 1`,
+          )
+          .get() as { id: number } | undefined;
+        if (dirty) {
+          throw new Error(`Build ${dirty.id} remained compatibility-dirty during v26 cutover`);
+        }
+        this.sqlite!.exec(`
+          DROP TRIGGER IF EXISTS trg_profile_layers_invalidate_accepted_revision_insert;
+          DROP TRIGGER IF EXISTS trg_profile_layers_invalidate_accepted_revision_update;
+          DROP TRIGGER IF EXISTS trg_profile_layers_invalidate_accepted_revision_delete;
+        `);
+        this.sqlite!
+          .prepare(
+            `INSERT INTO app_settings (tenant_id, key, value) VALUES (?, ?, ?)
+             ON CONFLICT(tenant_id, key) DO UPDATE SET value = excluded.value`,
+          )
+          .run(
+            "default",
+            schemaVersionKey,
+            String(COMPATIBILITY_DIRTY_REPAIR_SCHEMA_VERSION),
+          );
+      });
+      finalizeCompatibilityCutover.immediate();
+    }
     const row = this.sqlite
       .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")
       .get("default", schemaVersionKey) as { value?: string } | undefined;
