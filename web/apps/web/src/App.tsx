@@ -11,8 +11,7 @@ import { SaveStatusProvider } from "./context/SaveStatusContext";
 import { AuthProvider } from "./context/AuthContext";
 import AuthGate from "./components/AuthGate";
 import AppLayout from "./layout/AppLayout";
-import { buildSourcesRoute } from "./lib/routes";
-import { productionScopeFromSearch } from "./lib/siteMap";
+import { buildSourcesRoute, productionRoute } from "./lib/routes";
 
 // ─── Lazy page bundles ────────────────────────────────────────────────────────
 // Each page is split into its own async chunk so browsers only download what
@@ -72,13 +71,13 @@ function IndexRedirect() {
   return <PreserveSearchRedirect to="/builds" />;
 }
 
-function ProductionRoute() {
+function GlobalProductionRoute() {
   const location = useLocation();
-  return productionScopeFromSearch(location.search) === "build" ? (
-    <ExportPage />
-  ) : (
-    <GlobalProductionPage />
-  );
+  const id = Number(new URLSearchParams(location.search).get("profile"));
+  if (Number.isFinite(id) && id > 0) {
+    return <Navigate to={productionRoute(id)} replace />;
+  }
+  return <GlobalProductionPage />;
 }
 
 export default function App() {
@@ -129,11 +128,8 @@ export default function App() {
                               element={<PreserveSearchRedirect to="/progress" />}
                             />
 
-                            <Route path="production" element={<ProductionRoute />} />
-                            <Route
-                              path="export"
-                              element={<PreserveSearchRedirect to="/production" />}
-                            />
+                            <Route path="production" element={<GlobalProductionRoute />} />
+                            <Route path="export" element={<ExportPage />} />
 
                             <Route path="plans/:planId/studio" element={<LegacyStudioRedirect />} />
                             <Route

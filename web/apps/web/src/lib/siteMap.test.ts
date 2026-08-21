@@ -6,7 +6,6 @@ import {
   buildSectionPath,
   globalSectionFromPath,
   globalSectionPath,
-  productionScopeFromSearch,
 } from "./siteMap";
 
 describe("site map", () => {
@@ -26,13 +25,14 @@ describe("site map", () => {
     expect(buildSectionPath("sources", 7)).toBe("/sources?profile=7");
     expect(buildSectionPath("plan", 7)).toBe("/plan?profile=7");
     expect(buildSectionPath("checkoff", 7)).toBe("/progress?profile=7");
-    expect(buildSectionPath("production", 7)).toBe("/production?profile=7");
+    expect(buildSectionPath("production", 7)).toBe("/export?profile=7");
   });
 
-  it("maps current and legacy paths onto the accepted sections", () => {
+  it("keeps Global Production and Build Production on distinct paths", () => {
     expect(globalSectionFromPath("/")).toBe("builds");
     expect(globalSectionFromPath("/plans")).toBe("builds");
-    expect(globalSectionFromPath("/export")).toBe("production");
+    expect(globalSectionFromPath("/production")).toBe("production");
+    expect(globalSectionFromPath("/export")).toBeNull();
     expect(buildSectionFromPath("/sources")).toBe("sources");
     expect(buildSectionFromPath("/build")).toBe("sources");
     expect(buildSectionFromPath("/plan")).toBe("plan");
@@ -40,15 +40,7 @@ describe("site map", () => {
     expect(buildSectionFromPath("/review")).toBe("plan");
     expect(buildSectionFromPath("/checkoff")).toBe("checkoff");
     expect(buildSectionFromPath("/export")).toBe("production");
+    expect(buildSectionFromPath("/production")).toBeNull();
     expect(buildSectionFromPath("/library")).toBeNull();
-  });
-
-  it("treats Production without a profile as global, with a profile as Build", () => {
-    expect(productionScopeFromSearch("")).toBe("global");
-    expect(productionScopeFromSearch("?")).toBe("global");
-    expect(productionScopeFromSearch("?foo=1")).toBe("global");
-    expect(productionScopeFromSearch("?profile=7")).toBe("build");
-    expect(productionScopeFromSearch("profile=7")).toBe("build");
-    expect(productionScopeFromSearch("?profile=0")).toBe("global");
   });
 });

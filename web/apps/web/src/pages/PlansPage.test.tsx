@@ -141,7 +141,7 @@ describe("PlansPage", () => {
       "/progress?profile=7",
     );
     expect(screen.getByRole("link", { name: "Production for Voron" }).getAttribute("href")).toBe(
-      "/production?profile=7",
+      "/export?profile=7",
     );
   });
 

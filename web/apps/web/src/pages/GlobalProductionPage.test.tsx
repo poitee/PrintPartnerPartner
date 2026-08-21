@@ -82,7 +82,7 @@ describe("GlobalProductionPage", () => {
     expect(screen.getByRole("heading", { name: "Production" }).textContent).toBe("Production");
     expect(screen.getByText(/6 remaining/).textContent).toContain("6 remaining");
     expect(screen.getByRole("link", { name: "Open Voron in Production" }).getAttribute("href")).toBe(
-      "/production?profile=7",
+      "/export?profile=7",
     );
     expect(screen.getByRole("link", { name: "Checkoff for Voron" }).getAttribute("href")).toBe(
       "/progress?profile=7",

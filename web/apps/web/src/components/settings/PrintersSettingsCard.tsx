@@ -343,8 +343,8 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
       setNewName("");
       setMessage(
         hostType === "bambu"
-          ? `${name} added. Status on Printers; use Bambu Connect from Export (never Start print).`
-          : `${name} added. Send and Start print from Export when Idle.`,
+          ? `${name} added. Status on Printers; use Bambu Connect from Production (never Start print).`
+          : `${name} added. Send and Start print from Production when Idle.`,
       );
       await refresh();
     } catch (e) {
@@ -536,7 +536,7 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
             <CardTitle level={3} className="text-base">Printers</CardTitle>
             <CardDescription>
               Add a Klipper, Prusa, or Bambu printer once — connection and bed size together.
-              Live status on the Printers page; Send from Export for Klipper and Prusa.
+              Live status on the Printers page; Send from Production for Klipper and Prusa.
             </CardDescription>
           </div>
         </div>

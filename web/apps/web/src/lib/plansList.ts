@@ -63,7 +63,7 @@ export function planProgressLabel(progress: AcceptedProgressSummary): string {
     case "empty":
       return "Not applied";
     case "unavailable":
-      return "Progress unavailable";
+      return "Checkoff unavailable";
   }
 }
 

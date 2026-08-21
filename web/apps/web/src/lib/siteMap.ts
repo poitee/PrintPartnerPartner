@@ -44,7 +44,7 @@ export function buildSectionPath(
 
 export function globalSectionFromPath(pathname: string): GlobalSection | null {
   if (pathname === "/builds" || pathname === "/plans" || pathname === "/") return "builds";
-  if (pathname === "/production" || pathname === "/export") return "production";
+  if (pathname === "/production") return "production";
   if (pathname === "/printers") return "printers";
   if (pathname === "/settings") return "settings";
   return null;
@@ -54,15 +54,6 @@ export function buildSectionFromPath(pathname: string): BuildSection | null {
   if (pathname === "/sources" || pathname === "/build") return "sources";
   if (pathname === "/plan" || pathname === "/parts" || pathname === "/review") return "plan";
   if (pathname === "/progress" || pathname === "/checkoff") return "checkoff";
-  if (pathname === "/production" || pathname === "/export") return "production";
+  if (pathname === "/export") return "production";
   return null;
-}
-
-export type ProductionScope = "global" | "build";
-
-/** Global Production is `/production`. Build Production carries `?profile=`. */
-export function productionScopeFromSearch(search: string): ProductionScope {
-  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-  const id = Number(params.get("profile"));
-  return Number.isFinite(id) && id > 0 ? "build" : "global";
 }

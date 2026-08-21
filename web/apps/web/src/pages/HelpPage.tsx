@@ -267,7 +267,7 @@ export default function HelpPage() {
             </li>
             <li>
               Run <strong className="font-medium text-foreground">Update plan</strong> so variant
-              parts appear on Parts.
+              parts appear on Plan.
             </li>
           </ol>
           <ul className="list-disc space-y-2 pl-5">

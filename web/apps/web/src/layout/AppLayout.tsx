@@ -30,6 +30,7 @@ import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import { useWorkflowStages } from "../hooks/useWorkflowStages";
 import {
   isBuildPath,
+  isExportPath,
   isPartsPath,
   isProgressPath,
   isSourcesPath,
@@ -126,7 +127,8 @@ export default function AppLayout() {
     activePlanName &&
     (isBuildPath(location.pathname) ||
       isPartsPath(location.pathname) ||
-      isProgressPath(location.pathname));
+      isProgressPath(location.pathname) ||
+      isExportPath(location.pathname));
 
   const secondaryMobile = spineUtilityNavItems(selectedProfileId).map((item) => ({
     ...item,

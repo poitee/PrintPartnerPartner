@@ -99,7 +99,7 @@ describe("accepted Progress display", () => {
       "concurrent_update",
     ] as const) {
       expect(planProgressLabel({ kind: "unavailable", reason })).toBe(
-        "Progress unavailable",
+        "Checkoff unavailable",
       );
     }
   });

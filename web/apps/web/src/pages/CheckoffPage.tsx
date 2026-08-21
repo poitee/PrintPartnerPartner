@@ -771,8 +771,8 @@ export default function CheckoffPage() {
       return (
         <EmptyState
           icon={ClipboardCheck}
-          title="No plan selected"
-          description="Pick a plan to track remaining print work."
+          title="No Build selected"
+          description="Pick a Build to track remaining print work."
           action={{
             label: "Open Plan",
             onClick: () => navigate(planRoute(null)),
@@ -785,7 +785,7 @@ export default function CheckoffPage() {
         <EmptyState
           icon={ClipboardCheck}
           title="No parts yet"
-          description="Pick a plan, then track remaining on Progress."
+          description="Pick a Build, then track remaining on Checkoff."
           action={{
             label: "Open Plan",
             onClick: () => navigate(planRoute(selectedProfileId)),
@@ -827,7 +827,7 @@ export default function CheckoffPage() {
               aria-atomic={engineState === "loading" ? "true" : undefined}
             >
               {engineState === "offline"
-                ? "Engine offline — start the print-partner engine to use Progress."
+                ? "Engine offline — start the print-partner engine to use Checkoff."
                 : "Connecting to the engine…"}
             </p>
           </CardContent>
@@ -865,7 +865,7 @@ export default function CheckoffPage() {
         <Card className="no-print border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-destructive" role="alert">
-              Could not load Progress: {workspaceError}
+              Could not load Checkoff: {workspaceError}
             </p>
             <Button
               size="sm"
@@ -1093,7 +1093,7 @@ export default function CheckoffPage() {
           )}
           {reviewBackgroundError && (
             <p className="text-sm text-destructive" role="alert">
-              Could not refresh Progress: {reviewBackgroundError}
+              Could not refresh Checkoff: {reviewBackgroundError}
             </p>
           )}
           {auxiliaryError && (

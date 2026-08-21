@@ -300,11 +300,11 @@ export default function PrintersPage() {
                     <div className="flex flex-wrap gap-2 pt-1">
                       {canSend ? (
                         <Button size="sm" variant="outline" asChild>
-                          <Link to={exportRoute()}>Send from Export</Link>
+                          <Link to={exportRoute()}>Send from Production</Link>
                         </Button>
                       ) : (
                         <p className="text-[11px] leading-relaxed text-muted-foreground">
-                          Use Bambu Connect from Export.
+                          Use Bambu Connect from Production.
                         </p>
                       )}
                     </div>

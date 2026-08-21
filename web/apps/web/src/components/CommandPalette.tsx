@@ -26,7 +26,6 @@ import {
   exportRoute,
   helpRoute,
   isBuildPath,
-  isExportPath,
   isLibraryPath,
   isPartsPath,
   partsRoute,
@@ -174,7 +173,7 @@ export default function CommandPalette(_props?: Props) {
       {
         id: "nav-production",
         label: "Go to Production",
-        hint: isExportPath(location.pathname) ? "current" : undefined,
+        hint: location.pathname === "/production" ? "current" : undefined,
         group: "Navigate",
         run: () => {
           leaveBuildThen(() => {

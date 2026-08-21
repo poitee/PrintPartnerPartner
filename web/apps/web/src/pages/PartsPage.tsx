@@ -191,7 +191,7 @@ export default function PartsPage() {
               className="min-h-10 w-full sm:w-auto"
               asChild
             >
-              <Link to={progressRoute(selectedProfileId)}>Progress</Link>
+              <Link to={progressRoute(selectedProfileId)}>Checkoff</Link>
             </Button>
             <Button className="min-h-10 w-full sm:w-auto" asChild>
               <Link to={exportRoute(selectedProfileId)}>Production</Link>

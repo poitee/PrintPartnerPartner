@@ -55,8 +55,8 @@ describe("workflow routes", () => {
     expect(planRoute(5)).toBe("/plan?profile=5");
     expect(partsRoute(5)).toBe("/plan?profile=5");
     expect(progressRoute(5)).toBe("/progress?profile=5");
-    expect(productionRoute(5)).toBe("/production?profile=5");
-    expect(exportRoute(5)).toBe("/production?profile=5");
+    expect(productionRoute(5)).toBe("/export?profile=5");
+    expect(exportRoute(5)).toBe("/export?profile=5");
     expect(buildsRoute(5)).toBe("/builds?profile=5");
     expect(plansRoute(5)).toBe("/builds?profile=5");
   });
@@ -96,7 +96,7 @@ describe("path matchers", () => {
     expect(isProgressPath("/progress")).toBe(true);
     expect(isProgressPath("/checkoff")).toBe(true);
     expect(isExportPath("/export")).toBe(true);
-    expect(isExportPath("/production")).toBe(true);
+    expect(isExportPath("/production")).toBe(false);
     expect(isReviewPath("/review")).toBe(true);
     expect(isReviewPath("/parts")).toBe(true);
     expect(isReviewPath("/checkoff")).toBe(true);
@@ -116,7 +116,7 @@ describe("path matchers", () => {
     expect(isPlanWorkflowPath("/parts")).toBe(true);
     expect(isPlanWorkflowPath("/progress")).toBe(true);
     expect(isPlanWorkflowPath("/export")).toBe(true);
-    expect(isPlanWorkflowPath("/production")).toBe(true);
+    expect(isPlanWorkflowPath("/production")).toBe(false);
     expect(isPlanWorkflowPath("/review")).toBe(true);
     expect(isPlanWorkflowPath("/checkoff")).toBe(true);
     expect(isPlanWorkflowPath("/plans/3/studio")).toBe(true);

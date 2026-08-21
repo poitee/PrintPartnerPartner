@@ -129,7 +129,7 @@ describe("accepted site map routes", () => {
     expect((await screen.findByRole("heading", { name: "Library" })).textContent).toBe("Library");
   });
 
-  it("opens global Production at /production and Build Production with a profile", async () => {
+  it("opens global Production at /production and Build Production at /export", async () => {
     const { unmount } = render(
       <MemoryRouter initialEntries={["/production"]}>
         <App />
@@ -142,7 +142,7 @@ describe("accepted site map routes", () => {
     unmount();
 
     render(
-      <MemoryRouter initialEntries={["/production?profile=7"]}>
+      <MemoryRouter initialEntries={["/export?profile=7"]}>
         <App />
       </MemoryRouter>,
     );
@@ -152,9 +152,9 @@ describe("accepted site map routes", () => {
     );
   });
 
-  it("redirects /export to Production and keeps the profile as Build Production", async () => {
+  it("sends a profile on /production to Build Production", async () => {
     render(
-      <MemoryRouter initialEntries={["/export?profile=7"]}>
+      <MemoryRouter initialEntries={["/production?profile=7"]}>
         <App />
       </MemoryRouter>,
     );

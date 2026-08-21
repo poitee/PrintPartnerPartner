@@ -31,9 +31,9 @@ export function progressRoute(profileId?: number | null): string {
   return withProfile("/progress", profileId ?? null);
 }
 
-/** Canonical: Production (plates, downloads, printer jobs). */
+/** Canonical: Build Production (plates, downloads, printer send). */
 export function productionRoute(profileId?: number | null): string {
-  return withProfile("/production", profileId ?? null);
+  return withProfile("/export", profileId ?? null);
 }
 
 /** @deprecated Prefer `productionRoute`. */
@@ -131,7 +131,7 @@ export function isProgressPath(pathname: string): boolean {
 }
 
 export function isExportPath(pathname: string): boolean {
-  return pathname === "/export" || pathname === "/production";
+  return pathname === "/export";
 }
 
 /**

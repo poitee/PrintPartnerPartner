@@ -166,7 +166,7 @@ export function stageIdFromPath(pathname: string): WorkflowStageId | null {
   if (pathname === "/sources" || pathname === "/build") return "sources";
   if (pathname === "/plan" || pathname === "/parts" || pathname === "/review") return "plan";
   if (pathname === "/progress" || pathname === "/checkoff") return "checkoff";
-  if (pathname === "/production" || pathname === "/export") return "production";
+  if (pathname === "/export") return "production";
   return null;
 }
 
