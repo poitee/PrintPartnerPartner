@@ -60,6 +60,7 @@ describe("export 3mf", () => {
     const printer: PrinterMachine = {
       id: "p1",
       name: "Test",
+      model: "Test",
       bed_width_mm: 200,
       bed_depth_mm: 200,
       bed_height_mm: 200,
@@ -116,6 +117,7 @@ describe("export 3mf", () => {
     const voron: PrinterMachine = {
       id: "voron-350",
       name: "Voron 350",
+      model: "Voron 350",
       bed_width_mm: 200,
       bed_depth_mm: 200,
       bed_height_mm: 200,
@@ -126,6 +128,7 @@ describe("export 3mf", () => {
     const mk4: PrinterMachine = {
       id: "mk4",
       name: "MK4",
+      model: "MK4",
       bed_width_mm: 200,
       bed_depth_mm: 200,
       bed_height_mm: 200,
@@ -213,6 +216,7 @@ describe("export 3mf", () => {
     const printer: PrinterMachine = {
       id: "p1",
       name: "Test",
+      model: "Test",
       bed_width_mm: 200,
       bed_depth_mm: 200,
       bed_height_mm: 200,
@@ -258,6 +262,7 @@ describe("export 3mf", () => {
     const printer: PrinterMachine = {
       id: "tiny",
       name: "Tiny",
+      model: "Tiny",
       bed_width_mm: 20,
       bed_depth_mm: 20,
       bed_height_mm: 200,
@@ -298,6 +303,7 @@ describe("export 3mf", () => {
     const printer: PrinterMachine = {
       id: "p1",
       name: "Test",
+      model: "Test",
       bed_width_mm: 200,
       bed_depth_mm: 200,
       bed_height_mm: 200,
@@ -345,6 +351,7 @@ describe("export 3mf", () => {
     const makePrinter = (id: string, filamentId: string, label: string): PrinterMachine => ({
       id,
       name: "Workshop Printer",
+      model: "Workshop Printer",
       bed_width_mm: 200,
       bed_depth_mm: 200,
       bed_height_mm: 200,

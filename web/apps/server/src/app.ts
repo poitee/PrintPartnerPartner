@@ -21,6 +21,7 @@ import { registerApiKeyManagementRoutes } from "./routes/api-key-management.js";
 import { registerMetricsRoutes } from "./routes/metrics.js";
 import { registerApiV1Plugin, registerOpenApi, registerOpenApiJsonRoutes } from "./routes/api-v1.js";
 import { registerApiV2PlanPlugin } from "./routes/api-v2.js";
+import { registerAcceptedPlateRoutes } from "./routes/accepted-plates.js";
 import { registerAuthRoutes, registerTenantMiddleware } from "./routes/auth.js";
 import {
   createAdminPreHandler,
@@ -189,6 +190,10 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     };
 
     await registerCoreRoutes(app, coreDeps, { planSummaryContract: "accepted" });
+    await registerAcceptedPlateRoutes(app, {
+      repo: repository,
+      reposDir: coreDeps.reposDir,
+    });
 
     // Start background source watcher
     const { startSourceWatcher } = await import("./services/source-watcher.js");

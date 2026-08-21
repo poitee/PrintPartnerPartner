@@ -47,12 +47,24 @@ async function addPrinter(app: Awaited<ReturnType<typeof makeApp>>, name: string
   const res = await app.inject({
     method: "POST",
     url: "/printers",
-    payload: { name, bed_width_mm: 250, bed_depth_mm: 210 },
+    payload: { name, model: name, bed_width_mm: 250, bed_depth_mm: 210 },
   });
   return res.json() as { id: string };
 }
 
 describe("PUT /printers/:id", () => {
+  it("requires an explicit model for a custom Printer", async () => {
+    const app = await makeApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/printers",
+      payload: { name: "Unnamed model", bed_width_mm: 250, bed_depth_mm: 210 },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ detail: "model is required" });
+  });
+
   it("sets an explicit preferred_slicer override", async () => {
     const app = await makeApp();
     const printer = await addPrinter(app, "Redoubt");

@@ -6,6 +6,7 @@ export type { PartCopy };
 export type PrinterMachine = {
   id: string;
   name: string;
+  model: string;
   bed_width_mm: number;
   bed_depth_mm: number;
   bed_height_mm: number | null;

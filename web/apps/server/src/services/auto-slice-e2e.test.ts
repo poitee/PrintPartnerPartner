@@ -60,6 +60,7 @@ function machine(id: string, name: string, integrationId: string): PrinterMachin
   return {
     id,
     name,
+    model: name,
     bed_width_mm: 250,
     bed_depth_mm: 250,
     bed_height_mm: 250,

@@ -82,7 +82,7 @@ describe("GET /plans/:id/plate-workspace height bands", () => {
       const printerRes = await app.inject({
         method: "POST",
         url: "/printers",
-        payload: { name: "Bandsaw", bed_width_mm: 200, bed_depth_mm: 200 },
+        payload: { name: "Bandsaw", model: "Bandsaw", bed_width_mm: 200, bed_depth_mm: 200 },
       });
       expect(printerRes.statusCode).toBeLessThan(300);
       const printerId = (printerRes.json() as { id: string }).id;
@@ -159,7 +159,7 @@ describe("GET /plans/:id/plate-workspace height bands", () => {
       const printerRes = await app.inject({
         method: "POST",
         url: "/printers",
-        payload: { name: "Bandsaw2", bed_width_mm: 200, bed_depth_mm: 200 },
+        payload: { name: "Bandsaw2", model: "Bandsaw2", bed_width_mm: 200, bed_depth_mm: 200 },
       });
       const printerId = (printerRes.json() as { id: string }).id;
 
@@ -224,12 +224,12 @@ describe("GET /plans/:id/plate-workspace height bands", () => {
       const voronRes = await app.inject({
         method: "POST",
         url: "/printers",
-        payload: { name: "Voron", bed_width_mm: 200, bed_depth_mm: 200 },
+        payload: { name: "Voron", model: "Voron", bed_width_mm: 200, bed_depth_mm: 200 },
       });
       const mk4Res = await app.inject({
         method: "POST",
         url: "/printers",
-        payload: { name: "MK4", bed_width_mm: 200, bed_depth_mm: 200 },
+        payload: { name: "MK4", model: "MK4", bed_width_mm: 200, bed_depth_mm: 200 },
       });
       const voronId = (voronRes.json() as { id: string }).id;
       const mk4Id = (mk4Res.json() as { id: string }).id;

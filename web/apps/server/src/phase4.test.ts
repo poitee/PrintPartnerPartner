@@ -7,7 +7,13 @@ import { AppRepository } from "./db/repository.js";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
-import { loadFleet, saveFleet, clearFleetIntegrationBinds, parsePrinterMachine } from "./services/printer-fleet.js";
+import {
+  clearFleetIntegrationBinds,
+  loadFleet,
+  newMachineFromPreset,
+  parsePrinterMachine,
+  saveFleet,
+} from "./services/printer-fleet.js";
 
 const MINI_STL = `solid t
   facet normal 0 0 1
@@ -32,6 +38,7 @@ describe("Phase 4 APIs", () => {
       {
         id: "test-printer",
         name: "Test",
+        model: "Test",
         bed_width_mm: 200,
         bed_depth_mm: 200,
         bed_height_mm: 200,
@@ -80,6 +87,7 @@ describe("Phase 4 APIs", () => {
       {
         id: "p1",
         name: "Bed",
+        model: "Bed",
         bed_width_mm: 200,
         bed_depth_mm: 200,
         bed_height_mm: 200,
@@ -131,6 +139,7 @@ describe("Phase 4 APIs", () => {
       {
         id: "p1",
         name: "A",
+        model: "A",
         bed_width_mm: 250,
         bed_depth_mm: 210,
         bed_height_mm: 250,
@@ -161,11 +170,23 @@ describe("Phase 4 APIs", () => {
       loaded_filaments: [],
     });
     expect(legacy.integration_id).toBeUndefined();
+    expect(legacy.model).toBe("Legacy");
+
+    expect(newMachineFromPreset({
+      id: "preset-core-one",
+      name: "Core One",
+      model_slug: "prusa-core-one",
+      bed_width_mm: 250,
+      bed_depth_mm: 220,
+      bed_height_mm: 270,
+      max_filament_slots: 1,
+    }).model).toBe("prusa-core-one");
 
     saveFleet(repo, [
       {
         id: "p1",
         name: "Voron",
+        model: "Voron",
         bed_width_mm: 350,
         bed_depth_mm: 350,
         bed_height_mm: 345,
@@ -178,6 +199,7 @@ describe("Phase 4 APIs", () => {
       {
         id: "p2",
         name: "Other",
+        model: "Other",
         bed_width_mm: 250,
         bed_depth_mm: 210,
         bed_height_mm: null,

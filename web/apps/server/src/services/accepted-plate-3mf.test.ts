@@ -264,6 +264,40 @@ endsolid tracked`);
     }
   });
 
+  it("maps parseable degenerate STL geometry to the export mismatch result", async () => {
+    const { reposDir, snapshotRoot, input, tokens } = fixture();
+    const bytes = Buffer.from(`solid degenerate
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 10 0 0
+vertex 0 20 0
+endloop
+endfacet
+endsolid degenerate`);
+    writeFileSync(join(snapshotRoot, "degenerate.stl"), bytes);
+    const artifact: Extract<AcceptedOperationalArtifact, { kind: "tracked" }> = {
+      kind: "tracked",
+      sourceId: 1,
+      sourceRevisionId: 2,
+      snapshotRoot,
+      relativePath: "degenerate.stl",
+      expectedSha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+    const candidate = {
+      ...input,
+      plates: [{
+        ...input.plates[0]!,
+        units: [{ ...input.plates[0]!.units[0]!, artifact }],
+      }],
+    };
+
+    await expect(generateAcceptedPlate3mfArtifacts(
+      dependencies(candidate, reposDir),
+      { profileId: 7 },
+    )).resolves.toEqual({ kind: "artifact_geometry_mismatch", token: tokens[0] });
+  });
+
   it.each([
     { widthUm: 3_001 },
     { depthUm: 5_001 },

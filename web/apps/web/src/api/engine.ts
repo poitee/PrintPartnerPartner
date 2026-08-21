@@ -396,6 +396,7 @@ export type ManifestSummary = {
 export type PrinterMachine = {
   id: string;
   name: string;
+  model: string;
   bed_width_mm: number;
   bed_depth_mm: number;
   bed_height_mm: number | null;
@@ -1223,6 +1224,7 @@ export async function savePrinterFleet(
 
 export async function addPrinter(body: {
   name: string;
+  model: string;
   bed_width_mm: number;
   bed_depth_mm: number;
 }): Promise<PrinterMachine> {

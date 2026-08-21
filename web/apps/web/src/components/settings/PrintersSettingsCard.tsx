@@ -92,6 +92,7 @@ function machineFromPreset(
   return {
     id: `printer-${crypto.randomUUID().slice(0, 10)}`,
     name,
+    model: preset.model_slug ?? preset.name,
     bed_width_mm: preset.bed_width_mm,
     bed_depth_mm: preset.bed_depth_mm,
     bed_height_mm: preset.bed_height_mm,

@@ -6,6 +6,7 @@ function printer(id: string, name: string): PrinterMachine {
   return {
     id,
     name,
+    model: name,
     bed_width_mm: 250,
     bed_depth_mm: 210,
     bed_height_mm: 200,

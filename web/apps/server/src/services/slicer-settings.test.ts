@@ -19,6 +19,7 @@ function printer(overrides: Partial<PrinterMachine> = {}): PrinterMachine {
   return {
     id: "p1",
     name: "Voron 350",
+    model: overrides.model ?? "Voron 350",
     bed_width_mm: 350,
     bed_depth_mm: 350,
     bed_height_mm: 330,

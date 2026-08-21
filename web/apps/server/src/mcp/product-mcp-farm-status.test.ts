@@ -49,6 +49,7 @@ describe("product MCP wires an IntegrationPort into farm tools", () => {
       {
         id: "trident",
         name: "Trident",
+        model: "Trident",
         bed_width_mm: 300,
         bed_depth_mm: 300,
         bed_height_mm: 280,

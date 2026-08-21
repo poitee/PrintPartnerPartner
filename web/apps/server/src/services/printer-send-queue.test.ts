@@ -59,6 +59,7 @@ describe("printer-send-queue dispatch/drain", () => {
       {
         id: "p1",
         name: "P1",
+        model: "P1",
         bed_width_mm: 250,
         bed_depth_mm: 250,
         bed_height_mm: 250,
@@ -140,6 +141,7 @@ describe("printer-send-queue dispatch/drain", () => {
       {
         id: "p1",
         name: "P1",
+        model: "P1",
         bed_width_mm: 250,
         bed_depth_mm: 250,
         bed_height_mm: 250,
@@ -151,6 +153,7 @@ describe("printer-send-queue dispatch/drain", () => {
       {
         id: "p2",
         name: "P2",
+        model: "P2",
         bed_width_mm: 250,
         bed_depth_mm: 250,
         bed_height_mm: 250,

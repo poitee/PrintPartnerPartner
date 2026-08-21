@@ -45,6 +45,7 @@ function makePrinter(): PrinterMachine {
   return {
     id: "p1",
     name: "Test",
+    model: "Test",
     bed_width_mm: 200,
     bed_depth_mm: 200,
     bed_height_mm: 500,
@@ -269,6 +270,7 @@ function printerWithFilament(
   return {
     id,
     name,
+    model: name,
     bed_width_mm: 200,
     bed_depth_mm: 200,
     bed_height_mm: 200,

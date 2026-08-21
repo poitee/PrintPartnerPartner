@@ -29,6 +29,7 @@ import type { MergePart } from "./merge.js";
 const PRINTER: PrinterMachine = {
   id: "qa-p1",
   name: "QA-Test-Printer",
+  model: "QA-Test-Printer",
   bed_width_mm: 220,
   bed_depth_mm: 220,
   bed_height_mm: 500,

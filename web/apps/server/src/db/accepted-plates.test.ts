@@ -1,11 +1,13 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
-import { MAX_ACCEPTED_PLATES } from "@print-partner/domain";
+import { MAX_ACCEPTED_PLATES, parseAcceptedStlMesh } from "@print-partner/domain";
 import { acceptedPlanBasis } from "./accepted-plan-progress.js";
 import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
 import { AcceptedPlateIntegrityError } from "./accepted-plates.js";
@@ -14,6 +16,11 @@ import { backfillCurrentRequiredUnitSets } from "./required-units.js";
 import { AppRepository } from "./repository.js";
 import * as pgSchema from "./schema-pg.js";
 import { registerPostgresSyncQuery, unregisterPostgresSyncQuery } from "./sync-db-bridge.js";
+import {
+  initializeAcceptedPlates,
+  type AcceptedPlateWorkspaceDependencies,
+} from "../services/accepted-plate-workspace.js";
+import { parseRequiredUnitToken } from "../services/required-units.js";
 
 const cleanups: Array<() => void> = [];
 
@@ -95,7 +102,114 @@ function acceptedPlateRows(raw: Database.Database) {
   };
 }
 
+function nextApplyCommand(
+  repo: AppRepository,
+  profileId: number,
+  current: ReturnType<typeof acceptedPlanBasis>,
+  suffix: string,
+) {
+  const created = repo.recomputePlanDraft({
+    profileId,
+    actor: "test:user",
+    idempotencyKey: `accepted-plate-draft-${suffix}`,
+  });
+  if (created.kind !== "created") throw new Error(`accepted Plate draft was not created: ${created.kind}`);
+  const decisions = created.draft.parts.map((part) => {
+    if (part.baseRevisionPartId == null) throw new Error("accepted Plate predecessor is missing");
+    return {
+      kind: "accept_prior_completion" as const,
+      targetDraftPartId: part.id,
+      predecessorRevisionPartId: part.baseRevisionPartId,
+    };
+  });
+  const reconciled = repo.savePlanDraftRequiredUnitReconciliation({
+    profileId,
+    draftId: created.draft.id,
+    expectedSnapshotDigest: created.draft.snapshotDigest,
+    decisions,
+    actorId: "test:user",
+    idempotencyKey: `accepted-plate-reconciliation-${suffix}`,
+  });
+  if (reconciled.kind !== "saved") throw new Error("accepted Plate reconciliation failed");
+  return {
+    profileId,
+    draftId: created.draft.id,
+    expectedSnapshotDigest: reconciled.draft.snapshotDigest,
+    expectedLifecycleVersion: 0,
+    expectedBase: {
+      kind: "revision" as const,
+      revisionId: current.revisionId,
+      planVersion: current.planVersion,
+    },
+    actorId: "test:user",
+    idempotencyKey: `accepted-plate-apply-${suffix}`,
+  };
+}
+
+function attachLocalSource(repo: AppRepository, root: string, profileId: number, suffix: string) {
+  const sourceRoot = join(root, "repos", `accepted-plate-source-${suffix}`);
+  mkdirSync(sourceRoot, { recursive: true });
+  writeFileSync(join(sourceRoot, "bracket.stl"), `solid bracket
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 1 0 0
+vertex 0 1 1
+endloop
+endfacet
+endsolid bracket`);
+  const source = repo.createSource({
+    name: `Accepted Plate source ${suffix}`,
+    source_kind: "local",
+    local_path: sourceRoot,
+  });
+  repo.setBaseLayer(profileId, source.id);
+}
+
 describe("accepted Plate repository", () => {
+  it("reads exact accepted setup units and the raw current head in one snapshot", () => {
+    const { repo, profile, accepted, required } = fixture();
+
+    expect(repo.readAcceptedPlateWorkspaceInput(profile.id)).toMatchObject({
+      kind: "setup",
+      basis: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: null,
+      units: required.map((unit) => ({
+        token: unit.token,
+        objectName: unit.objectName,
+        filename: "bracket.stl",
+        sourceLayer: "base:test",
+        role: "primary",
+        filamentColorId: null,
+      })),
+    });
+
+    const published = repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: null,
+      plates: plateInput(required.map((unit) => unit.token)),
+    });
+    if (published.kind !== "published") throw new Error("Plate publication failed");
+
+    expect(repo.readAcceptedPlateWorkspaceInput(profile.id)).toMatchObject({
+      kind: "ready",
+      expectedPlateRevisionId: published.plateRevisionId,
+      plateRevisionId: published.plateRevisionId,
+      plateRevisionNumber: published.plateRevisionNumber,
+      units: required.map((unit) => ({ token: unit.token })),
+      plates: [{ plateId: "plate-main" }],
+    });
+  });
+
+  it("distinguishes a missing profile from an existing empty Plan", () => {
+    const { repo } = fixture();
+    const empty = repo.createProfile("Empty accepted Plan");
+
+    expect(repo.readAcceptedPlateWorkspaceInput(999_999)).toEqual({ kind: "profile_not_found" });
+    expect(repo.readAcceptedPlateWorkspaceInput(empty.id)).toEqual({ kind: "empty_plan" });
+  });
+
   it("publishes and reads exact micrometre geometry while projecting Object names", () => {
     const { repo, raw, profile, accepted, required } = fixture();
     const result = repo.publishAcceptedPlates({
@@ -275,7 +389,11 @@ describe("accepted Plate repository", () => {
         expectedPlateRevisionId: null,
         plates,
       }),
-    ).toEqual({ kind: "unchanged", plateRevisionId: first.plateRevisionId });
+    ).toEqual({
+      kind: "unchanged",
+      plateRevisionId: first.plateRevisionId,
+      plateRevisionNumber: first.plateRevisionNumber,
+    });
     expect(acceptedPlateRows(raw)).toEqual(before);
 
     const changed = structuredClone(plates);
@@ -478,33 +596,192 @@ describe("accepted Plate repository", () => {
     expect(acceptedPlateRows(raw)).toEqual(before);
   });
 
-  it("serializes two publishers and rejects the stale layout without writes", () => {
+  it("serializes barrier-released publishers on two connections against one expected head", async () => {
+    const { root, raw, profile, accepted, required } = fixture();
+    const basis = acceptedPlanBasis(accepted);
+    const layouts = [plateInput(required.map((unit) => unit.token)), plateInput(required.map((unit) => unit.token))];
+    layouts[1]![0]!.units[0]!.xUm += 1;
+    const startPath = join(root, "publishers-start");
+    const children = layouts.map((plates, index) => {
+      const readyPath = join(root, `publisher-${index}-ready`);
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "--input-type=module",
+          "-e",
+          `import { existsSync, writeFileSync } from "node:fs";
+import { getDb, SqliteDatabase } from "./src/db/client.ts";
+import { AppRepository } from "./src/db/repository.ts";
+const database = new SqliteDatabase(process.argv[1]);
+database.connect();
+const repo = new AppRepository(getDb(database), "default", database.reposDir);
+writeFileSync(process.argv[5], "ready");
+while (!existsSync(process.argv[6])) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+const result = repo.publishAcceptedPlates({
+  profileId: Number(process.argv[2]),
+  expected: JSON.parse(process.argv[3]),
+  expectedPlateRevisionId: null,
+  plates: JSON.parse(process.argv[4]),
+});
+process.stdout.write(JSON.stringify(result));
+database.close();`,
+          root,
+          String(profile.id),
+          JSON.stringify(basis),
+          JSON.stringify(plates),
+          readyPath,
+          startPath,
+        ],
+        { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
+      );
+      let output = "";
+      let error = "";
+      child.stdout?.on("data", (chunk: Buffer) => {
+        output += chunk.toString("utf8");
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        error += chunk.toString("utf8");
+      });
+      return { child, readyPath, output: () => output, error: () => error };
+    });
+    const deadline = Date.now() + 15_000;
+    while (children.some(({ readyPath }) => !existsSync(readyPath))) {
+      if (Date.now() >= deadline) {
+        throw new Error(children.map(({ error }) => error()).join("\n"));
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+    writeFileSync(startPath, "start");
+    const exits = await Promise.all(children.map(({ child }) => once(child, "exit")));
+    expect(exits.map(([code]) => code)).toEqual([0, 0]);
+    const results = children.map(({ output }) => JSON.parse(output()));
+    expect(results.map((result) => result.kind).sort()).toEqual([
+      "plate_revision_changed",
+      "published",
+    ]);
+    expect(acceptedPlateRows(raw).revisions).toHaveLength(1);
+  }, 20_000);
+
+  it("projects a defensively restored historical head as setup for the current accepted basis", () => {
     const { root, repo, raw, profile, accepted, required } = fixture();
+    const basisA = acceptedPlanBasis(accepted);
+    const published = repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: basisA,
+      expectedPlateRevisionId: null,
+      plates: plateInput(required.map((unit) => unit.token)),
+    });
+    if (published.kind !== "published") throw new Error("Plate publish failed");
+    attachLocalSource(repo, root, profile.id, "stale-head");
+    const command = nextApplyCommand(repo, profile.id, basisA, "stale-head");
     const secondDatabase = new SqliteDatabase(root);
     secondDatabase.connect();
     cleanups.push(() => secondDatabase.close());
     const secondRepo = new AppRepository(getDb(secondDatabase), "default", secondDatabase.reposDir);
-    const basis = acceptedPlanBasis(accepted);
-    const first = repo.publishAcceptedPlates({
+    expect(secondRepo.applyPlanChanges(command)).toMatchObject({ kind: "applied" });
+    raw.prepare(
+      "INSERT INTO accepted_plate_heads (tenant_id, profile_id, current_revision_id) VALUES ('default', ?, ?)",
+    ).run(profile.id, published.plateRevisionId);
+    const basisB = repo.readAcceptedPlanOperationalSnapshot(profile.id);
+    if (basisB.kind !== "ready") throw new Error("accepted basis B is unavailable");
+
+    expect(repo.readAcceptedPlateWorkspaceInput(profile.id)).toMatchObject({
+      kind: "setup",
+      basis: acceptedPlanBasis(basisB.snapshot),
+      expectedPlateRevisionId: published.plateRevisionId,
+    });
+  });
+
+  it("rejects initialization when Apply commits during artifact loading without recreating the head", async () => {
+    const { root, repo, raw, profile, accepted, required } = fixture();
+    const basisA = acceptedPlanBasis(accepted);
+    const published = repo.publishAcceptedPlates({
       profileId: profile.id,
-      expected: basis,
+      expected: basisA,
       expectedPlateRevisionId: null,
       plates: plateInput(required.map((unit) => unit.token)),
     });
-    if (first.kind !== "published") throw new Error("Plate publish failed");
+    if (published.kind !== "published") throw new Error("Plate publish failed");
     const before = acceptedPlateRows(raw);
-    const changed = plateInput(required.map((unit) => unit.token));
-    changed[0]!.units[0]!.xUm += 1;
+    attachLocalSource(repo, root, profile.id, "apply-race");
+    const applyCommand = nextApplyCommand(repo, profile.id, basisA, "apply-race");
+    const secondDatabase = new SqliteDatabase(root);
+    secondDatabase.connect();
+    cleanups.push(() => secondDatabase.close());
+    const secondRepo = new AppRepository(getDb(secondDatabase), "default", secondDatabase.reposDir);
+    const mesh = parseAcceptedStlMesh(Buffer.from(`solid geometry
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 50 0 0
+vertex 0 40 30
+endloop
+endfacet
+endsolid geometry`));
+    if (!mesh) throw new Error("Apply race geometry is invalid");
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const loading = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const dependencies = {
+      repository: repo,
+      reposDir: repo.reposDir,
+      limits: {
+        maxArtifactBytes: 1_000_000,
+        maxTotalSourceBytes: 1_000_000,
+        maxObjects: 10,
+        maxTriangles: 10,
+      },
+      loadPrinters: () => [{
+        id: "printer-core-one",
+        name: "Core One",
+        model: "Prusa Core One",
+        bed_width_mm: 250,
+        bed_depth_mm: 220,
+        bed_height_mm: 220,
+        margin_mm: 5,
+        max_filament_slots: 1,
+        loaded_filaments: [],
+      }],
+      loadGeometry: async () => {
+        started();
+        await released;
+        return {
+          kind: "ready" as const,
+          geometryByToken: new Map(required.map((unit) => [
+            parseRequiredUnitToken(unit.token),
+            { mesh, dimensions: { widthUm: 50_000, depthUm: 40_000, heightUm: 30_000 } },
+          ])),
+        };
+      },
+    } satisfies AcceptedPlateWorkspaceDependencies;
+    const initialization = initializeAcceptedPlates(dependencies, {
+      profileId: profile.id,
+      expected: basisA,
+      expectedPlateRevisionId: published.plateRevisionId,
+      assignments: required.map((unit) => ({
+        token: parseRequiredUnitToken(unit.token),
+        printerId: "printer-core-one",
+      })),
+    });
+    await loading;
 
-    expect(
-      secondRepo.publishAcceptedPlates({
-        profileId: profile.id,
-        expected: basis,
-        expectedPlateRevisionId: null,
-        plates: changed,
-      }),
-    ).toEqual({ kind: "plate_revision_changed" });
-    expect(acceptedPlateRows(raw)).toEqual(before);
+    expect(secondRepo.applyPlanChanges(applyCommand)).toMatchObject({ kind: "applied" });
+    expect(raw.prepare("SELECT COUNT(*) FROM accepted_plate_heads").pluck().get()).toBe(0);
+    release();
+    await expect(initialization).resolves.toEqual({ kind: "stale_accepted_plan" });
+
+    const after = acceptedPlateRows(raw);
+    expect(after.heads).toEqual([]);
+    expect(after.revisions).toEqual(before.revisions);
+    expect(after.plates).toEqual(before.plates);
+    expect(after.units).toEqual(before.units);
   });
 
   it("makes another tenant's Plate state indistinguishable from missing state", () => {
@@ -650,7 +927,11 @@ describe("accepted Plate repository", () => {
         xUm: 5_000,
         yUm: 5_000,
       }),
-    ).toEqual({ kind: "unchanged", plateRevisionId: published.plateRevisionId });
+    ).toEqual({
+      kind: "unchanged",
+      plateRevisionId: published.plateRevisionId,
+      plateRevisionNumber: 1,
+    });
     expect(acceptedPlateRows(raw)).toEqual(before);
 
     expect(
@@ -725,6 +1006,7 @@ describe("accepted Plate repository", () => {
     try {
       expect(repo.readAcceptedPlates(1)).toEqual({ kind: "transaction_unavailable" });
       expect(repo.readAcceptedPlateExportInput(1)).toEqual({ kind: "transaction_unavailable" });
+      expect(repo.readAcceptedPlateWorkspaceInput(1)).toEqual({ kind: "transaction_unavailable" });
       expect(repo.publishAcceptedPlates({ profileId: 1, expected, expectedPlateRevisionId: null, plates: [] })).toEqual({
         kind: "transaction_unavailable",
       });

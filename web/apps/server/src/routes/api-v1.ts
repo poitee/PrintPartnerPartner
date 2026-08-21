@@ -52,6 +52,7 @@ export async function registerOpenApi(app: FastifyInstance, _config: ServerConfi
             properties: {
               detail: { type: "string" },
               title: { type: "string" },
+              code: { type: "string" },
             },
             required: ["detail"],
           },

@@ -83,7 +83,11 @@ export type PublishAcceptedPlatesResult =
       readonly plateRevisionId: number;
       readonly plateRevisionNumber: number;
     }
-  | { readonly kind: "unchanged"; readonly plateRevisionId: number }
+  | {
+      readonly kind: "unchanged";
+      readonly plateRevisionId: number;
+      readonly plateRevisionNumber: number;
+    }
   | { readonly kind: "plate_revision_changed" }
   | AcceptedPlateFailure;
 
@@ -93,7 +97,11 @@ export type MoveAcceptedPlateUnitResult =
       readonly plateRevisionId: number;
       readonly plateRevisionNumber: number;
     }
-  | { readonly kind: "unchanged"; readonly plateRevisionId: number }
+  | {
+      readonly kind: "unchanged";
+      readonly plateRevisionId: number;
+      readonly plateRevisionNumber: number;
+    }
   | { readonly kind: "plate_revision_changed" | "unit_not_found" }
   | AcceptedPlateFailure;
 
@@ -148,6 +156,37 @@ export type AcceptedPlateExportInput = Readonly<{
 export type ReadAcceptedPlateExportInputResult =
   | { readonly kind: "ready"; readonly input: AcceptedPlateExportInput }
   | { readonly kind: "empty_plan" | "plates_not_published" | "stale_accepted_plan" }
+  | { readonly kind: "accepted_state_unavailable"; readonly reason: "compatibility_dirty" | "uninitialized" }
+  | { readonly kind: "transaction_unavailable" };
+
+export type AcceptedPlateSetupUnit = Readonly<{
+  token: RequiredUnitToken;
+  objectName: string;
+  filename: string;
+  sourceLayer: string;
+  role: string;
+  filamentColorId: string | null;
+  artifact: AcceptedOperationalArtifact;
+}>;
+
+export type ReadAcceptedPlateWorkspaceInputResult =
+  | {
+      readonly kind: "setup";
+      readonly basis: AcceptedPlanBasis;
+      readonly expectedPlateRevisionId: number | null;
+      readonly units: readonly AcceptedPlateSetupUnit[];
+    }
+  | {
+      readonly kind: "ready";
+      readonly basis: AcceptedPlanBasis;
+      readonly expectedPlateRevisionId: number;
+      readonly plateRevisionId: number;
+      readonly plateRevisionNumber: number;
+      readonly plates: readonly AcceptedPlate[];
+      readonly units: readonly AcceptedPlateSetupUnit[];
+    }
+  | { readonly kind: "profile_not_found" }
+  | { readonly kind: "empty_plan" }
   | { readonly kind: "accepted_state_unavailable"; readonly reason: "compatibility_dirty" | "uninitialized" }
   | { readonly kind: "transaction_unavailable" };
 
@@ -513,13 +552,26 @@ type AcceptedPlateStateResult =
       readonly layoutDigest: string;
       readonly plates: readonly AcceptedPlate[];
     }
-  | Exclude<ReadAcceptedPlatesResult, { readonly kind: "ready" }>;
+  | {
+      readonly kind: "empty";
+      readonly basis: AcceptedPlanBasis;
+      readonly snapshot: AcceptedPlanOperationalSnapshot;
+    }
+  | {
+      readonly kind: "stale_accepted_plan";
+      readonly basis: AcceptedPlanBasis;
+      readonly snapshot: AcceptedPlanOperationalSnapshot;
+      readonly expectedPlateRevisionId: number;
+    }
+  | { readonly kind: "profile_not_found" }
+  | { readonly kind: "empty_plan" }
+  | { readonly kind: "accepted_state_unavailable"; readonly reason: "compatibility_dirty" | "uninitialized" };
 
 function readAcceptedPlateState(
   dependencies: AcceptedPlateDependencies,
   profileId: number,
 ): AcceptedPlateStateResult {
-    if (!visibleProfile(dependencies, profileId)) return { kind: "empty_plan" };
+    if (!visibleProfile(dependencies, profileId)) return { kind: "profile_not_found" };
     const accepted = readAcceptedPlanOperationalSnapshotInternal({
       db: dependencies.db,
       schema: dependencies.schema,
@@ -543,7 +595,7 @@ function readAcceptedPlateState(
         ),
       )
       .get();
-    if (!head) return { kind: "empty", basis, plates: [] };
+    if (!head) return { kind: "empty", basis, snapshot: accepted.snapshot };
     const revision = dependencies.db
       .select()
       .from(dependencies.schema.acceptedPlateRevisions)
@@ -562,7 +614,12 @@ function readAcceptedPlateState(
       revision.planRevisionDigest !== basis.revisionDigest ||
       revision.requiredUnitMappingDigest !== basis.requiredUnitMappingDigest
     ) {
-      return { kind: "stale_accepted_plan" };
+      return {
+        kind: "stale_accepted_plan",
+        basis,
+        snapshot: accepted.snapshot,
+        expectedPlateRevisionId: head.currentRevisionId,
+      };
     }
     if (
       !storedInteger(revision.expectedPlateCount) ||
@@ -607,6 +664,9 @@ export function readAcceptedPlatesInternal(
   if (!dependencies.sqlite) return { kind: "transaction_unavailable" };
   return dependencies.readTransaction(() => {
     const state = readAcceptedPlateState(dependencies, profileId);
+    if (state.kind === "profile_not_found") return { kind: "empty_plan" };
+    if (state.kind === "stale_accepted_plan") return { kind: "stale_accepted_plan" };
+    if (state.kind === "empty") return { kind: "empty", basis: state.basis, plates: [] };
     if (state.kind !== "ready") return state;
     const { snapshot: _snapshot, layoutDigest: _layoutDigest, ...result } = state;
     return result;
@@ -621,6 +681,8 @@ export function readAcceptedPlateExportInputInternal(
   return dependencies.readTransaction(() => {
     const state = readAcceptedPlateState(dependencies, profileId);
     if (state.kind === "empty") return { kind: "plates_not_published" };
+    if (state.kind === "profile_not_found") return { kind: "empty_plan" };
+    if (state.kind === "stale_accepted_plan") return { kind: "stale_accepted_plan" };
     if (state.kind !== "ready") return state;
     const artifactByToken = new Map<string, AcceptedOperationalArtifact>();
     for (const part of state.snapshot.parts) {
@@ -662,6 +724,60 @@ export function readAcceptedPlateExportInputInternal(
           }),
         })),
       },
+    };
+  });
+}
+
+function acceptedPlateSetupUnits(snapshot: AcceptedPlanOperationalSnapshot): AcceptedPlateSetupUnit[] {
+  return snapshot.parts
+    .filter((part) => part.included)
+    .flatMap((part) => part.units
+      .filter((unit) => unit.required)
+      .map((unit) => ({
+        token: parseRequiredUnitToken(unit.token),
+        objectName: unit.objectName,
+        filename: part.filename,
+        sourceLayer: part.sourceLayer,
+        role: part.effectiveRole,
+        filamentColorId: part.filamentColorId,
+        artifact: part.artifact,
+      })));
+}
+
+export function readAcceptedPlateWorkspaceInputInternal(
+  dependencies: AcceptedPlateDependencies,
+  profileId: number,
+): ReadAcceptedPlateWorkspaceInputResult {
+  if (!dependencies.sqlite) return { kind: "transaction_unavailable" };
+  return dependencies.readTransaction(() => {
+    const state = readAcceptedPlateState(dependencies, profileId);
+    if (state.kind === "profile_not_found" || state.kind === "empty_plan" || state.kind === "accepted_state_unavailable") {
+      return state;
+    }
+    if (state.kind === "empty") {
+      return {
+        kind: "setup",
+        basis: state.basis,
+        expectedPlateRevisionId: null,
+        units: acceptedPlateSetupUnits(state.snapshot),
+      };
+    }
+    if (state.kind === "stale_accepted_plan") {
+      return {
+        kind: "setup",
+        basis: state.basis,
+        expectedPlateRevisionId: state.expectedPlateRevisionId,
+        units: acceptedPlateSetupUnits(state.snapshot),
+      };
+    }
+    return {
+      kind: "ready",
+      basis: state.basis,
+      expectedPlateRevisionId: state.plateRevisionId,
+      plateRevisionId: state.plateRevisionId,
+      plateRevisionNumber: state.plateRevisionNumber,
+      plates: state.plates,
+      units: acceptedPlateSetupUnits(state.snapshot),
     };
   });
 }
@@ -718,7 +834,11 @@ export function publishAcceptedPlatesInternal(
           currentRevision.layoutDigest,
         );
         if (currentRevision.layoutDigest === digest) {
-          return { kind: "unchanged", plateRevisionId: currentRevision.id };
+          return {
+            kind: "unchanged",
+            plateRevisionId: currentRevision.id,
+            plateRevisionNumber: currentRevision.revisionNumber,
+          };
         }
       }
       if (head.currentRevisionId !== expectedPlateRevisionId) {
@@ -836,7 +956,13 @@ export function moveAcceptedPlateUnitInternal(
       }),
     }));
     if (!found) return { kind: "unit_not_found" };
-    if (unchanged) return { kind: "unchanged", plateRevisionId: currentRevision.id };
+    if (unchanged) {
+      return {
+        kind: "unchanged",
+        plateRevisionId: currentRevision.id,
+        plateRevisionNumber: currentRevision.revisionNumber,
+      };
+    }
     const validated = validatePlates(next, new Set(objectNames.keys()));
     if (validated.kind !== "ready") return validated;
     const revisionNumber = currentRevision.revisionNumber + 1;

@@ -1,11 +1,7 @@
-import { buffer } from "node:stream/consumers";
 import {
   acceptedPlateZipEpoch,
   encodeAcceptedPlate3mf,
   MAX_ACCEPTED_PLATES,
-  parseAcceptedStlMesh,
-  stlMeshDimensionsUm,
-  type StlMesh,
 } from "@print-partner/domain";
 import { strToU8, zipSync } from "fflate";
 import type {
@@ -14,7 +10,10 @@ import type {
   ReadAcceptedPlateExportInputResult,
 } from "../db/accepted-plates.js";
 import type { AcceptedArtifactVerificationFailure } from "./accepted-artifacts.js";
-import { openVerifiedAcceptedArtifact } from "./accepted-artifacts.js";
+import {
+  loadAcceptedArtifactGeometry,
+  type AcceptedArtifactOpener,
+} from "./accepted-artifact-geometry.js";
 
 export type AcceptedPlate3mfLimit =
   | "artifact_bytes"
@@ -41,7 +40,7 @@ export type AcceptedPlate3mfDependencies = Readonly<{
   repository: AcceptedPlateExportRepository;
   reposDir: string;
   limits: AcceptedPlate3mfLimits;
-  openArtifact?: typeof openVerifiedAcceptedArtifact;
+  openArtifact?: AcceptedArtifactOpener;
   bundleEncoder?: (entries: Record<string, Uint8Array>) => Uint8Array;
 }>;
 
@@ -80,16 +79,6 @@ function validLimits(limits: AcceptedPlate3mfLimits): boolean {
     Object.values(limits).every((value) => Number.isSafeInteger(value) && value >= 0) &&
     limits.maxPlates <= MAX_ACCEPTED_PLATES
   );
-}
-
-function descriptorKey(artifact: Extract<AcceptedPlateExportInput["plates"][number]["units"][number]["artifact"], { kind: "tracked" }>): string {
-  return JSON.stringify([
-    artifact.sourceId,
-    artifact.sourceRevisionId,
-    artifact.snapshotRoot,
-    artifact.relativePath,
-    artifact.expectedSha256,
-  ]);
 }
 
 function entryName(ordinal: number): string {
@@ -141,71 +130,33 @@ export async function generateAcceptedPlate3mfArtifacts(
   for (const plate of input.plates) {
     for (const unit of plate.units) plateByToken.set(unit.token, plate);
   }
-  if (units.length > dependencies.limits.maxObjects) {
-    return { kind: "limit_exceeded", limit: "objects" };
+  const loaded = await loadAcceptedArtifactGeometry({
+    reposDir: dependencies.reposDir,
+    units,
+    limits: dependencies.limits,
+    openArtifact: dependencies.openArtifact,
+  });
+  if (loaded.kind === "degenerate_geometry") {
+    return { kind: "artifact_geometry_mismatch", token: loaded.token };
   }
-
-  const meshesByDescriptor = new Map<string, StlMesh>();
-  const meshesByToken = new Map<AcceptedPlateExportUnit["token"], StlMesh>();
-  let totalSourceBytes = 0;
-  let repeatedTriangles = 0;
+  if (loaded.kind !== "ready") return loaded;
   for (const unit of units) {
-    if (unit.artifact.kind === "unavailable") {
-      return { kind: "artifact_unavailable", token: unit.token, reason: unit.artifact.reason };
-    }
-    const key = descriptorKey(unit.artifact);
-    let mesh = meshesByDescriptor.get(key);
-    if (!mesh) {
-      const opened = (dependencies.openArtifact ?? openVerifiedAcceptedArtifact)({
-        reposDir: dependencies.reposDir,
-        artifact: unit.artifact,
-        maxBytes: dependencies.limits.maxArtifactBytes,
-      });
-      if (opened.kind !== "verified") {
-        if (opened.reason === "too_large") {
-          return { kind: "limit_exceeded", limit: "artifact_bytes" };
-        }
-        return { kind: "artifact_unavailable", token: unit.token, reason: opened.reason };
-      }
-      totalSourceBytes += opened.lease.size;
-      if (totalSourceBytes > dependencies.limits.maxTotalSourceBytes) {
-        opened.lease.close();
-        return { kind: "limit_exceeded", limit: "total_source_bytes" };
-      }
-      let bytes: Buffer;
-      try {
-        bytes = await buffer(opened.lease.createReadStream());
-      } catch {
-        return { kind: "artifact_unavailable", token: unit.token, reason: "io_error" };
-      } finally {
-        opened.lease.close();
-      }
-      const parsed = parseAcceptedStlMesh(bytes);
-      if (!parsed) return { kind: "invalid_stl", token: unit.token };
-      mesh = parsed;
-      meshesByDescriptor.set(key, mesh);
-    }
-    const dimensions = stlMeshDimensionsUm(mesh);
+    const geometry = loaded.geometryByToken.get(unit.token);
     const plate = plateByToken.get(unit.token);
     if (
-      !dimensions ||
+      !geometry ||
       !plate ||
-      dimensions.widthUm !== unit.widthUm ||
-      dimensions.depthUm !== unit.depthUm ||
-      dimensions.heightUm !== unit.heightUm ||
+      geometry.dimensions.widthUm !== unit.widthUm ||
+      geometry.dimensions.depthUm !== unit.depthUm ||
+      geometry.dimensions.heightUm !== unit.heightUm ||
       unit.xUm < plate.marginUm ||
       unit.yUm < plate.marginUm ||
-      unit.xUm + dimensions.widthUm > plate.bedWidthUm - plate.marginUm ||
-      unit.yUm + dimensions.depthUm > plate.bedDepthUm - plate.marginUm ||
-      dimensions.heightUm > plate.bedHeightUm
+      unit.xUm + geometry.dimensions.widthUm > plate.bedWidthUm - plate.marginUm ||
+      unit.yUm + geometry.dimensions.depthUm > plate.bedDepthUm - plate.marginUm ||
+      geometry.dimensions.heightUm > plate.bedHeightUm
     ) {
       return { kind: "artifact_geometry_mismatch", token: unit.token };
     }
-    repeatedTriangles += mesh.faces.length;
-    if (repeatedTriangles > dependencies.limits.maxTriangles) {
-      return { kind: "limit_exceeded", limit: "triangles" };
-    }
-    meshesByToken.set(unit.token, mesh);
   }
 
   const plates = input.plates.map((plate): GeneratedAcceptedPlate3mf => ({
@@ -213,9 +164,9 @@ export async function generateAcceptedPlate3mfArtifacts(
     ordinal: plate.ordinal,
     entryName: entryName(plate.ordinal),
     bytes: encodeAcceptedPlate3mf(plate.units.map((unit) => {
-      const mesh = meshesByToken.get(unit.token);
-      if (!mesh) throw new Error("Accepted Plate export mesh is missing");
-      return { token: unit.token, objectName: unit.objectName, xUm: unit.xUm, yUm: unit.yUm, mesh };
+      const geometry = loaded.geometryByToken.get(unit.token);
+      if (!geometry) throw new Error("Accepted Plate export mesh is missing");
+      return { token: unit.token, objectName: unit.objectName, xUm: unit.xUm, yUm: unit.yUm, mesh: geometry.mesh };
     })),
   }));
   const manifest = manifestBytes(input);

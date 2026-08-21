@@ -32,6 +32,7 @@ describe("plate packer", () => {
     const printer: PrinterMachine = {
       id: "p1",
       name: "Test",
+      model: "Test",
       bed_width_mm: 200,
       bed_depth_mm: 200,
       bed_height_mm: 200,
@@ -69,6 +70,7 @@ describe("plate packer", () => {
     const printer: PrinterMachine = {
       id: "tiny",
       name: "Tiny",
+      model: "Tiny",
       bed_width_mm: 20,
       bed_depth_mm: 20,
       bed_height_mm: 200,
@@ -110,6 +112,7 @@ describe("plate packer", () => {
     const printer: PrinterMachine = {
       id: "tiny",
       name: "Tiny",
+      model: "Tiny",
       bed_width_mm: 12,
       bed_depth_mm: 12,
       bed_height_mm: 200,
@@ -145,6 +148,7 @@ describe("plate packer", () => {
     const printer: PrinterMachine = {
       id: "short-z",
       name: "ShortZ",
+      model: "ShortZ",
       bed_width_mm: 200,
       bed_depth_mm: 200,
       bed_height_mm: 20,
@@ -201,6 +205,7 @@ function packSinglePartOfHeight(heightMm: number) {
     const printer: PrinterMachine = {
       id: "p1",
       name: "Test",
+      model: "Test",
       bed_width_mm: 200,
       bed_depth_mm: 200,
       bed_height_mm: 500,
@@ -290,6 +295,7 @@ function makePrinter(overrides: Partial<PrinterMachine> = {}): PrinterMachine {
   return {
     id: "p1",
     name: "Test",
+    model: overrides.model ?? "Test",
     bed_width_mm: 200,
     bed_depth_mm: 200,
     bed_height_mm: 500,

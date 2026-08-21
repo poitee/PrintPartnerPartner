@@ -157,6 +157,7 @@ function makePrinter(id: string, name: string): PrinterMachine {
   return {
     id,
     name,
+    model: name,
     bed_width_mm: 200,
     bed_depth_mm: 200,
     bed_height_mm: 200,

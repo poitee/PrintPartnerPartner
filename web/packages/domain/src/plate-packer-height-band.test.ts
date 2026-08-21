@@ -34,6 +34,7 @@ const EXPECTED_BAND_ORDER: HeightBand[] = ["flat", "short", "medium", "tall", "v
 const PRINTER: PrinterMachine = {
   id: "p1",
   name: "Test",
+  model: "Test",
   bed_width_mm: 200,
   bed_depth_mm: 200,
   bed_height_mm: 500,

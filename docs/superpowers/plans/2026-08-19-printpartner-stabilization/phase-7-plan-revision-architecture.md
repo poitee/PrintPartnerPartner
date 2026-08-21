@@ -808,6 +808,55 @@ The full domain suite passed 19 files and 147 tests. The full server suite
 passed 165 files with one file skipped, 1331 tests passed, and 3 tests skipped.
 Both typechecks, root lint, independent review, and diff checks passed.
 
+## Accepted Plate workspace API
+
+The accepted Plate workspace is now available through unversioned first-party
+routes and `/api/v2` Plan subresources. It is deliberately absent from
+`/api/v1`. A setup response exposes the current accepted Plan basis, the raw
+current Plate head for compare-and-swap replacement, accepted Required-unit
+tokens and display metadata, and current Printers with complete geometry.
+Accepted artifact descriptors remain server-internal.
+
+Initialization accepts exactly one explicit Printer assignment for every
+Required-unit token. Unassigned, missing, duplicate, unknown, and foreign
+tokens fail before artifact access or Plate writes. PrintPartner does not infer
+a Printer from filament, Source, directory, or fleet order. Printer model is a
+required current field; old fleet JSON falls back to its stored display name,
+and new preset Printers capture the preset model slug or name.
+
+The server verifies each distinct accepted artifact descriptor, strictly parses
+each STL, measures its geometry once, and packs integer-micrometre rectangles
+without rotation. Packing order uses descending longest side, descending area,
+then token. Units that fit only after a 90-degree turn fail with
+`unit_too_large`; rotation remains a slicer decision.
+The existing accepted Plate publication command then rechecks the accepted Plan
+basis and Plate head inside one SQLite `IMMEDIATE` transaction.
+
+An exact retry reconstructs the deterministic candidate from the persisted
+dimensions and current Printer data. It returns the current revision with
+zero artifact reads and zero writes only when every stored field matches.
+Initialization returns its validated candidate and publication receipt without
+a post-commit reread, so a concurrent Apply or move cannot change the response.
+Move accepts only integer X/Y coordinates and creates an immutable successor;
+there is no route for rotation, scaling, Plate transfer, or membership edits.
+
+The route boundary uses stable error codes and coarse logs. PostgreSQL returns
+query-free `503` until a real transaction adapter exists. Tests cover flat and
+v2 parity, v1 absence, API-key enforcement, tenant opacity, tracked binary STL
+deduplication, invalid and degenerate geometry, assignment ordering, replay,
+move bounds and overlap, and no post-publication reread. A real cross-process
+two-connection race proves one of two distinct publications wins and only one
+revision is created. A controlled Apply during geometry loading proves
+initialization returns a stale Plan, does not recreate the deleted head, and
+does not alter immutable Plate history.
+
+Focused feature coverage passed 77 tests. The domain suite passed 150 tests,
+the contracts suite passed 27 tests, and the full server suite passed 1358
+tests with 3 skipped. Monorepo typecheck, build, lint, independent review,
+no-comments audit, and diff checks passed. The browser Plate workspace and
+legacy export callers remain on their current flows until the accepted export
+delivery unit is complete.
+
 ## Module shape
 
 ```ts

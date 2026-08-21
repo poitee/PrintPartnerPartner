@@ -17,6 +17,7 @@ function machine(id: string, name: string, integrationId: string | null): Printe
   return {
     id,
     name,
+    model: name,
     bed_width_mm: 250,
     bed_depth_mm: 250,
     bed_height_mm: 250,
@@ -72,6 +73,7 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
       {
         id: "trident-r2",
         name: "Trident R2 LDO",
+        model: "Trident R2 LDO",
         bed_width_mm: 250,
         bed_depth_mm: 250,
         bed_height_mm: 250,
@@ -83,6 +85,7 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
       {
         id: "prusa-xl",
         name: "Prusa XL",
+        model: "Prusa XL",
         bed_width_mm: 360,
         bed_depth_mm: 360,
         bed_height_mm: 360,
@@ -94,6 +97,7 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
       {
         id: "coreone1",
         name: "CoreOne1",
+        model: "CoreOne1",
         bed_width_mm: 250,
         bed_depth_mm: 220,
         bed_height_mm: 270,

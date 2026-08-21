@@ -49,6 +49,7 @@ export function parsePrinterMachine(data: Record<string, unknown>): PrinterMachi
   const machine: PrinterMachine = {
     id: String(data.id),
     name: String(data.name ?? "Printer"),
+    model: String(data.model ?? data.name ?? "Printer"),
     bed_width_mm: Number(data.bed_width_mm ?? 250),
     bed_depth_mm: Number(data.bed_depth_mm ?? 210),
     bed_height_mm: data.bed_height_mm != null ? Number(data.bed_height_mm) : null,
@@ -128,6 +129,7 @@ export function newMachineFromPreset(preset: PrinterPreset, name?: string): Prin
   return ensureSlots({
     id: `printer-${randomBytes(5).toString("hex")}`,
     name: name ?? preset.name,
+    model: preset.model_slug ?? preset.name,
     bed_width_mm: preset.bed_width_mm,
     bed_depth_mm: preset.bed_depth_mm,
     bed_height_mm: preset.bed_height_mm,

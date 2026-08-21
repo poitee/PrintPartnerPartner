@@ -23,4 +23,5 @@ export * from "./plate-plan.js";
 export * from "./kit-print-plan.js";
 export * from "./export-3mf.js";
 export * from "./accepted-plate-3mf.js";
+export * from "./accepted-plate-packer.js";
 export * from "./merge-copies.js";

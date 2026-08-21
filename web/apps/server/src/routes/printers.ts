@@ -97,16 +97,21 @@ export async function registerPrinterRoutes(app: FastifyInstance, deps: RouteDep
     }
   });
 
-  app.post("/printers", async (request) => {
+  app.post("/printers", async (request, reply) => {
     const body = request.body as {
       name?: string;
+      model?: string;
       bed_width_mm?: number;
       bed_depth_mm?: number;
     };
+    if (!body.model?.trim()) {
+      return reply.status(400).send({ detail: "model is required" });
+    }
     const fleet = loadFleet(deps.repo);
     const machine = parsePrinterMachine({
       id: `printer-${crypto.randomUUID().slice(0, 10)}`,
       name: body.name ?? "Printer",
+      model: body.model.trim(),
       bed_width_mm: body.bed_width_mm ?? 250,
       bed_depth_mm: body.bed_depth_mm ?? 210,
       bed_height_mm: 250,

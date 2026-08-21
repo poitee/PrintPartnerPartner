@@ -82,10 +82,87 @@ export function formatTimestamp(
 
 export type ApiError = {
   detail: string;
+  code?: string;
   title?: string;
   status?: number;
   type?: string;
 };
+
+export type AcceptedPlanBasisContract = Readonly<{
+  profile_id: number;
+  plan_version: number;
+  plan_revision_id: number;
+  plan_revision_digest: string;
+  required_unit_mapping_digest: string;
+}>;
+
+export type AcceptedPlatePrinter = Readonly<{
+  id: string;
+  name: string;
+  model: string;
+  bed_width_um: number;
+  bed_depth_um: number;
+  bed_height_um: number;
+  margin_um: number;
+}>;
+
+export type AcceptedPlateSetupUnit = Readonly<{
+  token: string;
+  object_name: string;
+  filename: string;
+  source_layer: string;
+  role: string;
+  filament_color_id: string | null;
+}>;
+
+export type AcceptedPlatePlacedUnit = AcceptedPlateSetupUnit & Readonly<{
+  x_um: number;
+  y_um: number;
+  width_um: number;
+  depth_um: number;
+  height_um: number;
+}>;
+
+export type AcceptedPlateView = Readonly<{
+  plate_id: string;
+  ordinal: number;
+  printer: AcceptedPlatePrinter;
+  units: readonly AcceptedPlatePlacedUnit[];
+}>;
+
+export type AcceptedPlateWorkspace =
+  | { readonly kind: "empty_plan" }
+  | {
+      readonly kind: "setup";
+      readonly basis: AcceptedPlanBasisContract;
+      readonly expected_plate_revision_id: number | null;
+      readonly printers: readonly AcceptedPlatePrinter[];
+      readonly units: readonly AcceptedPlateSetupUnit[];
+    }
+  | {
+      readonly kind: "ready";
+      readonly basis: AcceptedPlanBasisContract;
+      readonly plate_revision_id: number;
+      readonly plate_revision_number: number;
+      readonly printers: readonly AcceptedPlatePrinter[];
+      readonly plates: readonly AcceptedPlateView[];
+    };
+
+export type InitializeAcceptedPlatesRequest = Readonly<{
+  expected: AcceptedPlanBasisContract;
+  expected_plate_revision_id: number | null;
+  assignments: readonly Readonly<{
+    token: string;
+    printer_id: string | null;
+  }>[];
+}>;
+
+export type MoveAcceptedPlateUnitRequest = Readonly<{
+  expected: AcceptedPlanBasisContract;
+  expected_plate_revision_id: number;
+  x_um: number;
+  y_um: number;
+}>;
 
 /**
  * Validates a Discord incoming-webhook URL: must be
