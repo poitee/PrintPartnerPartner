@@ -838,7 +838,9 @@ function resolvePlanId(
   validateRequested = true,
 ): number | null {
   const requested = asInt(input.plan_id);
-  if (requested != null && (!validateRequested || ctx.repo.getProfile(requested))) return requested;
+  if (requested != null && (!validateRequested || ctx.repo.getOwnedProfileIdentity(requested))) {
+    return requested;
+  }
   return ctx.activePlanId != null ? ctx.activePlanId : null;
 }
 
@@ -1045,7 +1047,7 @@ async function resolveRepoTreeSummary(
 }
 
 function planSnapshotJson(repo: AppRepository, planId: number): Record<string, unknown> {
-  const profile = repo.getProfile(planId);
+  const profile = repo.getProfileHeader(planId);
   if (!profile) return { error: "Plan not found" };
   const layers = repo.getProfileLayers(planId);
   const kit = loadKitManifest(repo, planId);
@@ -1159,7 +1161,7 @@ export async function invokeAssistantTool(
       }
 
       case "list_plans": {
-        const plans = ctx.repo.listProfiles().map((p) => ({
+        const plans = ctx.repo.listProfileHeaders().map((p) => ({
           id: p.id,
           name: p.name,
           part_count: p.part_count,
@@ -1390,7 +1392,7 @@ export async function invokeAssistantTool(
         if (planId == null || !rawPresetId) {
           return { content: JSON.stringify({ error: "plan_id and preset_id required" }) };
         }
-        if (!ctx.repo.getProfile(planId)) {
+        if (!ctx.repo.getOwnedProfileIdentity(planId)) {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
         const catalog = loadKitCatalog() as Record<string, unknown>;
@@ -1467,7 +1469,7 @@ export async function invokeAssistantTool(
         if (planId == null || !sourceName) {
           return { content: JSON.stringify({ error: "plan_id and source_name required" }) };
         }
-        if (!ctx.repo.getProfile(planId)) {
+        if (!ctx.repo.getOwnedProfileIdentity(planId)) {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
         const source = sourceByName(ctx.repo, sourceName);
@@ -1549,7 +1551,7 @@ export async function invokeAssistantTool(
         if (planId == null || !sourceName) {
           return { content: JSON.stringify({ error: "plan_id and source_name required" }) };
         }
-        if (!ctx.repo.getProfile(planId)) {
+        if (!ctx.repo.getOwnedProfileIdentity(planId)) {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
         const source = sourceByName(ctx.repo, sourceName);
@@ -1685,7 +1687,7 @@ export async function invokeAssistantTool(
       case "search_plan_parts": {
         const planId = resolvePlanId(input, ctx);
         if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
-        if (!ctx.repo.getProfile(planId)) {
+        if (!ctx.repo.getOwnedProfileIdentity(planId)) {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
         const query = typeof input.query === "string" ? input.query.trim() : "";
@@ -2731,13 +2733,13 @@ export async function applyAssistantAction(
     } catch {
       return { ok: false, status: 500, detail: "Internal Server Error" };
     }
-  } else if (!skipPlanCheck && !deps.repo.getProfile(planId)) {
+  } else if (!skipPlanCheck && !deps.repo.getOwnedProfileIdentity(planId)) {
     return { ok: false, detail: "Plan not found" };
   }
   if (
     action.type === "propose_source_mapping" &&
     planId > 0 &&
-    !deps.repo.getProfile(planId)
+    !deps.repo.getOwnedProfileIdentity(planId)
   ) {
     return { ok: false, detail: "Plan not found" };
   }
@@ -3106,8 +3108,8 @@ export async function applyAssistantAction(
           local_path,
         });
         const needsSync = source_kind !== "local" || !created.local_path;
-        // Chain Sync as a follow-up card when a real plan is in context.
-        const canFollowUp = needsSync && planId > 0 && Boolean(deps.repo.getProfile(planId));
+        const canFollowUp =
+          needsSync && planId > 0 && Boolean(deps.repo.getOwnedProfileIdentity(planId));
         outcome = {
           ok: true,
           result: {

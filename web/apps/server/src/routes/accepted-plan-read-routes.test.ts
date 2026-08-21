@@ -407,6 +407,10 @@ describe("accepted Plan read routes", () => {
       expect(unexpected.statusCode).toBe(500);
       expect(unexpected.json()).toEqual({ detail: "Internal Server Error" });
       expect(acceptedReadCount).toBe(13);
+      repo.readAcceptedPlanOperationalSnapshot = (profileId) => {
+        acceptedReadCount += 1;
+        return readAccepted(profileId);
+      };
 
       const getOwnedProfileIdentity = repo.getOwnedProfileIdentity.bind(repo);
       repo.getOwnedProfileIdentity = () => {
@@ -425,21 +429,16 @@ describe("accepted Plan read routes", () => {
       });
       expect(patchArchiveIdentityFailure.statusCode).toBe(500);
       expect(patchArchiveIdentityFailure.json()).toEqual({ detail: "Internal Server Error" });
-      repo.getOwnedProfileIdentity = getOwnedProfileIdentity;
-
-      const getProfile = repo.getProfile.bind(repo);
-      repo.getProfile = () => {
-        throw new Error(`private profile lookup failure ${directory}`);
-      };
-      const profileLookupFailure = await app.inject({
+      const identityLookupFailure = await app.inject({
         method: "GET",
         url: `/plans/${emptyProfile.id}/checkoff`,
       });
-      expect(profileLookupFailure.statusCode).toBe(500);
-      expect(profileLookupFailure.json()).toEqual({
+      expect(identityLookupFailure.statusCode).toBe(500);
+      expect(identityLookupFailure.json()).toEqual({
         detail: "Internal Server Error",
       });
-      repo.getProfile = getProfile;
+      expect(acceptedReadCount).toBe(13);
+      repo.getOwnedProfileIdentity = getOwnedProfileIdentity;
 
       repo.getPartRow = () => {
         throw new Error(`private Part lookup failure ${directory}`);

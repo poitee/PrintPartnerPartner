@@ -58,7 +58,7 @@ describe("appendBuildDecisionHints", () => {
       activePlanId: 9,
       dataDir: null,
       repo: {
-        getProfile: () => ({ id: 9 }),
+        getOwnedProfileIdentity: () => ({ id: 9, name: "EMU", archivedAt: null }),
         getProfileLayers: () => [{ layer_type: "base", project_name: "DW-Tas/emu" }],
         listSources: () => [{ name: "DW-Tas/emu" }],
       },
@@ -109,7 +109,7 @@ describe("stripWrongBaseProposalsForAttachedKit (generic)", () => {
       activePlanId: 9,
       dataDir: null,
       repo: {
-        getProfile: () => ({ id: 9 }),
+        getOwnedProfileIdentity: () => ({ id: 9, name: "EMU", archivedAt: null }),
         getProfileLayers: () => [{ layer_type: "base", project_name: "DW-Tas/emu" }],
         listSources: () => [{ name: "DW-Tas/emu" }, { name: "Voron-Trident" }],
       },
@@ -139,7 +139,7 @@ describe("stripWrongBaseProposalsForAttachedKit (generic)", () => {
       activePlanId: 9,
       dataDir: null,
       repo: {
-        getProfile: () => ({ id: 9 }),
+        getOwnedProfileIdentity: () => ({ id: 9, name: "EMU", archivedAt: null }),
         getProfileLayers: () => [{ layer_type: "base", project_name: "DW-Tas/emu" }],
         listSources: () => [{ name: "DW-Tas/emu" }, { name: "Voron-Trident" }],
       },
@@ -188,7 +188,7 @@ describe("stripWrongBaseProposalsForAttachedKit (generic)", () => {
       activePlanId: 3,
       dataDir: null,
       repo: {
-        getProfile: () => ({ id: 3 }),
+        getOwnedProfileIdentity: () => ({ id: 3, name: "Trident", archivedAt: null }),
         getProfileLayers: () => [{ layer_type: "base", project_name: "Voron-Trident" }],
         listSources: () => [
           { name: "Voron-Trident" },
@@ -228,7 +228,7 @@ describe("stripWrongBaseProposalsForAttachedKit (generic)", () => {
       activePlanId: 3,
       dataDir: null,
       repo: {
-        getProfile: () => ({ id: 3 }),
+        getOwnedProfileIdentity: () => ({ id: 3, name: "Trident", archivedAt: null }),
         getProfileLayers: () => [{ layer_type: "base", project_name: "Voron-Trident" }],
         listSources: () => [{ name: "Voron-Trident" }, { name: "Micron" }],
       },

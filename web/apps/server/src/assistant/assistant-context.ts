@@ -99,7 +99,7 @@ function summarizeKitCatalog(catalog: Record<string, unknown>): string {
 }
 
 function summarizePlan(repo: AppRepository, planId: number): string | null {
-  const profile = repo.getProfile(planId);
+  const profile = repo.getProfileHeader(planId);
   if (!profile) return null;
   const layers = repo.getProfileLayers(planId);
   const kit = loadKitManifest(repo, planId);
@@ -132,7 +132,7 @@ export function buildPlanContextBlock(
   catalog: Record<string, unknown>,
   dataDir?: string | null,
 ): string | null {
-  if (!repo.getProfile(planId)) return null;
+  if (!repo.getOwnedProfileIdentity(planId)) return null;
   const layers = repo.getProfileLayers(planId);
   const kit = loadKitManifest(repo, planId);
   const base = layers.find((l) => l.layer_type === "base");

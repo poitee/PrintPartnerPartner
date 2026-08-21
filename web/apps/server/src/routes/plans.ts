@@ -55,7 +55,9 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.delete("/plans/:id", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     deps.repo.deleteProfile(id);
     return reply.status(204).send();
   });
@@ -79,7 +81,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       if (body.archived === true && !archiveIdentity) {
         return reply.status(404).send({ detail: "Profile not found" });
       }
-      if (body.archived !== true && !deps.repo.getProfile(id)) {
+      if (body.archived !== true && !deps.repo.getOwnedProfileIdentity(id)) {
         return reply.status(404).send({ detail: "Profile not found" });
       }
       if (body.archived === false) {
@@ -141,7 +143,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.post("/plans/:id/touch", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     try {
-      if (!deps.repo.getProfile(id)) {
+      if (!deps.repo.getOwnedProfileIdentity(id)) {
         return reply.status(404).send({ detail: "Profile not found" });
       }
       return deps.repo.touchProfileLastUsed(id);
@@ -191,9 +193,13 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
     const id = Number((request.params as { id: string }).id);
     const body = request.body as { name?: string; clear_checkoff?: boolean };
     try {
-      return deps.repo.duplicateProfile(id, String(body.name ?? ""), {
+      const duplicate = deps.repo.duplicateProfile(id, String(body.name ?? ""), {
         clearCheckoff: Boolean(body.clear_checkoff),
       });
+      return {
+        ...deps.repo.getProfile(duplicate.id)!,
+        layers: duplicate.layers,
+      };
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }
@@ -202,7 +208,9 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.delete("/plans/:id/layers/:layerId", async (request, reply) => {
     const profileId = Number((request.params as { id: string }).id);
     const layerId = Number((request.params as { layerId: string }).layerId);
-    if (!deps.repo.getProfile(profileId)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(profileId)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     try {
       deps.repo.removeLayer(layerId);
       return reply.status(204).send();
@@ -215,7 +223,9 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
     const profileId = Number((request.params as { id: string }).id);
     const layerId = Number((request.params as { layerId: string }).layerId);
     const body = request.body as { project_id?: number };
-    if (!deps.repo.getProfile(profileId)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(profileId)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     try {
       deps.repo.replaceLayer(layerId, Number(body.project_id));
       return { profile_id: profileId, layers: deps.repo.getProfileLayers(profileId) };
@@ -226,14 +236,14 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/layers", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     return { profile_id: id, layers: deps.repo.getProfileLayers(id) };
   });
 
   app.put("/plans/:id/layers/base", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const body = request.body as { project_id?: number };
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     try {
       deps.repo.setBaseLayer(id, Number(body.project_id));
       return { profile_id: id, layers: deps.repo.getProfileLayers(id) };
@@ -245,7 +255,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.post("/plans/:id/layers", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const body = request.body as { project_id?: number };
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     try {
       deps.repo.addAddonLayer(id, Number(body.project_id));
       return { profile_id: id, layers: deps.repo.getProfileLayers(id) };
@@ -263,7 +273,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/parts", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const query = request.query as { limit?: string; offset?: string };
     const limit = query.limit ? Number(query.limit) : 10000;
     const offset = query.offset ? Number(query.offset) : 0;
@@ -279,7 +289,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/parts-grouped", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const query = (request.query as { query?: string }).query ?? "";
     return deps.repo.getPartsGrouped(id, query);
   });
@@ -326,7 +336,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.post("/plans/:id/apply-manifest", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = (request.body as { preserve_included?: boolean } | null) ?? {};
     const result = applyManifestToProfile(deps.repo, id, body.preserve_included ?? true);
     return {
@@ -347,7 +357,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.get("/plans/:id/manifest-warnings", async () => ({ warnings: [] }));
   app.get("/plans/:id/role-filaments", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const roles = deps.repo.getRoleFilaments(id);
     await enrichRoleFilamentRows(roles, { repo: deps.repo, dataDir: deps.dataDir });
     return { roles };
@@ -355,7 +365,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.put("/plans/:id/role-filament", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = request.body as {
       role?: string;
       filament_color_id?: string | null;
@@ -402,7 +412,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   /** Re-apply every saved role color to matching included parts and refresh thumbnails. */
   app.post("/plans/:id/apply-role-colors", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = (request.body ?? {}) as { refresh_thumbnails?: boolean };
     const refreshThumbnails = body.refresh_thumbnails !== false;
     const savedDefaults = loadRoleFilamentDefaults(deps.repo, id);
@@ -429,7 +439,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.get("/plans/:id/checkoff", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     try {
-      if (!deps.repo.getProfile(id)) {
+      if (!deps.repo.getOwnedProfileIdentity(id)) {
         return reply.status(404).send({ detail: "Profile not found" });
       }
       const accepted = deps.repo.readAcceptedPlanOperationalSnapshot(id);
@@ -471,13 +481,13 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/kit-manifest", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     return { profile_id: id, kit: loadKitManifest(deps.repo, id) };
   });
 
   app.put("/plans/:id/kit-manifest", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = request.body as { kit?: Record<string, unknown> };
     const kit = saveKitManifest(deps.repo, id, (body.kit ?? {}) as Parameters<typeof saveKitManifest>[2]);
     return { profile_id: id, kit };
@@ -485,7 +495,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/manifest-v2", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const raw = deps.repo.getSetting(`manifest_v2_${id}`);
     if (!raw) {
       return {
@@ -509,19 +519,19 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/plan-manifest-builder", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     return buildPlanManifestBuilder(deps.repo, id);
   });
 
   app.get("/plans/:id/decisions", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     return { decisions: deps.repo.listPlanDecisions(id) };
   });
 
   app.post("/plans/:id/decisions", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = (request.body ?? {}) as {
       kind?: string;
       actor?: string;
@@ -566,14 +576,14 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/snapshots", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const { listPlanSnapshots } = await import("../services/plan-snapshots.js");
     return { snapshots: listPlanSnapshots(deps.repo, id) };
   });
 
   app.post("/plans/:id/snapshots", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = (request.body ?? {}) as { name?: string; source?: string };
     const { createPlanSnapshot } = await import("../services/plan-snapshots.js");
     try {
@@ -590,7 +600,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.get("/plans/:id/snapshots/:sid", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const sid = Number((request.params as { sid: string }).sid);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const { getPlanSnapshot } = await import("../services/plan-snapshots.js");
     const snap = getPlanSnapshot(deps.repo, sid);
     if (!snap || snap.plan_id !== id) return reply.status(404).send({ detail: "Snapshot not found" });
@@ -600,7 +610,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.post("/plans/:id/snapshots/:sid/restore", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const sid = Number((request.params as { sid: string }).sid);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const { getPlanSnapshot, restorePlanSnapshotPayload } = await import(
       "../services/plan-snapshots.js"
     );
@@ -631,7 +641,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   /** GET /plans/:id/variant-dimensions — read variant_dimensions from the base source manifest. */
   app.get("/plans/:id/variant-dimensions", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const { getSourceVariantDimensions, getPlanVariantSelection } = await import(
       "../services/variant-dimensions.js"
     );
@@ -646,7 +656,9 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   /** POST /plans/:id/variant-selection — apply variant choice to base source import rules. */
   app.post("/plans/:id/variant-selection", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     const body = (request.body ?? {}) as { selection?: Record<string, string>; source_id?: number };
     const selection = body.selection ?? {};
     const layers = deps.repo.getProfileLayers(id);

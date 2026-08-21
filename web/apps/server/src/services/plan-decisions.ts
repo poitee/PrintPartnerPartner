@@ -41,7 +41,7 @@ export function logAppliedAction(
   action: AssistantProposedAction,
   result?: Record<string, unknown> | null,
 ): PlanDecision | null {
-  if (!repo.getProfile(action.plan_id)) return null;
+  if (!repo.getOwnedProfileIdentity(action.plan_id)) return null;
   return appendPlanDecision(repo, {
     planId: action.plan_id,
     actor: "assistant",
@@ -58,7 +58,7 @@ export function logDismissedAction(
   repo: AppRepository,
   action: AssistantProposedAction,
 ): PlanDecision | null {
-  if (!repo.getProfile(action.plan_id)) return null;
+  if (!repo.getOwnedProfileIdentity(action.plan_id)) return null;
   return appendPlanDecision(repo, {
     planId: action.plan_id,
     actor: "user",

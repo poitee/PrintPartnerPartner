@@ -752,7 +752,7 @@ export async function registerJobRoutes(
 
   app.post("/jobs/recompute", limited, async (request, reply) => {
     const body = request.body as { profile_id?: number; apply_manifest?: boolean };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     const job_id = await jobs.start(
@@ -793,7 +793,7 @@ export async function registerJobRoutes(
       missing_only?: boolean;
       group_by?: string;
     };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     const job_id = await jobs.start(
@@ -810,7 +810,7 @@ export async function registerJobRoutes(
 
   app.post("/jobs/export-checklist-html", async (request, reply) => {
     const body = request.body as { profile_id?: number };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     const job_id = await jobs.start(
@@ -823,7 +823,7 @@ export async function registerJobRoutes(
 
   app.post("/jobs/export-kit-bundle", limited, async (request, reply) => {
     const body = request.body as { profile_id?: number; include_print_progress?: boolean };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     const job_id = await jobs.start(
@@ -845,7 +845,7 @@ export async function registerJobRoutes(
       missing_only?: boolean;
       enabled_printer_ids?: string[];
     };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     const job_id = await jobs.start(
@@ -870,7 +870,7 @@ export async function registerJobRoutes(
       enabled_printer_ids?: string[];
       timeout_s?: number;
     };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     const job_id = await jobs.start(
@@ -899,7 +899,7 @@ export async function registerJobRoutes(
       spacing_mm?: number;
       grouping_strategy?: string;
     };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     const job_id = await jobs.start(
@@ -959,7 +959,7 @@ export async function registerJobRoutes(
             "Pick a plan to bind this send (profile_id required)",
           );
         }
-        if (!jobs.getRepo().getProfile(profileId)) {
+        if (!jobs.getRepo().getOwnedProfileIdentity(profileId)) {
           return sendProblem(reply, 404, "Not Found", "Profile not found");
         }
 

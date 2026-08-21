@@ -63,8 +63,7 @@ async function buildCandidatesFromObjectNames(
 ): Promise<Array<{ stl_basename: string; copy_count: number; matching_filenames: string[] }>> {
   if (!objectNames.length) return [];
 
-  // Get all filenames from all profiles
-  const profiles = repo.listProfiles();
+  const profiles = repo.listProfileHeaders();
   const allFilenames: string[] = [];
   for (const profile of profiles) {
     const { parts } = repo.listParts(profile.id, 10000, 0);

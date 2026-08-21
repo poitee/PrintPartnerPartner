@@ -24,7 +24,7 @@ function mockRepo(opts: {
   decisions?: PlanDecision[];
 }): AppRepository {
   return {
-    getProfile: () => ({ id: 1, name: "P" }),
+    getOwnedProfileIdentity: () => ({ id: 1, name: "P", archivedAt: null }),
     getProfileLayers: () =>
       opts.layers.map((l, i) => ({
         id: i + 1,
@@ -158,7 +158,7 @@ describe("suggestSoftStackActions", () => {
       ]),
     );
     const repo = {
-      getProfile: () => ({ id: 1, name: "P" }),
+      getOwnedProfileIdentity: () => ({ id: 1, name: "P", archivedAt: null }),
       getProfileLayers: () => [
         {
           id: 1,

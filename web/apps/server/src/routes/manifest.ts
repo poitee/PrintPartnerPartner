@@ -126,7 +126,9 @@ export async function registerManifestRoutes(
     const body = request.body as { preset_id?: string };
     const presetId = String(body.preset_id ?? "").trim();
     if (!presetId) return reply.status(400).send({ detail: "preset_id is required" });
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     try {
       const result = applyStackPresetToProfile(deps.repo, id, presetId);
       const kit = loadKitManifest(deps.repo, id);

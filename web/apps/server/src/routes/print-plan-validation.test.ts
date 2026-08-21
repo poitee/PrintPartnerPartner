@@ -15,7 +15,11 @@ describe("print-plan HTTP validation", () => {
       ["print_plan:7", JSON.stringify(initialPlan)],
     ]);
     const repo = {
-      getProfile: (id: number) => (id === 7 ? { id, name: "Plan" } : null),
+      getOwnedProfileIdentity: (id: number) =>
+        id === 7 ? { id, name: "Plan", archivedAt: null } : null,
+      getProfile: () => {
+        throw new Error("summary Progress must not be read");
+      },
       getSetting: (key: string) => settings.get(key) ?? null,
       setSetting: (key: string, value: string) => {
         settings.set(key, value);
@@ -87,5 +91,19 @@ describe("print-plan HTTP validation", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json().plan.grouping_strategy).toBe("height_band");
+  });
+
+  it("preserves the ownership-only 404 without reading summary Progress", async () => {
+    const { app } = await fixture({
+      enabled_printer_ids: [],
+      plate_layout: null,
+      group_assignments: {},
+      grouping_strategy: "location",
+    });
+
+    const response = await app.inject({ method: "GET", url: "/plans/999/print-plan" });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ detail: "Profile not found" });
   });
 });

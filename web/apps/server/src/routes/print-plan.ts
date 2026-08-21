@@ -26,7 +26,9 @@ export async function registerPrintPlanRoutes(
 ): Promise<void> {
   app.get("/plans/:id/print-plan", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     const plan = loadKitPrintPlan(deps.repo, id, (message, error) => {
       request.log.warn({ err: error, profileId: id }, message);
     });
@@ -43,7 +45,9 @@ export async function registerPrintPlanRoutes(
 
   app.put("/plans/:id/print-plan", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     if (!isRecord(request.body)) {
       return reply.status(400).send({ detail: "Print plan body must be an object" });
     }
@@ -75,7 +79,9 @@ export async function registerPrintPlanRoutes(
 
   app.get("/plans/:id/print-groups", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     const plan = loadKitPrintPlan(deps.repo, id);
     const fleet = loadFleet(deps.repo);
     const { parts } = deps.repo.buildMergePartsForProfile(id);
@@ -86,7 +92,9 @@ export async function registerPrintPlanRoutes(
 
   app.put("/plans/:id/print-assignments", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     const body = request.body as { assignments?: Record<string, string> };
     const plan = loadKitPrintPlan(deps.repo, id);
     const fleet = loadFleet(deps.repo);
@@ -109,13 +117,17 @@ export async function registerPrintPlanRoutes(
 
   app.get("/plans/:id/plate-workspace", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     return buildPlateWorkspace(deps.repo, id);
   });
 
   app.post("/plans/:id/print-plan/prepare-missing", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     const { parts, completedByMatchKey } = deps.repo.buildMergePartsForProfile(id);
     const copies = unprintedCopies(
       parts as MergePartExport[],

@@ -189,7 +189,7 @@ export async function registerBambuConnectRoutes(
           "Pick a plan to bind this send (profile_id required)",
         );
       }
-      if (!deps.repo.getProfile(profileId)) {
+      if (!deps.repo.getOwnedProfileIdentity(profileId)) {
         return reject(404, "Not Found", "Profile not found");
       }
 

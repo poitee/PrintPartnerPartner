@@ -155,7 +155,7 @@ export function userAskedToSwitchBase(userText: string): boolean {
 function planBaseSourceName(toolCtx: ToolContext): string | null {
   const planId = toolCtx.activePlanId;
   if (planId == null) return null;
-  if (!toolCtx.repo.getProfile(planId)) return null;
+  if (!toolCtx.repo.getOwnedProfileIdentity(planId)) return null;
   const layers = toolCtx.repo.getProfileLayers(planId);
   const base = layers.find((l) => l.layer_type === "base");
   return base?.project_name ?? null;
@@ -221,7 +221,9 @@ export function appendAliasDrivenHints(
   const liveNames = new Set(liveSources.map((s) => s.name));
   const catalogBases = catalogBaseSourceNameSet();
   const layers =
-    toolCtx.repo.getProfile(planId) != null ? toolCtx.repo.getProfileLayers(planId) : [];
+    toolCtx.repo.getOwnedProfileIdentity(planId) != null
+      ? toolCtx.repo.getProfileLayers(planId)
+      : [];
   const attached = new Set(
     layers.map((l) => l.project_name).filter((n): n is string => Boolean(n)),
   );

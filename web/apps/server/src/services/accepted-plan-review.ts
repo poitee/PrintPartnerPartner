@@ -400,7 +400,7 @@ function observeAcceptedPlanReview(input: {
 export async function readAcceptedPlanReview(
   input: ReadAcceptedPlanReviewInput,
 ): Promise<ReadAcceptedPlanReviewResult> {
-  const profile = input.repo.getProfile(input.profileId);
+  const profile = input.repo.getOwnedProfileIdentity(input.profileId);
   if (!profile) return { kind: "not_found" };
   const accepted = input.repo.readAcceptedPlanOperationalSnapshot(input.profileId);
   if (accepted.kind === "empty") {

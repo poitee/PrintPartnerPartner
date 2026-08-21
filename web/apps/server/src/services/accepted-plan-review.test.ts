@@ -121,7 +121,11 @@ function repository(input: {
   accepted: ReturnType<AppRepository["readAcceptedPlanOperationalSnapshot"]>;
 }) {
   return {
-    getProfile: vi.fn(() => input.profile === undefined ? { id: 7, name: "Working name" } : input.profile),
+    getOwnedProfileIdentity: vi.fn(() =>
+      input.profile === undefined
+        ? { id: 7, name: "Working name", archivedAt: null }
+        : input.profile,
+    ),
     readAcceptedPlanOperationalSnapshot: vi.fn(() => input.accepted),
   } as unknown as AppRepository;
 }

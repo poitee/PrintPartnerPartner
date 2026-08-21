@@ -70,7 +70,11 @@ describe("accepted Review observation boundary", () => {
       ],
     };
     const repo = {
-      getProfile: vi.fn(() => ({ id: 7, name: "Working" })),
+      getOwnedProfileIdentity: vi.fn(() => ({
+        id: 7,
+        name: "Working",
+        archivedAt: null,
+      })),
       readAcceptedPlanOperationalSnapshot: vi.fn(() => ({ kind: "ready" as const, snapshot })),
     } as unknown as AppRepository;
 

@@ -44,7 +44,7 @@ export async function registerApiV1ExtensionRoutes(
 ): Promise<void> {
   app.get("/plans/:id/artifacts", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) {
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     return {

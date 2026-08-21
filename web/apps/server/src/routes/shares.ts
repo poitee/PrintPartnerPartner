@@ -20,7 +20,7 @@ export function registerShareRoutes(
     }
     const planId = Number((request.params as { id: string }).id);
     if (!Number.isFinite(planId)) return reply.status(400).send({ detail: "Invalid plan id" });
-    const profile = repo.getProfile(planId);
+    const profile = repo.getOwnedProfileIdentity(planId);
     if (!profile) return reply.status(404).send({ detail: "Plan not found" });
 
     const body = request.body as {

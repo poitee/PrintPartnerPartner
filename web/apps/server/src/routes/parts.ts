@@ -398,7 +398,7 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
   app.post("/plans/:id/regenerate-thumbnails", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     try {
-      if (!deps.repo.getProfile(id)) {
+      if (!deps.repo.getOwnedProfileIdentity(id)) {
         return reply.status(404).send({ detail: "Profile not found" });
       }
       const accepted = deps.repo.readAcceptedPlanOperationalSnapshot(id);

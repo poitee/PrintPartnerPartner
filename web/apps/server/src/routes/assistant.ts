@@ -91,7 +91,7 @@ export async function registerAssistantRoutes(
     const q = request.query as { plan_id?: string };
     const raw = q.plan_id != null ? Number(q.plan_id) : NaN;
     const planId = Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : null;
-    if (planId != null && !deps.repo.getProfile(planId)) {
+    if (planId != null && !deps.repo.getOwnedProfileIdentity(planId)) {
       return sendProblem(reply, 404, "Not Found", "Plan not found");
     }
     const digest = buildPreferencesDigest(deps.repo, planId);
@@ -133,7 +133,7 @@ export async function registerAssistantRoutes(
     }
 
     if (planId != null) {
-      if (!deps.repo.getProfile(planId)) {
+      if (!deps.repo.getOwnedProfileIdentity(planId)) {
         return sendProblem(reply, 404, "Not Found", "Plan not found");
       }
       const deleted = deps.repo.deletePlanDecisionsForPlan(planId);

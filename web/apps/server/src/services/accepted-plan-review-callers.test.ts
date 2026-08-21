@@ -93,7 +93,7 @@ function repository(
   };
   return {
     reposDir: "/unused/repos",
-    getProfile: vi.fn(() => profile),
+    getOwnedProfileIdentity: vi.fn(() => profile),
     getSetting: vi.fn(() => null),
     listParts: vi.fn(() => {
       throw new Error("working Part reader must not run");
@@ -200,7 +200,7 @@ describe("accepted Plan Review callers", () => {
       has_blockers: true,
       part_groups: [],
     });
-    expect(repo.getProfile).toHaveBeenCalledTimes(1);
+    expect(repo.getOwnedProfileIdentity).toHaveBeenCalledTimes(1);
     expect(repo.readAcceptedPlanOperationalSnapshot).toHaveBeenCalledTimes(1);
   });
 
@@ -230,7 +230,7 @@ describe("accepted Plan Review callers", () => {
       totals: { included_parts: 0, total_print_units: 0, by_role: {}, by_filament: {} },
       layers: [],
     });
-    expect(repo.getProfile).toHaveBeenCalledTimes(1);
+    expect(repo.getOwnedProfileIdentity).toHaveBeenCalledTimes(1);
     expect(repo.readAcceptedPlanOperationalSnapshot).toHaveBeenCalledTimes(1);
   });
 

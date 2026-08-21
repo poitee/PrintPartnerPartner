@@ -248,6 +248,24 @@ export type SourceActivationObservation = Readonly<
   >
 >;
 export type ProfileRow = typeof defaultSchema.buildProfiles.$inferSelect;
+
+export type ProfileHeader = {
+  readonly id: number;
+  readonly name: string;
+  readonly order_number: string | null;
+  readonly special_request: string | null;
+  readonly part_count: number;
+  readonly build_stale: boolean;
+  readonly freshness: PlanFreshness;
+  readonly archived_at: string | null;
+  readonly last_used_at: string | null;
+};
+
+export type OwnedProfileIdentity = {
+  readonly id: number;
+  readonly name: string;
+  readonly archivedAt: string | null;
+};
 export type LayerRow = typeof defaultSchema.profileLayers.$inferSelect;
 export type PartDbRow = typeof defaultSchema.parts.$inferSelect;
 export type SourceDocRow = typeof defaultSchema.sourceDocs.$inferSelect;
@@ -2954,6 +2972,12 @@ export class AppRepository {
   }
 
   listProfiles(): ProfileSummary[] {
+    return this.listProfileHeaders().map((header) =>
+      this.toProfileSummary(header, this.printUnitTotals(header.id)),
+    );
+  }
+
+  listProfileHeaders(): ProfileHeader[] {
     const rows = this.db
       .select({
         profile: this.schema.buildProfiles,
@@ -2972,9 +2996,10 @@ export class AppRepository {
       rows.map(({ profile }) => profile.id),
     );
 
-    return rows.map(({ profile, partCount }) =>
-      this.toProfileSummary(profile, Number(partCount ?? 0), freshnessContext),
-    );
+    return rows.map(({ profile, partCount }) => {
+      const freshness = this.planFreshness(profile, freshnessContext);
+      return this.toProfileHeader(profile, Number(partCount ?? 0), freshness);
+    });
   }
 
   private buildPlanFreshnessContext(profileIds: readonly number[]): PlanFreshnessContext {
@@ -3116,25 +3141,32 @@ export class AppRepository {
     };
   }
 
-  private toProfileSummary(
+  private toProfileHeader(
     profile: typeof this.schema.buildProfiles.$inferSelect,
     partCount: number,
-    freshnessContext?: PlanFreshnessContext,
-  ): ProfileSummary {
-    const { totalUnits, remainingUnits } = this.printUnitTotals(profile.id);
-    const freshness = this.planFreshness(profile, freshnessContext);
+    freshness: PlanFreshness,
+  ): ProfileHeader {
     return {
       id: profile.id,
       name: profile.name,
       order_number: profile.orderNumber,
       special_request: profile.specialRequest?.trim() ? profile.specialRequest.trim() : null,
       part_count: partCount,
-      remaining_units: remainingUnits,
-      total_units: totalUnits,
       build_stale: freshness.status === "stale",
       freshness,
       archived_at: profile.archivedAt ?? null,
       last_used_at: profile.lastUsedAt ?? null,
+    };
+  }
+
+  private toProfileSummary(
+    header: ProfileHeader,
+    totals: { readonly totalUnits: number; readonly remainingUnits: number },
+  ): ProfileSummary {
+    return {
+      ...header,
+      remaining_units: totals.remainingUnits,
+      total_units: totals.totalUnits,
     };
   }
 
@@ -3239,6 +3271,11 @@ export class AppRepository {
   }
 
   getProfile(id: number): ProfileSummary | null {
+    const header = this.getProfileHeader(id);
+    return header ? this.toProfileSummary(header, this.printUnitTotals(id)) : null;
+  }
+
+  getProfileHeader(id: number): ProfileHeader | null {
     const profile = this.db
       .select()
       .from(this.schema.buildProfiles)
@@ -3250,14 +3287,14 @@ export class AppRepository {
       .from(this.schema.parts)
       .where(eq(this.schema.parts.profileId, id))
       .get();
-    return this.toProfileSummary(profile, Number(partCount?.c ?? 0));
+    return this.toProfileHeader(
+      profile,
+      Number(partCount?.c ?? 0),
+      this.planFreshness(profile),
+    );
   }
 
-  getOwnedProfileIdentity(id: number): {
-    readonly id: number;
-    readonly name: string;
-    readonly archivedAt: string | null;
-  } | null {
+  getOwnedProfileIdentity(id: number): OwnedProfileIdentity | null {
     return this.db
       .select({
         id: this.schema.buildProfiles.id,
@@ -6261,7 +6298,7 @@ export class AppRepository {
   }
 
   updateProfileSpecialRequest(id: number, specialRequest: string | null): ProfileSummary {
-    if (!this.getProfile(id)) throw new Error("Profile not found");
+    if (!this.getOwnedProfileIdentity(id)) throw new Error("Profile not found");
     const trimmed = (specialRequest ?? "").trim();
     this.db
       .update(this.schema.buildProfiles)
@@ -6281,7 +6318,7 @@ export class AppRepository {
   }
 
   touchProfileLastUsed(id: number): ProfileSummary {
-    const existing = this.getProfile(id);
+    const existing = this.getOwnedProfileIdentity(id);
     if (!existing) throw new Error("Profile not found");
     const now = new Date().toISOString();
     this.db
@@ -6298,7 +6335,7 @@ export class AppRepository {
     id: number,
     newName: string,
     options?: { clearCheckoff?: boolean },
-  ): ProfileSummary & { layers: ReturnType<AppRepository["getProfileLayers"]> } {
+  ): ProfileHeader & { layers: ReturnType<AppRepository["getProfileLayers"]> } {
     const trimmed = newName.trim();
     if (!trimmed) throw new Error("Profile name is required");
     const dup = this.db
@@ -6419,7 +6456,7 @@ export class AppRepository {
     }
 
     return {
-      ...this.getProfile(newProfile.id)!,
+      ...this.getProfileHeader(newProfile.id)!,
       layers: this.getProfileLayers(newProfile.id),
     };
   }

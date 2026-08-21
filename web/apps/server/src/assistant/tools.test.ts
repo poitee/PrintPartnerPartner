@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
+import { InProcessJobRunner } from "../routes/jobs.js";
 import { invokeAssistantTool, applyAssistantAction } from "./tools.js";
 import { inferStackPresetId, summarizeOtherBuildsAsExamples } from "./example-builds.js";
 import { buildAssistantSystemPrompt } from "./assistant-context.js";
@@ -29,9 +30,17 @@ describe("assistant tools + example builds", () => {
       source_kind: "github",
     });
     const plan = repo.createProfile("My 2.4", source.id);
+    repo.listProfiles = () => {
+      throw new Error("Profile summaries must not be read");
+    };
 
     const plans = JSON.parse((await invokeAssistantTool("list_plans", {}, { repo })).content);
-    expect(plans.plans.some((p: { id: number }) => p.id === plan.id)).toBe(true);
+    expect(plans.plans).toContainEqual({
+      id: plan.id,
+      name: "My 2.4",
+      part_count: 0,
+      build_stale: false,
+    });
 
     const sources = JSON.parse((await invokeAssistantTool("list_sources", {}, { repo })).content);
     expect(sources.sources.some((s: { name: string }) => s.name === "Voron-2")).toBe(true);
@@ -119,6 +128,43 @@ describe("assistant tools + example builds", () => {
     expect(baseLayer?.project_id).toBe(other.id);
   });
 
+  it("duplicate_plan returns header fields without reading a profile summary", async () => {
+    const plan = repo.createProfile("Template");
+    repo.getProfile = () => {
+      throw new Error("Profile summary must not be read");
+    };
+
+    const result = await applyAssistantAction(
+      {
+        id: "duplicate-plan",
+        type: "duplicate_plan",
+        plan_id: plan.id,
+        label: "Duplicate plan",
+        summary: "Create a working copy",
+        params: { name: "Working copy", clear_checkoff: true },
+      },
+      {
+        repo,
+        jobs: new InProcessJobRunner({
+          getRepo: () => repo,
+          reposDir: dataDir,
+          exportsDir: dataDir,
+          dataDir,
+        }),
+      },
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        plan_id: expect.any(Number),
+        name: "Working copy",
+        part_count: 0,
+        clear_checkoff: true,
+      },
+    });
+  });
+
   it("summarizeOtherBuildsAsExamples excludes active plan and documents non-training", () => {
     const source = repo.createSource({
       name: "Voron-2",
@@ -127,10 +173,20 @@ describe("assistant tools + example builds", () => {
     });
     const a = repo.createProfile("Alpha", source.id);
     const b = repo.createProfile("Beta", source.id);
+    const listProfileHeaders = repo.listProfileHeaders.bind(repo);
+    let headerListReads = 0;
+    repo.listProfileHeaders = () => {
+      headerListReads += 1;
+      return listProfileHeaders();
+    };
+    repo.getProfileHeader = () => {
+      throw new Error("Example rendering must reuse the bulk header row");
+    };
     const text = summarizeOtherBuildsAsExamples({
       repo,
       excludePlanId: a.id,
     });
+    expect(headerListReads).toBe(1);
     expect(text).toContain("NOT model training");
     expect(text).toContain("Beta");
     expect(text).not.toContain(`#${a.id}:`);

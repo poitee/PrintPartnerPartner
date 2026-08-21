@@ -135,7 +135,7 @@ export async function registerPrinterSendQueueRoutes(
             "Pick a plan to bind this send (profile_id required)",
           );
         }
-        if (!deps.repo.getProfile(profileId)) {
+        if (!deps.repo.getOwnedProfileIdentity(profileId)) {
           return sendProblem(reply, 404, "Not Found", "Profile not found");
         }
 

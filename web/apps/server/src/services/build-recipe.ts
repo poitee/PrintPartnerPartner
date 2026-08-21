@@ -24,7 +24,7 @@ function sourceRef(
 
 /** Derive a reproducible build recipe from current layers + kit manifest + decisions. */
 export function deriveBuildRecipe(repo: AppRepository, planId: number): BuildRecipe | null {
-  const profile = repo.getProfile(planId);
+  const profile = repo.getOwnedProfileIdentity(planId);
   if (!profile) return null;
 
   const layers = repo.getProfileLayers(planId);

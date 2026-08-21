@@ -31,7 +31,7 @@ export function suggestSoftStackActions(options: {
   const { repo, planId } = options;
   const maxActions = options.maxActions ?? 2;
   const existing = options.existingActions ?? [];
-  if (!repo.getProfile(planId)) return [];
+  if (!repo.getOwnedProfileIdentity(planId)) return [];
 
   const layers = repo.getProfileLayers(planId);
   const base = layers.find((l) => l.layer_type === "base");

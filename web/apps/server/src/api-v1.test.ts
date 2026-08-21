@@ -30,6 +30,95 @@ describe("API v1", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("flat and versioned duplicate routes return the full profile summary with layers", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-apiv1-duplicate-"));
+    process.env.PRINT_PARTNER_DATA_DIR = dir;
+    delete process.env.PRINT_PARTNER_API_KEY;
+
+    const config = loadConfig();
+    const ports = createSelfHostPorts(dir);
+    await ports.db.connect();
+    const source = ports.repository.createSource({
+      name: "Base",
+      url: "https://example.com/base.git",
+      source_kind: "github",
+    });
+    const plan = ports.repository.createProfile("Template", source.id);
+    const app = await buildApp(config, ports);
+
+    const flat = await app.inject({
+      method: "POST",
+      url: `/plans/${plan.id}/duplicate`,
+      payload: { name: "Flat copy", clear_checkoff: true },
+    });
+    expect(flat.statusCode).toBe(200);
+    expect(flat.json()).toEqual({
+      id: expect.any(Number),
+      name: "Flat copy",
+      order_number: null,
+      special_request: null,
+      part_count: 0,
+      remaining_units: 0,
+      total_units: 0,
+      build_stale: false,
+      freshness: {
+        status: "untracked",
+        accepted_input_set_id: null,
+        accepted_at: null,
+        reasons: [{ kind: "no_accepted_inputs" }],
+      },
+      archived_at: null,
+      last_used_at: expect.any(String),
+      layers: [
+        {
+          id: expect.any(Number),
+          layer_order: 0,
+          layer_type: "base",
+          project_id: source.id,
+          project_name: "Base",
+        },
+      ],
+    });
+
+    const versioned = await app.inject({
+      method: "POST",
+      url: `/api/v1/plans/${plan.id}/duplicate`,
+      payload: { name: "Versioned copy", clear_checkoff: true },
+    });
+    expect(versioned.statusCode).toBe(200);
+    expect(versioned.json()).toEqual({
+      id: expect.any(Number),
+      name: "Versioned copy",
+      order_number: null,
+      special_request: null,
+      part_count: 0,
+      remaining_units: 0,
+      total_units: 0,
+      build_stale: false,
+      freshness: {
+        status: "untracked",
+        accepted_input_set_id: null,
+        accepted_at: null,
+        reasons: [{ kind: "no_accepted_inputs" }],
+      },
+      archived_at: null,
+      last_used_at: expect.any(String),
+      layers: [
+        {
+          id: expect.any(Number),
+          layer_order: 0,
+          layer_type: "base",
+          project_id: source.id,
+          project_name: "Base",
+        },
+      ],
+    });
+
+    await app.close();
+    ports.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("GET /api/v1 index and openapi redirect", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-apiv1b-"));
     process.env.PRINT_PARTNER_DATA_DIR = dir;

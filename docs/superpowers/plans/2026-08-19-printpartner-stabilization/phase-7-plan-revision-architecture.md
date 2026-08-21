@@ -618,6 +618,25 @@ The full server suite passed 155 files with one file skipped, 1200 tests passed,
 and 3 tests skipped. Server typecheck, root lint, the no-comments audit, and the
 diff check passed.
 
+The metadata escape adds private `ProfileHeader` reads for current Plan name,
+order, special request, compatibility Part count, freshness, archive time, and
+last-used time. Metadata callers use those reads, while ownership and existence
+checks use the tenant-scoped `OwnedProfileIdentity`. Neither path reads or
+validates Progress. Assistant `list_plans` keeps its existing result, and example
+Build summaries reuse one bulk header read instead of adding per-Plan header
+queries.
+
+`duplicateProfile` now returns header metadata plus layers. The flat and
+`/api/v1` Plan routes explicitly compose the unchanged full `ProfileSummary`,
+including Progress totals, while the assistant duplicate action avoids that
+summary read. The public contract, HTTP bodies, web UI, metrics, Discord digest,
+and assistant print statistics remain unchanged. Static inventories pin every
+known summary, header, and identity API caller, plus the four repository mutation
+paths that still return full summaries. The focused caller proof passed 4 files
+and 40 tests. The full server suite passed 157 files with one file skipped, 1208
+tests passed, and 3 tests skipped. Server typecheck, full web lint, the final
+no-comments audit, and the diff check passed.
+
 ## Module shape
 
 ```ts
