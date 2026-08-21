@@ -58,11 +58,12 @@ function setup() {
   const acceptedPart = accepted.snapshot.parts.find(
     (part) => part.projectionPartId === bracket.id,
   )!;
+  const raw = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
   cleanups.push(() => {
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  return { repo, plan, bracket, acceptedPart, accepted: accepted.snapshot };
+  return { repo, plan, bracket, acceptedPart, accepted: accepted.snapshot, raw };
 }
 
 function setupUninitialized() {
@@ -186,8 +187,8 @@ describe("accepted printer attribution repository command", () => {
       },
       {
         expected: "compatibility_dirty",
-        arrange: ({ repo, plan, bracket }) => {
-          repo.patchPart(bracket.id, { filament_color_id: "pla-black" });
+        arrange: ({ plan, bracket, raw }) => {
+          raw.prepare("UPDATE parts SET notes = 'dirty' WHERE id = ?").run(bracket.id);
           return plan.id;
         },
       },

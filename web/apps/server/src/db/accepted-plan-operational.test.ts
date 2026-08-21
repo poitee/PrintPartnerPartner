@@ -591,7 +591,10 @@ describe("accepted Plan operational snapshot", () => {
     );
 
     expect(source).not.toContain("afterProfileRead");
-    expect(exportedFunctions).toEqual(["readAcceptedPlanOperationalSnapshotInternal"]);
+    expect(exportedFunctions).toEqual([
+      "projectionPlanningFieldsMatch",
+      "readAcceptedPlanOperationalSnapshotInternal",
+    ]);
   });
 
   const corruptionCases: readonly {
@@ -863,9 +866,6 @@ describe("accepted Plan operational snapshot", () => {
     ["source_layer", "changed-layer"],
     ["status", "changed-status"],
     ["role", "changed-role"],
-    ["filament_color_id", "changed-color"],
-    ["filament_custom_hex", "#123456"],
-    ["spoolman_spool_id", "spoolman:1"],
     ["quantity_auto", 2],
     ["quantity_override", 2],
     ["quantity_effective", 2],
@@ -896,6 +896,27 @@ describe("accepted Plan operational snapshot", () => {
       context.database.close();
     });
   }
+
+  it("overlays live filament without treating it as projection corruption", () => {
+    const context = trackedApplyFixture();
+    context.raw.exec("DROP TRIGGER trg_parts_invalidate_accepted_revision_update");
+    context.raw
+      .prepare(
+        `UPDATE parts
+            SET filament_color_id = 'pla-black',
+                filament_custom_hex = NULL,
+                spoolman_spool_id = 'spoolman:1'
+          WHERE profile_id = ?`,
+      )
+      .run(context.profile.id);
+
+    const accepted = context.repo.readAcceptedPlanOperationalSnapshot(context.profile.id);
+    expect(accepted.kind).toBe("ready");
+    if (accepted.kind !== "ready") throw new Error("accepted snapshot is not ready");
+    expect(accepted.snapshot.parts[0]?.filamentColorId).toBe("pla-black");
+    expect(accepted.snapshot.parts[0]?.spoolmanSpoolId).toBe("spoolman:1");
+    context.database.close();
+  });
 
   const revisionDigestChanges = [
     ["part_key", "changed-key"],

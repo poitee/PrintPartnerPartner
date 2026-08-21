@@ -20,6 +20,13 @@ import {
   acceptedPartMediaIdentity,
 } from "../services/accepted-part-media.js";
 import { acceptedPlanBasis, type AcceptedProgressFailure } from "../db/accepted-plan-progress.js";
+import {
+  liveAssignmentFrom,
+  resolveFilamentAssignment,
+  type AssignAcceptedFilamentResult,
+} from "../db/accepted-part-filament.js";
+import { getColorById, resolvePartFilamentHex } from "../services/filament-catalog.js";
+import type { PartRow } from "@print-partner/contracts";
 import { parseRequiredUnitToken } from "../services/required-units.js";
 
 type RouteDeps = {
@@ -59,6 +66,49 @@ function acceptedStateDetail(reason: "compatibility_dirty" | "uninitialized"): s
   return reason === "compatibility_dirty"
     ? "Accepted Plan requires compatibility repair"
     : "Accepted Plan operational state is not initialized";
+}
+
+function toPartRow(part: AcceptedOperationalPart): PartRow {
+  const color = part.filamentColorId ? getColorById(part.filamentColorId) : null;
+  return {
+    id: part.projectionPartId,
+    match_key: part.partKey,
+    relative_path: part.relativePath,
+    filename: part.filename,
+    source_layer: part.sourceLayer,
+    status: part.status,
+    role: part.effectiveRole,
+    requirement: part.requirement,
+    option_group_id: part.optionGroupId,
+    included: part.included,
+    filament_color_id: part.filamentColorId,
+    filament_custom_hex: part.filamentCustomHex,
+    spoolman_spool_id: part.spoolmanSpoolId,
+    filament_display: color?.combo_label ?? "",
+    filament_hex: resolvePartFilamentHex(part),
+    quantity_auto: part.quantityInferred,
+    quantity_override: part.quantityOverride,
+    quantity_effective: part.quantityEffective,
+  };
+}
+
+function sendAcceptedFilamentFailure(reply: FastifyReply, failure: AssignAcceptedFilamentResult) {
+  if (failure.kind === "updated") {
+    throw new Error("Accepted filament success cannot be sent as a failure");
+  }
+  if (failure.kind === "accepted_state_unavailable") {
+    return reply.status(409).send({ detail: acceptedStateDetail(failure.reason) });
+  }
+  if (failure.kind === "stale_accepted_plan") {
+    return reply.status(409).send({ detail: "Accepted Plan changed; reload and retry" });
+  }
+  if (failure.kind === "transaction_unavailable") {
+    return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+  }
+  if (failure.kind === "plan_archived") {
+    return reply.status(409).send({ detail: "Archived Plan Progress cannot be changed" });
+  }
+  return reply.status(404).send({ detail: "Part not found" });
 }
 
 function sendAcceptedProgressFailure(reply: FastifyReply, failure: AcceptedProgressFailure) {
@@ -174,19 +224,47 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
     ) {
       return reply.status(400).send({ detail: "Only filament and spool assignment may be updated" });
     }
-    const patch = {
-      ...(fields.filament_color_id !== undefined
-        ? { filament_color_id: fields.filament_color_id as string | null }
-        : {}),
-      ...(fields.spoolman_spool_id !== undefined
-        ? { spoolman_spool_id: fields.spoolman_spool_id as string | null }
-        : {}),
-    };
+    if (!deps.repo.canMutateAcceptedPlan()) {
+      return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+    }
+    let profileId: number | null = null;
     try {
-      return deps.repo.patchPart(id, patch);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return reply.status(msg.includes("not found") ? 404 : 400).send({ detail: msg });
+      const accepted = readAcceptedPartRequest(deps, id);
+      if (accepted.kind === "part_not_found") {
+        return reply.status(404).send({ detail: "Part not found" });
+      }
+      if (accepted.kind === "accepted_state_unavailable") {
+        return reply.status(409).send({ detail: acceptedStateDetail(accepted.reason) });
+      }
+      profileId = accepted.profileId;
+      const result = deps.repo.assignAcceptedFilament({
+        expected: acceptedPlanBasis(accepted.snapshot),
+        target: { kind: "part", projectionPartId: id },
+        assignment: resolveFilamentAssignment(liveAssignmentFrom(accepted.part), {
+          ...(fields.filament_color_id !== undefined
+            ? { colorId: fields.filament_color_id as string | null }
+            : {}),
+          ...(fields.spoolman_spool_id !== undefined
+            ? { spoolmanSpoolId: fields.spoolman_spool_id as string | null }
+            : {}),
+        }),
+      });
+      return result.kind === "updated"
+        ? toPartRow(result.part)
+        : sendAcceptedFilamentFailure(reply, result);
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error(
+          { code: error.code, profileId, partId: id },
+          "Accepted Plan integrity failure",
+        );
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error(
+        { failure: "unexpected", profileId, partId: id },
+        "Accepted Plan filament update failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
 

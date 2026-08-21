@@ -82,7 +82,13 @@ describe("Phase 6 tenant isolation", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
       expect(repo.getProfileHeader(profileId)).toBeNull();
       expect(repo.getPartRow(partId)).toBeNull();
-      expect(() => repo.patchPart(partId, { filament_color_id: "pla-black" })).toThrow("Part not found");
+      expect(
+        repo.assignAcceptedFilament({
+          expected,
+          target: { kind: "part", projectionPartId: partId },
+          assignment: { color: { kind: "catalog", colorId: "pla-black" }, spoolmanSpoolId: null },
+        }),
+      ).toEqual({ kind: "part_not_found" });
       expect(repo.setAcceptedUnitCompletion({ expected, token, completed: false })).toEqual({
         kind: "unit_not_found",
       });

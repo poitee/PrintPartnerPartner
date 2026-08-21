@@ -1140,7 +1140,35 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 28;
+export const currentSchemaVersion = 29;
+
+export const SQLITE_PARTS_INVALIDATE_ACCEPTED_REVISION_UPDATE = `CREATE TRIGGER IF NOT EXISTS trg_parts_invalidate_accepted_revision_update
+    AFTER UPDATE ON parts
+    WHEN OLD.id IS NOT NEW.id
+      OR OLD.tenant_id IS NOT NEW.tenant_id
+      OR OLD.profile_id IS NOT NEW.profile_id
+      OR OLD.match_key IS NOT NEW.match_key
+      OR OLD.relative_path IS NOT NEW.relative_path
+      OR OLD.filename IS NOT NEW.filename
+      OR OLD.source_layer IS NOT NEW.source_layer
+      OR OLD.status IS NOT NEW.status
+      OR OLD.role IS NOT NEW.role
+      OR OLD.quantity_auto IS NOT NEW.quantity_auto
+      OR OLD.quantity_override IS NOT NEW.quantity_override
+      OR OLD.quantity_effective IS NOT NEW.quantity_effective
+      OR OLD.included IS NOT NEW.included
+      OR OLD.notes IS NOT NEW.notes
+      OR OLD.github_blob_url IS NOT NEW.github_blob_url
+      OR OLD.geometry_same IS NOT NEW.geometry_same
+      OR OLD.requirement IS NOT NEW.requirement
+      OR OLD.option_group_id IS NOT NEW.option_group_id
+      OR OLD.manifest_source IS NOT NEW.manifest_source
+    BEGIN
+      UPDATE build_profiles
+         SET accepted_plan_revision_id = NULL
+       WHERE (id = OLD.profile_id AND tenant_id = OLD.tenant_id)
+          OR (id = NEW.profile_id AND tenant_id = NEW.tenant_id);
+    END`;
 
 export const schemaMigrations: string[] = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -1675,14 +1703,7 @@ export const schemaMigrations: string[] = [
          SET accepted_plan_revision_id = NULL
        WHERE id = NEW.profile_id AND tenant_id = NEW.tenant_id;
     END`,
-  `CREATE TRIGGER IF NOT EXISTS trg_parts_invalidate_accepted_revision_update
-    AFTER UPDATE ON parts
-    BEGIN
-      UPDATE build_profiles
-         SET accepted_plan_revision_id = NULL
-       WHERE (id = OLD.profile_id AND tenant_id = OLD.tenant_id)
-          OR (id = NEW.profile_id AND tenant_id = NEW.tenant_id);
-    END`,
+  SQLITE_PARTS_INVALIDATE_ACCEPTED_REVISION_UPDATE,
   `CREATE TRIGGER IF NOT EXISTS trg_parts_invalidate_accepted_revision_delete
     AFTER DELETE ON parts
     BEGIN

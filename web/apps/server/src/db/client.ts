@@ -24,6 +24,10 @@ import {
   LEGACY_PRINT_PLAN_REMOVAL_SCHEMA_VERSION,
   removeLegacyPrintPlansAndStampSqlite,
 } from "./legacy-print-plan-removal.js";
+import {
+  ACCEPTED_FILAMENT_ASSIGNMENT_SCHEMA_VERSION,
+  applyAcceptedFilamentAssignmentSchema,
+} from "./accepted-filament-assignment-schema.js";
 
 export type DrizzleDb = BetterSQLite3Database<typeof schema>;
 
@@ -299,6 +303,9 @@ export class SqliteDatabase {
         this.sqlite,
         this.requiredUnitBackfillDependencies.afterLegacyPrintPlanRemoval,
       );
+    }
+    if (versionBeforeMigration < ACCEPTED_FILAMENT_ASSIGNMENT_SCHEMA_VERSION) {
+      applyAcceptedFilamentAssignmentSchema(this.sqlite);
     }
     const row = this.sqlite
       .prepare("SELECT value FROM app_settings WHERE tenant_id = ? AND key = ?")

@@ -15,6 +15,7 @@ import { createSelfHostPorts } from "../adapters/self-host/index.js";
 import { buildApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
+import { saveRoleFilamentDefault } from "../services/role-filament-store.js";
 import {
   acceptedMediaBasis,
   acceptedMediaCachePath,
@@ -70,7 +71,11 @@ describe("accepted Part media routes", () => {
     });
     repo.activateSourceRevision({ sourceId: source.id, revisionId: sourceRevision.id, observed });
     const profile = repo.createProfile("Accepted media Plan", source.id);
-    repo.bulkSetRoleFilament(profile.id, "primary", null, "#112233");
+    saveRoleFilamentDefault(repo, profile.id, "primary", {
+      filament_color_id: null,
+      filament_custom_hex: "#112233",
+      spoolman_spool_id: null,
+    });
     const created = repo.recomputePlanDraft({
       profileId: profile.id,
       actor: "test:user",

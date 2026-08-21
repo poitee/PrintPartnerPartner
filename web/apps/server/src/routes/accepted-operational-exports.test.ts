@@ -6,9 +6,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
+import { eq } from "drizzle-orm";
 import { getDb, SqliteDatabase } from "../db/client.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import { AppRepository, type SchemaTables } from "../db/repository.js";
+import * as schema from "../db/schema.js";
 import * as pgSchema from "../db/schema-pg.js";
 import {
   registerPostgresSyncQuery,
@@ -353,7 +355,7 @@ describe("accepted operational export routes", () => {
     const { db, repo, profile } = fixture();
     const part = repo.listParts(profile.id).parts[0];
     if (!part) throw new Error("test Part is missing");
-    repo.patchPart(part.id, { filament_color_id: "pla-black" });
+    db.update(schema.parts).set({ notes: "dirty" }).where(eq(schema.parts.id, part.id)).run();
     const authStore = new AuthStore(db);
     const createShare = vi.spyOn(authStore, "createPlanShare");
     const app = Fastify();

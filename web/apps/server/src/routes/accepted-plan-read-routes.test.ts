@@ -326,7 +326,9 @@ describe("accepted Plan read routes", () => {
       acceptPlanForTest(repo, dirtyProfile.id);
       const dirtyPart = repo.listParts(dirtyProfile.id).parts[0];
       if (!dirtyPart) throw new Error("dirty test Part is missing");
-      repo.patchPart(dirtyPart.id, { filament_color_id: "pla-black" });
+      const dirtyDb = new Database(join(directory, "print-partner.db"));
+      dirtyDb.prepare("UPDATE parts SET notes = 'dirty' WHERE id = ?").run(dirtyPart.id);
+      dirtyDb.close();
       const dirtyCheckoff = await app.inject({
         method: "GET",
         url: `/plans/${dirtyProfile.id}/checkoff`,

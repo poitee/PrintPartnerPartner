@@ -17,6 +17,12 @@ import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-opera
 import { toAcceptedCheckoffView } from "../services/accepted-plan-views.js";
 import { acceptedPlanBasis } from "../db/accepted-plan-progress.js";
 import {
+  filamentAssignmentColumns,
+  resolveFilamentAssignment,
+  type AssignAcceptedFilamentResult,
+  type FilamentAssignment,
+} from "../db/accepted-part-filament.js";
+import {
   toLegacyProfileSummary,
   toProfileSummary,
   type LegacyProgressFailure,
@@ -64,6 +70,40 @@ function acceptedStateDetail(reason: "compatibility_dirty" | "uninitialized"): s
   return reason === "compatibility_dirty"
     ? "Accepted Plan requires compatibility repair"
     : "Accepted Plan operational state is not initialized";
+}
+
+function sendAcceptedFilamentFailure(reply: FastifyReply, failure: AssignAcceptedFilamentResult) {
+  if (failure.kind === "updated") {
+    throw new Error("Accepted filament success cannot be sent as a failure");
+  }
+  if (failure.kind === "accepted_state_unavailable") {
+    return reply.status(409).send({ detail: acceptedStateDetail(failure.reason) });
+  }
+  if (failure.kind === "stale_accepted_plan") {
+    return reply.status(409).send({ detail: "Accepted Plan changed; reload and retry" });
+  }
+  if (failure.kind === "transaction_unavailable") {
+    return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+  }
+  if (failure.kind === "plan_archived") {
+    return reply.status(409).send({ detail: "Archived Plan Progress cannot be changed" });
+  }
+  return reply.status(404).send({ detail: "Part not found" });
+}
+
+function completeRoleAssignment(body: {
+  filament_color_id?: string | null;
+  filament_custom_hex?: string | null;
+  spoolman_spool_id?: string | null;
+}): FilamentAssignment {
+  return resolveFilamentAssignment(
+    { color: { kind: "unset" }, spoolmanSpoolId: null },
+    {
+      colorId: body.filament_color_id ?? null,
+      customHex: body.filament_custom_hex ?? null,
+      spoolmanSpoolId: body.spoolman_spool_id ?? null,
+    },
+  );
 }
 
 function archiveAcceptedPlan(
@@ -548,58 +588,73 @@ export async function registerPlanRoutes(
     };
     const role = String(body.role ?? "").trim();
     if (!role) return reply.status(400).send({ detail: "role is required" });
+    const snapshot = deps.repo.readAcceptedPlanOperationalSnapshot(id);
+    if (snapshot.kind !== "ready") {
+      return reply.status(409).send({
+        detail:
+          snapshot.kind === "empty"
+            ? "Accepted Plan changed; reload and retry"
+            : acceptedStateDetail(snapshot.kind),
+      });
+    }
     const normalizedRole = normalizePartRole(role);
-    const spoolRef =
-      body.spoolman_spool_id !== undefined ? body.spoolman_spool_id : undefined;
-    const partsBeforeUpdate = deps.repo
-      .getProfilePartRows(id)
-      .filter((p) => p.included && normalizePartRole(p.role) === normalizedRole);
-    const updated = deps.repo.bulkSetRoleFilament(
-      id,
-      role,
-      body.filament_color_id ?? null,
-      body.filament_custom_hex ?? null,
-      spoolRef,
-    );
+    const result = deps.repo.assignAcceptedFilament({
+      expected: acceptedPlanBasis(snapshot.snapshot),
+      target: { kind: "role", role: normalizedRole },
+      assignment: completeRoleAssignment(body),
+    });
+    if (result.kind !== "updated") return sendAcceptedFilamentFailure(reply, result);
     const refreshThumbnails = body.refresh_thumbnails !== false;
     let thumbnails_cleared = 0;
     if (refreshThumbnails) {
-      for (const before of partsBeforeUpdate) {
-        const stl = resolvePartStl(deps.repo, before);
+      for (const assigned of result.assigned) {
+        const part = deps.repo.getPartRow(assigned.projectionPartId);
+        if (!part) continue;
+        const stl = resolvePartStl(deps.repo, part);
         if (!stl) continue;
-        const after = deps.repo.getPartRow(before.id);
-        const newHex = after ? resolvePartFilamentHex(after) : null;
         thumbnails_cleared += clearPartThumbnailCacheAtHexes(
           deps.thumbsDir,
           stl,
           normalizedRole,
-          [resolvePartFilamentHex(before), newHex],
+          [
+            resolvePartFilamentHex(filamentAssignmentColumns(assigned.before)),
+            resolvePartFilamentHex(filamentAssignmentColumns(assigned.after)),
+          ],
         );
       }
     }
     const roles = deps.repo.getRoleFilaments(id);
     await enrichRoleFilamentRows(roles, { repo: deps.repo, dataDir: deps.dataDir });
-    return { updated, thumbnails_cleared, roles };
+    return { updated: result.assigned.length, thumbnails_cleared, roles };
   });
 
-  /** Re-apply every saved role color to matching included parts and refresh thumbnails. */
   app.post("/plans/:id/apply-role-colors", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = (request.body ?? {}) as { refresh_thumbnails?: boolean };
     const refreshThumbnails = body.refresh_thumbnails !== false;
+    const snapshot = deps.repo.readAcceptedPlanOperationalSnapshot(id);
+    if (snapshot.kind !== "ready") {
+      return reply.status(409).send({
+        detail:
+          snapshot.kind === "empty"
+            ? "Accepted Plan changed; reload and retry"
+            : acceptedStateDetail(snapshot.kind),
+      });
+    }
     const savedDefaults = loadRoleFilamentDefaults(deps.repo, id);
+    const expected = acceptedPlanBasis(snapshot.snapshot);
     let updated = 0;
     for (const role of canonicalRoleOrder()) {
       const saved = savedDefaults[role];
       if (!saved?.filament_color_id && !saved?.filament_custom_hex) continue;
-      updated += deps.repo.bulkSetRoleFilament(
-        id,
-        role,
-        saved.filament_color_id ?? null,
-        saved.filament_custom_hex ?? null,
-        saved.spoolman_spool_id ?? undefined,
-      );
+      const result = deps.repo.assignAcceptedFilament({
+        expected,
+        target: { kind: "role", role },
+        assignment: completeRoleAssignment(saved),
+      });
+      if (result.kind !== "updated") return sendAcceptedFilamentFailure(reply, result);
+      updated += result.assigned.length;
     }
     const thumbnails_cleared = refreshThumbnails
       ? clearPlanThumbnailCache(deps.repo, deps.thumbsDir, id)

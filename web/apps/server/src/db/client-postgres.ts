@@ -646,6 +646,28 @@ export const postgresPostInitMigrations: string[] = [
         RETURN OLD;
       END IF;
       IF TG_OP = 'UPDATE' THEN
+        IF OLD.id IS NOT DISTINCT FROM NEW.id
+           AND OLD.tenant_id IS NOT DISTINCT FROM NEW.tenant_id
+           AND OLD.profile_id IS NOT DISTINCT FROM NEW.profile_id
+           AND OLD.match_key IS NOT DISTINCT FROM NEW.match_key
+           AND OLD.relative_path IS NOT DISTINCT FROM NEW.relative_path
+           AND OLD.filename IS NOT DISTINCT FROM NEW.filename
+           AND OLD.source_layer IS NOT DISTINCT FROM NEW.source_layer
+           AND OLD.status IS NOT DISTINCT FROM NEW.status
+           AND OLD.role IS NOT DISTINCT FROM NEW.role
+           AND OLD.quantity_auto IS NOT DISTINCT FROM NEW.quantity_auto
+           AND OLD.quantity_override IS NOT DISTINCT FROM NEW.quantity_override
+           AND OLD.quantity_effective IS NOT DISTINCT FROM NEW.quantity_effective
+           AND OLD.included IS NOT DISTINCT FROM NEW.included
+           AND OLD.notes IS NOT DISTINCT FROM NEW.notes
+           AND OLD.github_blob_url IS NOT DISTINCT FROM NEW.github_blob_url
+           AND OLD.geometry_same IS NOT DISTINCT FROM NEW.geometry_same
+           AND OLD.requirement IS NOT DISTINCT FROM NEW.requirement
+           AND OLD.option_group_id IS NOT DISTINCT FROM NEW.option_group_id
+           AND OLD.manifest_source IS NOT DISTINCT FROM NEW.manifest_source
+        THEN
+          RETURN NEW;
+        END IF;
         UPDATE build_profiles
            SET accepted_plan_revision_id = NULL
          WHERE id = OLD.profile_id AND tenant_id = OLD.tenant_id;

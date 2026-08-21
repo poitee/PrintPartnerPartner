@@ -65,12 +65,8 @@ describe("Plan draft cutover production inventory", () => {
     expect(route).not.toMatch(/\b(included|quantity_override)\b/);
 
     const repository = readFileSync(join(webRoot, "apps/server/src/db/repository.ts"), "utf8");
-    const patchPart = repository.slice(
-      repository.indexOf("  patchPart("),
-      repository.indexOf("  getRoleFilaments("),
-    );
-    expect(patchPart).toContain("filament_color_id?: string | null");
-    expect(patchPart).toContain("spoolman_spool_id?: string | null");
-    expect(patchPart).not.toMatch(/\b(included|quantity_override)\b/);
+    expect(repository).not.toContain("  patchPart(");
+    expect(repository).toContain("  assignAcceptedFilament(");
+    expect(repository).not.toContain("  bulkSetRoleFilament(");
   });
 });

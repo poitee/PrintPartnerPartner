@@ -40,7 +40,6 @@ import {
   loadRoleFilamentDefaults,
   roleFilamentSettingKey,
   saveRoleFilamentDefault,
-  type RoleFilamentDefault,
 } from "../services/role-filament-store.js";
 import { getColorById, resolvePartFilamentHex } from "../services/filament-catalog.js";
 import type { EditableKitRecipe } from "../services/export-kit.js";
@@ -149,10 +148,17 @@ import {
 } from "../services/working-plan-sources.js";
 import { resolveStoredSnapshotPath } from "./stored-snapshot-path.js";
 import {
+  projectionPlanningFieldsMatch,
   readAcceptedPlanOperationalSnapshotInternal,
   type AcceptedPlanCorruptionCode,
   type ReadAcceptedPlanOperationalSnapshotResult,
 } from "./accepted-plan-operational.js";
+import {
+  assignAcceptedFilamentInternal,
+  filamentAssignmentColumns,
+  type AssignAcceptedFilament,
+  type AssignAcceptedFilamentResult,
+} from "./accepted-part-filament.js";
 import {
   MAX_ACCEPTED_PROGRESS_SUMMARY_BATCH,
   readAcceptedPlanProgressBatch,
@@ -1269,6 +1275,31 @@ export class AppRepository {
         ),
       "immediate",
     );
+  }
+
+  assignAcceptedFilament(command: AssignAcceptedFilament): AssignAcceptedFilamentResult {
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+    return this.transaction(() => {
+      const result = assignAcceptedFilamentInternal(
+        {
+          db: this.db,
+          schema: this.schema,
+          tenantId: this.tenantId,
+          reposDir: this.reposDir,
+          sqlite: true,
+        },
+        command,
+      );
+      if (result.kind === "updated" && command.target.kind === "role") {
+        const columns = filamentAssignmentColumns(command.assignment);
+        saveRoleFilamentDefault(this, command.expected.profileId, command.target.role, {
+          filament_color_id: columns.filamentColorId,
+          filament_custom_hex: columns.filamentCustomHex,
+          spoolman_spool_id: columns.spoolmanSpoolId,
+        });
+      }
+      return result;
+    }, "immediate");
   }
 
   setAcceptedPrintedCounts(command: {
@@ -5622,6 +5653,15 @@ export class AppRepository {
         return { kind: "draft_changed" };
       }
       this.validatePlanRevisionInputs(profileId, draftInputs);
+      const liveFilamentByProjectionId = new Map<
+        number,
+        {
+          filamentColorId: string | null;
+          filamentCustomHex: string | null;
+          spoolmanSpoolId: string | null;
+        }
+      >();
+      const predecessorProjectionByRevisionPartId = new Map<number, number>();
       if (expectedBaseRevisionId != null) {
         const accepted = this.getAcceptedPlanRevision(profileId);
         if (
@@ -5643,6 +5683,18 @@ export class AppRepository {
           )
           .all();
         const compatibilityById = new Map(compatibility.map((part) => [part.id, part]));
+        for (const part of compatibility) {
+          liveFilamentByProjectionId.set(part.id, {
+            filamentColorId: part.filamentColorId,
+            filamentCustomHex: part.filamentCustomHex,
+            spoolmanSpoolId: part.spoolmanSpoolId,
+          });
+        }
+        for (const part of accepted.parts) {
+          if (part.projectionPartId != null) {
+            predecessorProjectionByRevisionPartId.set(part.id, part.projectionPartId);
+          }
+        }
         if (
           compatibility.length !== accepted.parts.length ||
           accepted.parts.some((part) => {
@@ -5650,25 +5702,24 @@ export class AppRepository {
               part.projectionPartId == null ? null : compatibilityById.get(part.projectionPartId);
             return (
               !projected ||
-              projected.matchKey !== part.partKey ||
-              projected.relativePath !== part.relativePath ||
-              projected.filename !== part.filename ||
-              projected.sourceLayer !== part.sourceLayer ||
-              projected.status !== part.status ||
-              projected.role !== part.effectiveRole ||
-              projected.filamentColorId !== part.filamentColorId ||
-              projected.filamentCustomHex !== part.filamentCustomHex ||
-              projected.spoolmanSpoolId !== part.spoolmanSpoolId ||
-              projected.quantityAuto !== part.quantityInferred ||
-              projected.quantityOverride !== part.quantityOverride ||
-              projected.quantityEffective !== part.quantityEffective ||
-              projected.included !== part.included ||
-              projected.notes !== part.notes ||
-              projected.githubBlobUrl !== part.githubBlobUrl ||
-              projected.geometrySame !== part.geometrySame ||
-              projected.requirement !== part.requirement ||
-              projected.optionGroupId !== part.optionGroupId ||
-              projected.manifestSource !== part.manifestSource
+              !projectionPlanningFieldsMatch(projected, {
+                partKey: part.partKey,
+                relativePath: part.relativePath,
+                filename: part.filename,
+                sourceLayer: part.sourceLayer,
+                status: part.status,
+                role: part.effectiveRole,
+                quantityInferred: part.quantityInferred,
+                quantityOverride: part.quantityOverride,
+                quantityEffective: part.quantityEffective,
+                included: part.included,
+                notes: part.notes,
+                githubBlobUrl: part.githubBlobUrl,
+                geometrySame: part.geometrySame,
+                requirement: part.requirement,
+                optionGroupId: part.optionGroupId,
+                manifestSource: part.manifestSource,
+              })
             );
           })
         ) {
@@ -5786,7 +5837,20 @@ export class AppRepository {
         return { kind: "production_active", ...production };
       }
       const prepared = preparePlanPublication({
-        draft,
+        draft: {
+          ...draft,
+          parts: draft.parts.map((part) => {
+            if (part.baseRevisionPartId == null) return part;
+            const predecessorProjectionId = predecessorProjectionByRevisionPartId.get(
+              part.baseRevisionPartId,
+            );
+            const live =
+              predecessorProjectionId == null
+                ? undefined
+                : liveFilamentByProjectionId.get(predecessorProjectionId);
+            return live ? { ...part, ...live } : part;
+          }),
+        },
         assignments: reconciliation.assignments,
         baseUnits: publicationBaseUnits,
       });
@@ -7261,42 +7325,6 @@ export class AppRepository {
     }
   }
 
-  patchPart(
-    partId: number,
-    patch: {
-      filament_color_id?: string | null;
-      spoolman_spool_id?: string | null;
-    },
-  ): PartRow {
-    this.requirePart(partId);
-    const updates: Partial<typeof this.schema.parts.$inferInsert> = {};
-    if (patch.filament_color_id !== undefined) {
-      updates.filamentColorId = patch.filament_color_id;
-      updates.spoolmanSpoolId = null;
-    }
-    if (patch.spoolman_spool_id !== undefined) {
-      updates.spoolmanSpoolId = patch.spoolman_spool_id;
-    }
-    if (Object.keys(updates).length) {
-      this.db
-        .update(this.schema.parts)
-        .set(updates)
-        .where(
-          and(
-            eq(this.schema.parts.tenantId, this.tenantId),
-            eq(this.schema.parts.id, partId),
-          ),
-        )
-        .run();
-    }
-    const updated = this.requirePart(partId);
-    const row = partRow(updated);
-    const color = updated.filamentColorId ? getColorById(updated.filamentColorId) : null;
-    row.filament_display = color?.combo_label ?? "";
-    row.filament_hex = resolvePartFilamentHex(updated);
-    return row;
-  }
-
   getRoleFilaments(profileId: number) {
     const partRows = this.listPartRows(profileId);
     const savedDefaults = loadRoleFilamentDefaults(this, profileId);
@@ -7406,51 +7434,6 @@ export class AppRepository {
             (filament_color_id ? getColorById(filament_color_id)?.hex ?? null : null),
         };
       });
-  }
-
-  bulkSetRoleFilament(
-    profileId: number,
-    role: string,
-    colorId: string | null,
-    customHex?: string | null,
-    spoolRef?: string | null,
-  ): number {
-    this.requireProfile(profileId);
-    const targetRole = normalizePartRole(role);
-    const defaultPatch: Partial<RoleFilamentDefault> = {
-      filament_color_id: colorId,
-      filament_custom_hex: customHex ?? null,
-    };
-    if (spoolRef !== undefined) {
-      defaultPatch.spoolman_spool_id = spoolRef;
-    } else if (colorId != null) {
-      defaultPatch.spoolman_spool_id = null;
-    }
-    saveRoleFilamentDefault(this, profileId, targetRole, defaultPatch);
-
-    const partRows = this.listPartRows(profileId);
-    let updated = 0;
-    for (const part of partRows) {
-      if (!part.included || normalizePartRole(part.role) !== targetRole) continue;
-      const nextSpool =
-        spoolRef !== undefined
-          ? spoolRef
-          : colorId !== part.filamentColorId
-            ? null
-            : part.spoolmanSpoolId;
-      this.db
-        .update(this.schema.parts)
-        .set({
-          filamentColorId: colorId,
-          filamentCustomHex: customHex ?? null,
-          spoolmanSpoolId: nextSpool ?? null,
-        })
-        .where(eq(this.schema.parts.id, part.id))
-        .run();
-      updated += 1;
-    }
-    this.markProfileConfigModified(profileId);
-    return updated;
   }
 
   readEditableKitRecipe(profileId: number): EditableKitRecipe {

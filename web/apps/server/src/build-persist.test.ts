@@ -1,4 +1,6 @@
+import Database from "better-sqlite3";
 import { acceptPlanForTest, editAcceptedPartsForTest } from "./test/accept-plan.js";
+import { acceptedPlanBasis } from "./db/accepted-plan-progress.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -58,8 +60,19 @@ describe("Build persistence and STL preview", () => {
     expect(afterRecompute.included).toBe(false);
     expect(afterRecompute.quantity_effective).toBe(3);
 
-    repo.patchPart(partId, { filament_color_id: "pla-black" });
+    const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
+    if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+    expect(
+      repo.assignAcceptedFilament({
+        expected: acceptedPlanBasis(accepted.snapshot),
+        target: { kind: "part", projectionPartId: partId },
+        assignment: { color: { kind: "catalog", colorId: "pla-black" }, spoolmanSpoolId: null },
+      }).kind,
+    ).toBe("updated");
     expect(repo.getPartRow(partId)?.filamentColorId).toBe("pla-black");
+    const dirty = new Database(join(dir, "print-partner.db"));
+    dirty.prepare("UPDATE parts SET notes = 'dirty' WHERE id = ?").run(partId);
+    dirty.close();
 
     const partRow = repo.getPartRow(partId)!;
     expect(resolvePartStl(repo, partRow)).toContain("bracket.stl");

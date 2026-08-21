@@ -295,6 +295,68 @@ export type AcceptedPlanValidatedPart = {
   readonly projectionPart: typeof defaultSchema.parts.$inferSelect;
 };
 
+export type ProjectionPlanningFields = Readonly<{
+  matchKey: string;
+  relativePath: string;
+  filename: string;
+  sourceLayer: string;
+  status: string;
+  role: string;
+  quantityAuto: number;
+  quantityOverride: number | null;
+  quantityEffective: number;
+  included: boolean;
+  notes: string;
+  githubBlobUrl: string | null;
+  geometrySame: boolean | null;
+  requirement: string | null;
+  optionGroupId: string | null;
+  manifestSource: string | null;
+}>;
+
+export type RevisionPlanningFields = Readonly<{
+  partKey: string;
+  relativePath: string;
+  filename: string;
+  sourceLayer: string;
+  status: string;
+  role: string;
+  quantityInferred: number;
+  quantityOverride: number | null;
+  quantityEffective: number;
+  included: boolean;
+  notes: string;
+  githubBlobUrl: string | null;
+  geometrySame: boolean | null;
+  requirement: string | null;
+  optionGroupId: string | null;
+  manifestSource: string | null;
+}>;
+
+export function projectionPlanningFieldsMatch(
+  projection: ProjectionPlanningFields,
+  revision: RevisionPlanningFields,
+): boolean {
+  return (
+    projection.matchKey === revision.partKey &&
+    projection.relativePath === revision.relativePath &&
+    projection.filename === revision.filename &&
+    projection.sourceLayer === revision.sourceLayer &&
+    projection.status === revision.status &&
+    projection.role === revision.role &&
+    projection.quantityAuto === revision.quantityInferred &&
+    projection.quantityOverride === revision.quantityOverride &&
+    projection.quantityEffective === revision.quantityEffective &&
+    projection.included === revision.included &&
+    projection.notes === revision.notes &&
+    projection.githubBlobUrl === revision.githubBlobUrl &&
+    projection.geometrySame === revision.geometrySame &&
+    projection.requirement === revision.requirement &&
+    projection.optionGroupId === revision.optionGroupId &&
+    projection.manifestSource === revision.manifestSource
+  );
+}
+
 export type AcceptedPlanPointerValidation =
   | { readonly kind: "missing" }
   | { readonly kind: "empty" }
@@ -487,25 +549,24 @@ export const validateAcceptedPlanProjectionRows = (input: {
       const effectiveRole = part.roleOverride ?? part.roleInferred;
       if (
         !projection ||
-        projection.matchKey !== part.partKey ||
-        projection.relativePath !== part.relativePath ||
-        projection.filename !== part.filename ||
-        projection.sourceLayer !== part.sourceLayer ||
-        projection.status !== part.status ||
-        projection.role !== effectiveRole ||
-        projection.filamentColorId !== part.filamentColorId ||
-        projection.filamentCustomHex !== part.filamentCustomHex ||
-        projection.spoolmanSpoolId !== part.spoolmanSpoolId ||
-        projection.quantityAuto !== part.quantityInferred ||
-        projection.quantityOverride !== part.quantityOverride ||
-        projection.quantityEffective !== part.quantityEffective ||
-        projection.included !== part.included ||
-        projection.notes !== part.notes ||
-        projection.githubBlobUrl !== part.githubBlobUrl ||
-        projection.geometrySame !== part.geometrySame ||
-        projection.requirement !== part.requirement ||
-        projection.optionGroupId !== part.optionGroupId ||
-        projection.manifestSource !== part.manifestSource
+        !projectionPlanningFieldsMatch(projection, {
+          partKey: part.partKey,
+          relativePath: part.relativePath,
+          filename: part.filename,
+          sourceLayer: part.sourceLayer,
+          status: part.status,
+          role: effectiveRole,
+          quantityInferred: part.quantityInferred,
+          quantityOverride: part.quantityOverride,
+          quantityEffective: part.quantityEffective,
+          included: part.included,
+          notes: part.notes,
+          githubBlobUrl: part.githubBlobUrl,
+          geometrySame: part.geometrySame,
+          requirement: part.requirement,
+          optionGroupId: part.optionGroupId,
+          manifestSource: part.manifestSource,
+        })
       ) {
         corrupt("projection", "Accepted Plan projection differs from its revision");
       }
@@ -1188,7 +1249,7 @@ function loadAcceptedParts(input: {
         { included: row.included, geometrySame: row.geometrySame },
       ]),
     ),
-  }).map(({ revisionPart: part }): LoadedAcceptedPart => {
+  }).map(({ revisionPart: part, projectionPart: projection }): LoadedAcceptedPart => {
       const effectiveRole = part.roleOverride ?? part.roleInferred;
       let artifact: AcceptedOperationalArtifact;
       if (inputState.kind === "legacy" || inputState.kind === "format1") {
@@ -1231,9 +1292,9 @@ function loadAcceptedParts(input: {
           roleInferred: part.roleInferred,
           roleOverride: part.roleOverride,
           effectiveRole,
-          filamentColorId: part.filamentColorId,
-          filamentCustomHex: part.filamentCustomHex,
-          spoolmanSpoolId: part.spoolmanSpoolId,
+          filamentColorId: projection.filamentColorId,
+          filamentCustomHex: projection.filamentCustomHex,
+          spoolmanSpoolId: projection.spoolmanSpoolId,
           quantityInferred: part.quantityInferred,
           quantityOverride: part.quantityOverride,
           quantityEffective: part.quantityEffective,

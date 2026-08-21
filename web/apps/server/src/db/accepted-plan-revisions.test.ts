@@ -707,7 +707,9 @@ describe("accepted Plan revision backfill", () => {
     const repo = repository(migrated);
     const partRevision = repo.getAcceptedPlanRevision(partProfile.id)!;
     const layerRevision = repo.getAcceptedPlanRevision(layerProfile.id)!;
-    repo.patchPart(partRevision.parts[0]!.projectionPartId!, { filament_color_id: "pla-black" });
+    rawDatabase(migrated)
+      .prepare("UPDATE parts SET notes = 'compatibility-dirty' WHERE id = ?")
+      .run(partRevision.parts[0]!.projectionPartId!);
     rawDatabase(migrated)
       .prepare(
         `INSERT INTO profile_layers (tenant_id, profile_id, layer_order, layer_type, project_id)
@@ -996,7 +998,7 @@ describe("accepted Plan revision backfill", () => {
     expect(utf8Bytes(Object.values(revision))).toBe(MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES);
     expect(
       migratedRaw.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get(),
-    ).toEqual({ value: "28" });
+    ).toEqual({ value: "29" });
     migrated.close();
   });
 
@@ -1235,7 +1237,7 @@ describe("accepted Plan revision backfill", () => {
       rawDatabase(upgraded)
         .prepare("SELECT value FROM app_settings WHERE key = 'schema_version'")
         .get(),
-    ).toEqual({ value: "28" });
+    ).toEqual({ value: "29" });
     expect(
       rawDatabase(upgraded)
         .prepare(
