@@ -651,6 +651,29 @@ proofs used 11, 15, and 22 total queries and 1, 2, and 3 accepted batches. The
 focused composition and presenter suite passed 2 files and 9 tests. Server
 typecheck, root lint, the no-comments audit, and the diff check passed.
 
+Progress summary Unit 3b moves metrics, Discord digest, and assistant
+`get_print_stats` to the accepted Profile summary collection. Metrics expose
+collection availability, one bounded state series per active Plan, and
+`parts_remaining` only for ready Progress. Metric labels escape quotes,
+backslashes, and newlines. They do not expose integrity codes or accepted
+identity data.
+
+Discord keeps active Plans in name order, counts unavailable rows toward the
+five-Plan limit, and renders each accepted state without false numeric
+progress. A collection failure still sends the printer and overnight sections.
+Assistant and product MCP return the same available or unavailable
+`active_plans` union. Unexpected collection failures retain non-Plan statistics
+and use coarse logs without private error data.
+
+The standalone digest capture now seeds accepted revisions and Required units.
+Its real spec-example output reported 189 total units and 189 remaining units.
+The caller inventory pins that maintainer path and the three production
+collection callers. The focused Unit 3b suite passed 6 files and 47 tests. The
+full server suite passed 160 files with one file skipped, 1228 tests passed, and
+3 tests skipped. Server typecheck, root lint, the no-comments audit, and the
+diff check passed. Plan HTTP contracts, routes, web UI, and repository state did
+not change in this unit.
+
 ## Module shape
 
 ```ts

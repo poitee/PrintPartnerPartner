@@ -144,7 +144,15 @@ describe("sendFarmDigest", () => {
       platesOvernight: 3,
       windowHours: 8,
       printers: [{ name: "Prusa XL", state: "idle" }],
-      activePlans: [{ plan_name: "Trident R2 LDO", remaining_units: 189 }],
+      activePlans: {
+        kind: "available",
+        plans: [
+          {
+            plan_name: "Trident R2 LDO",
+            progress: { kind: "ready", totalUnits: 200, remainingUnits: 189 },
+          },
+        ],
+      },
     });
 
     expect(result.ok).toBe(false);
@@ -160,7 +168,15 @@ describe("sendFarmDigest", () => {
       platesOvernight: 3,
       windowHours: 8,
       printers: [{ name: "Prusa XL", state: "idle" }],
-      activePlans: [{ plan_name: "Trident R2 LDO", remaining_units: 189 }],
+      activePlans: {
+        kind: "available",
+        plans: [
+          {
+            plan_name: "Trident R2 LDO",
+            progress: { kind: "ready", totalUnits: 200, remainingUnits: 189 },
+          },
+        ],
+      },
     });
 
     expect(result.ok).toBe(true);
@@ -169,5 +185,45 @@ describe("sendFarmDigest", () => {
     expect(description).toContain("3");
     expect(description).toContain("Prusa XL");
     expect(description).toContain("189");
+  });
+
+  it("renders every accepted state in name order and applies the five-Plan cap", async () => {
+    const spy = vi.spyOn(outbound, "safeOutboundFetch").mockResolvedValue(makeResponse(204));
+    await sendFarmDigest("https://discord.com/api/webhooks/1/tok", {
+      platesOvernight: 0,
+      windowHours: 8,
+      printers: [],
+      activePlans: {
+        kind: "available",
+        plans: [
+          { plan_name: "A Ready", progress: { kind: "ready", totalUnits: 3, remainingUnits: 2 } },
+          { plan_name: "B Zero", progress: { kind: "ready", totalUnits: 0, remainingUnits: 0 } },
+          { plan_name: "C Empty", progress: { kind: "empty" } },
+          { plan_name: "D Dirty", progress: { kind: "unavailable", reason: "compatibility_dirty" } },
+          { plan_name: "E Integrity", progress: { kind: "integrity_failure", code: "progress" } },
+          { plan_name: "F Concurrent", progress: { kind: "concurrent_update" } },
+        ],
+      },
+    });
+    const body = JSON.parse((spy.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.embeds[0].description).toContain(
+      "• A Ready: **2** units remaining\n• B Zero: No required units\n• C Empty: Not applied\n• D Dirty: Progress unavailable\n• E Integrity: Progress unavailable\n_…and 1 more_",
+    );
+    expect(body.embeds[0].description).not.toContain("F Concurrent:");
+  });
+
+  it("renders one collection-unavailable line while preserving other sections", async () => {
+    const spy = vi.spyOn(outbound, "safeOutboundFetch").mockResolvedValue(makeResponse(204));
+    await sendFarmDigest("https://discord.com/api/webhooks/1/tok", {
+      platesOvernight: 3,
+      windowHours: 8,
+      printers: [{ name: "Prusa XL", state: "idle" }],
+      activePlans: { kind: "unavailable" },
+    });
+    const body = JSON.parse((spy.mock.calls[0][1] as RequestInit).body as string);
+    const description = body.embeds[0].description as string;
+    expect(description).toContain("3");
+    expect(description).toContain("Prusa XL");
+    expect(description).toContain("Plan progress unavailable");
   });
 });

@@ -7,6 +7,7 @@ import { buildApp } from "../app.js";
 import { loadConfig } from "../config.js";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
 import * as discordNotify from "../services/discord-notify.js";
+import { getLogger } from "../services/logger.js";
 
 async function makeApp(dir: string) {
   process.env.PRINT_PARTNER_DATA_DIR = dir;
@@ -58,6 +59,46 @@ describe("POST /api/discord-digest", () => {
     expect(body.ok).toBe(true);
     expect(body.plates_overnight).toBe(3);
     expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0]?.[1].activePlans).toEqual({
+      kind: "available",
+      plans: [
+        {
+          plan_name: "Overnight Run",
+          progress: { kind: "empty" },
+        },
+      ],
+    });
+
+    await app.close();
+    ports.db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("sends printer and overnight data when the accepted collection fails", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-discord-digest-progress-failure-"));
+    const { app, ports } = await makeApp(dir);
+    const repo = ports.repository!;
+    repo.setSetting("discord_notify_webhook_url", "https://discord.example/webhook/abc");
+    repo.listAcceptedProfileSummaries = () => {
+      throw new Error("secret SQL /private/path token_123");
+    };
+    repo.listProfiles = () => {
+      throw new Error("legacy summary read must not run");
+    };
+    const sendSpy = vi
+      .spyOn(discordNotify, "sendFarmDigest")
+      .mockResolvedValue({ ok: true, status: 204, attempts: 1 });
+    const log = vi.spyOn(getLogger(), "log").mockImplementation(() => undefined);
+
+    const response = await app.inject({ method: "POST", url: "/api/discord-digest" });
+    expect(response.statusCode).toBe(200);
+    expect(sendSpy.mock.calls[0]?.[1].activePlans).toEqual({ kind: "unavailable" });
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret SQL");
+    expect(log).toHaveBeenCalledWith(
+      "error",
+      "[discord-digest] Plan progress collection unavailable",
+      { failure: "unexpected", operation: "discord_digest_plan_progress" },
+    );
 
     await app.close();
     ports.db.close();

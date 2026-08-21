@@ -43,10 +43,12 @@ describe("Profile summary caller inventory", () => {
       { file: "routes/plans.ts", count: 6 },
     ]);
     expect(knownProductionCallers("listProfiles", "db/repository.ts")).toEqual([
+      { file: "routes/plans.ts", count: 1 },
+    ]);
+    expect(knownProductionCallers("listAcceptedProfileSummaries", "db/repository.ts")).toEqual([
       { file: "assistant/tools.ts", count: 1 },
       { file: "routes/discord-digest.ts", count: 1 },
       { file: "routes/metrics.ts", count: 1 },
-      { file: "routes/plans.ts", count: 1 },
     ]);
     expect(knownProductionCallers("getProfileHeader", "db/repository.ts")).toEqual([
       { file: "assistant/assistant-context.ts", count: 1 },
@@ -58,6 +60,13 @@ describe("Profile summary caller inventory", () => {
       { file: "routes/printer-checkoff.ts", count: 1 },
       { file: "services/knowledge-bundle.ts", count: 1 },
     ]);
+    const digestCapture = readFileSync(
+      join(sourceRoot, "../capture-digest-fixtures.ts"),
+      "utf8",
+    );
+    expect(
+      digestCapture.match(/\binvokeAssistantTool\(\s*"get_print_stats"/g) ?? [],
+    ).toHaveLength(1);
   });
 
   it("keeps repository summary reads in summary-returning mutation paths", () => {

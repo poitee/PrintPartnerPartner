@@ -3,7 +3,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } fro
 import type { AssistantActionType, AssistantProposedAction, PrinterHostStatus } from "@print-partner/contracts";
 import { isAssistantUiAction } from "@print-partner/contracts";
 import { listStlRelativePaths, safeRepoPath } from "@print-partner/domain";
-import type { AppRepository } from "../db/repository.js";
+import type { AcceptedProfileProgress, AppRepository } from "../db/repository.js";
 import {
   AcceptedPlanOperationalIntegrityError,
   type ReadAcceptedPlanOperationalSnapshotResult,
@@ -59,9 +59,47 @@ import {
   decisionFingerprint,
   isDismissedFingerprint,
 } from "./preferences-digest.js";
+import { getLogger } from "../services/logger.js";
 
 const GITHUB_PAT_KEY = "github_pat";
 const SHA256_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+
+type PrintStatsAcceptedProgress =
+  | {
+      readonly kind: "ready";
+      readonly total_units: number;
+      readonly remaining_units: number;
+    }
+  | { readonly kind: "empty" }
+  | {
+      readonly kind: "unavailable";
+      readonly reason:
+        | "compatibility_dirty"
+        | "uninitialized"
+        | "integrity"
+        | "concurrent_update";
+    };
+
+function printStatsAcceptedProgress(
+  progress: AcceptedProfileProgress,
+): PrintStatsAcceptedProgress {
+  switch (progress.kind) {
+    case "ready":
+      return {
+        kind: "ready",
+        total_units: progress.totalUnits,
+        remaining_units: progress.remainingUnits,
+      };
+    case "empty":
+      return { kind: "empty" };
+    case "unavailable":
+      return { kind: "unavailable", reason: progress.reason };
+    case "integrity_failure":
+      return { kind: "unavailable", reason: "integrity" };
+    case "concurrent_update":
+      return { kind: "unavailable", reason: "concurrent_update" };
+  }
+}
 
 function parseAcceptedPlanBasis(value: unknown): AcceptedPlanBasis | null {
   if (!value || typeof value !== "object") return null;
@@ -793,7 +831,7 @@ export const ASSISTANT_TOOL_SPECS: AssistantToolSpec[] = [
   {
     name: "get_print_stats",
     description:
-      "Recent print activity and plan completion rates. Returns plates sent to printers in the last N hours (default 8h / overnight), how many completed vs failed, the completion rate, filament consumed in grams, a per-printer breakdown of the same figures, and per-plan remaining unit counts. Pass hours to control the lookback window.",
+      "Recent print activity and accepted Plan progress. Returns plates sent in the last N hours, completed and failed counts, completion rate, filament consumed, and a per-printer breakdown. active_plans is either an available collection or unavailable when collection loading fails. Each available Plan has plan_id, plan_name, part_count, and accepted_progress. accepted_progress is ready with total_units and remaining_units, empty when nothing has been applied, or unavailable with reason compatibility_dirty, uninitialized, integrity, or concurrent_update. Per-Plan unavailable states remain inside an available collection. Pass hours to control the lookback window.",
     input_schema: {
       type: "object",
       properties: {
@@ -2631,16 +2669,38 @@ export async function invokeAssistantTool(
           "../services/farm-filament.js"
         );
 
-        // per-plan remaining units
-        const planSummaries = ctx.repo
-          .listProfiles()
-          .filter((p) => !p.archived_at)
-          .map((p) => ({
-            plan_id: p.id,
-            plan_name: p.name,
-            remaining_units: p.remaining_units,
-            part_count: p.part_count,
-          }));
+        let activePlans:
+          | {
+              readonly kind: "available";
+              readonly plans: readonly {
+                readonly plan_id: number;
+                readonly plan_name: string;
+                readonly part_count: number;
+                readonly accepted_progress: PrintStatsAcceptedProgress;
+              }[];
+            }
+          | { readonly kind: "unavailable" };
+        try {
+          activePlans = {
+            kind: "available",
+            plans: ctx.repo
+              .listAcceptedProfileSummaries()
+              .filter(({ header }) => !header.archived_at)
+              .map(({ header, progress }) => ({
+                plan_id: header.id,
+                plan_name: header.name,
+                part_count: header.part_count,
+                accepted_progress: printStatsAcceptedProgress(progress),
+              })),
+          };
+        } catch {
+          activePlans = { kind: "unavailable" };
+          getLogger().log(
+            "error",
+            "[assistant] Plan progress collection unavailable",
+            { failure: "unexpected", operation: "get_print_stats" },
+          );
+        }
 
         return {
           content: JSON.stringify({
@@ -2655,7 +2715,7 @@ export async function invokeAssistantTool(
             completion_rate: completionRate(completed, failed),
             filament_consumed_g: filamentG,
             by_printer: printStatsByPrinter(recentJobs),
-            active_plans: planSummaries,
+            active_plans: activePlans,
           }),
         };
       }
