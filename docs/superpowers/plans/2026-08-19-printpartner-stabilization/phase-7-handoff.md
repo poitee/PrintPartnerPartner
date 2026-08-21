@@ -40,22 +40,28 @@ Review evidence is stored outside the repository at `/tmp/printpartner-phase7-pl
 
 ## Next unit
 
-Do not declare Phase 7 complete yet.
+Phase 7 caller migrations are complete. Compatibility `parts` and `print_progress`
+tables remain as projections. Every production command that creates or changes
+accepted Plan requirements now goes through `applyPlanChanges`.
 
-Audit and migrate the remaining compatibility projection readers and writers before removing the compatibility tables. Start from the retained owners named in `cleanup-manifest.md`:
+Landed after `08b6799`:
 
-- filament and Spoolman assignment paths
-- accepted Progress and assembly storage adapters
-- Part media readers that still use compatibility projection identity
-- duplicate, import, and editable kit paths that can still create or alter working Plan data
+- live filament and Spoolman assignment through `assignAcceptedFilament`
+- Progress and assembly writes through accepted token commands
+- Part media on the accepted operational snapshot
+- duplicate and kit import publish through Apply instead of inserting working Parts
 
-Keep printer queue, printer link, Plan binding, and print-job token migration in Phase 9. Phase 7 may retain `print_progress` as the Checkoff storage adapter while every public mutation first resolves accepted token and basis identity.
+Keep printer queue, printer link, Plan binding, and print-job token migration in
+Phase 9. Removing the compatibility tables is a later migration after those
+readers have a replacement.
 
 The Phase 7 exit assertion is:
 
 > No production command can change accepted Plan requirements or the Required-unit set except `applyPlanChanges`.
 
-Prove the assertion with a production caller inventory. Migrate one coherent caller wave at a time. Delete each legacy API in the same wave as its final caller.
+The production inventory in `plan-draft-cutover-inventory.test.ts` pins that
+assertion. Resume at Phase 8 site structure when starting the next stabilization
+slice.
 
 ## Resume procedure
 
