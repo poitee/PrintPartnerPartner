@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { PlanDraftPart, PlanDraftSnapshot } from "./plan-drafts.js";
 import {
+  AcceptedOperationalRowTextLimitError,
+  MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES,
   preparePlanPublication,
   publishedPlanPartsMatch,
+  validateAcceptedOperationalTextRow,
 } from "./plan-publication.js";
 
 function part(id: number, quantityEffective = 1): PlanDraftPart {
@@ -54,6 +57,15 @@ function draft(parts: PlanDraftPart[]): PlanDraftSnapshot {
 }
 
 describe("Plan publication preparation", () => {
+  it("enforces the accepted operational UTF-8 row limit at its exact boundary", () => {
+    const exact = "\u00e9".repeat(MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES / 2);
+
+    expect(() => validateAcceptedOperationalTextRow([exact])).not.toThrow();
+    expect(() => validateAcceptedOperationalTextRow([exact, "x"])).toThrowError(
+      AcceptedOperationalRowTextLimitError,
+    );
+  });
+
   it("derives accepted Parts, frozen mappings, and translated progress canonically", () => {
     const first = part(21, 2);
     const second = { ...part(22), included: false, roleOverride: "accent" };

@@ -3321,7 +3321,7 @@ database.close();`,
     first.database.close();
   });
 
-  it("normalizes progress from read APIs inside IMMEDIATE", () => {
+  it("keeps progress read APIs outside mutation transactions", () => {
     const { database, profile, repo } = editableDraftFixture();
     const nativeTransaction = repo.transaction.bind(repo);
     const behaviors: Array<"deferred" | "immediate"> = [];
@@ -3333,7 +3333,7 @@ database.close();`,
       return nativeTransaction(fn, behavior);
     };
     repo.getCheckoff(profile.id);
-    expect(behaviors).toContain("immediate");
+    expect(behaviors).toEqual([]);
     database.close();
   });
 });

@@ -1,9 +1,32 @@
 import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 import type { PlanDraftPart, PlanDraftSnapshot } from "./plan-drafts.js";
 import { parseRequiredUnitToken } from "./required-units.js";
 import type { RequiredUnitAssignment } from "./required-unit-reconciliation.js";
 
 export const PLAN_REVISION_DIGEST_FORMAT = "plan-revision-parts-v1";
+export const MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES = 64 * 1024;
+
+export class AcceptedOperationalRowTextLimitError extends Error {
+  readonly code = "accepted_operational_row_text_limit" as const;
+
+  constructor() {
+    super("Accepted operational row text exceeds the UTF-8 byte limit");
+    this.name = "AcceptedOperationalRowTextLimitError";
+  }
+}
+
+export function validateAcceptedOperationalTextRow(
+  values: readonly (string | null)[],
+): void {
+  const bytes = values.reduce(
+    (total, value) => total + (value == null ? 0 : Buffer.byteLength(value, "utf8")),
+    0,
+  );
+  if (bytes > MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES) {
+    throw new AcceptedOperationalRowTextLimitError();
+  }
+}
 
 export type PlanPublicationPart = Omit<PlanDraftPart, "id" | "draftId" | "baseRevisionPartId"> & {
   readonly draftPartId: number;
@@ -215,6 +238,24 @@ export function preparePlanPublication(input: {
     ) {
       throw new Error("Plan publication quantity is invalid");
     }
+    validateAcceptedOperationalTextRow([
+      part.partKey,
+      part.relativePath,
+      part.filename,
+      part.sourceLayer,
+      part.status,
+      part.roleInferred,
+      part.roleOverride,
+      part.filamentColorId,
+      part.filamentCustomHex,
+      part.spoolmanSpoolId,
+      part.notes,
+      part.githubBlobUrl,
+      part.requirement,
+      part.optionGroupId,
+      part.manifestSource,
+      part.artifactDigest,
+    ]);
     const { id, draftId: _draftId, baseRevisionPartId: _baseRevisionPartId, ...values } = part;
     return {
       draftPartId: id,

@@ -75,7 +75,7 @@ import type {
   StlNamingProfileOverride,
 } from "@print-partner/contracts";
 import { and, asc, count, desc, eq, gte, isNotNull, isNull, ne, sql } from "drizzle-orm";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import type { DrizzleDb } from "./client.js";
 import {
   asSyncDb,
@@ -148,6 +148,7 @@ import {
   PLAN_REVISION_DIGEST_FORMAT,
   preparePlanPublication,
   publishedPlanPartsMatch,
+  validateAcceptedOperationalTextRow,
   type PlanPublicationBaseUnit,
 } from "../services/plan-publication.js";
 import {
@@ -157,6 +158,11 @@ import {
   type WorkingSource,
   type WorkingSourceSelection,
 } from "../services/working-plan-sources.js";
+import { resolveStoredSnapshotPath } from "./stored-snapshot-path.js";
+import {
+  readAcceptedPlanOperationalSnapshotInternal,
+  type ReadAcceptedPlanOperationalSnapshotResult,
+} from "./accepted-plan-operational.js";
 
 function docTitleFromPath(path: string): string {
   const base = basename(path);
@@ -206,6 +212,15 @@ export type SchemaTables = Pick<
 >;
 
 export type ProjectRow = typeof defaultSchema.projects.$inferSelect;
+export class PlanTransactionUnavailableError extends Error {
+  readonly code = "transaction_unavailable" as const;
+
+  constructor() {
+    super("This operation requires a native database transaction");
+    this.name = "PlanTransactionUnavailableError";
+  }
+}
+
 export type SourceActivationObservation = Readonly<
   Pick<
     ProjectRow,
@@ -751,23 +766,6 @@ function planInputTrackingKind(value: string): PlanRevisionInput["tracking_kind"
   return value === "untracked" ? "untracked" : "revision";
 }
 
-function resolveStoredSnapshotPath(reposDir: string, locator: string): string | null {
-  const segments = locator.replaceAll("\\", "/").split("/");
-  if (
-    isAbsolute(locator) ||
-    locator.includes("\\") ||
-    segments.some((segment) => !segment || segment === "." || segment === "..")
-  ) {
-    return null;
-  }
-  const reposRoot = resolve(reposDir);
-  const snapshotPath = resolve(reposRoot, locator);
-  if (snapshotPath === reposRoot || !snapshotPath.startsWith(`${reposRoot}${sep}`)) {
-    return null;
-  }
-  return snapshotPath;
-}
-
 function partRow(row: PartDbRow): PartRow {
   return {
     id: row.id,
@@ -898,6 +896,21 @@ export class AppRepository {
       format_version: row.formatVersion === 2 ? 2 : 1,
       inputs,
     };
+  }
+
+  readAcceptedPlanOperationalSnapshot(
+    profileId: number,
+  ): ReadAcceptedPlanOperationalSnapshotResult {
+    const read = () =>
+      readAcceptedPlanOperationalSnapshotInternal({
+        db: this.db,
+        schema: this.schema,
+        tenantId: this.tenantId,
+        profileId,
+        reposDir: this.reposDir,
+        sqlite: this.syncSqlite,
+      });
+    return this.syncSqlite ? this.transaction(read, "deferred") : read();
   }
 
   readCurrentRequiredUnitSet(profileId: number): ReadCurrentRequiredUnitSetResult {
@@ -2327,6 +2340,13 @@ export class AppRepository {
       }
     }
     for (const input of canonical) {
+      validateAcceptedOperationalTextRow([
+        this.tenantId,
+        input.source_layer,
+        input.tracking_kind,
+        input.manifest_digest,
+        input.effective_naming_digest,
+      ]);
       const source = this.getSource(input.source_id);
       if (!source) throw new Error("Source not found");
       if (input.tracking_kind === "revision") {
@@ -2340,6 +2360,14 @@ export class AppRepository {
         if (revision.manifest_digest !== input.manifest_digest) {
           throw new Error("Plan revision input digest does not match the Source revision");
         }
+        validateAcceptedOperationalTextRow([
+          this.tenantId,
+          revision.upstream_revision_key,
+          revision.manifest_digest,
+          revision.snapshot_locator,
+          revision.synced_at,
+          revision.completeness,
+        ]);
       } else if (input.source_revision_id != null || input.manifest_digest != null) {
         throw new Error("Untracked Plan input cannot carry revision identity");
       }
@@ -2356,6 +2384,12 @@ export class AppRepository {
 
     const inputSetDigest = digestPlanInputs(canonical);
     const recordedAt = publishedAt ?? new Date().toISOString();
+    validateAcceptedOperationalTextRow([
+      this.tenantId,
+      inputSetDigest,
+      recordedAt,
+      recordedAt,
+    ]);
     this.db
       .insert(this.schema.planRevisionInputSets)
       .values({
@@ -2453,6 +2487,21 @@ export class AppRepository {
       )
       .get();
     if (!published) throw new Error("Plan revision input set was not published");
+    validateAcceptedOperationalTextRow([
+      published.tenantId,
+      published.inputSetDigest,
+      published.recordedAt,
+      published.publishedAt,
+    ]);
+    for (const stored of storedInputs) {
+      validateAcceptedOperationalTextRow([
+        stored.tenantId,
+        stored.sourceLayer,
+        stored.trackingKind,
+        stored.manifestDigest,
+        stored.effectiveNamingDigest,
+      ]);
+    }
     return this.planRevisionInputSet(published);
   }
 
@@ -4877,6 +4926,13 @@ export class AppRepository {
         .get();
       if (!profile) return { kind: "not_found" };
       if (profile.archivedAt != null) return { kind: "build_archived" };
+      validateAcceptedOperationalTextRow([
+        profile.tenantId,
+        profile.name,
+        profile.orderNumber,
+        profile.specialRequest,
+        profile.archivedAt,
+      ]);
       const draftHeader = this.db
         .select()
         .from(this.schema.planDrafts)
@@ -5040,11 +5096,25 @@ export class AppRepository {
         return { kind: "reconciliation_required", reason: "stale" };
       }
       const objectNames = new Map<string, string>();
+      const storedBaseUnits = new Map<
+        string,
+        {
+          readonly tenantId: string;
+          readonly profileId: number;
+          readonly createdInRevisionId: number;
+          readonly objectName: string;
+          readonly createdAt: string;
+        }
+      >();
       if (baseUnits.length > 0) {
         for (const unit of this.db
           .select({
             token: this.schema.requiredUnits.token,
+            tenantId: this.schema.requiredUnits.tenantId,
+            profileId: this.schema.requiredUnits.profileId,
+            createdInRevisionId: this.schema.requiredUnits.createdInRevisionId,
             objectName: this.schema.requiredUnits.objectName,
+            createdAt: this.schema.requiredUnits.createdAt,
           })
           .from(this.schema.requiredUnits)
           .where(
@@ -5056,14 +5126,30 @@ export class AppRepository {
           )
           .all()) {
           objectNames.set(unit.token, unit.objectName);
+          storedBaseUnits.set(unit.token, unit);
         }
       }
       const publicationBaseUnits: PlanPublicationBaseUnit[] = baseUnits.map((unit) => {
-        const objectName = objectNames.get(unit.token);
-        if (!objectName) throw new Error("Required-unit Object name is missing");
+        const stored = storedBaseUnits.get(unit.token);
+        if (
+          !stored ||
+          stored.tenantId !== this.tenantId ||
+          stored.profileId !== profileId ||
+          !Number.isSafeInteger(stored.createdInRevisionId) ||
+          stored.createdInRevisionId <= 0 ||
+          stored.createdAt !== unit.createdAt
+        ) {
+          throw new Error("Required-unit identity is corrupt");
+        }
+        validateAcceptedOperationalTextRow([
+          unit.token,
+          stored.tenantId,
+          stored.objectName,
+          stored.createdAt,
+        ]);
         return {
           token: unit.token,
-          objectName,
+          objectName: stored.objectName,
           completed: unit.completed,
           assembled: unit.assembled,
         };
@@ -5078,6 +5164,27 @@ export class AppRepository {
         assignments: reconciliation.assignments,
         baseUnits: publicationBaseUnits,
       });
+      for (const part of prepared.parts) {
+        validateAcceptedOperationalTextRow([
+          this.tenantId,
+          part.partKey,
+          part.relativePath,
+          part.filename,
+          part.sourceLayer,
+          part.status,
+          part.roleInferred,
+          part.roleOverride,
+          part.filamentColorId,
+          part.filamentCustomHex,
+          part.spoolmanSpoolId,
+          part.notes,
+          part.githubBlobUrl,
+          part.requirement,
+          part.optionGroupId,
+          part.manifestSource,
+          part.artifactDigest,
+        ]);
+      }
       const existingTokens = new Set(
         this.db.select({ token: this.schema.requiredUnits.token }).from(this.schema.requiredUnits).all()
           .map((row) => row.token),
@@ -5116,6 +5223,24 @@ export class AppRepository {
         allocated.set(`${assignment.draftPartId}:${assignment.unitIndex}`, chosen);
       }
       const appliedAt = (this.planApplyDependencies.clock?.() ?? new Date()).toISOString();
+      validateAcceptedOperationalTextRow([
+        this.tenantId,
+        "tracked",
+        PLAN_REVISION_DIGEST_FORMAT,
+        prepared.revisionDigest,
+        actorId,
+        actorId,
+        appliedAt,
+        appliedAt,
+      ]);
+      for (const unit of allocated.values()) {
+        validateAcceptedOperationalTextRow([
+          this.tenantId,
+          unit.token,
+          unit.objectName,
+          appliedAt,
+        ]);
+      }
       const detached = this.db
         .update(this.schema.buildProfiles)
         .set({ acceptedPlanRevisionId: null })
@@ -5295,6 +5420,12 @@ export class AppRepository {
         expectedUnitCount: prepared.expectedUnitCount,
         rows: mappingRows,
       });
+      validateAcceptedOperationalTextRow([
+        this.tenantId,
+        REQUIRED_UNIT_MAP_FORMAT,
+        mappingDigest,
+        appliedAt,
+      ]);
       this.db
         .insert(this.schema.planRevisionRequiredUnitSets)
         .values({
@@ -6743,17 +6874,18 @@ export class AppRepository {
   }
 
   private ensureProgressForOwnedPart(part: PartDbRow): void {
+    if (!this.syncSqlite) throw new PlanTransactionUnavailableError();
     const mutate = () => {
       const rows = this.progressRowsForPart(part.id);
       const qty = Math.max(1, part.quantityEffective);
       const ensured = ensureProgressRows(rows, part.id, qty);
       this.saveProgressRowsForOwnedPart(part.id, ensured);
     };
-    if (this.syncSqlite) this.transaction(mutate, "immediate");
-    else mutate();
+    this.transaction(mutate, "immediate");
   }
 
   ensureProgressForPart(part: PartDbRow): void {
+    if (!this.syncSqlite) throw new PlanTransactionUnavailableError();
     this.requirePart(part.id);
     this.ensureProgressForOwnedPart(part);
   }
@@ -6837,9 +6969,6 @@ export class AppRepository {
     ctx?: FilamentResolveContext,
   ) {
     const partRows = this.listPartRows(profileId);
-    for (const part of partRows) {
-      this.ensureProgressForOwnedPart(part);
-    }
     const unitsById = this.printUnitsForPartRows(partRows);
     const progressRowsById = this.progressRowsByPartId(partRows);
     const rows = partRows.filter((p) => includeExcluded || p.included);
@@ -6876,9 +7005,6 @@ export class AppRepository {
 
   getCheckoff(profileId: number, ctx?: FilamentResolveContext) {
     const partRows = this.listPartRows(profileId);
-    for (const part of partRows) {
-      this.ensureProgressForOwnedPart(part);
-    }
     const unitsById = this.printUnitsForPartRows(partRows);
     const displayRows = partRows.map((p) => {
       const units = unitsById.get(p.id) ?? [];
@@ -6919,6 +7045,7 @@ export class AppRepository {
   }
 
   patchPartProgress(partId: number, unitIndex: number, completed: boolean) {
+    if (!this.syncSqlite) throw new PlanTransactionUnavailableError();
     const mutate = () => {
       const part = this.requirePart(partId);
       const qty = Math.max(1, part.quantityEffective);
@@ -6938,10 +7065,11 @@ export class AppRepository {
         missing: !isFullyPrinted({ quantity_effective: qty, printed_count: printedCount }),
       };
     };
-    return this.syncSqlite ? this.transaction(mutate, "immediate") : mutate();
+    return this.transaction(mutate, "immediate");
   }
 
   patchPartAssembled(partId: number, unitIndex: number, assembled: boolean) {
+    if (!this.syncSqlite) throw new PlanTransactionUnavailableError();
     const mutate = () => {
       const part = this.requirePart(partId);
       const qty = Math.max(1, part.quantityEffective);
@@ -6960,14 +7088,13 @@ export class AppRepository {
         assembled_units: assembledUnits,
       };
     };
-    return this.syncSqlite ? this.transaction(mutate, "immediate") : mutate();
+    return this.transaction(mutate, "immediate");
   }
 
   /** Read accessor: the assembled state of every unit of a single part. */
   getPartAssembled(partId: number) {
     const part = this.requirePart(partId);
     const qty = Math.max(1, part.quantityEffective);
-    this.ensureProgressForOwnedPart(part);
     const rows = this.progressRowsForPart(partId);
     const assembledUnits = getAssembledUnits(rows, qty);
     return {
@@ -6989,6 +7116,9 @@ export class AppRepository {
       manifest_source?: string | null;
     },
   ): PartRow {
+    if (patch.quantity_override != null && !this.syncSqlite) {
+      throw new PlanTransactionUnavailableError();
+    }
     const part = this.requirePart(partId);
     const updates: Partial<typeof this.schema.parts.$inferInsert> = {};
     if (patch.included != null) updates.included = patch.included;

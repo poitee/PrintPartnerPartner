@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import {
   digestPlanRevisionParts,
   PLAN_REVISION_DIGEST_FORMAT,
+  validateAcceptedOperationalTextRow,
   type PlanRevisionDigestPart,
 } from "../services/plan-publication.js";
 import {
@@ -32,6 +33,10 @@ export type CompatibilityDirtyRepairResult = {
 type DirtyProfile = {
   readonly id: number;
   readonly tenant_id: string;
+  readonly name: string;
+  readonly order_number: string | null;
+  readonly special_request: string | null;
+  readonly archived_at: string | null;
   readonly accepted_plan_version: number;
 };
 
@@ -68,6 +73,23 @@ function digestParts(parts: readonly CompatibilityPart[]): string {
 }
 
 function digestPart(part: CompatibilityPart): PlanRevisionDigestPart {
+  validateAcceptedOperationalTextRow([
+    part.tenant_id,
+    part.match_key,
+    part.relative_path,
+    part.filename,
+    part.source_layer,
+    part.status,
+    part.role,
+    part.filament_color_id,
+    part.filament_custom_hex,
+    part.spoolman_spool_id,
+    part.notes,
+    part.github_blob_url,
+    part.requirement,
+    part.option_group_id,
+    part.manifest_source,
+  ]);
   return {
     partKey: part.match_key,
     relativePath: part.relative_path,
@@ -194,7 +216,8 @@ export function repairCompatibilityDirtyBuilds(
   }
   const profiles = database
     .prepare(
-      `SELECT profile.id, profile.tenant_id, profile.accepted_plan_version
+      `SELECT profile.id, profile.tenant_id, profile.name, profile.order_number,
+              profile.special_request, profile.archived_at, profile.accepted_plan_version
          FROM build_profiles profile
         WHERE profile.accepted_plan_revision_id IS NULL
           AND (
@@ -218,12 +241,21 @@ export function repairCompatibilityDirtyBuilds(
     const repair = database.transaction(() => {
       const current = database
         .prepare(
-          `SELECT accepted_plan_revision_id, accepted_plan_version
+          `SELECT tenant_id, name, order_number, special_request, archived_at,
+                  accepted_plan_revision_id, accepted_plan_version
              FROM build_profiles
             WHERE tenant_id = ? AND id = ?`,
         )
         .get(profile.tenant_id, profile.id) as
-        | { accepted_plan_revision_id: number | null; accepted_plan_version: number }
+        | {
+            tenant_id: string;
+            name: string;
+            order_number: string | null;
+            special_request: string | null;
+            archived_at: string | null;
+            accepted_plan_revision_id: number | null;
+            accepted_plan_version: number;
+          }
         | undefined;
       if (!current) throw new Error(`Build ${profile.id} disappeared during compatibility repair`);
       if (current.accepted_plan_revision_id != null) {
@@ -236,6 +268,13 @@ export function repairCompatibilityDirtyBuilds(
       ) {
         throw new Error(`Build ${profile.id} has an invalid accepted Plan version`);
       }
+      validateAcceptedOperationalTextRow([
+        current.tenant_id,
+        current.name,
+        current.order_number,
+        current.special_request,
+        current.archived_at,
+      ]);
       const parts = readParts(database, profile.tenant_id, profile.id);
       if (current.accepted_plan_version === 0 && parts.length === 0) {
         return { published: false, parts: 0, units: 0 };
@@ -252,6 +291,16 @@ export function repairCompatibilityDirtyBuilds(
         | { id: number; revision_number: number }
         | undefined;
       const migratedAt = now();
+      validateAcceptedOperationalTextRow([
+        profile.tenant_id,
+        "legacy",
+        PLAN_REVISION_DIGEST_FORMAT,
+        digestParts(parts),
+        "migration:v26",
+        "migration:v26",
+        migratedAt,
+        migratedAt,
+      ]);
       const revision = database
         .prepare(
           `INSERT INTO plan_revisions (
@@ -351,6 +400,12 @@ export function repairCompatibilityDirtyBuilds(
           for (let attempt = 0; attempt < maxCollisionAttempts; attempt += 1) {
             const token = parseRequiredUnitToken(tokenFactory());
             const objectName = requiredUnitObjectName(part.filename, token);
+            validateAcceptedOperationalTextRow([
+              token,
+              profile.tenant_id,
+              objectName,
+              migratedAt,
+            ]);
             const collision = database
               .prepare(
                 `SELECT 1 AS found FROM required_units
@@ -386,6 +441,12 @@ export function repairCompatibilityDirtyBuilds(
         expectedUnitCount: mappings.length,
         rows: mappings,
       });
+      validateAcceptedOperationalTextRow([
+        profile.tenant_id,
+        REQUIRED_UNIT_MAP_FORMAT,
+        mappingDigest,
+        migratedAt,
+      ]);
       database
         .prepare(
           `INSERT INTO plan_revision_required_unit_sets (

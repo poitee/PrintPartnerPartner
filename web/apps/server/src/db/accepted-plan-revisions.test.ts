@@ -8,7 +8,11 @@ import { getDb, SqliteDatabase } from "./client.js";
 import { repairCompatibilityDirtyBuilds } from "./compatibility-dirty-repair.js";
 import { AppRepository } from "./repository.js";
 import { backfillCurrentRequiredUnitSets } from "./required-units.js";
-import { digestPlanRevisionParts } from "../services/plan-publication.js";
+import {
+  AcceptedOperationalRowTextLimitError,
+  digestPlanRevisionParts,
+  MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES,
+} from "../services/plan-publication.js";
 
 const tempDirs: string[] = [];
 
@@ -26,6 +30,13 @@ function rawDatabase(database: SqliteDatabase): Database.Database {
 
 function repository(database: SqliteDatabase, tenantId = "default"): AppRepository {
   return new AppRepository(getDb(database), tenantId, database.reposDir);
+}
+
+function utf8Bytes(values: readonly unknown[]): number {
+  return values.reduce<number>(
+    (total, value) => total + (typeof value === "string" ? Buffer.byteLength(value, "utf8") : 0),
+    0,
+  );
 }
 
 function markAsV18(raw: Database.Database): void {
@@ -850,6 +861,131 @@ describe("accepted Plan revision backfill", () => {
         .get(profile.id),
     ).toEqual(repairedUnitCount);
     reopened.close();
+  });
+
+  it("rolls back v26 compatibility repair when a legacy Part exceeds the text limit", () => {
+    const { dir, database } = createDatabase();
+    const raw = rawDatabase(database);
+    const profile = repository(database).createProfile("Oversized v25 repair");
+    raw.prepare(
+      `INSERT INTO parts (
+        tenant_id, profile_id, match_key, relative_path, filename, source_layer,
+        status, role, quantity_auto, quantity_effective, included, notes
+      ) VALUES ('default', ?, 'oversized', 'oversized.stl', 'oversized.stl', 'base',
+                'base', 'primary', 1, 1, 1, ?)`,
+    ).run(profile.id, "x".repeat(MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES + 1));
+    raw.prepare(
+      `UPDATE app_settings SET value = '25'
+        WHERE tenant_id = 'default' AND key = 'schema_version'`,
+    ).run();
+    const partsBefore = raw.prepare("SELECT * FROM parts WHERE profile_id = ?").all(profile.id);
+    const profileBefore = raw.prepare("SELECT * FROM build_profiles WHERE id = ?").get(profile.id);
+    database.close();
+
+    const migrated = new SqliteDatabase(dir);
+    expect(() => migrated.connect()).toThrowError(AcceptedOperationalRowTextLimitError);
+    migrated.close();
+
+    const inspect = new Database(join(dir, "print-partner.db"));
+    expect(inspect.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get()).toEqual(
+      { value: "25" },
+    );
+    expect(inspect.prepare("SELECT * FROM build_profiles WHERE id = ?").get(profile.id)).toEqual(
+      profileBefore,
+    );
+    expect(inspect.prepare("SELECT * FROM parts WHERE profile_id = ?").all(profile.id)).toEqual(
+      partsBefore,
+    );
+    expect(
+      inspect.prepare("SELECT count(*) AS count FROM plan_revisions WHERE profile_id = ?").get(
+        profile.id,
+      ),
+    ).toEqual({ count: 0 });
+    inspect.close();
+  });
+
+  it("rolls back v26 repair when legacy revision provenance crosses the row limit", () => {
+    const { dir, database } = createDatabase();
+    const raw = rawDatabase(database);
+    const profile = repository(database).createProfile("Legacy provenance overflow");
+    const migratedAt = "2026-08-20T11:00:00.000Z";
+    const fixedWithoutTenant = utf8Bytes([
+      "legacy",
+      "plan-revision-parts-v1",
+      "x".repeat(64),
+      "migration:v26",
+      "migration:v26",
+      migratedAt,
+      migratedAt,
+    ]);
+    const tenantId = "t".repeat(
+      MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES - fixedWithoutTenant + 1,
+    );
+    raw.prepare(
+      `UPDATE build_profiles
+          SET tenant_id = ?, accepted_plan_version = 1
+        WHERE id = ?`,
+    ).run(tenantId, profile.id);
+    raw.prepare(
+      `UPDATE app_settings SET value = '25'
+        WHERE tenant_id = 'default' AND key = 'schema_version'`,
+    ).run();
+    database.close();
+
+    const migrated = new SqliteDatabase(dir, { now: () => migratedAt });
+    expect(() => migrated.connect()).toThrowError(AcceptedOperationalRowTextLimitError);
+    migrated.close();
+
+    const inspect = new Database(join(dir, "print-partner.db"));
+    expect(inspect.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get()).toEqual(
+      { value: "25" },
+    );
+    expect(
+      inspect.prepare("SELECT count(*) AS count FROM plan_revisions WHERE profile_id = ?").get(
+        profile.id,
+      ),
+    ).toEqual({ count: 0 });
+    inspect.close();
+  });
+
+  it("publishes a legacy revision at the exact stored row limit", () => {
+    const { dir, database } = createDatabase();
+    const raw = rawDatabase(database);
+    const profile = repository(database).createProfile("Legacy exact revision");
+    const migratedAt = "2026-08-20T11:00:00.000Z";
+    const fixedWithoutTenant = utf8Bytes([
+      "legacy",
+      "plan-revision-parts-v1",
+      "x".repeat(64),
+      "migration:v26",
+      "migration:v26",
+      migratedAt,
+      migratedAt,
+    ]);
+    const tenantId = "t".repeat(MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES - fixedWithoutTenant);
+    raw.prepare(
+      `UPDATE build_profiles
+          SET tenant_id = ?, accepted_plan_version = 1
+        WHERE id = ?`,
+    ).run(tenantId, profile.id);
+    raw.prepare(
+      `UPDATE app_settings SET value = '25'
+        WHERE tenant_id = 'default' AND key = 'schema_version'`,
+    ).run();
+    database.close();
+
+    const migrated = new SqliteDatabase(dir, { now: () => migratedAt });
+    migrated.connect();
+    const migratedRaw = rawDatabase(migrated);
+    const revision = migratedRaw
+      .prepare("SELECT * FROM plan_revisions WHERE profile_id = ?")
+      .get(profile.id) as Record<string, unknown>;
+
+    expect(utf8Bytes(Object.values(revision))).toBe(MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES);
+    expect(
+      migratedRaw.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get(),
+    ).toEqual({ value: "26" });
+    migrated.close();
   });
 
   it("repairs an empty positive-version Build and leaves a truly empty Build untouched", () => {

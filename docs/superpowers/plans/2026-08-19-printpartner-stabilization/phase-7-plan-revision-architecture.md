@@ -357,11 +357,34 @@ digest. A different stale target returns conflict. The command changes only
 working layers and `config_modified_at`; accepted revisions, accepted input
 selection, drafts, compatibility Parts, and Checkoff stay unchanged.
 
+Unit 5b1 adds one verified accepted operational read. The result is a
+discriminated union for a ready Plan, a true empty Plan, a compatibility-dirty
+Plan, or an uninitialized Plan. A ready result binds the accepted revision,
+captured Source inputs, compatibility Parts, Required-unit mappings, and live
+Checkoff progress into one aggregate. Compatibility Part IDs remain production
+coordinates. They do not establish planning identity.
+
+SQLite reads the aggregate inside one deferred transaction. A concurrent
+Apply can therefore produce either the complete old aggregate or the complete
+new aggregate, never a mixture. PostgreSQL rereads the accepted terminal
+identity and retries the full read once when that identity changes. PostgreSQL
+progress writes fail closed until the repository has a native transaction
+adapter because the current sync bridge cannot publish their multi-statement
+rewrite atomically.
+
+Each text-bearing accepted row has a 64 KiB aggregate UTF-8 limit. Apply and
+the v26 repair validate the exact stored rows. The reader fetches text-bearing
+rows in pages of 16 and narrow rows in pages of 256 so each PostgreSQL bridge
+response remains below its 8 MiB limit. Legacy repaired revisions are ready
+with unavailable artifact evidence. Historical format-1 input snapshots remain
+uninitialized. Unit 5b1 does not migrate routes or other production callers.
+
 ## Module shape
 
 ```ts
 backfillAcceptedPlanRevisions(db): BackfillResult
 readAcceptedPlanRevision(buildId): AcceptedPlanRevision | null
+readAcceptedPlanOperationalSnapshot(buildId): ReadAcceptedPlanOperationalSnapshotResult
 recomputePlanDraft(buildId, actorId): PlanDraft
 applyManifestToPlanDraft(draftId): PlanDraft
 diffPlanDraft(draftId): PlanDraftDiff
