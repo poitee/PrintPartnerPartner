@@ -32,6 +32,7 @@ describe("buildPlanWarningLines", () => {
       ],
       review: {
         profile_id: 1,
+        accepted_basis: null,
         plan_name: "Test",
         layers: [],
         totals: { included_parts: 2, total_print_units: 2, by_role: {}, by_filament: {} },

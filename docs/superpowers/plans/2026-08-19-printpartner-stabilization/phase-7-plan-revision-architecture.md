@@ -1081,6 +1081,41 @@ files and 76 tests. The contracts suite passed 4 files and 33 tests. The full
 server suite passed 166 files, passed 1334 tests, and skipped 1 test. Monorepo
 typecheck, lint, build, and diff checks passed.
 
+## Accepted Plan draft transport and browser cutover
+
+The Plan draft workspace is available on flat and `/api/v2` Plan routes.
+The public value contains the Build ID, draft identity and lifecycle generation,
+canonical snapshot digest and accepted base, proposed Parts, accepted diff, and
+Required-unit reconciliation. Recompute, batch Part edits, reconciliation,
+Apply, abandon, and rebase parse strict contracts. Mutation actors come from
+authentication. SQLite owns the native transactions; PostgreSQL mutations
+return `transaction_unavailable` before issuing a query.
+
+The browser persists and refetches the newest open draft. Rebuild creates a
+saved proposal. Inclusion and quantity controls edit that proposal, while
+accepted Review and Checkoff remain unchanged. The draft card presents each
+proposed Part value and removed accepted Part. Apply is explicit and is disabled
+for an unresolved reconciliation or stale base. A stale draft exposes an
+explicit recovery action: abandon the exact open lifecycle identity, retain the
+returned abandoned identity, then rebase that exact generation and digest.
+Merge conflicts leave the source abandoned for another deliberate attempt.
+
+Spreadsheet quantity and inclusion changes use one atomic batch draft edit and
+compare against the current saved draft, not accepted Review. Printed counts are
+a separate accepted Checkoff operation. A mixed planning and Progress import is
+rejected before either write. Progress-only import carries the complete
+`AcceptedPlanBasis` returned by accepted Review and unique Part/count rows. One
+SQLite immediate transaction verifies the basis and all rows before writing the
+exact completion prefix for every requested Part. An Apply makes the old basis
+stale; the new accepted Review basis is required for the next import.
+
+This cutover deletes the legacy recompute job kind, dispatcher, routes, and
+browser polling code. It also deletes the old accepted-planning commands
+`recomputeProfile` and `applyManifestToProfile`. `PATCH /parts/:id` now retains
+only filament-color and Spoolman-spool assignment. Accepted Progress and
+assembly routes remain separate because they update Checkoff rather than Plan
+requirements.
+
 ## Module shape
 
 ```ts
@@ -1095,10 +1130,11 @@ verifyAcceptedPrint(command): VerifyAcceptedPrintResult
 resolveAcceptedPrinterAttribution(snapshot, observation): AcceptedPrinterAttribution
 materializeAcceptedPrinterLink(command): MaterializeAcceptedPrinterLinkResult
 recomputePlanDraft(buildId, actorId): PlanDraft
-applyManifestToPlanDraft(draftId): PlanDraft
+editPlanDraftParts(command): PlanDraft
 diffPlanDraft(draftId): PlanDraftDiff
 rebasePlanDraft(command: RebasePlanDraftCommand): RebasePlanDraftResult
 applyPlanChanges(command: ApplyPlanChanges): ApplyPlanResult
+setAcceptedPrintedCounts(command): SetAcceptedPrintedCountsResult
 ```
 
 Contracts own the wire values. Repository code owns tenant-filtered

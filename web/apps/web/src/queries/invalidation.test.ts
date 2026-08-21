@@ -14,12 +14,6 @@ const completedUpdateCheck: JobSnapshot = {
   error: null,
 };
 
-const completedRecompute: JobSnapshot = {
-  ...completedUpdateCheck,
-  job_id: "job-2",
-  kind: "recompute",
-};
-
 describe("job query invalidation", () => {
   it("invalidates shared Source and Plan summaries after an update check", () => {
     const queryClient = new QueryClient();
@@ -50,17 +44,6 @@ describe("job query invalidation", () => {
     });
 
     expect(queryClient.getQueryState(queryKeys.sources)?.isInvalidated).toBe(false);
-  });
-
-  it("invalidates recipe data after recompute", () => {
-    const queryClient = new QueryClient();
-    queryClient.setQueryData(queryKeys.planRecipeBundle(4), {});
-
-    invalidateAfterJob(queryClient, "recompute", completedRecompute, 4);
-
-    expect(
-      queryClient.getQueryState(queryKeys.planRecipeBundle(4))?.isInvalidated,
-    ).toBe(true);
   });
 
   it("refreshes accepted export history after a terminal export failure", () => {

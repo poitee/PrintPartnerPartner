@@ -13,6 +13,7 @@ import {
 
 const review: PlanReview = {
   profile_id: 1,
+  accepted_basis: null,
   plan_name: "Test Plan",
   layers: [],
   totals: {

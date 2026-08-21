@@ -18,7 +18,7 @@ const relativePath = z.string().min(1).max(1_000).refine((value) => {
 export type RequiredUnitToken = z.infer<typeof requiredUnitToken>;
 export type AcceptedPlateId = z.infer<typeof acceptedPlateId>;
 
-const acceptedPlanBasisSchema = z.strictObject({
+export const acceptedPlanBasisSchema = z.strictObject({
   profile_id: positiveSafeInteger,
   plan_version: positiveSafeInteger,
   plan_revision_id: positiveSafeInteger,
@@ -27,6 +27,10 @@ const acceptedPlanBasisSchema = z.strictObject({
 });
 
 export type AcceptedPlanBasisContract = z.infer<typeof acceptedPlanBasisSchema>;
+
+export function parseAcceptedPlanBasis(value: unknown): AcceptedPlanBasisContract {
+  return acceptedPlanBasisSchema.parse(value);
+}
 
 const acceptedPlatePrinterSchema = z.strictObject({
   id: printerId,

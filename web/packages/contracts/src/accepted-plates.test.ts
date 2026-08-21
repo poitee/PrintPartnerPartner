@@ -3,6 +3,7 @@ import {
   parseAcceptedPlateEndpointError,
   parseAcceptedPlateExportJobList,
   parseAcceptedPlateWorkspace,
+  parseAcceptedPlanBasis,
   parseMoveAcceptedPlateUnitRequest,
 } from "./accepted-plates.js";
 import { JOB_KINDS } from "./index.js";
@@ -39,10 +40,15 @@ const setupUnit = {
 };
 
 describe("accepted Plate contracts", () => {
+  it("parses only a complete immutable accepted Plan basis", () => {
+    expect(parseAcceptedPlanBasis(basis)).toEqual(basis);
+    expect(() => parseAcceptedPlanBasis({ ...basis, plan_revision_digest: "bad" })).toThrow();
+    expect(() => parseAcceptedPlanBasis({ ...basis, private_path: "/secret" })).toThrow();
+  });
+
   it("defines every startable job kind", () => {
     expect(JOB_KINDS).toEqual([
       "sync",
-      "recompute",
       "import-scan",
       "extract-source-docs",
       "check-source-updates",

@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "../test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -5,8 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteDatabase, getDb } from "./client.js";
 import { AppRepository } from "./repository.js";
-import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
-import { backfillCurrentRequiredUnitSets } from "./required-units.js";
 import { acceptedPlanBasis } from "./accepted-plan-progress.js";
 import { parseRequiredUnitToken } from "../services/required-units.js";
 
@@ -57,9 +56,8 @@ describe("print_progress.assembled migration", () => {
       repo.updateSource(source.id, { local_path: repoPath });
       repo.updateImportRules(source.id, ["x/"]);
       const plan = repo.createProfile("Plan", source.id);
-      await repo.recomputeProfile(plan.id);
+      await acceptPlanForTest(repo, plan.id);
       const partId = repo.listParts(plan.id).parts[0]!.id;
-      repo.patchPart(partId, { quantity_override: 1 });
       const populated = new Database(join(dir, "print-partner.db"));
       populated
         .prepare("UPDATE print_progress SET completed = 1, assembled = 1 WHERE part_id = ?")
@@ -122,16 +120,9 @@ describe("print_progress.assembled migration", () => {
       repo.updateSource(source.id, { local_path: repoPath });
       repo.updateImportRules(source.id, ["x/"]);
       const plan = repo.createProfile("Plan", source.id);
-      await repo.recomputeProfile(plan.id);
+      await acceptPlanForTest(repo, plan.id);
 
       const partId = repo.listParts(plan.id).parts[0]!.id;
-      repo.patchPart(partId, { quantity_override: 1 });
-      const raw = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
-      backfillAcceptedPlanRevisions(raw, "2026-08-21T16:00:00.000Z");
-      backfillCurrentRequiredUnitSets(raw, {
-        now: () => "2026-08-21T16:01:00.000Z",
-        tokenFactory: () => "ppu_00000000000000000000000000000001",
-      });
       const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
       if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
       const expected = acceptedPlanBasis(accepted.snapshot);

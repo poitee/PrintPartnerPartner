@@ -1,3 +1,4 @@
+import { acceptPlanForTest, editAcceptedPartsForTest } from "../test/accept-plan.js";
 import Database from "better-sqlite3";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,8 +7,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
-import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
-import { backfillCurrentRequiredUnitSets } from "./required-units.js";
 import { acceptedPlanBasis, acceptedProgressSummary } from "./accepted-plan-progress.js";
 import { parseRequiredUnitToken } from "../services/required-units.js";
 
@@ -30,25 +29,24 @@ async function fixture(quantity = 4, included = true) {
   repo.updateSource(source.id, { local_path: sourceRoot });
   repo.updateImportRules(source.id, ["parts/"]);
   const profile = repo.createProfile("Accepted progress", source.id);
-  repo.recomputeProfile(profile.id);
+  acceptPlanForTest(repo, profile.id);
   const part = repo.listParts(profile.id).parts[0];
   if (!part) throw new Error("test Part is missing");
-  repo.patchPart(part.id, { quantity_override: quantity });
-  if (!included) repo.patchPart(part.id, { included: false });
-
-  const raw = new Database(join(root, "print-partner.db"));
-  raw.pragma("foreign_keys = ON");
-  backfillAcceptedPlanRevisions(raw, "2026-08-21T10:00:00.000Z");
-  let token = 1;
-  backfillCurrentRequiredUnitSets(raw, {
-    now: () => "2026-08-21T10:01:00.000Z",
-    tokenFactory: () => `ppu_${(token++).toString(16).padStart(32, "0")}`,
-  });
-  raw.close();
+  const remapped = editAcceptedPartsForTest(repo, profile.id, [{
+    projectionPartId: part.id,
+    quantityOverride: quantity,
+    ...(!included ? { included: false } : {}),
+  }]);
 
   const accepted = repo.readAcceptedPlanOperationalSnapshot(profile.id);
   if (accepted.kind !== "ready") throw new Error(`accepted state is ${accepted.kind}`);
-  return { root, repo, profileId: profile.id, partId: part.id, snapshot: accepted.snapshot };
+  return {
+    root,
+    repo,
+    profileId: profile.id,
+    partId: remapped.get(part.id)!,
+    snapshot: accepted.snapshot,
+  };
 }
 
 describe("accepted Plan Progress commands", () => {
@@ -178,6 +176,72 @@ describe("accepted Plan Progress commands", () => {
       raw.prepare("SELECT completed, assembled FROM print_progress WHERE part_id = ?").get(partId),
     ).toEqual(before);
     raw.close();
+  });
+
+  it("imports printed counts atomically against one accepted basis", async () => {
+    const { root, repo, profileId, partId, snapshot } = await fixture(3);
+    const expected = acceptedPlanBasis(snapshot);
+    const before = repo.readAcceptedPlanOperationalSnapshot(profileId);
+
+    expect(repo.setAcceptedPrintedCounts({
+      expected: { ...expected, planVersion: expected.planVersion + 1 },
+      rows: [{ partId, printedCount: 2 }],
+    })).toEqual({ kind: "stale_accepted_plan" });
+    expect(repo.readAcceptedPlanOperationalSnapshot(profileId)).toEqual(before);
+
+    expect(repo.setAcceptedPrintedCounts({
+      expected,
+      rows: [
+        { partId, printedCount: 1 },
+        { partId: partId + 10_000, printedCount: 1 },
+      ],
+    })).toEqual({ kind: "part_not_found" });
+    expect(repo.readAcceptedPlanOperationalSnapshot(profileId)).toEqual(before);
+
+    const raw = new Database(join(root, "print-partner.db"));
+    raw.prepare(
+      "UPDATE print_progress SET completed = CASE WHEN unit_index = 1 THEN 1 ELSE 0 END WHERE part_id = ?",
+    ).run(partId);
+    expect(repo.setAcceptedPrintedCounts({
+      expected,
+      rows: [{ partId, printedCount: 2 }],
+    })).toEqual({ kind: "updated", updatedParts: 1 });
+    const normalized = repo.readAcceptedPlanOperationalSnapshot(profileId);
+    if (normalized.kind !== "ready") throw new Error("normalized accepted state is unavailable");
+    expect(normalized.snapshot.parts[0]!.units.map((unit) => unit.completed)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    raw.prepare("UPDATE print_progress SET completed = 0 WHERE part_id = ?").run(partId);
+    raw.exec(`
+      CREATE TRIGGER fail_second_progress_import
+      BEFORE UPDATE ON print_progress
+      WHEN NEW.part_id = ${partId} AND NEW.unit_index = 1
+      BEGIN
+        SELECT RAISE(ABORT, 'injected progress import failure');
+      END;
+    `);
+    expect(() => repo.setAcceptedPrintedCounts({
+      expected,
+      rows: [{ partId, printedCount: 3 }],
+    })).toThrow("injected progress import failure");
+    expect(repo.readAcceptedPlanOperationalSnapshot(profileId)).toEqual(before);
+    raw.exec("DROP TRIGGER fail_second_progress_import");
+    raw.close();
+
+    expect(repo.setAcceptedPrintedCounts({
+      expected,
+      rows: [{ partId, printedCount: 2 }],
+    })).toEqual({ kind: "updated", updatedParts: 1 });
+    const updated = repo.readAcceptedPlanOperationalSnapshot(profileId);
+    expect(updated.kind).toBe("ready");
+    if (updated.kind !== "ready") throw new Error("updated accepted state is unavailable");
+    expect(updated.snapshot.parts[0]!.units.map((unit) => unit.completed)).toEqual([
+      true,
+      true,
+      false,
+    ]);
   });
 
   it("waits for a concurrent archive commit and then rejects an uncheck", async () => {

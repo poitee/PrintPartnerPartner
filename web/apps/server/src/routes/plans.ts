@@ -5,7 +5,6 @@ import type {
   AppRepository,
 } from "../db/repository.js";
 import { readAcceptedPlanReview } from "../services/accepted-plan-review.js";
-import { applyManifestToProfile } from "../services/manifest-apply.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
 import { buildPlanManifestBuilder } from "../services/plan-manifest-builder.js";
 import { preloadSpoolmanForColorIds, enrichRoleFilamentRows } from "../services/filament-resolve.js";
@@ -518,18 +517,6 @@ export async function registerPlanRoutes(
       );
       return reply.status(500).send({ detail: "Internal Server Error" });
     }
-  });
-
-  app.post("/plans/:id/apply-manifest", async (request, reply) => {
-    const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
-    const body = (request.body as { preserve_included?: boolean } | null) ?? {};
-    const result = applyManifestToProfile(deps.repo, id, body.preserve_included ?? true);
-    return {
-      profile_id: id,
-      applied_rules: result.applied_rules,
-      warnings: result.warnings,
-    };
   });
 
   app.get("/plans/maintenance", async () => ({ plans_with_warnings: [] }));

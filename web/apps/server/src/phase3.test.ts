@@ -1,5 +1,5 @@
+import { acceptPlanForTest, editAcceptedPartsForTest } from "./test/accept-plan.js";
 import { describe, expect, it } from "vitest";
-import Database from "better-sqlite3";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,8 +10,6 @@ import { loadConfig } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { buildStlTreePayload, progressSummary } from "@print-partner/domain";
 import { exportStlPackJobMessage, STL_EXPORT_MISSING_HINT } from "./services/export-stl-pack.js";
-import { backfillAcceptedPlanRevisions } from "./db/accepted-plan-revisions.js";
-import { backfillCurrentRequiredUnitSets } from "./db/required-units.js";
 import { acceptedPlanBasis } from "./db/accepted-plan-progress.js";
 import { parseRequiredUnitToken } from "./services/required-units.js";
 
@@ -78,17 +76,13 @@ describe("Phase 3 APIs", () => {
     repo.updateImportRules(source.id, ["x/"]);
 
     const plan = repo.createProfile("Plan", source.id);
-    await repo.recomputeProfile(plan.id);
+    await acceptPlanForTest(repo, plan.id);
 
-    const partId = repo.listParts(plan.id).parts[0]!.id;
-    repo.patchPart(partId, { quantity_override: 1 });
-    const raw = new Database(join(dir, "print-partner.db"));
-    backfillAcceptedPlanRevisions(raw, "2026-08-21T06:00:00.000Z");
-    backfillCurrentRequiredUnitSets(raw, {
-      now: () => "2026-08-21T06:01:00.000Z",
-      tokenFactory: () => "ppu_00000000000000000000000000000001",
-    });
-    raw.close();
+    const priorPartId = repo.listParts(plan.id).parts[0]!.id;
+    editAcceptedPartsForTest(repo, plan.id, [{
+      projectionPartId: priorPartId,
+      quantityOverride: 1,
+    }]);
     const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
     if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
     const patched = repo.setAcceptedUnitCompletion({
@@ -116,19 +110,13 @@ describe("Phase 3 APIs", () => {
     repo.updateImportRules(source.id, ["x/"]);
 
     const plan = repo.createProfile("Plan", source.id);
-    await repo.recomputeProfile(plan.id);
+    await acceptPlanForTest(repo, plan.id);
 
-    const partId = repo.listParts(plan.id).parts[0]!.id;
-    repo.patchPart(partId, { quantity_override: 1 });
-
-    const raw = new Database(join(dir, "print-partner.db"));
-    raw.pragma("foreign_keys = ON");
-    backfillAcceptedPlanRevisions(raw, "2026-08-21T06:00:00.000Z");
-    backfillCurrentRequiredUnitSets(raw, {
-      now: () => "2026-08-21T06:01:00.000Z",
-      tokenFactory: () => "ppu_00000000000000000000000000000001",
-    });
-    raw.close();
+    const priorPartId = repo.listParts(plan.id).parts[0]!.id;
+    const partId = editAcceptedPartsForTest(repo, plan.id, [{
+      projectionPartId: priorPartId,
+      quantityOverride: 1,
+    }]).get(priorPartId)!;
     const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
     if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
     const expected = acceptedPlanBasis(accepted.snapshot);

@@ -11,7 +11,6 @@ import {
   scanRepo,
   serializeImportRules,
   STL_NAMING_DEFAULTS_KEY,
-  ensureProgressRows,
   type MergePart,
   type ProgressRow,
   type StlNamingProfileDict,
@@ -24,7 +23,7 @@ import {
 } from "@print-partner/domain";
 import { createHash } from "node:crypto";
 import { inArray } from "drizzle-orm";
-import { applyManifestToProfile } from "../services/manifest-apply.js";
+import { applyManifestToDraftParts } from "../services/manifest-apply.js";
 import { loadKitManifest, saveKitManifest, type KitManifestRecord } from "../services/kit-manifest-store.js";
 import {
   collectKitBundleSourceRefs,
@@ -160,6 +159,7 @@ import {
   type AcceptedPlanProgressRead,
 } from "./accepted-plan-progress-summary.js";
 import {
+  acceptedPlanBasis,
   applyAcceptedUnitDecisionsInternal,
   archiveAcceptedPlanInternal,
   setAcceptedUnitAssemblyInternal,
@@ -519,6 +519,11 @@ export type RecomputePlanDraftResult =
   | { readonly kind: "no_layers" }
   | { readonly kind: "no_stls" }
   | { readonly kind: "would_wipe" };
+
+export type SetAcceptedPrintedCountsResult =
+  | { readonly kind: "updated"; readonly updatedParts: number }
+  | { readonly kind: "part_not_found" | "invalid_rows" }
+  | AcceptedProgressFailure;
 
 export type EditPlanDraftPartsResult =
   | { readonly kind: "updated"; readonly draft: PlanDraftSnapshot }
@@ -1264,6 +1269,90 @@ export class AppRepository {
         ),
       "immediate",
     );
+  }
+
+  setAcceptedPrintedCounts(command: {
+    readonly expected: AcceptedPlanBasis;
+    readonly rows: readonly { readonly partId: number; readonly printedCount: number }[];
+  }): SetAcceptedPrintedCountsResult {
+    if (!this.syncSqlite) return { kind: "transaction_unavailable" };
+    return this.transaction((): SetAcceptedPrintedCountsResult => {
+      const accepted = readAcceptedPlanOperationalSnapshotInternal({
+        db: this.db,
+        schema: this.schema,
+        tenantId: this.tenantId,
+        reposDir: this.reposDir,
+        sqlite: true,
+        profileId: command.expected.profileId,
+      });
+      if (accepted.kind !== "ready") {
+        if (accepted.kind === "empty") return { kind: "stale_accepted_plan" };
+        return { kind: "accepted_state_unavailable", reason: accepted.kind };
+      }
+      const actual = acceptedPlanBasis(accepted.snapshot);
+      if (
+        actual.profileId !== command.expected.profileId ||
+        actual.planVersion !== command.expected.planVersion ||
+        actual.revisionId !== command.expected.revisionId ||
+        actual.revisionDigest !== command.expected.revisionDigest ||
+        actual.requiredUnitMappingDigest !== command.expected.requiredUnitMappingDigest
+      ) {
+        return { kind: "stale_accepted_plan" };
+      }
+      if (accepted.snapshot.profile.archivedAt) return { kind: "plan_archived" };
+      const partById = new Map(
+        accepted.snapshot.parts.map((part) => [part.projectionPartId, part] as const),
+      );
+      const seen = new Set<number>();
+      for (const row of command.rows) {
+        if (
+          seen.has(row.partId) ||
+          !Number.isSafeInteger(row.printedCount) ||
+          row.printedCount < 0
+        ) {
+          return { kind: "invalid_rows" };
+        }
+        seen.add(row.partId);
+        const part = partById.get(row.partId);
+        if (!part) return { kind: "part_not_found" };
+        if (row.printedCount > part.units.length) return { kind: "invalid_rows" };
+      }
+      const changes = command.rows.map((row) => {
+        const part = partById.get(row.partId)!;
+        return {
+          part,
+          changed: part.units.some(
+            (unit) => unit.completed !== (unit.unitIndex < row.printedCount),
+          ),
+          units: part.units.map((unit) => ({
+            unitIndex: unit.unitIndex,
+            completed: unit.unitIndex < row.printedCount,
+          })),
+        };
+      });
+      let updatedParts = 0;
+      for (const change of changes) {
+        if (change.changed) updatedParts += 1;
+        for (const unit of change.units) {
+          this.db
+            .update(this.schema.printProgress)
+            .set(
+              unit.completed
+                ? { completed: true }
+                : { completed: false, assembled: false },
+            )
+            .where(
+              and(
+                eq(this.schema.printProgress.tenantId, this.tenantId),
+                eq(this.schema.printProgress.partId, change.part.projectionPartId),
+                eq(this.schema.printProgress.unitIndex, unit.unitIndex),
+              ),
+            )
+            .run();
+        }
+      }
+      return { kind: "updated", updatedParts };
+    }, "immediate");
   }
 
   setAcceptedUnitAssembly(command: SetAcceptedUnitAssembly): SetAcceptedUnitAssemblyResult {
@@ -3793,6 +3882,7 @@ export class AppRepository {
       createdAt: row.createdAt,
       requiredUnitReconciliation: verifiedReconciliation
         ? {
+            id: verifiedReconciliation.id,
             format: verifiedReconciliation.format,
             digest: verifiedReconciliation.reconciliationDigest,
           }
@@ -3842,7 +3932,12 @@ export class AppRepository {
         : draft.digestFormat === PLAN_DRAFT_SELECTION_DIGEST_FORMAT
           ? digestPlanDraftSelection({
               planningDigest,
-              requiredUnitReconciliation: draft.requiredUnitReconciliation ?? null,
+              requiredUnitReconciliation: draft.requiredUnitReconciliation
+                ? {
+                    format: draft.requiredUnitReconciliation.format,
+                    digest: draft.requiredUnitReconciliation.digest,
+                  }
+                : null,
             })
           : null;
     if (digest == null) throw new Error("Plan draft digest format is unsupported");
@@ -3964,7 +4059,7 @@ export class AppRepository {
     const trackingBySourceLayer = new Map(
       draftInputs.map((captured) => [captured.sourceLayer, captured.trackingKind]),
     );
-    const draftParts = merged.parts.map((part): PlanSnapshotPart & {
+    const scannedDraftParts = merged.parts.map((part): PlanSnapshotPart & {
       baseRevisionPartId: number | null;
     } => {
       const prior = acceptedByKey.get(part.matchKey);
@@ -4009,6 +4104,7 @@ export class AppRepository {
         artifactDigest,
       };
     });
+    const draftParts = applyManifestToDraftParts(this, profileId, scannedDraftParts);
     return {
       kind: "prepared",
       value: {
@@ -6161,10 +6257,27 @@ export class AppRepository {
     readonly expectedSnapshotDigest: string;
     readonly decision: PlanDraftPartDecision;
   }): EditPlanDraftPartsResult {
+    return this.editPlanDraftPartsBatch({
+      profileId: input.profileId,
+      draftId: input.draftId,
+      expectedSnapshotDigest: input.expectedSnapshotDigest,
+      decisions: [input.decision],
+    });
+  }
+
+  editPlanDraftPartsBatch(input: {
+    readonly profileId: number;
+    readonly draftId: number;
+    readonly expectedSnapshotDigest: string;
+    readonly decisions: readonly PlanDraftPartDecision[];
+  }): EditPlanDraftPartsResult {
     const expectedSnapshotDigest = sha256Digest(
       input.expectedSnapshotDigest,
       "Expected Plan draft snapshot digest",
     );
+    if (input.decisions.length === 0) {
+      throw new Error("Plan draft edit batch requires at least one decision");
+    }
     if (!this.syncSqlite) return { kind: "transaction_unavailable" };
 
     return this.transaction((): EditPlanDraftPartsResult => {
@@ -6208,9 +6321,11 @@ export class AppRepository {
         return { kind: "base_changed", draft: current };
       }
 
-      let next: PlanDraftSnapshot;
+      let next = current;
       try {
-        next = applyPlanDraftPartDecision({ draft: current, decision: input.decision });
+        for (const decision of input.decisions) {
+          next = applyPlanDraftPartDecision({ draft: next, decision });
+        }
       } catch (error) {
         if (error instanceof PlanDraftPartNotFoundError) return { kind: "not_found" };
         throw error;
@@ -6224,21 +6339,13 @@ export class AppRepository {
 
       const changedPartIds = current.parts
         .filter((part) => {
-          if (!input.decision.partIds.includes(part.id)) return false;
-          switch (input.decision.kind) {
-            case "set_included":
-              return part.included !== input.decision.value;
-            case "set_quantity_override":
-              return (
-                part.quantityOverride !== input.decision.value ||
-                part.quantityEffective !==
-                  (input.decision.value ?? part.quantityInferred)
-              );
-            default: {
-              const exhaustive: never = input.decision;
-              throw new Error(`Unsupported Plan draft decision: ${String(exhaustive)}`);
-            }
-          }
+          const nextPart = next.parts.find((candidate) => candidate.id === part.id);
+          if (!nextPart) throw new Error("Edited Plan draft lost a Part");
+          return (
+            part.included !== nextPart.included ||
+            part.quantityOverride !== nextPart.quantityOverride ||
+            part.quantityEffective !== nextPart.quantityEffective
+          );
         })
         .map((part) => part.id);
       if (changedPartIds.length === 0) {
@@ -6273,28 +6380,30 @@ export class AppRepository {
         .run();
       if (headerWrite.changes !== 1) return { kind: "conflict", draft: current };
 
-      const partScope = and(
-        eq(this.schema.planDraftParts.tenantId, this.tenantId),
-        eq(this.schema.planDraftParts.draftId, input.draftId),
-        inArray(this.schema.planDraftParts.id, changedPartIds),
-      );
-      const partWrite =
-        input.decision.kind === "set_included"
-          ? this.db
-              .update(this.schema.planDraftParts)
-              .set({ included: input.decision.value })
-              .where(partScope)
-              .run()
-          : this.db
-              .update(this.schema.planDraftParts)
-              .set({
-                quantityOverride: input.decision.value,
-                quantityEffective: sql`COALESCE(${input.decision.value}, ${this.schema.planDraftParts.quantityInferred})`,
-              })
-              .where(partScope)
-              .run();
-      if (partWrite.changes !== changedPartIds.length) {
-        throw new Error("Plan draft Part edit did not update every selected row");
+      for (const decision of input.decisions) {
+        const partScope = and(
+          eq(this.schema.planDraftParts.tenantId, this.tenantId),
+          eq(this.schema.planDraftParts.draftId, input.draftId),
+          inArray(this.schema.planDraftParts.id, [...decision.partIds]),
+        );
+        const partWrite =
+          decision.kind === "set_included"
+            ? this.db
+                .update(this.schema.planDraftParts)
+                .set({ included: decision.value })
+                .where(partScope)
+                .run()
+            : this.db
+                .update(this.schema.planDraftParts)
+                .set({
+                  quantityOverride: decision.value,
+                  quantityEffective: sql`COALESCE(${decision.value}, ${this.schema.planDraftParts.quantityInferred})`,
+                })
+                .where(partScope)
+                .run();
+        if (partWrite.changes !== decision.partIds.length) {
+          throw new Error("Plan draft Part edit did not update every selected row");
+        }
       }
       const persisted = this.getPlanDraft(input.profileId, input.draftId);
       if (
@@ -7050,224 +7159,6 @@ export class AppRepository {
     return { parts: rows.map(partRow), total: Number(total?.c ?? 0) };
   }
 
-  private rowToMergePart(row: PartDbRow): MergePart {
-    return {
-      matchKey: row.matchKey,
-      relativePath: row.relativePath,
-      filename: row.filename,
-      sourceLayer: row.sourceLayer,
-      status: row.status,
-      role: row.role,
-      quantityAuto: row.quantityAuto,
-      partSlug: row.filename,
-      included: row.included,
-      quantityOverride: row.quantityOverride,
-      notes: row.notes ?? "",
-      geometrySame: row.geometrySame,
-      absolutePath: null,
-    };
-  }
-
-  recomputeProfile(
-    profileId: number,
-    options?: { apply_manifest?: boolean },
-  ): {
-    merged: boolean;
-    part_count?: number;
-    reason?: string;
-    message?: string;
-    layer_debug: Array<Record<string, unknown>>;
-    manifest_applied?: number;
-    manifest_warnings?: Array<Record<string, unknown>>;
-    accepted_input_set_id?: number;
-  } {
-    this.requireProfile(profileId);
-    const capture = this.capturePlanInputs(profileId);
-    const layers = this.db
-      .select()
-      .from(this.schema.profileLayers)
-      .where(eq(this.schema.profileLayers.profileId, profileId))
-      .orderBy(asc(this.schema.profileLayers.layerOrder))
-      .all();
-
-    const existingRows = this.db
-      .select()
-      .from(this.schema.parts)
-      .where(eq(this.schema.parts.profileId, profileId))
-      .all();
-    const existing: Record<string, MergePart> = {};
-    for (const row of existingRows) {
-      existing[row.matchKey] = this.rowToMergePart(row);
-    }
-
-    const layerScans: Array<[string, ReturnType<typeof scanRepo>]> = [];
-    const layerDebug: Array<Record<string, unknown>> = [];
-    for (const layer of layers) {
-      if (!layer.projectId) {
-        layerDebug.push({ layer_type: layer.layerType, project_id: null, skipped: "no_project" });
-      }
-    }
-
-    for (const layer of capture.layers) {
-      if (!layer.localPath) {
-        layerDebug.push({
-          layer_type: layer.layerType,
-          project_id: layer.projectId,
-          skipped: "no_local_path",
-        });
-        continue;
-      }
-      const namingProfile = resolveNamingProfile(layer.namingProfile, null);
-      const scanned = scanRepo(
-        layer.localPath,
-        layer.sourceLayer,
-        layer.importRules,
-        namingProfile,
-      );
-      layerScans.push([layer.sourceLayer, scanned]);
-      layerDebug.push({
-        label: layer.sourceLayer,
-        local_path: layer.localPath,
-        stl_count: scanned.length,
-        scan_cached: false,
-      });
-    }
-
-    if (!layerScans.length) {
-      return { merged: false, reason: "no_layers", layer_debug: layerDebug };
-    }
-
-    const totalScanned = layerScans.reduce((n, [, s]) => n + s.length, 0);
-    if (totalScanned === 0) {
-      return {
-        merged: false,
-        reason: "no_stls",
-        message:
-          "No STL files matched import rules for any layer. Use Import files… on each source.",
-        layer_debug: layerDebug,
-      };
-    }
-
-    if (!this.syncSqlite) {
-      return {
-        merged: false,
-        reason: "transaction_unavailable",
-        message:
-          "Plan rebuild is unavailable on PostgreSQL until accepted parts and inputs can be committed atomically.",
-        layer_debug: layerDebug,
-      };
-    }
-
-    try {
-      const result = mergeLayers(layerScans, existing, { geometryCompare: false });
-      if (!result.parts.length && existingRows.length) {
-        throw new MergeWouldWipeProfileError("Scan found no STL files.");
-      }
-
-      return this.transaction(() => {
-        const newKeys = new Set(result.parts.map((p) => p.matchKey));
-        for (const row of existingRows) {
-          if (!newKeys.has(row.matchKey)) {
-            this.db.delete(this.schema.printProgress).where(eq(this.schema.printProgress.partId, row.id)).run();
-            this.db.delete(this.schema.parts).where(eq(this.schema.parts.id, row.id)).run();
-          }
-        }
-
-        for (const mp of result.parts) {
-          const prior = existingRows.find((r) => r.matchKey === mp.matchKey);
-          const qty =
-            mp.quantityOverride != null ? mp.quantityOverride : mp.quantityAuto;
-          if (prior) {
-            const roleDefault =
-              loadRoleFilamentDefaults(this, profileId)[normalizePartRole(mp.role)];
-            this.db
-              .update(this.schema.parts)
-              .set({
-                relativePath: mp.relativePath,
-                filename: mp.filename,
-                sourceLayer: mp.sourceLayer,
-                status: mp.status,
-                quantityAuto: mp.quantityAuto,
-                quantityEffective: qty,
-                quantityOverride: mp.quantityOverride,
-                included: mp.included,
-                notes: mp.notes,
-                geometrySame: mp.geometrySame,
-                role: mp.role,
-                filamentColorId: prior.filamentColorId ?? roleDefault?.filament_color_id ?? null,
-                filamentCustomHex: prior.filamentCustomHex ?? roleDefault?.filament_custom_hex ?? null,
-                spoolmanSpoolId: prior.spoolmanSpoolId ?? roleDefault?.spoolman_spool_id ?? null,
-              })
-              .where(eq(this.schema.parts.id, prior.id))
-              .run();
-          } else {
-            const role = normalizePartRole(mp.role);
-            const roleDefault = loadRoleFilamentDefaults(this, profileId)[role];
-            this.db
-              .insert(this.schema.parts)
-              .values({
-                tenantId: this.tenantId,
-                profileId,
-                matchKey: mp.matchKey,
-                relativePath: mp.relativePath,
-                filename: mp.filename,
-                sourceLayer: mp.sourceLayer,
-                status: mp.status,
-                role: mp.role,
-                quantityAuto: mp.quantityAuto,
-                quantityOverride: mp.quantityOverride,
-                quantityEffective: qty,
-                included: mp.included,
-                notes: mp.notes,
-                geometrySame: mp.geometrySame,
-                filamentColorId: roleDefault?.filament_color_id ?? null,
-                filamentCustomHex: roleDefault?.filament_custom_hex ?? null,
-                spoolmanSpoolId: roleDefault?.spoolman_spool_id ?? null,
-              })
-              .run();
-          }
-        }
-
-        const out: {
-          merged: boolean;
-          part_count: number;
-          layer_debug: Array<Record<string, unknown>>;
-          manifest_applied?: number;
-          manifest_warnings?: Array<Record<string, unknown>>;
-          accepted_input_set_id?: number;
-        } = {
-          merged: true,
-          part_count: result.parts.length,
-          layer_debug: layerDebug,
-        };
-        if (options?.apply_manifest) {
-          const manifestResult = applyManifestToProfile(this, profileId, true);
-          out.manifest_applied = manifestResult.applied_rules;
-          out.manifest_warnings = manifestResult.warnings;
-        }
-        if (this.capturePlanInputs(profileId).fingerprint !== capture.fingerprint) {
-          throw new Error("Plan inputs changed during rebuild; accepted Plan was not updated");
-        }
-        const acceptedAt = new Date().toISOString();
-        const inputSet = this.publishPlanRevisionInputs(profileId, capture.inputs);
-        this.acceptPlanRevisionInputSet(profileId, inputSet.id, acceptedAt);
-        this.touchLastRecomputed(profileId, acceptedAt);
-        out.accepted_input_set_id = inputSet.id;
-        return out;
-      });
-    } catch (e) {
-      if (e instanceof MergeWouldWipeProfileError) {
-        return {
-          merged: false,
-          reason: "would_wipe",
-          message: e.message,
-          layer_debug: layerDebug,
-        };
-      }
-      throw e;
-    }
-  }
-
   markSourceSynced(id: number, commitSha: string | null): void {
     const row = this.getProjectRow(id);
     if (!row) return;
@@ -7346,26 +7237,6 @@ export class AppRepository {
       .all();
   }
 
-  private progressRowsForPart(partId: number): ProgressRow[] {
-    return this.db
-      .select()
-      .from(this.schema.printProgress)
-      .where(
-        and(
-          eq(this.schema.printProgress.tenantId, this.tenantId),
-          eq(this.schema.printProgress.partId, partId),
-        ),
-      )
-      .all()
-      .map((r) => ({
-        id: r.id,
-        partId: r.partId,
-        unitIndex: r.unitIndex,
-        completed: r.completed,
-        assembled: (r as Record<string, unknown>).assembled ? true : false,
-      }));
-  }
-
   /** Replace progress only after the caller has proved the part belongs to this tenant. */
   private saveProgressRowsForOwnedPart(partId: number, rows: ProgressRow[]): void {
     this.db
@@ -7390,35 +7261,15 @@ export class AppRepository {
     }
   }
 
-  private ensureProgressForOwnedPart(part: PartDbRow): void {
-    if (!this.syncSqlite) throw new PlanTransactionUnavailableError();
-    const mutate = () => {
-      const rows = this.progressRowsForPart(part.id);
-      const qty = Math.max(1, part.quantityEffective);
-      const ensured = ensureProgressRows(rows, part.id, qty);
-      this.saveProgressRowsForOwnedPart(part.id, ensured);
-    };
-    this.transaction(mutate, "immediate");
-  }
-
   patchPart(
     partId: number,
     patch: {
-      included?: boolean;
       filament_color_id?: string | null;
-      quantity_override?: number;
       spoolman_spool_id?: string | null;
-      requirement?: string | null;
-      option_group_id?: string | null;
-      manifest_source?: string | null;
     },
   ): PartRow {
-    if (patch.quantity_override != null && !this.syncSqlite) {
-      throw new PlanTransactionUnavailableError();
-    }
-    const part = this.requirePart(partId);
+    this.requirePart(partId);
     const updates: Partial<typeof this.schema.parts.$inferInsert> = {};
-    if (patch.included != null) updates.included = patch.included;
     if (patch.filament_color_id !== undefined) {
       updates.filamentColorId = patch.filament_color_id;
       updates.spoolmanSpoolId = null;
@@ -7426,14 +7277,6 @@ export class AppRepository {
     if (patch.spoolman_spool_id !== undefined) {
       updates.spoolmanSpoolId = patch.spoolman_spool_id;
     }
-    if (patch.quantity_override != null) {
-      updates.quantityOverride = patch.quantity_override;
-      updates.quantityEffective = patch.quantity_override;
-      this.ensureProgressForOwnedPart({ ...part, quantityEffective: patch.quantity_override });
-    }
-    if (patch.requirement !== undefined) updates.requirement = patch.requirement;
-    if (patch.option_group_id !== undefined) updates.optionGroupId = patch.option_group_id;
-    if (patch.manifest_source !== undefined) updates.manifestSource = patch.manifest_source;
     if (Object.keys(updates).length) {
       this.db
         .update(this.schema.parts)

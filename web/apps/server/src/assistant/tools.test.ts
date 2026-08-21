@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "../test/accept-plan.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -317,7 +318,7 @@ describe("assistant tools + example builds", () => {
     });
     repo.updateImportRules(source.id, ["STLs/"]);
     const plan = repo.createProfile("Plan", source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
 
     const found = JSON.parse(
       (

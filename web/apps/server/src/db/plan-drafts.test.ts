@@ -1154,6 +1154,33 @@ describe("saved Plan drafts", () => {
     database.close();
   });
 
+  it("rolls back every draft Part edit when a later batch write fails", () => {
+    const { database, raw, profile, repo, draft } = editableDraftFixture();
+    const firstId = draft.parts[0]?.id;
+    const secondId = draft.parts[1]?.id;
+    if (!firstId || !secondId) throw new Error("editable draft Parts are missing");
+    raw.exec(`
+      CREATE TRIGGER reject_second_draft_part_edit
+      BEFORE UPDATE OF included ON plan_draft_parts
+      WHEN NEW.id = ${secondId}
+      BEGIN
+        SELECT RAISE(ABORT, 'injected batch failure');
+      END
+    `);
+
+    expect(() => repo.editPlanDraftPartsBatch({
+      profileId: profile.id,
+      draftId: draft.id,
+      expectedSnapshotDigest: draft.snapshotDigest,
+      decisions: [
+        { kind: "set_quantity_override", partIds: [firstId], value: 7 },
+        { kind: "set_included", partIds: [secondId], value: false },
+      ],
+    })).toThrow("injected batch failure");
+    expect(repo.getPlanDraft(profile.id, draft.id)).toEqual(draft);
+    database.close();
+  });
+
   it("distinguishes a dirty accepted baseline from a different valid base", () => {
     const dirty = editableDraftFixture();
     dirty.raw
@@ -2628,7 +2655,8 @@ describe("saved Plan drafts", () => {
   });
 
   it("reopens a complete shrink result with the same surplus and progress basis", () => {
-    const { database, raw, profile, repo, draft, root } = editableDraftFixture();
+    const { database, raw, profile, source, repo, draft, root } = editableDraftFixture();
+    const otherProfile = repo.createProfile("Other reconciliation owner", source.id);
     backfillCurrentRequiredUnitSets(raw, {
       tokenFactory: (() => {
         let value = 200;
@@ -2668,6 +2696,14 @@ describe("saved Plan drafts", () => {
     const reopened = new SqliteDatabase(root);
     reopened.connect();
     const reopenedRepo = new AppRepository(getDb(reopened), "default", reopened.reposDir);
+    expect(reopenedRepo.getPlanDraft(profile.id, draft.id)).toMatchObject({
+      snapshotDigest: saved.draft.snapshotDigest,
+      requiredUnitReconciliation: {
+        id: saved.reconciliation.id,
+        format: saved.reconciliation.format,
+        digest: saved.reconciliation.reconciliationDigest,
+      },
+    });
     expect(
       reopenedRepo.getPlanDraftRequiredUnitReconciliation(
         profile.id,
@@ -2675,6 +2711,13 @@ describe("saved Plan drafts", () => {
         saved.reconciliation.id,
       ),
     ).toEqual(saved.reconciliation);
+    expect(
+      reopenedRepo.getPlanDraftRequiredUnitReconciliation(
+        otherProfile.id,
+        draft.id,
+        saved.reconciliation.id,
+      ),
+    ).toBeNull();
     expect(
       reopenedRepo.savePlanDraftRequiredUnitReconciliation({
         profileId: profile.id,

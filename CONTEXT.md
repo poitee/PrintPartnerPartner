@@ -19,8 +19,10 @@ The accepted statement of the parts and quantities required for a Build.
 _Avoid_: Build, checkoff sheet
 
 **Plan draft**:
-Autosaved changes to sources, file selections, and quantities that do not yet
-change the accepted Plan or the Checkoff sheet.
+Saved proposed source recompute, file inclusion, and quantity values that do
+not change the accepted Plan or the Checkoff sheet until the user explicitly
+applies them. A stale draft must be abandoned and rebased onto the current
+accepted Plan before Apply.
 _Avoid_: Unsaved plan
 
 **Plan revision**:

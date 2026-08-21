@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import * as yaml from "js-yaml";
 import { safeRepoPath } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
-import type { PartDbRow } from "../db/repository.js";
+import type { PlanSnapshotPart } from "./plan-drafts.js";
 import { loadKitManifest } from "./kit-manifest-store.js";
 import { findEditableSourceManifestPath } from "./source-workspace.js";
 
@@ -57,11 +57,6 @@ export type ManifestDoc = {
   option_groups?: Record<string, ManifestOptionGroup>;
   selections?: Record<string, string>;
   variant_dimensions?: Record<string, Array<string | number>>;
-};
-
-export type ManifestApplyResult = {
-  applied_rules: number;
-  warnings: Array<{ code: string; message: string; severity: string }>;
 };
 
 function parseStringList(raw: unknown): string[] {
@@ -239,6 +234,33 @@ export function selectionIncludesPart(
   return matchKeyMatches(selection, matchKey);
 }
 
+export function applyOptionGroupSelections<
+  T extends { readonly partKey: string; readonly optionGroupId: string | null; readonly included: boolean },
+>(
+  inputParts: readonly T[],
+  groups: Readonly<Record<string, ManifestOptionGroup>>,
+  selections: Readonly<Record<string, string>>,
+): T[] {
+  let parts = [...inputParts];
+  for (const [groupId, group] of Object.entries(groups)) {
+    if ((group.rule ?? "pick_one") !== "pick_one") continue;
+    const selection = selections[groupId];
+    parts = parts.map((part) => {
+      if (part.optionGroupId != null && part.optionGroupId !== groupId) return part;
+      const inGroup =
+        part.optionGroupId === groupId || partInOptionGroup(part.partKey, groupId, group);
+      if (!inGroup) return part;
+      return {
+        ...part,
+        included: selection
+          ? selectionIncludesPart(part.partKey, group, selection)
+          : false,
+      };
+    });
+  }
+  return parts;
+}
+
 export function findRepoManifestPath(localPath: string): string | null {
   return safeRepoPath(localPath, CANONICAL_MANIFEST);
 }
@@ -287,7 +309,7 @@ export function collectRepoManifests(
 }
 
 function ruleForPart(
-  part: PartDbRow,
+  part: { readonly matchKey: string },
   layerProject: string | null,
   manifests: Array<{ projectName: string; doc: ManifestDoc; source: string }>,
 ): { rule: ManifestPartRule; source: string } | null {
@@ -307,71 +329,35 @@ function ruleForPart(
   return null;
 }
 
-export function applyManifestToProfile(
+export function applyManifestToDraftParts(
   repo: AppRepository,
   profileId: number,
-  preserveIncluded = true,
-): ManifestApplyResult {
-  const warnings: ManifestApplyResult["warnings"] = [];
-  const { parts: partList } = repo.listParts(profileId, 10000, 0);
-  if (!partList.length) return { applied_rules: 0, warnings };
-
+  inputParts: readonly (PlanSnapshotPart & { readonly baseRevisionPartId: number | null })[],
+): Array<PlanSnapshotPart & { baseRevisionPartId: number | null }> {
   const manifests = collectRepoManifests(repo, profileId);
-  const kitOverlay = loadKitManifest(repo, profileId);
-  const overlaySelections = { ...kitOverlay.selections };
-
+  const overlaySelections = { ...loadKitManifest(repo, profileId).selections };
   for (const { doc } of manifests) {
-    if (doc.selections) {
-      for (const [key, value] of Object.entries(doc.selections)) {
-        if (!(key in overlaySelections)) overlaySelections[key] = value;
-      }
+    for (const [key, value] of Object.entries(doc.selections ?? {})) {
+      if (!(key in overlaySelections)) overlaySelections[key] = value;
     }
   }
+  const parts = inputParts.map((part) => {
+    const layerLabel = part.sourceLayer.split(":", 2)[1] ?? null;
+    const matched = ruleForPart({ matchKey: part.partKey }, layerLabel, manifests);
+    if (!matched) return { ...part };
+    return {
+      ...part,
+      requirement: matched.rule.requirement ?? part.requirement,
+      optionGroupId: matched.rule.option_group ?? part.optionGroupId,
+      manifestSource: matched.source,
+      included:
+        matched.rule.default_included != null && matched.source === "kit"
+          ? matched.rule.default_included
+          : part.included,
+    };
+  });
 
-  let applied = 0;
-
-  for (const part of partList) {
-    const row = repo.getPartRow(part.id);
-    if (!row) continue;
-    const layerLabel = row.sourceLayer.split(":", 2)[1] ?? null;
-    const matched = ruleForPart(row, layerLabel, manifests);
-    if (!matched) continue;
-    const { rule, source } = matched;
-    const patch: Record<string, unknown> = { manifest_source: source };
-    if (rule.requirement) patch.requirement = rule.requirement;
-    if (rule.option_group) patch.option_group_id = rule.option_group;
-    if (!preserveIncluded && rule.default_included != null) {
-      patch.included = rule.default_included;
-    } else if (rule.default_included != null && source === "kit") {
-      patch.included = rule.default_included;
-    }
-    repo.patchPart(part.id, patch);
-    applied += 1;
-  }
-
-  const allGroups: Record<string, ManifestOptionGroup> = {};
-  for (const { doc } of manifests) {
-    mergeOptionGroups(allGroups, doc.option_groups ?? {});
-  }
-
-  for (const [gid, group] of Object.entries(allGroups)) {
-    if ((group.rule ?? "pick_one") !== "pick_one") continue;
-    for (const part of partList) {
-      const inGroup =
-        part.option_group_id === gid || partInOptionGroup(part.match_key, gid, group);
-      if (inGroup) repo.patchPart(part.id, { included: false });
-    }
-    const selection = overlaySelections[gid];
-    if (!selection) continue;
-    for (const part of partList) {
-      const inGroup =
-        part.option_group_id === gid || partInOptionGroup(part.match_key, gid, group);
-      if (!inGroup) continue;
-      repo.patchPart(part.id, {
-        included: selectionIncludesPart(part.match_key, group, selection),
-      });
-    }
-  }
-
-  return { applied_rules: applied, warnings };
+  const groups: Record<string, ManifestOptionGroup> = {};
+  for (const { doc } of manifests) mergeOptionGroups(groups, doc.option_groups ?? {});
+  return applyOptionGroupSelections(parts, groups, overlaySelections);
 }

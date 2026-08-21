@@ -76,6 +76,30 @@ Completed on August 20, 2026:
 
 The following dependency majors remain deferred because they change a runtime or compiler boundary: Node types 26, TypeScript 7, `better-sqlite3` 13 and its type package, Chokidar 5, and jsdom 30. Upgrade each in a focused compatibility change with its own tests rather than folding it into dead-code cleanup.
 
+## Accepted Plan draft cutover wave
+
+Completed on August 21, 2026:
+
+- moved browser Rebuild, inclusion edits, quantity edits, and spreadsheet
+  planning imports to persisted Plan drafts based on the accepted Plan, with
+  explicit Apply;
+- added explicit abandon-then-rebase recovery for stale saved drafts and kept
+  accepted Review and Checkoff unchanged until Apply;
+- separated spreadsheet printed-count import into one accepted-basis-checked
+  transaction and rejected mixed planning and Progress imports before writes;
+- removed the legacy recompute job kind, dispatcher, routes, polling client, and
+  labels;
+- removed the legacy production commands `recomputeProfile` and
+  `applyManifestToProfile` after migrating their test and runtime callers; and
+- narrowed `PATCH /parts/:id` and its repository command to
+  `filament_color_id` and `spoolman_spool_id`. Accepted Progress and assembly
+  subresources remain live.
+
+The compatibility `parts` and `print_progress` tables remain because accepted
+Review, Checkoff, media lookup, and installed database upgrades still consume
+their revision-keyed projections. They no longer authorize direct accepted
+quantity or inclusion writes.
+
 ## Remove after the redesign replaces it
 
 - Current Parts, Export, Welcome, and Plans page shells.

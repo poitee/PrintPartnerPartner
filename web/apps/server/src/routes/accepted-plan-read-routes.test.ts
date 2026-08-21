@@ -1,7 +1,9 @@
+import { acceptPlanForTest, editAcceptedPartsForTest } from "../test/accept-plan.js";
 import Database from "better-sqlite3";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -9,8 +11,6 @@ import type { Pool } from "pg";
 import { buildApp } from "../app.js";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
 import { loadConfig } from "../config.js";
-import { backfillAcceptedPlanRevisions } from "../db/accepted-plan-revisions.js";
-import { backfillCurrentRequiredUnitSets } from "../db/required-units.js";
 import { acceptedPlanBasis } from "../db/accepted-plan-progress.js";
 import { parseRequiredUnitToken } from "../services/required-units.js";
 import { AppRepository, type SchemaTables } from "../db/repository.js";
@@ -118,19 +118,14 @@ describe("accepted Plan read routes", () => {
     repo.updateSource(source.id, { local_path: sourceRoot });
     repo.updateImportRules(source.id, ["parts/"]);
     const profile = repo.createProfile("Accepted route Plan", source.id);
-    repo.recomputeProfile(profile.id);
-    const part = repo.listParts(profile.id).parts[0];
-    if (!part) throw new Error("test Part is missing");
-    repo.patchPart(part.id, { quantity_override: 1 });
-
-    const raw = new Database(join(directory, "print-partner.db"));
-    raw.pragma("foreign_keys = ON");
-    backfillAcceptedPlanRevisions(raw, "2026-08-21T06:00:00.000Z");
-    backfillCurrentRequiredUnitSets(raw, {
-      now: () => "2026-08-21T06:01:00.000Z",
-      tokenFactory: () => "ppu_00000000000000000000000000000001",
-    });
-    raw.close();
+    acceptPlanForTest(repo, profile.id);
+    const priorPart = repo.listParts(profile.id).parts[0];
+    if (!priorPart) throw new Error("test Part is missing");
+    const remappedPartId = editAcceptedPartsForTest(repo, profile.id, [{
+      projectionPartId: priorPart.id,
+      quantityOverride: 1,
+    }]).get(priorPart.id)!;
+    const part = repo.listParts(profile.id).parts.find((candidate) => candidate.id === remappedPartId)!;
 
     const initialAccepted = repo.readAcceptedPlanOperationalSnapshot(profile.id);
     if (initialAccepted.kind !== "ready") throw new Error("accepted Plan is not ready");
@@ -153,8 +148,8 @@ describe("accepted Plan read routes", () => {
       },
     );
     const progressBeforeRequests = progressBeforeRead
-      .prepare("SELECT * FROM print_progress ORDER BY id")
-      .all();
+      .prepare("SELECT * FROM print_progress WHERE part_id = ? ORDER BY id")
+      .all(part.id);
     progressBeforeRead.close();
 
     const readAccepted = repo.readAcceptedPlanOperationalSnapshot.bind(repo);
@@ -328,9 +323,10 @@ describe("accepted Plan read routes", () => {
         "Dirty accepted route Plan",
         source.id,
       );
-      repo.recomputeProfile(dirtyProfile.id);
+      acceptPlanForTest(repo, dirtyProfile.id);
       const dirtyPart = repo.listParts(dirtyProfile.id).parts[0];
       if (!dirtyPart) throw new Error("dirty test Part is missing");
+      repo.patchPart(dirtyPart.id, { filament_color_id: "pla-black" });
       const dirtyCheckoff = await app.inject({
         method: "GET",
         url: `/plans/${dirtyProfile.id}/checkoff`,
@@ -363,13 +359,66 @@ describe("accepted Plan read routes", () => {
       expect(missingPart.json()).toEqual({ detail: "Part not found" });
       expect(acceptedReadCount).toBe(10);
 
+      const observedSource = repo.getProjectRow(source.id);
+      if (!observedSource) throw new Error("test Source is missing");
+      const historicalLocator = `${source.id}/revisions/historical`;
+      const historicalRoot = join(directory, "repos", historicalLocator);
+      mkdirSync(join(historicalRoot, "parts"), { recursive: true });
+      writeFileSync(join(historicalRoot, "parts", "widget.stl"), "solid widget");
+      const historicalRevision = repo.recordSourceRevision({
+        sourceId: source.id,
+        upstreamRevisionKey: "historical",
+        manifestDigest: "a".repeat(64),
+        snapshotLocator: historicalLocator,
+        syncedAt: "2026-08-21T06:02:00.000Z",
+        completeness: "complete",
+      });
+      repo.activateSourceRevision({
+        sourceId: source.id,
+        revisionId: historicalRevision.id,
+        observed: observedSource,
+      });
+      const uninitializedProfile = repo.createProfile(
+        "Uninitialized accepted route Plan",
+        source.id,
+      );
+      acceptPlanForTest(repo, uninitializedProfile.id);
       const repairRaw = new Database(join(directory, "print-partner.db"));
       repairRaw.pragma("foreign_keys = ON");
-      backfillAcceptedPlanRevisions(repairRaw, "2026-08-21T06:02:00.000Z");
+      const inputSetId = repairRaw
+        .prepare("SELECT input_set_id FROM plan_accepted_input_sets WHERE profile_id = ?")
+        .pluck()
+        .get(uninitializedProfile.id) as number;
+      repairRaw
+        .prepare(
+          `UPDATE plan_revision_inputs
+              SET source_layer = 'legacy:' || source_id,
+                  layer_order = 0,
+                  tracking_kind = 'revision',
+                  effective_naming_digest = NULL
+            WHERE input_set_id = ?`,
+        )
+        .run(inputSetId);
+      const historicalInputs = repairRaw
+        .prepare(
+          `SELECT source_revision_id, manifest_digest
+             FROM plan_revision_inputs
+            WHERE input_set_id = ?
+            ORDER BY source_revision_id`,
+        )
+        .all(inputSetId);
+      const inputSetDigest = createHash("sha256")
+        .update(JSON.stringify(historicalInputs))
+        .digest("hex");
+      repairRaw
+        .prepare(
+          "UPDATE plan_revision_input_sets SET format_version = 1, input_set_digest = ? WHERE id = ?",
+        )
+        .run(inputSetDigest, inputSetId);
       repairRaw.close();
       const uninitialized = await app.inject({
         method: "GET",
-        url: `/plans/${dirtyProfile.id}/checkoff`,
+        url: `/plans/${uninitializedProfile.id}/checkoff`,
       });
       expect(uninitialized.statusCode).toBe(409);
       expect(uninitialized.json()).toEqual({
@@ -462,8 +511,8 @@ describe("accepted Plan read routes", () => {
       );
       expect(
         progressAfterFailures
-          .prepare("SELECT * FROM print_progress ORDER BY id")
-          .all(),
+          .prepare("SELECT * FROM print_progress WHERE part_id = ? ORDER BY id")
+          .all(part.id),
       ).toEqual(progressBeforeRequests);
       progressAfterFailures.close();
       const serializedErrors = JSON.stringify(capturedErrors, (_key, value: unknown) =>

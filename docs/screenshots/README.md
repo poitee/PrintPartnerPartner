@@ -35,7 +35,7 @@ The root README embeds **light** PNGs. GitHub Pages uses theme pairs for light/d
 
 1. Start the app (`docker compose up --build` or local single-port run on `:8080`).
 2. Add and sync at least one source with STLs.
-3. Create a plan, attach the source, pick STL files, set role colors, and recompute so parts exist.
+3. Create a plan, attach the source, rebuild a draft, pick STL files and quantities, then apply the draft so accepted parts exist.
 
 Optional: pass `--profile-id N` to select a specific plan when multiple exist.
 

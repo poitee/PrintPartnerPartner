@@ -707,7 +707,7 @@ describe("accepted Plan revision backfill", () => {
     const repo = repository(migrated);
     const partRevision = repo.getAcceptedPlanRevision(partProfile.id)!;
     const layerRevision = repo.getAcceptedPlanRevision(layerProfile.id)!;
-    repo.patchPart(partRevision.parts[0]!.projectionPartId!, { included: false });
+    repo.patchPart(partRevision.parts[0]!.projectionPartId!, { filament_color_id: "pla-black" });
     rawDatabase(migrated)
       .prepare(
         `INSERT INTO profile_layers (tenant_id, profile_id, layer_order, layer_type, project_id)
@@ -776,8 +776,8 @@ describe("accepted Plan revision backfill", () => {
     const firstRevision = migratedRepo.getAcceptedPlanRevision(profile.id)!;
     const firstMapping = migratedRepo.readCurrentRequiredUnitSet(profile.id);
     if (firstMapping.kind !== "ready") throw new Error("initial mapping not ready");
-    migratedRepo.patchPart(partId, { included: false });
     const migratedRaw = rawDatabase(migrated);
+    migratedRaw.prepare("UPDATE parts SET included = 0 WHERE id = ?").run(partId);
     migratedRaw
       .prepare(
         `UPDATE app_settings SET value = '25'

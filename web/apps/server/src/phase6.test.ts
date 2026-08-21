@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "./test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,8 +7,6 @@ import Database from "better-sqlite3";
 import { getDb, SqliteDatabase } from "./db/client.js";
 import { AppRepository } from "./db/repository.js";
 import { tenantStorage } from "./middleware/tenant-context.js";
-import { backfillAcceptedPlanRevisions } from "./db/accepted-plan-revisions.js";
-import { backfillCurrentRequiredUnitSets } from "./db/required-units.js";
 import { acceptedPlanBasis, type AcceptedPlanBasis } from "./db/accepted-plan-progress.js";
 import { parseRequiredUnitToken, type RequiredUnitToken } from "./services/required-units.js";
 
@@ -69,15 +68,8 @@ describe("Phase 6 tenant isolation", () => {
       repo.updateSource(source.id, { local_path: repoPath });
       repo.updateImportRules(source.id, ["parts/"]);
       profileId = repo.createProfile("Tenant A plan", source.id).id;
-      expect(repo.recomputeProfile(profileId).merged).toBe(true);
+      expect(acceptPlanForTest(repo, profileId).merged).toBe(true);
       partId = repo.listParts(profileId).parts[0]!.id;
-      repo.patchPart(partId, { quantity_override: 1 });
-      const raw = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
-      backfillAcceptedPlanRevisions(raw, "2026-08-21T14:00:00.000Z");
-      backfillCurrentRequiredUnitSets(raw, {
-        now: () => "2026-08-21T14:01:00.000Z",
-        tokenFactory: () => "ppu_00000000000000000000000000000001",
-      });
       const accepted = repo.readAcceptedPlanOperationalSnapshot(profileId);
       if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
       expected = acceptedPlanBasis(accepted.snapshot);
@@ -90,7 +82,7 @@ describe("Phase 6 tenant isolation", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
       expect(repo.getProfileHeader(profileId)).toBeNull();
       expect(repo.getPartRow(partId)).toBeNull();
-      expect(() => repo.patchPart(partId, { included: false })).toThrow("Part not found");
+      expect(() => repo.patchPart(partId, { filament_color_id: "pla-black" })).toThrow("Part not found");
       expect(repo.setAcceptedUnitCompletion({ expected, token, completed: false })).toEqual({
         kind: "unit_not_found",
       });
@@ -98,7 +90,7 @@ describe("Phase 6 tenant isolation", () => {
         kind: "unit_not_found",
       });
       expect(() => repo.listParts(profileId)).toThrow("Profile not found");
-      expect(() => repo.recomputeProfile(profileId)).toThrow("Profile not found");
+      expect(() => acceptPlanForTest(repo, profileId)).toThrow("Profile not found");
       expect(() => repo.readEditableKitRecipe(profileId)).toThrow("Profile not found");
       expect(() =>
         repo.createPlanDecision({
@@ -153,7 +145,7 @@ describe("Phase 6 tenant isolation", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["parts/"]);
     const profile = repo.createProfile("Atomic plan", source.id);
-    expect(repo.recomputeProfile(profile.id).merged).toBe(true);
+    expect(acceptPlanForTest(repo, profile.id).merged).toBe(true);
     const before = repo.listParts(profile.id).parts;
 
     unlinkSync(originalPath);
@@ -171,7 +163,7 @@ describe("Phase 6 tenant isolation", () => {
       END
     `);
 
-    expect(() => repo.recomputeProfile(profile.id)).toThrow("injected recompute failure");
+    expect(() => acceptPlanForTest(repo, profile.id)).toThrow("injected recompute failure");
     expect(repo.listParts(profile.id).parts).toEqual(before);
 
     sqlite.close();
@@ -193,16 +185,9 @@ describe("Phase 6 tenant isolation", () => {
     });
     repo.updateSource(source.id, { local_path: repoPath });
     const profile = repo.createProfile("Progress plan", source.id);
-    expect(repo.recomputeProfile(profile.id).merged).toBe(true);
+    expect(acceptPlanForTest(repo, profile.id).merged).toBe(true);
     const partId = repo.listParts(profile.id).parts[0]!.id;
-    repo.patchPart(partId, { quantity_override: 1 });
-
     const native = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
-    backfillAcceptedPlanRevisions(native, "2026-08-21T15:00:00.000Z");
-    backfillCurrentRequiredUnitSets(native, {
-      now: () => "2026-08-21T15:01:00.000Z",
-      tokenFactory: () => "ppu_00000000000000000000000000000001",
-    });
     const accepted = repo.readAcceptedPlanOperationalSnapshot(profile.id);
     if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
     native.prepare("UPDATE print_progress SET tenant_id = ? WHERE part_id = ?").run(

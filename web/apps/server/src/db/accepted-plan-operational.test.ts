@@ -12,7 +12,6 @@ import type { PostgresDrizzleDb } from "./client-postgres.js";
 import { backfillCurrentRequiredUnitSets } from "./required-units.js";
 import {
   AppRepository,
-  PlanTransactionUnavailableError,
   type SchemaTables,
 } from "./repository.js";
 import {
@@ -1156,11 +1155,6 @@ describe("accepted Plan operational snapshot", () => {
           decisions: [{ token, result: "confirmed" }],
         }),
       ).toEqual({ kind: "transaction_unavailable" });
-      expect(() => repo.patchPart(1, { quantity_override: 2 })).toThrowError(
-        expect.objectContaining<Partial<PlanTransactionUnavailableError>>({
-          code: "transaction_unavailable",
-        }),
-      );
       expect(statements).toEqual([]);
     } finally {
       unregisterPostgresSyncQuery(postgres);

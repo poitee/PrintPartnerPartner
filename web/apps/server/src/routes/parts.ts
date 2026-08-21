@@ -156,22 +156,34 @@ async function sendPartImage(
 export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.patch("/parts/:id", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    const body = request.body as {
-      included?: boolean;
-      filament_color_id?: string | null;
-      quantity_override?: number;
-      spoolman_spool_id?: string | null;
-    };
-    if (
-      body.included === undefined &&
-      body.filament_color_id === undefined &&
-      body.quantity_override === undefined &&
-      body.spoolman_spool_id === undefined
-    ) {
+    const body = request.body;
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
       return reply.status(400).send({ detail: "No fields to update" });
     }
+    const fields = body as Record<string, unknown>;
+    const keys = Object.keys(fields);
+    if (
+      keys.length === 0 ||
+      keys.some((key) => key !== "filament_color_id" && key !== "spoolman_spool_id") ||
+      (fields.filament_color_id !== undefined &&
+        fields.filament_color_id !== null &&
+        typeof fields.filament_color_id !== "string") ||
+      (fields.spoolman_spool_id !== undefined &&
+        fields.spoolman_spool_id !== null &&
+        typeof fields.spoolman_spool_id !== "string")
+    ) {
+      return reply.status(400).send({ detail: "Only filament and spool assignment may be updated" });
+    }
+    const patch = {
+      ...(fields.filament_color_id !== undefined
+        ? { filament_color_id: fields.filament_color_id as string | null }
+        : {}),
+      ...(fields.spoolman_spool_id !== undefined
+        ? { spoolman_spool_id: fields.spoolman_spool_id as string | null }
+        : {}),
+    };
     try {
-      return deps.repo.patchPart(id, body);
+      return deps.repo.patchPart(id, patch);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       return reply.status(msg.includes("not found") ? 404 : 400).send({ detail: msg });

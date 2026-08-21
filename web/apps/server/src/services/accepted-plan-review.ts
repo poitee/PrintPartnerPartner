@@ -1,5 +1,5 @@
 import { folderKeyFromRelativePath, mergeConflictIssueMessage, ROOT_FOLDER } from "@print-partner/domain";
-import type { PartRow } from "@print-partner/contracts";
+import type { AcceptedPlanBasisContract, PartRow } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import type {
   AcceptedOperationalInput,
@@ -39,6 +39,7 @@ export type AcceptedPlanReviewPart = PartRow & {
 
 export type AcceptedPlanReviewBody = {
   readonly profile_id: number;
+  readonly accepted_basis: AcceptedPlanBasisContract | null;
   readonly plan_name: string;
   readonly layers: readonly {
     readonly id: number;
@@ -125,6 +126,7 @@ function noIncludedPartsIssue(): AcceptedPlanReviewIssue {
 function emptyReview(profileId: number, planName: string): AcceptedPlanReviewBody {
   return {
     profile_id: profileId,
+    accepted_basis: null,
     plan_name: planName,
     layers: [],
     totals: { included_parts: 0, total_print_units: 0, by_role: {}, by_filament: {} },
@@ -330,6 +332,13 @@ export function projectAcceptedPlanReview(input: {
   });
   return {
     profile_id: input.snapshot.profile.id,
+    accepted_basis: {
+      profile_id: input.snapshot.profile.id,
+      plan_version: input.snapshot.planVersion,
+      plan_revision_id: input.snapshot.revisionId,
+      plan_revision_digest: input.snapshot.revisionDigest,
+      required_unit_mapping_digest: input.snapshot.requiredUnitMappingDigest,
+    },
     plan_name: input.snapshot.profile.name,
     layers: layerResult.layers,
     totals: {

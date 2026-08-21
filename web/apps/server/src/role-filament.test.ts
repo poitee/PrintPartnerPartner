@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "./test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -39,7 +40,7 @@ describe("bulkSetRoleFilament", () => {
     repo.updateImportRules(source.id, ["parts/"]);
 
     const plan = repo.createProfile("RolePlan", source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
     const partId = repo.listParts(plan.id).parts[0]!.id;
     db.update(defaultSchema.parts)
       .set({ role: "" })
@@ -72,7 +73,7 @@ describe("bulkSetRoleFilament", () => {
     repo.updateImportRules(source.id, ["parts/"]);
 
     const plan = repo.createProfile("SpoolPlan", source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
     const filamentId = "spoolman:test-int:filament:7";
     const spoolRef = "spoolman:test-int:spool:3";
 
@@ -116,7 +117,7 @@ describe("bulkSetRoleFilament", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["parts/"]);
     repo.setBaseLayer(plan.id, source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
 
     const accentPart = repo.listParts(plan.id).parts.find((p) => p.role === "accent");
     expect(accentPart?.filament_custom_hex).toBe("#ff6600");
@@ -139,7 +140,7 @@ describe("bulkSetRoleFilament", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["parts/"]);
     const plan = repo.createProfile("CasePlan", source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
     const partId = repo.listParts(plan.id).parts[0]!.id;
     db.update(defaultSchema.parts)
       .set({ role: "Accent" })

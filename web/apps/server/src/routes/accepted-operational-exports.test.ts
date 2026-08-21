@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "../test/accept-plan.js";
 import Fastify from "fastify";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,7 +55,7 @@ function fixture(recompute = true) {
   repo.updateSource(source.id, { local_path: sourceRoot });
   repo.updateImportRules(source.id, ["part.stl"]);
   const profile = repo.createProfile("Build", source.id);
-  if (recompute) repo.recomputeProfile(profile.id);
+  if (recompute) acceptPlanForTest(repo, profile.id);
   cleanups.push(() => {
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
@@ -350,6 +351,9 @@ describe("accepted operational export routes", () => {
 
   it("maps unavailable accepted share progress to 409 before creating a share", async () => {
     const { db, repo, profile } = fixture();
+    const part = repo.listParts(profile.id).parts[0];
+    if (!part) throw new Error("test Part is missing");
+    repo.patchPart(part.id, { filament_color_id: "pla-black" });
     const authStore = new AuthStore(db);
     const createShare = vi.spyOn(authStore, "createPlanShare");
     const app = Fastify();

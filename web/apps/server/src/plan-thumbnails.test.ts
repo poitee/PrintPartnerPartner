@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "./test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -27,7 +28,7 @@ describe("clearPlanThumbnailCache", () => {
     repo.updateImportRules(source.id, ["parts/"]);
 
     const plan = repo.createProfile("ThumbPlan", source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
     repo.bulkSetRoleFilament(plan.id, "primary", "pla-black", null);
 
     const part = repo.getProfilePartRows(plan.id)[0]!;
@@ -88,7 +89,7 @@ describe("apply-role-colors route logic", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["parts/"]);
     repo.setBaseLayer(plan.id, source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
 
     const part = repo.listParts(plan.id).parts.find((p) => p.role === "accent")!;
     repo.patchPart(part.id, { filament_color_id: "pla-white" });

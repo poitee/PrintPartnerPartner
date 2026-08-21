@@ -1,3 +1,4 @@
+import { acceptPlanForTest, editAcceptedPartsForTest } from "../test/accept-plan.js";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -20,9 +21,6 @@ import {
   listUnattributedPrints,
   saveUnattributedPrint,
 } from "../services/unattributed-print-store.js";
-import type Database from "better-sqlite3";
-import { backfillAcceptedPlanRevisions } from "../db/accepted-plan-revisions.js";
-import { backfillCurrentRequiredUnitSets } from "../db/required-units.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -44,17 +42,13 @@ async function setup() {
   repo.updateSource(source.id, { local_path: repoPath });
   repo.updateImportRules(source.id, ["parts/"]);
   const plan = repo.createProfile("Progress", source.id);
-  repo.recomputeProfile(plan.id);
-  const bracket = repo.listParts(plan.id).parts.find((p) => p.filename === "bracket.stl")!;
-  repo.patchPart(bracket.id, { quantity_override: 1 });
-  const raw = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
-  backfillAcceptedPlanRevisions(raw, "2026-08-21T12:00:00.000Z");
-  let token = 1;
-  backfillCurrentRequiredUnitSets(raw, {
-    now: () => "2026-08-21T12:01:00.000Z",
-    tokenFactory: () => `ppu_${(token++).toString(16).padStart(32, "0")}`,
-  });
-
+  acceptPlanForTest(repo, plan.id);
+  const priorBracket = repo.listParts(plan.id).parts.find((p) => p.filename === "bracket.stl")!;
+  const remapped = editAcceptedPartsForTest(repo, plan.id, [{
+    projectionPartId: priorBracket.id,
+    quantityOverride: 1,
+  }]);
+  const bracket = repo.getPartRow(remapped.get(priorBracket.id)!)!;
   repo.setSetting("integrations", JSON.stringify([{
     id: "prusa-1",
     type: "prusalink",

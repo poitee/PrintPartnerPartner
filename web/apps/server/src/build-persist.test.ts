@@ -1,3 +1,4 @@
+import { acceptPlanForTest, editAcceptedPartsForTest } from "./test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -40,23 +41,25 @@ describe("Build persistence and STL preview", () => {
     repo.updateImportRules(source.id, ["parts/"]);
 
     const plan = repo.createProfile("PersistPlan", source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
     const parts = repo.listParts(plan.id).parts;
     expect(parts.length).toBe(1);
-    const partId = parts[0]!.id;
-
-    repo.bulkSetRoleFilament(plan.id, "primary", "pla-black", null);
-    repo.patchPart(partId, { included: false, quantity_override: 3 });
-
+    const priorPartId = parts[0]!.id;
+    const partId = editAcceptedPartsForTest(repo, plan.id, [{
+      projectionPartId: priorPartId,
+      included: false,
+      quantityOverride: 3,
+    }]).get(priorPartId)!;
     const reloaded = repo.listParts(plan.id).parts[0]!;
     expect(reloaded.included).toBe(false);
     expect(reloaded.quantity_effective).toBe(3);
 
-    repo.recomputeProfile(plan.id);
     const afterRecompute = repo.listParts(plan.id).parts[0]!;
     expect(afterRecompute.included).toBe(false);
     expect(afterRecompute.quantity_effective).toBe(3);
-    expect(afterRecompute.filament_color_id).toBe("pla-black");
+
+    repo.patchPart(partId, { filament_color_id: "pla-black" });
+    expect(repo.getPartRow(partId)?.filamentColorId).toBe("pla-black");
 
     const partRow = repo.getPartRow(partId)!;
     expect(resolvePartStl(repo, partRow)).toContain("bracket.stl");
@@ -99,7 +102,7 @@ describe("Build persistence and STL preview", () => {
     });
     expect(narrowRules.statusCode).toBe(200);
 
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
 
     const partsRes = await app.inject({ method: "GET", url: `/plans/${plan.id}/parts` });
     expect(partsRes.statusCode).toBe(200);

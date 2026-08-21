@@ -22,6 +22,7 @@ import { registerMetricsRoutes } from "./routes/metrics.js";
 import { registerApiV1Plugin, registerOpenApi, registerOpenApiJsonRoutes } from "./routes/api-v1.js";
 import { registerApiV2PlanPlugin } from "./routes/api-v2.js";
 import { registerAcceptedPlateRoutes } from "./routes/accepted-plates.js";
+import { registerPlanDraftRoutes } from "./routes/plan-drafts.js";
 import { registerAuthRoutes, registerTenantMiddleware } from "./routes/auth.js";
 import {
   createAdminPreHandler,
@@ -190,6 +191,7 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     };
 
     await registerCoreRoutes(app, coreDeps, { planSummaryContract: "accepted" });
+    await registerPlanDraftRoutes(app, { repo: repository });
     await registerAcceptedPlateRoutes(app, {
       repo: repository,
       reposDir: coreDeps.reposDir,

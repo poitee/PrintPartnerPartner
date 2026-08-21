@@ -1,16 +1,13 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { JobSnapshot } from "../api/engine";
 import { queryKeys } from "./keys";
-import { invalidatePlanReview } from "./planReview";
 import { invalidateProfiles } from "./profiles";
 import { invalidateSources } from "./sources";
 import {
   invalidateAcceptedPlateExportJobs,
-  invalidateAcceptedPlateWorkspace,
 } from "./acceptedPlates";
 
 const SYNC_KINDS = new Set(["sync", "sync-all", "check-source-updates", "import-scan"]);
-const RECOMPUTE_KINDS = new Set(["recompute", "apply-manifest"]);
 const SOURCE_MUTATION_KINDS = new Set([
   "import-repos-txt",
   "import-kit-bundle",
@@ -34,15 +31,6 @@ export function invalidateAfterJob(
     void invalidateSources(qc);
     void invalidateProfiles(qc);
     void qc.invalidateQueries({ queryKey: queryKeys.planReviews });
-  }
-
-  if (RECOMPUTE_KINDS.has(kind) && profileId != null) {
-    void invalidatePlanReview(qc, profileId);
-    void invalidateProfiles(qc);
-    void qc.invalidateQueries({ queryKey: queryKeys.planLayers(profileId) });
-    void qc.invalidateQueries({ queryKey: queryKeys.roleFilaments(profileId) });
-    void qc.invalidateQueries({ queryKey: queryKeys.planRecipeBundle(profileId) });
-    void invalidateAcceptedPlateWorkspace(qc, profileId);
   }
 
   if (kind === "stl-export" || kind === "export-kit-bundle" || kind === "export-checklist-html") {

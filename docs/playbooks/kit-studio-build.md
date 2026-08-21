@@ -47,9 +47,9 @@ Expand each source card, check files or folders to include, and use the **STL pr
 
 Set a color per role (primary, accent, clear, opaque) in **Colors by role**. Previews on Plan, Parts, and Progress update when you change a color.
 
-### Recompute
+### Review and apply the plan
 
-Click **Update** / recompute when the stale banner appears (or enable auto-recompute for stale plans in Settings). This refreshes Parts and Progress from your file picks.
+Click **Rebuild draft** after changing sources. File and quantity changes remain proposed while you review the draft. Click **Apply plan** to update the accepted Parts and Required units.
 
 ## 5. Parts, Progress, Export
 
@@ -63,9 +63,9 @@ Click **Update** / recompute when the stale banner appears (or enable auto-recom
 | Issue | Fix |
 |-------|-----|
 | Preset grayed / error | Sync missing repos on Library |
-| Empty variant choices | Recompute; check manifest rules in repo YAML |
+| Empty variant choices | Rebuild the draft; check manifest rules in repo YAML |
 | Wrong variants | Check per-repo manifests; shared choice ids must match |
-| Stale Parts list | Recompute on Plan |
+| Stale Parts list | Review and apply the saved draft on Plan |
 | Colors not in previews | Change role color again or use Advanced → Regenerate thumbnails |
 
 See [golden LDO 2.4 example](../examples/golden-ldo-voron-2.4-sb-tap.md).

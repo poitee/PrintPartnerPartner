@@ -379,8 +379,6 @@ export class InProcessJobRunner {
         let result: Record<string, unknown>;
         if (kind === "sync") {
           result = await this.runSync(jobId, payload);
-        } else if (kind === "recompute") {
-          result = await this.runRecompute(payload);
         } else if (kind === "import-scan") {
           const projectId = Number(payload.project_id);
           result = await syncProjectById(this.repo, this.deps.reposDir, projectId, undefined, {
@@ -540,12 +538,6 @@ export class InProcessJobRunner {
       onProgress: (msg, progress) => this.emit(jobId, { message: msg, progress }),
     });
     return { project_id: projectId, ...result };
-  }
-
-  private async runRecompute(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const profileId = Number(payload.profile_id);
-    const apply_manifest = Boolean(payload.apply_manifest);
-    return this.repo.recomputeProfile(profileId, { apply_manifest });
   }
 
   private acceptedOperationalExportFailure(
@@ -889,22 +881,6 @@ export async function registerJobRoutes(
   app.post("/jobs/sync", limited, async (request) => {
     const body = (request.body ?? {}) as Record<string, unknown>;
     const job_id = await jobs.start("sync", body, request.tenantId);
-    return { job_id };
-  });
-
-  app.post("/jobs/recompute", limited, async (request, reply) => {
-    const body = request.body as { profile_id?: number; apply_manifest?: boolean };
-    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
-      return sendProblem(reply, 404, "Not Found", "Profile not found");
-    }
-    const job_id = await jobs.start(
-      "recompute",
-      {
-        profile_id: body.profile_id,
-        apply_manifest: body.apply_manifest ?? false,
-      },
-      request.tenantId,
-    );
     return { job_id };
   });
 

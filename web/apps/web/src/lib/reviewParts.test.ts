@@ -68,6 +68,7 @@ describe("mergePartIntoReview", () => {
   it("updates totals when a part is excluded", () => {
     const review: PlanReview = {
       profile_id: 1,
+      accepted_basis: null,
       plan_name: "Test",
       layers: [],
       totals: {
@@ -98,6 +99,7 @@ describe("mergePartIntoReview", () => {
 describe("mergeAssembledIntoReview", () => {
   const review: PlanReview = {
     profile_id: 1,
+    accepted_basis: null,
     plan_name: "Test",
     layers: [],
     totals: {
@@ -157,6 +159,7 @@ describe("mergeProgressIntoReview + assembly tracking", () => {
   const builtReview = (): PlanReview =>
     ({
       profile_id: 1,
+      accepted_basis: null,
       plan_name: "Voron 2.4",
       layers: [],
       totals: { included_parts: 1, total_print_units: 2, by_role: {}, by_filament: {} },

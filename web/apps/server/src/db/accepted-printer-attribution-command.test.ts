@@ -1,3 +1,4 @@
+import { acceptPlanForTest, editAcceptedPartsForTest } from "../test/accept-plan.js";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,8 +7,6 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDb, SqliteDatabase } from "./client.js";
-import { backfillAcceptedPlanRevisions } from "./accepted-plan-revisions.js";
-import { backfillCurrentRequiredUnitSets } from "./required-units.js";
 import { AppRepository, type SchemaTables } from "./repository.js";
 import * as pgSchema from "./schema-pg.js";
 import {
@@ -47,16 +46,13 @@ function setup() {
   repo.updateSource(source.id, { local_path: repoPath });
   repo.updateImportRules(source.id, ["parts/"]);
   const plan = repo.createProfile("Accepted printer", source.id);
-  repo.recomputeProfile(plan.id);
-  const bracket = repo.listParts(plan.id).parts.find((part) => part.filename === "bracket.stl")!;
-  repo.patchPart(bracket.id, { quantity_override: 2 });
-  const raw = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
-  backfillAcceptedPlanRevisions(raw, "2026-08-21T12:00:00.000Z");
-  let nextToken = 1;
-  backfillCurrentRequiredUnitSets(raw, {
-    now: () => "2026-08-21T12:01:00.000Z",
-    tokenFactory: () => `ppu_${(nextToken++).toString(16).padStart(32, "0")}`,
-  });
+  acceptPlanForTest(repo, plan.id);
+  const priorBracket = repo.listParts(plan.id).parts.find((part) => part.filename === "bracket.stl")!;
+  const remapped = editAcceptedPartsForTest(repo, plan.id, [{
+    projectionPartId: priorBracket.id,
+    quantityOverride: 2,
+  }]);
+  const bracket = repo.getPartRow(remapped.get(priorBracket.id)!)!;
   const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
   if (accepted.kind !== "ready") throw new Error("accepted fixture is unavailable");
   const acceptedPart = accepted.snapshot.parts.find(
@@ -81,9 +77,16 @@ function setupUninitialized() {
   repo.updateSource(source.id, { local_path: repoPath });
   repo.updateImportRules(source.id, ["parts/"]);
   const plan = repo.createProfile("Uninitialized attribution", source.id);
-  repo.recomputeProfile(plan.id);
+  acceptPlanForTest(repo, plan.id);
   const raw = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
-  backfillAcceptedPlanRevisions(raw, "2026-08-21T12:00:00.000Z");
+  raw.exec(`
+    DROP TRIGGER trg_plan_revision_required_units_immutable_delete;
+    DROP TRIGGER trg_plan_revision_required_unit_sets_immutable_delete;
+    DROP TRIGGER trg_required_units_immutable_delete;
+    DELETE FROM plan_revision_required_units;
+    DELETE FROM plan_revision_required_unit_sets;
+    DELETE FROM required_units;
+  `);
   cleanups.push(() => {
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
@@ -184,7 +187,7 @@ describe("accepted printer attribution repository command", () => {
       {
         expected: "compatibility_dirty",
         arrange: ({ repo, plan, bracket }) => {
-          repo.patchPart(bracket.id, { included: false });
+          repo.patchPart(bracket.id, { filament_color_id: "pla-black" });
           return plan.id;
         },
       },

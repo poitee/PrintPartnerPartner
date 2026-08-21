@@ -73,7 +73,7 @@ export type PlanDraftSnapshot = {
   idempotencyKey: string;
   createdAt: string;
   requiredUnitReconciliation?:
-    | { readonly format: string; readonly digest: string }
+    | { readonly id: number; readonly format: string; readonly digest: string }
     | null;
   inputs: PlanDraftInput[];
   parts: PlanDraftPart[];
@@ -584,7 +584,12 @@ export function applyPlanDraftPartDecision(input: {
       input.draft.digestFormat === PLAN_DRAFT_SELECTION_DIGEST_FORMAT
         ? digestPlanDraftSelection({
             planningDigest,
-            requiredUnitReconciliation: input.draft.requiredUnitReconciliation ?? null,
+            requiredUnitReconciliation: input.draft.requiredUnitReconciliation
+              ? {
+                  format: input.draft.requiredUnitReconciliation.format,
+                  digest: input.draft.requiredUnitReconciliation.digest,
+                }
+              : null,
           })
         : planningDigest,
   };

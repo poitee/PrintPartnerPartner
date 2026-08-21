@@ -135,6 +135,26 @@ afterEach(() => {
 });
 
 describe("readAcceptedPlanReview", () => {
+  it("exposes the complete immutable accepted basis used by progress commands", () => {
+    const { snapshotRoot } = fixture();
+    const accepted = snapshot(snapshotRoot);
+
+    const body = projectAcceptedPlanReview({
+      snapshot: accepted,
+      includeExcluded: false,
+      availableInputRoots: new Set([31]),
+      mediaByPartId: new Map([[72, { artifactMissing: false, thumbEmpty: false }]]),
+    });
+
+    expect(body.accepted_basis).toEqual({
+      profile_id: 7,
+      plan_version: 3,
+      plan_revision_id: 11,
+      plan_revision_digest: "d".repeat(64),
+      required_unit_mapping_digest: "2".repeat(64),
+    });
+  });
+
   it("fails closed when an included Part has no captured media observation", () => {
     const { snapshotRoot } = fixture();
 
@@ -232,6 +252,7 @@ describe("readAcceptedPlanReview", () => {
       kind: "empty",
       body: {
         profile_id: 7,
+        accepted_basis: null,
         plan_name: "Working name",
         layers: [],
         totals: { included_parts: 0, total_print_units: 0, by_role: {}, by_filament: {} },

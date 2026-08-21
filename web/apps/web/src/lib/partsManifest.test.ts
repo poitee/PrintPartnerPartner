@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  applyPartsManifest,
   buildPartsManifestRows,
   parseManifestCsv,
   PARTS_MANIFEST_HEADERS,
@@ -13,6 +14,13 @@ import type { SourceSummary } from "@print-partner/contracts";
 function sampleReview(): PlanReview {
   return {
     profile_id: 1,
+    accepted_basis: {
+      profile_id: 1,
+      plan_version: 4,
+      plan_revision_id: 8,
+      plan_revision_digest: "a".repeat(64),
+      required_unit_mapping_digest: "b".repeat(64),
+    },
     plan_name: "Voron Test",
     layers: [
       {
@@ -86,6 +94,208 @@ const sampleSources: SourceSummary[] = [
 ];
 
 describe("partsManifest CSV", () => {
+  it("validates the whole spreadsheet before grouped saved-draft edits", async () => {
+    const review = sampleReview();
+    const rows = buildPartsManifestRows({ review, sources: sampleSources });
+    const workspace = {
+      profile_id: 1,
+      draft: {
+        draft_id: 9,
+        state: "open" as const,
+        lifecycle_version: 0,
+        snapshot_digest: "a".repeat(64),
+        base: { revision_id: 3, plan_version: 1 },
+      },
+      parts: [{
+        draft_part_id: 17,
+        base_revision_part_id: 3,
+        part_key: "frame/x_extrusion.stl",
+        filename: "x_extrusion.stl",
+        relative_path: "frame/x_extrusion.stl",
+        source_layer: "base:Voron2",
+        role: "structural",
+        quantity_inferred: 2,
+        quantity_override: null,
+        quantity_effective: 2,
+        included: true,
+      }],
+      diff: { base_is_current: true, added: [], removed: [], changed: [] },
+      reconciliation: { kind: "ready" as const, reused_units: 2, new_units: 0, surplus_units: 0 },
+    };
+    const decisions: unknown[] = [];
+    let batchCalls = 0;
+    const applyDraftDecisions = async (batch: unknown[]) => {
+      batchCalls++;
+      decisions.push(...batch);
+      return workspace;
+    };
+
+    const invalid = await applyPartsManifest(
+      [{ ...rows[0]!, quantity: "3" }, { ...rows[0]!, part_id: "", match_key: "missing", quantity: "0" }],
+      review,
+      { applyIncluded: true, draftWorkspace: workspace, applyDraftDecisions },
+    );
+    expect(invalid.errors.length).toBeGreaterThan(0);
+    expect(decisions).toEqual([]);
+
+    const result = await applyPartsManifest(
+      [{ ...rows[0]!, quantity: "3", included: "false" }],
+      review,
+      { applyIncluded: true, draftWorkspace: workspace, applyDraftDecisions },
+    );
+    expect(result).toEqual({ updated: 1, skipped: 0, errors: [] });
+    expect(batchCalls).toBe(1);
+    expect(decisions).toEqual([
+      { kind: "set_quantity_override", draft_part_ids: [17], value: 3 },
+      { kind: "set_included", draft_part_ids: [17], value: false },
+    ]);
+    expect(review.part_groups[0]!.parts[0]).toMatchObject({
+      quantity_effective: 2,
+      included: true,
+    });
+  });
+
+  it("compares planning imports with the saved draft instead of accepted Review", async () => {
+    const review = sampleReview();
+    const rows = buildPartsManifestRows({ review, sources: sampleSources });
+    const workspace = {
+      profile_id: 1,
+      draft: {
+        draft_id: 9,
+        state: "open" as const,
+        lifecycle_version: 0,
+        snapshot_digest: "a".repeat(64),
+        base: { revision_id: 3, plan_version: 1 },
+      },
+      parts: [{
+        draft_part_id: 17,
+        base_revision_part_id: 3,
+        part_key: "frame/x_extrusion.stl",
+        filename: "x_extrusion.stl",
+        relative_path: "frame/x_extrusion.stl",
+        source_layer: "base:Voron2",
+        role: "structural",
+        quantity_inferred: 2,
+        quantity_override: 3,
+        quantity_effective: 3,
+        included: false,
+      }],
+      diff: { base_is_current: true, added: [], removed: [], changed: [] },
+      reconciliation: { kind: "ready" as const, reused_units: 2, new_units: 0, surplus_units: 0 },
+    };
+    const applyDraftDecisions = vi.fn().mockResolvedValue(workspace);
+
+    const restoreAcceptedValues = await applyPartsManifest(rows, review, {
+      applyIncluded: true,
+      draftWorkspace: workspace,
+      applyDraftDecisions,
+    });
+    expect(restoreAcceptedValues).toEqual({ updated: 1, skipped: 0, errors: [] });
+    expect(applyDraftDecisions).toHaveBeenCalledWith([
+      { kind: "set_quantity_override", draft_part_ids: [17], value: 2 },
+      { kind: "set_included", draft_part_ids: [17], value: true },
+    ]);
+
+    applyDraftDecisions.mockClear();
+    const keepDraftValues = await applyPartsManifest(
+      [{ ...rows[0]!, quantity: "3", included: "false" }],
+      review,
+      { applyIncluded: true, draftWorkspace: workspace, applyDraftDecisions },
+    );
+    expect(keepDraftValues).toEqual({ updated: 0, skipped: 1, errors: [] });
+    expect(applyDraftDecisions).not.toHaveBeenCalled();
+  });
+
+  it("rejects mixed proposed planning and accepted progress before either write", async () => {
+    const review = sampleReview();
+    const rows = buildPartsManifestRows({ review, sources: sampleSources });
+    const applyDraftDecisions = vi.fn();
+    const applyAcceptedProgress = vi.fn();
+
+    const result = await applyPartsManifest(
+      [{ ...rows[0]!, quantity: "3", printed_count: "2" }],
+      review,
+      {
+        applyPrintedProgress: true,
+        draftWorkspace: {
+          profile_id: 1,
+          draft: {
+            draft_id: 9,
+            state: "open",
+            lifecycle_version: 0,
+            snapshot_digest: "c".repeat(64),
+            base: { revision_id: 8, plan_version: 4 },
+          },
+          parts: [{
+            draft_part_id: 17,
+            base_revision_part_id: 8,
+            part_key: "frame/x_extrusion.stl",
+            filename: "x_extrusion.stl",
+            relative_path: "frame/x_extrusion.stl",
+            source_layer: "base:Voron2",
+            role: "structural",
+            quantity_inferred: 2,
+            quantity_override: null,
+            quantity_effective: 2,
+            included: true,
+          }],
+          diff: { base_is_current: true, added: [], removed: [], changed: [] },
+          reconciliation: { kind: "ready", reused_units: 2, new_units: 0, surplus_units: 0 },
+        },
+        applyDraftDecisions,
+        applyAcceptedProgress,
+      },
+    );
+
+    expect(result.errors).toEqual([{
+      row: 0,
+      message: "Quantity/inclusion and printed counts must be imported separately",
+    }]);
+    expect(applyDraftDecisions).not.toHaveBeenCalled();
+    expect(applyAcceptedProgress).not.toHaveBeenCalled();
+  });
+
+  it("submits progress-only rows once against the exact accepted basis without local mutation", async () => {
+    const review = sampleReview();
+    const rows = buildPartsManifestRows({ review, sources: sampleSources });
+    const applyAcceptedProgress = vi.fn().mockResolvedValue(undefined);
+
+    const result = await applyPartsManifest(
+      [{ ...rows[0]!, printed_count: "2" }],
+      review,
+      { applyPrintedProgress: true, applyAcceptedProgress },
+    );
+
+    expect(result).toEqual({ updated: 1, skipped: 0, errors: [] });
+    expect(applyAcceptedProgress).toHaveBeenCalledOnce();
+    expect(applyAcceptedProgress).toHaveBeenCalledWith(
+      review.accepted_basis,
+      [{ part_id: 42, printed_count: 2 }],
+    );
+    expect(review.part_groups[0]!.parts[0]).toMatchObject({
+      printed_count: 1,
+      print_units: [true, false],
+    });
+  });
+
+  it("does not alter browser state when a stale accepted basis is rejected", async () => {
+    const review = sampleReview();
+    const rows = buildPartsManifestRows({ review, sources: sampleSources });
+
+    await expect(applyPartsManifest(
+      [{ ...rows[0]!, printed_count: "2" }],
+      review,
+      {
+        applyPrintedProgress: true,
+        applyAcceptedProgress: vi.fn().mockRejectedValue(new Error("Accepted Plan changed; reload and retry")),
+      },
+    )).rejects.toThrow("Accepted Plan changed; reload and retry");
+    expect(review.part_groups[0]!.parts[0]).toMatchObject({
+      printed_count: 1,
+      print_units: [true, false],
+    });
+  });
+
   it("uses the stable header row", () => {
     const rows = buildPartsManifestRows({ review: sampleReview(), sources: sampleSources });
     const csv = rowsToCsv(rows);

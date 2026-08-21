@@ -305,6 +305,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
 ) {
   const { profiles } = useProfileSelection();
   const {
+    draftWorkspace,
     setQuantity,
     setIncluded,
     setSpoolmanSpool,
@@ -390,7 +391,29 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
     };
   }, [spoolmanConfigured, integrationId]);
 
-  const allParts = useMemo(() => flattenReviewParts(review.part_groups), [review.part_groups]);
+  const acceptedParts = useMemo(() => flattenReviewParts(review.part_groups), [review.part_groups]);
+  const acceptedPartById = useMemo(
+    () => new Map(acceptedParts.map((part) => [part.id, part])),
+    [acceptedParts],
+  );
+  const draftPartByKey = useMemo(
+    () => new Map((draftWorkspace?.parts ?? []).map((part) => [part.part_key, part])),
+    [draftWorkspace],
+  );
+  const allParts = useMemo(() => {
+    if (!draftWorkspace || ui.viewMode !== "edit") return acceptedParts;
+    return acceptedParts.map((part) => {
+      const proposed = draftPartByKey.get(part.match_key);
+      return proposed
+        ? {
+            ...part,
+            included: proposed.included,
+            quantity_override: proposed.quantity_override,
+            quantity_effective: proposed.quantity_effective,
+          }
+        : part;
+    });
+  }, [acceptedParts, draftPartByKey, draftWorkspace, ui.viewMode]);
 
   const facets = useMemo(() => collectReviewFacets(allParts), [allParts]);
 
@@ -408,8 +431,8 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
   const sourceGroups = useMemo(() => groupCheckoffParts(filtered), [filtered]);
 
   const summary = useMemo(
-    () => formatCheckoffSummary(allParts.filter((p) => p.included)),
-    [allParts],
+    () => formatCheckoffSummary(acceptedParts.filter((p) => p.included)),
+    [acceptedParts],
   );
 
   const patchUi = useCallback((patch: Partial<PersistedReviewPartsUi>) => {
@@ -417,7 +440,7 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
   }, []);
 
   const onQtyChange = (part: ReviewPart, next: number) => {
-    void setQuantity(part.id, next);
+    void setQuantity(part.id, part.match_key, next);
   };
 
   const onRemove = (part: ReviewPart) => setRemoveTarget(part);
@@ -426,11 +449,11 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
     if (!removeTarget) return;
     const target = removeTarget;
     setRemoveTarget(null);
-    void setIncluded(target.id, false);
+    void setIncluded(target.id, target.match_key, false);
   };
 
   const onRestore = (part: ReviewPart) => {
-    void setIncluded(part.id, true);
+    void setIncluded(part.id, part.match_key, true);
   };
 
   const onSpoolChange = (partId: number, spoolman_spool_id: string | null) => {
@@ -448,9 +471,18 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
   const noteForPart = useCallback(
     (part: ReviewPart) => {
       const warn = partWarningNote(part, review);
-      return { note: warn ?? partSourceNote(part), noteWarn: warn != null };
+      const accepted = acceptedPartById.get(part.id);
+      const proposedChange = draftWorkspace && accepted && (
+        accepted.included !== part.included || accepted.quantity_effective !== part.quantity_effective
+      )
+        ? `Accepted: qty ${accepted.quantity_effective}, ${accepted.included ? "included" : "excluded"}`
+        : null;
+      return {
+        note: [warn ?? partSourceNote(part), proposedChange].filter(Boolean).join("; "),
+        noteWarn: warn != null,
+      };
     },
-    [review],
+    [acceptedPartById, draftWorkspace, review],
   );
 
   const displayName = planName || profiles.find((p) => p.id === review.profile_id)?.name || "Parts";
@@ -496,9 +528,13 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
               {viewMode === "edit" && spoolmanConfigured && (
                 <th className="sheet-cell-spool">Spool</th>
               )}
-              <th className="sheet-cell-qty">Qty</th>
+              <th className="sheet-cell-qty">
+                {viewMode === "edit" && draftWorkspace ? "Proposed qty" : "Qty"}
+              </th>
               {viewMode === "edit" ? (
-                <th className="sheet-cell-actions">Actions</th>
+                <th className="sheet-cell-actions">
+                  {draftWorkspace ? "Proposed inclusion" : "Actions"}
+                </th>
               ) : (
                 <th className="sheet-cell-printed">Printed</th>
               )}
@@ -554,6 +590,11 @@ const ReviewPartsSheet = forwardRef<ReviewPartsSheetHandle, Props>(function Revi
 
   return (
     <section className="space-y-3">
+      {draftWorkspace && ui.viewMode === "edit" && (
+        <p className="no-print rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+          Quantity and inclusion controls show proposed draft values. Accepted Plan values and Checkoff stay unchanged until Apply.
+        </p>
+      )}
       <div className="no-print checkoff-sticky flex flex-col gap-3 rounded-lg border border-border bg-card p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div

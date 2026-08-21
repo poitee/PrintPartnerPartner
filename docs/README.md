@@ -30,7 +30,7 @@ After the app is running, open **Help** in the sidebar for the in-app workflow g
 | Step | What you do |
 |------|-------------|
 | **Library** | Register GitHub repos, local folders, or zips; categories; import rules; sync; global STL search; update-available badges |
-| **Plan** | Attach base/add-on sources, pick STL files, set role filament colors (live previews), recompute when stale, kit/manifest options |
+| **Plan** | Attach base/add-on sources, pick STL files, set quantities and role filament colors in a saved draft, then review and apply it |
 | **Parts** | Validation summary by role and filament, 3D previews, quantity edits |
 | **Progress** | Print checkoff — per-unit progress, assembled toggles, filters, printable checklist |
 | **Export** | Plate workspace, height bands, slicer links, profile library, STL/3MF packs, printer bind/send |

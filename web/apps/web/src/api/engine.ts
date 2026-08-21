@@ -16,6 +16,12 @@ import {
   type JobEvent,
   type JobSnapshot,
   type PartRow,
+  type AcceptedPlanBasisContract,
+  type PlanDraftIdentity,
+  type PlanDraftWorkspace,
+  type PlanDraftPartDecisionContract,
+  type ApplyPlanDraftReceipt,
+  type RequiredUnitDecisionContract,
   type ProfileSummary,
   type SourceSummary,
   type StlNamingFolderRule,
@@ -24,6 +30,11 @@ import {
   type StlNamingRole,
   type StlNamingRoleId,
   type UnattributedPrint,
+  parsePlanDraftWorkspace,
+  parsePlanDraftIdentity,
+  parseAcceptedPlanBasis,
+  parseAcceptedProgressImportResponse,
+  parseApplyPlanDraftReceipt,
 } from "@print-partner/contracts";
 import {
   pickKitBundleFileWeb,
@@ -44,6 +55,11 @@ export type {
   JobEvent,
   JobSnapshot,
   PartRow,
+  PlanDraftIdentity,
+  PlanDraftWorkspace,
+  PlanDraftPartDecisionContract,
+  ApplyPlanDraftReceipt,
+  RequiredUnitDecisionContract,
   ProfileSummary,
   SourceSummary,
   StlNamingFolderRule,
@@ -503,10 +519,11 @@ export type IncomingShare = {
   created_at: string;
 };
 
-class EngineHttpError extends Error {
+export class EngineHttpError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly body: unknown = null,
   ) {
     super(message);
     this.name = "EngineHttpError";
@@ -528,6 +545,7 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new EngineHttpError(
       detail?.detail ?? `Engine ${path} failed: ${res.status}`,
       res.status,
+      detail,
     );
   }
   if (res.status === 204) {
@@ -1152,9 +1170,7 @@ export async function addProfileAddonLayer(
 export async function patchPart(
   partId: number,
   fields: {
-    included?: boolean;
     filament_color_id?: string;
-    quantity_override?: number;
     spoolman_spool_id?: string | null;
   },
 ): Promise<PartRow> {
@@ -1786,12 +1802,10 @@ function encodeStlRelativePath(relativePath: string): string {
     .join("/");
 }
 
-/** Mesh bytes for an STL under a synced source (before plan recompute). */
 export async function sourceStlMeshUrl(sourceId: number, relativePath: string): Promise<string> {
   return resolveEngineUrl(`/sources/${sourceId}/stl/${encodeStlRelativePath(relativePath)}/mesh`);
 }
 
-/** PNG preview for an STL under a synced source (before plan recompute). */
 export async function sourceStlPreviewUrl(sourceId: number, relativePath: string): Promise<string> {
   return resolveEngineUrl(`/sources/${sourceId}/stl/${encodeStlRelativePath(relativePath)}/preview`);
 }
@@ -2073,18 +2087,116 @@ export async function fetchManifestWarnings(
   return body.warnings;
 }
 
-export async function startRecompute(
+export async function listPlanDrafts(profileId: number): Promise<PlanDraftIdentity[]> {
+  const body = await engineFetch<{ drafts: PlanDraftIdentity[] }>(`/plans/${profileId}/drafts`);
+  return body.drafts;
+}
+
+export async function fetchPlanDraftWorkspace(
   profileId: number,
-  options?: { apply_manifest?: boolean },
-): Promise<string> {
-  const body = await engineFetch<{ job_id: string }>("/jobs/recompute", {
+  draftId: number,
+): Promise<PlanDraftWorkspace> {
+  return parsePlanDraftWorkspace(await engineFetch(`/plans/${profileId}/drafts/${draftId}`));
+}
+
+export async function recomputePlanDraft(profileId: number): Promise<PlanDraftWorkspace> {
+  return parsePlanDraftWorkspace(await engineFetch(`/plans/${profileId}/drafts/recompute`, {
     method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ apply_manifest: true }),
+  }));
+}
+
+export async function editPlanDraftParts(input: {
+  profileId: number;
+  draftId: number;
+  expectedSnapshotDigest: string;
+  decisions: PlanDraftPartDecisionContract[];
+}): Promise<PlanDraftWorkspace> {
+  return parsePlanDraftWorkspace(await engineFetch(
+    `/plans/${input.profileId}/drafts/${input.draftId}/parts`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        expected_snapshot_digest: input.expectedSnapshotDigest,
+        decisions: input.decisions,
+      }),
+    },
+  ));
+}
+
+export async function reconcilePlanDraft(input: {
+  profileId: number;
+  draftId: number;
+  expectedSnapshotDigest: string;
+  decisions: RequiredUnitDecisionContract[];
+}): Promise<PlanDraftWorkspace> {
+  return parsePlanDraftWorkspace(await engineFetch(
+    `/plans/${input.profileId}/drafts/${input.draftId}/reconciliation`,
+    {
+      method: "PUT",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({
+        expected_snapshot_digest: input.expectedSnapshotDigest,
+        decisions: input.decisions,
+      }),
+    },
+  ));
+}
+
+export async function applyPlanDraft(workspace: PlanDraftWorkspace): Promise<ApplyPlanDraftReceipt> {
+  return parseApplyPlanDraftReceipt(await engineFetch(`/plans/${workspace.profile_id}/drafts/${workspace.draft.draft_id}/apply`, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
     body: JSON.stringify({
-      profile_id: profileId,
-      apply_manifest: options?.apply_manifest ?? false,
+      expected_snapshot_digest: workspace.draft.snapshot_digest,
+      expected_lifecycle_version: workspace.draft.lifecycle_version,
+      expected_base: workspace.draft.base,
     }),
-  });
-  return body.job_id;
+  }));
+}
+
+export async function abandonPlanDraft(
+  profileId: number,
+  draft: PlanDraftIdentity,
+): Promise<PlanDraftIdentity> {
+  return parsePlanDraftIdentity(await engineFetch(
+    `/plans/${profileId}/drafts/${draft.draft_id}/abandon`,
+    {
+      method: "POST",
+      body: JSON.stringify({ expected_lifecycle_version: draft.lifecycle_version }),
+    },
+  ));
+}
+
+export async function rebasePlanDraft(
+  profileId: number,
+  draft: PlanDraftIdentity,
+): Promise<PlanDraftWorkspace> {
+  return parsePlanDraftWorkspace(await engineFetch(
+    `/plans/${profileId}/drafts/${draft.draft_id}/rebase`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({
+        expected_source_lifecycle_version: draft.lifecycle_version,
+        expected_source_snapshot_digest: draft.snapshot_digest,
+      }),
+    },
+  ));
+}
+
+export async function importAcceptedPrintedCounts(input: {
+  profileId: number;
+  expected: AcceptedPlanBasisContract;
+  rows: Array<{ part_id: number; printed_count: number }>;
+}): Promise<{ updated_parts: number }> {
+  return parseAcceptedProgressImportResponse(await engineFetch(
+    `/plans/${input.profileId}/progress/import`, {
+    method: "POST",
+    body: JSON.stringify({ expected: input.expected, rows: input.rows }),
+    },
+  ));
 }
 
 export type PlanReviewIssue = {
@@ -2137,6 +2249,7 @@ export type PlanReviewPartGroup = {
 
 export type PlanReview = {
   profile_id: number;
+  accepted_basis: AcceptedPlanBasisContract | null;
   plan_name: string;
   layers: PlanReviewLayer[];
   totals: PlanReviewTotals;
@@ -2151,7 +2264,12 @@ export async function fetchPlanReview(
 ): Promise<PlanReview> {
   const qs =
     options?.includeExcluded === true ? "?include_excluded=true" : "";
-  return engineFetch<PlanReview>(`/plans/${profileId}/review${qs}`);
+  const review = await engineFetch<PlanReview>(`/plans/${profileId}/review${qs}`);
+  return {
+    ...review,
+    accepted_basis:
+      review.accepted_basis == null ? null : parseAcceptedPlanBasis(review.accepted_basis),
+  };
 }
 
 export type KitBundleUnmatchedSource = {
@@ -2538,16 +2656,6 @@ export async function startExportChecklistHtml(profileId: number): Promise<strin
     },
   );
   return body.job_id;
-}
-
-export async function applyManifest(
-  profileId: number,
-  preserveIncluded = true,
-): Promise<{ applied_rules: number; warnings: ManifestWarning[] }> {
-  return engineFetch(`/plans/${profileId}/apply-manifest`, {
-    method: "POST",
-    body: JSON.stringify({ preserve_included: preserveIncluded }),
-  });
 }
 
 export async function fetchManifestV2(profileId: number): Promise<ManifestV2> {

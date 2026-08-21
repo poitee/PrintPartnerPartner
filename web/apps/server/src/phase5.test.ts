@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "./test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -38,7 +39,7 @@ describe("Phase 5", () => {
     expect(matchKeyMatches("bracket.stl", "parts/bracket.stl")).toBe(true);
   });
 
-  it("apply-manifest after recompute sets requirement", () => {
+  it("draft recompute sets the proposed manifest requirement", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-mf-"));
     const sqlite = new SqliteDatabase(dir);
     sqlite.connect();
@@ -54,7 +55,7 @@ describe("Phase 5", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["parts/"]);
     const plan = repo.createProfile("Plan", source.id);
-    repo.recomputeProfile(plan.id, { apply_manifest: true });
+    acceptPlanForTest(repo, plan.id);
     const { parts } = repo.listParts(plan.id, 100, 0);
     expect(parts[0]?.requirement).toBe("required");
     sqlite.close();
@@ -74,7 +75,7 @@ describe("Phase 5", () => {
     repo.updateImportRules(source.id, ["p/"]);
     const plan = repo.createProfile("KitPlan", source.id);
     saveKitManifest(repo, plan.id, { selections: { toolhead: "stealthburner" }, include: ["p/"] });
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
     const bundlePath = exportEditableKitBundle(repo, plan.id, join(dir, "exports"));
     const data = loadKitBundleBytes(bundlePath);
     expect(data.format).toBe(KIT_FORMAT);
@@ -119,7 +120,7 @@ describe("Phase 5", () => {
       selections: { toolhead: "stealthburner", probe: "tap" },
       choice_tree: [{ id: "toolhead", label: "Toolhead" }],
     });
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
 
     const data = loadKitBundleBytes(exportEditableKitBundle(repo, plan.id, join(dir, "exports")));
     expect(data.sources).toBeTruthy();

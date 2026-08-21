@@ -79,7 +79,7 @@ docker compose pull && docker compose up -d
 Print Partner follows a five-step desk loop: **Library → Plan → Parts → Progress → Export**.
 
 1. **Library** — Add GitHub repos, local folders, or zip archives. Assign categories, set import rules, and sync STLs.
-2. **Plan** — Create or switch plans (**Create plan** in the header, or **Plans** in the sidebar). Attach sources, pick STL files, set role filament colors, and recompute when the stale banner appears.
+2. **Plan**: Create or switch plans (**Create plan** in the header, or **Plans** in the sidebar). Attach sources, rebuild a saved draft, choose STL files and quantities, review the changes, and click **Apply plan** to accept them.
 3. **Parts** — Validate totals by role and filament, browse 3D previews, and edit quantities.
 4. **Progress** — Track per-unit print progress (and assembled toggles), print a checklist, or export missing STLs.
 5. **Export** — Plate workspace, height-band packing, slicer links, profile library, STL/3MF packs, and printer bind/send.

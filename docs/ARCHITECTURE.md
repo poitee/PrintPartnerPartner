@@ -82,7 +82,7 @@ flowchart LR
 
 ## Background jobs & progress
 
-Long-running work such as repo sync, plan recompute, STL pack export, HTML checklist export, kit-bundle import/export, and accepted Plate 3MF export runs through a background **job runner** (`web/apps/server/src/routes/jobs.ts`). Self-host and SaaS both use the in-process runner by default; SaaS can be backed by a BullMQ/Redis queue (`REDIS_URL`) for horizontal scaling. Clients start a job over REST and subscribe to live progress via the WebSocket at `/ws/jobs/:id`.
+Long-running work such as repo sync, STL pack export, HTML checklist export, kit-bundle import/export, and accepted Plate 3MF export runs through a background **job runner** (`web/apps/server/src/routes/jobs.ts`). Self-host and SaaS both use the in-process runner by default; SaaS can be backed by a BullMQ/Redis queue (`REDIS_URL`) for horizontal scaling. Clients start a job over REST and subscribe to live progress via the WebSocket at `/ws/jobs/:id`.
 
 ## Workflow
 
@@ -93,13 +93,13 @@ flowchart LR
   Parts --> Progress[Progress]
   Progress --> Export[Export]
   Library -->|sync| DB[(App DB)]
-  Plan -->|recompute| DB
+  Plan -->|save draft and apply| DB
   Export -->|export STLs| FS[exports/]
   Progress -->|progress| DB
 ```
 
 1. **Library** — register GitHub/local/zip sources; categories; import rules; cross-repo STL search; update-available badges.
-2. **Plan** — set role filament colors, attach sources, pick files and quantities, rebuild plan; inline repo Docs viewer; kit/manifest options.
+2. **Plan**: attach sources, rebuild a saved draft, choose files, quantities, and role filament colors, then review and apply the draft; inline repo Docs viewer; kit/manifest options.
 3. **Parts** — validation summary by role/filament; full parts list with 3D previews.
 4. **Progress** — per-unit progress (saved per plan), assembled toggles, printable checklist, and missing-STL export.
 5. **Export** - explicit Required-unit Printer allocation, deterministic arrangement, immutable Plate revisions, accepted 3MF download and handoff, STL packs, share bundles, checklist HTML, and printer send. Slicer profile assignment and sync status live on **Settings → Printers** (not a flat profile library on Export). **Settings → Slicers** registers slicer instances (GUI URL + watch path + dialect); profile-sync and Export slicer links follow enabled instances. Self-host Docker pull/start/stop/logs operate only on containers labeled `printpartner.slicer_instance_id`. Export can hand one accepted Plate revision to a managed exchange inbox or download it for a local slicer.

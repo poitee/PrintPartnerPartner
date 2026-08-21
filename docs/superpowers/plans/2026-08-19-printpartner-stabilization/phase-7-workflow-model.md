@@ -23,7 +23,12 @@ status, and completion.
   result. Zero affected rows is a conflict. A matching retry returns only its
   original result. Offer an explicit rebase that recomputes and presents new
   differences after a conflict.
-- Define explicit commands for recompute preview and manifest application.
+- Rebuild into a persisted draft workspace. Route quantity and inclusion edits,
+  including spreadsheet imports, through that workspace.
+- Keep accepted Review and Checkoff unchanged until explicit Apply. Reject mixed
+  spreadsheet planning and accepted Progress changes before either write.
+- Recover a stale draft through an explicit abandon-then-rebase sequence that
+  preserves the abandoned source as history.
 - Represent an inferred role and quantity separately from a manual quantity
   override.
 - Make page labels and action names use the accepted vocabulary.
@@ -55,3 +60,10 @@ create another revision; reuse the key with a changed draft and prove it is
 rejected. Inject a failure between Source-pin and Plan writes and prove the
 transaction leaves both unchanged. Each action name must produce the same
 behavior wherever it appears.
+
+The browser cutover additionally remounts a saved open draft, presents proposed
+Part values and reconciliation choices, disables Apply for stale or unresolved
+workspaces, and invalidates accepted Review, Checkoff, summary, Plate, and
+export caches after Apply. Accepted printed-count spreadsheet imports use the
+complete accepted basis returned by Review in one atomic batch; an Apply makes
+that basis stale.

@@ -2,6 +2,7 @@
 
 export * from "./source-naming.js";
 export * from "./accepted-plates.js";
+export * from "./plan-drafts.js";
 
 export type DeployMode = "self-host" | "saas";
 
@@ -116,7 +117,6 @@ export function validateDiscordWebhookUrl(url: string): string | null {
 
 export const JOB_KINDS = [
   "sync",
-  "recompute",
   "import-scan",
   "extract-source-docs",
   "check-source-updates",

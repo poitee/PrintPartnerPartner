@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "./test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -21,7 +22,7 @@ describe("patchPart spoolman_spool_id", () => {
     repo.updateImportRules(source.id, ["parts/"]);
 
     const plan = repo.createProfile("PartSpoolPlan", source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
     const partId = repo.listParts(plan.id).parts[0]!.id;
     const filamentId = "spoolman:test-int:filament:7";
     const spoolRef = "spoolman:test-int:spool:3";

@@ -186,6 +186,7 @@ describe("accepted Plan Review callers", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       profile_id: 7,
+      accepted_basis: null,
       plan_name: "Plan",
       layers: [],
       totals: { included_parts: 0, total_print_units: 0, by_role: {}, by_filament: {} },
@@ -260,6 +261,13 @@ describe("accepted Plan Review callers", () => {
     expect(standard.statusCode).toBe(200);
     expect(standard.json()).toEqual({
       profile_id: 7,
+      accepted_basis: {
+        profile_id: 7,
+        plan_version: 1,
+        plan_revision_id: 1,
+        plan_revision_digest: "a".repeat(64),
+        required_unit_mapping_digest: "b".repeat(64),
+      },
       plan_name: "Accepted Plan",
       layers: [],
       totals: {

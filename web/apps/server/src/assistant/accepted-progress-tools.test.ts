@@ -1,3 +1,4 @@
+import { acceptPlanForTest, editAcceptedPartsForTest } from "../test/accept-plan.js";
 import Database from "better-sqlite3";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,9 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import Fastify from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
-import { backfillAcceptedPlanRevisions } from "../db/accepted-plan-revisions.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
-import { backfillCurrentRequiredUnitSets } from "../db/required-units.js";
 import { applyAssistantAction, invokeAssistantTool } from "./tools.js";
 import { InProcessJobRunner } from "../routes/jobs.js";
 import { parseRequiredUnitToken } from "../services/required-units.js";
@@ -44,22 +43,16 @@ async function fixture(planCount = 1) {
   repo.updateImportRules(source.id, ["parts/"]);
   const profiles = Array.from({ length: planCount }, (_, index) => {
     const profile = repo.createProfile(`Assistant Progress ${index + 1}`, source.id);
-    repo.recomputeProfile(profile.id);
+    acceptPlanForTest(repo, profile.id);
     const part = repo.listParts(profile.id).parts[0]!;
-    repo.patchPart(part.id, { quantity_override: 1 });
-    return { profile, part };
+    const remapped = editAcceptedPartsForTest(repo, profile.id, [{
+      projectionPartId: part.id,
+      quantityOverride: 1,
+    }]);
+    const acceptedPart = repo.getPartRow(remapped.get(part.id)!);
+    if (!acceptedPart) throw new Error("test accepted Part is missing");
+    return { profile, part: acceptedPart };
   });
-  let tokenSequence = 0;
-  const raw = new Database(join(root, "print-partner.db"));
-  backfillAcceptedPlanRevisions(raw, "2026-08-21T13:00:00.000Z");
-  backfillCurrentRequiredUnitSets(raw, {
-    now: () => "2026-08-21T13:01:00.000Z",
-    tokenFactory: () => {
-      tokenSequence += 1;
-      return `ppu_${tokenSequence.toString(16).padStart(32, "0")}`;
-    },
-  });
-  raw.close();
   return { root, repo, profile: profiles[0]!.profile, part: profiles[0]!.part, profiles };
 }
 

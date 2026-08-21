@@ -1,3 +1,4 @@
+import { acceptPlanForTest, editAcceptedPartsForTest } from "../test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -13,8 +14,6 @@ import { reconcilePrinterCheckoff } from "./printer-checkoff.js";
 import { verifyPrinterCheckoff } from "./printer-checkoff-verify.js";
 import { summarizePrintOutcomes } from "./printer-outcomes-store.js";
 import type Database from "better-sqlite3";
-import { backfillAcceptedPlanRevisions } from "../db/accepted-plan-revisions.js";
-import { backfillCurrentRequiredUnitSets } from "../db/required-units.js";
 import { drizzle } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import * as pgSchema from "../db/schema-pg.js";
@@ -39,22 +38,18 @@ function setupPlan() {
   repo.updateImportRules(source.id, ["parts/"]);
 
   const plan = repo.createProfile("VerifyPlan", source.id);
-  repo.recomputeProfile(plan.id);
+  acceptPlanForTest(repo, plan.id);
   const parts = repo.listParts(plan.id).parts;
-  const bracket = parts.find((p) => p.filename === "bracket.stl")!;
-  const frame = parts.find((p) => p.filename === "frame.stl")!;
-  expect(bracket).toBeTruthy();
-  expect(frame).toBeTruthy();
-  repo.patchPart(bracket.id, { quantity_override: 2 });
-  repo.patchPart(frame.id, { quantity_override: 1 });
-
-  const raw = (sqlite as unknown as { sqlite: Database.Database }).sqlite;
-  backfillAcceptedPlanRevisions(raw, "2026-08-21T11:00:00.000Z");
-  let token = 1;
-  backfillCurrentRequiredUnitSets(raw, {
-    now: () => "2026-08-21T11:01:00.000Z",
-    tokenFactory: () => `ppu_${(token++).toString(16).padStart(32, "0")}`,
-  });
+  const priorBracket = parts.find((p) => p.filename === "bracket.stl")!;
+  const priorFrame = parts.find((p) => p.filename === "frame.stl")!;
+  expect(priorBracket).toBeTruthy();
+  expect(priorFrame).toBeTruthy();
+  const remapped = editAcceptedPartsForTest(repo, plan.id, [
+    { projectionPartId: priorBracket.id, quantityOverride: 2 },
+    { projectionPartId: priorFrame.id, quantityOverride: 1 },
+  ]);
+  const bracket = repo.getPartRow(remapped.get(priorBracket.id)!)!;
+  const frame = repo.getPartRow(remapped.get(priorFrame.id)!)!;
 
   return { dir, sqlite, repo, plan, bracket, frame };
 }

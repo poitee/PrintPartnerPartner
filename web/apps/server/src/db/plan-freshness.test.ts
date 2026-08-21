@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "../test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -69,8 +70,8 @@ describe("Plan freshness", () => {
       const dependent = repo.createProfile("Dependent", first.source.id);
       const unrelated = repo.createProfile("Unrelated", second.source.id);
 
-      expect(repo.recomputeProfile(dependent.id).merged).toBe(true);
-      expect(repo.recomputeProfile(unrelated.id).merged).toBe(true);
+      expect(acceptPlanForTest(repo, dependent.id).merged).toBe(true);
+      expect(acceptPlanForTest(repo, unrelated.id).merged).toBe(true);
       expect(repo.getProfileHeader(dependent.id)?.freshness.status).toBe("current");
       expect(repo.getProfileHeader(unrelated.id)?.freshness.status).toBe("current");
 
@@ -99,11 +100,11 @@ describe("Plan freshness", () => {
     withRepo((repo, reposDir) => {
       const tracked = createTrackedSource(repo, reposDir, "Rollback", "a", "solid a");
       const plan = repo.createProfile("Rollback plan", tracked.source.id);
-      repo.recomputeProfile(plan.id);
+      acceptPlanForTest(repo, plan.id);
       const acceptedA = repo.getAcceptedPlanRevisionInputSet(plan.id);
 
       const revisionB = activateRevision(repo, reposDir, tracked.source.id, "b", "solid b");
-      repo.recomputeProfile(plan.id);
+      acceptPlanForTest(repo, plan.id);
       const acceptedB = repo.getAcceptedPlanRevisionInputSet(plan.id);
       expect(acceptedB?.id).not.toBe(acceptedA?.id);
 
@@ -114,7 +115,7 @@ describe("Plan freshness", () => {
         revisionId: tracked.revision.id,
         observed,
       });
-      repo.recomputeProfile(plan.id);
+      acceptPlanForTest(repo, plan.id);
 
       expect(repo.getAcceptedPlanRevisionInputSet(plan.id)?.id).toBe(acceptedA?.id);
       expect(repo.listPlanRevisionInputSets(plan.id)).toHaveLength(2);
@@ -126,7 +127,7 @@ describe("Plan freshness", () => {
     withRepo((repo, reposDir) => {
       const tracked = createTrackedSource(repo, reposDir, "Pinned", "a", "solid accepted");
       const plan = repo.createProfile("Pinned plan", tracked.source.id);
-      repo.recomputeProfile(plan.id);
+      acceptPlanForTest(repo, plan.id);
       const part = repo.getProfilePartRows(plan.id)[0];
       if (!part) throw new Error("test part missing");
 
@@ -155,7 +156,7 @@ describe("Plan freshness", () => {
       repo.updateSource(tracked.source.id, { local_path: otherRoot });
       const plan = repo.createProfile("Aligned plan", tracked.source.id);
 
-      expect(repo.recomputeProfile(plan.id).merged).toBe(true);
+      expect(acceptPlanForTest(repo, plan.id).merged).toBe(true);
       expect(repo.listParts(plan.id).parts.map((part) => part.filename)).toEqual([
         "bracket.stl",
       ]);
@@ -169,7 +170,7 @@ describe("Plan freshness", () => {
     withRepo((repo, reposDir) => {
       const tracked = createTrackedSource(repo, reposDir, "Named", "a", "solid named");
       const trackedPlan = repo.createProfile("Named plan", tracked.source.id);
-      repo.recomputeProfile(trackedPlan.id);
+      acceptPlanForTest(repo, trackedPlan.id);
 
       const current = repo.getGlobalNaming();
       repo.saveSourceNaming(tracked.source.id, {
@@ -192,7 +193,7 @@ describe("Plan freshness", () => {
       mkdirSync(join(reposDir, "local"), { recursive: true });
       writeFileSync(join(reposDir, "local", "local.stl"), "solid local");
       const localPlan = repo.createProfile("Local plan", local.id);
-      repo.recomputeProfile(localPlan.id);
+      acceptPlanForTest(repo, localPlan.id);
       expect(repo.getProfileHeader(localPlan.id)?.freshness).toMatchObject({
         status: "untracked",
         reasons: [{ kind: "source_revision_untracked", source_id: local.id }],
@@ -204,11 +205,11 @@ describe("Plan freshness", () => {
     withRepo((repo, reposDir) => {
       const tracked = createTrackedSource(repo, reposDir, "Refused", "a", "solid a");
       const plan = repo.createProfile("Refused plan", tracked.source.id);
-      repo.recomputeProfile(plan.id);
+      acceptPlanForTest(repo, plan.id);
       const accepted = repo.getAcceptedPlanRevisionInputSet(plan.id);
       repo.updateImportRules(tracked.source.id, ["missing/"]);
 
-      expect(repo.recomputeProfile(plan.id)).toMatchObject({ merged: false, reason: "no_stls" });
+      expect(acceptPlanForTest(repo, plan.id)).toMatchObject({ merged: false, reason: "no_stls" });
       expect(repo.getAcceptedPlanRevisionInputSet(plan.id)).toEqual(accepted);
     });
   });
@@ -217,7 +218,7 @@ describe("Plan freshness", () => {
     withRepo((repo, reposDir) => {
       const tracked = createTrackedSource(repo, reposDir, "Invalid naming", "a", "solid a");
       const plan = repo.createProfile("Invalid naming plan", tracked.source.id);
-      repo.recomputeProfile(plan.id);
+      acceptPlanForTest(repo, plan.id);
       const partsBefore = repo.listParts(plan.id).parts;
       const accepted = repo.getAcceptedPlanRevisionInputSet(plan.id);
       repo.updateSource(tracked.source.id, {
@@ -229,7 +230,7 @@ describe("Plan freshness", () => {
         },
       });
 
-      expect(() => repo.recomputeProfile(plan.id)).toThrow(/override\.folder_rules/i);
+      expect(() => acceptPlanForTest(repo, plan.id)).toThrow(/override\.folder_rules/i);
       expect(repo.listParts(plan.id).parts).toEqual(partsBefore);
       expect(repo.getAcceptedPlanRevisionInputSet(plan.id)).toEqual(accepted);
     });
@@ -239,7 +240,7 @@ describe("Plan freshness", () => {
     withRepo((repo, reposDir, db) => {
       const tracked = createTrackedSource(repo, reposDir, "Malformed", "a", "solid a");
       const plan = repo.createProfile("Malformed plan", tracked.source.id);
-      repo.recomputeProfile(plan.id);
+      acceptPlanForTest(repo, plan.id);
       db.insert(schema.profileLayers)
         .values({
           tenantId: "default",
@@ -256,7 +257,7 @@ describe("Plan freshness", () => {
         status: "stale",
         reasons: expect.arrayContaining([{ kind: "plan_inputs_invalid" }]),
       });
-      expect(() => repo.recomputeProfile(plan.id)).toThrow(
+      expect(() => acceptPlanForTest(repo, plan.id)).toThrow(
         "A Source can only be attached to a Plan once",
       );
     });

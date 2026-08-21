@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { CoreRouteDeps } from "./core-routes.js";
 import { registerPlanRoutes } from "./plans.js";
 import { registerAcceptedPlateRoutes } from "./accepted-plates.js";
+import { registerPlanDraftRoutes } from "./plan-drafts.js";
 
 export async function registerApiV2PlanPlugin(
   app: FastifyInstance,
@@ -23,5 +24,6 @@ export async function registerApiV2PlanPlugin(
     },
     { summaryContract: "accepted" },
   );
+  await registerPlanDraftRoutes(app, { repo: deps.repo });
   await registerAcceptedPlateRoutes(app, { repo: deps.repo, reposDir: deps.reposDir });
 }
