@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type Database from "better-sqlite3";
+import Database from "better-sqlite3";
 import { getDb, SqliteDatabase } from "./db/client.js";
 import { AppRepository } from "./db/repository.js";
 import { tenantStorage } from "./middleware/tenant-context.js";
@@ -94,8 +94,18 @@ describe("Phase 6 tenant isolation", () => {
     tenantStorage.run("tenant-a", () => {
       const repo = new AppRepository(db, "default", sqlite.reposDir);
       expect(repo.getPartRow(partId)?.included).toBe(true);
-      expect(repo.getEnrichedPartsForReview(profileId, false)[0]?.assembled_units).toEqual([true]);
       expect(repo.getCheckoff(profileId).parts[0]?.print_units).toEqual([true]);
+      const raw = new Database(join(dir, "print-partner.db"), { readonly: true });
+      try {
+        expect(
+          raw
+            .prepare("SELECT assembled FROM print_progress WHERE part_id = ? AND unit_index = 0")
+            .pluck()
+            .get(partId),
+        ).toBe(1);
+      } finally {
+        raw.close();
+      }
     });
 
     sqlite.close();

@@ -13,6 +13,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { AssistantProposedAction } from "@print-partner/contracts";
 import { isAssistantUiAction } from "@print-partner/contracts";
+import { join } from "node:path";
 import type { ServerConfig } from "../config.js";
 import { createAssistantPort } from "../assistant/create-assistant.js";
 import { resolveAssistantRuntime } from "../assistant/resolve-assistant.js";
@@ -135,6 +136,7 @@ export function createProductMcpServer(deps: ProductMcpDeps): Server {
       activePlanId: defaultPlanId,
       useOtherBuildsAsExamples: runtime.useOtherBuildsAsExamples,
       dataDir: config.dataDir,
+      thumbsDir: join(config.dataDir, "thumbs"),
       assistant: createAssistantPort(runtime),
       runtime,
       integrations: getIntegrations(),

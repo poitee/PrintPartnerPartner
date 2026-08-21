@@ -12,7 +12,6 @@ import { loadKitManifest, saveKitManifest } from "./services/kit-manifest-store.
 import { setRequestTenantId } from "./middleware/tenant-context.js";
 import { SaasS3StoragePort } from "./adapters/saas/storage-s3.js";
 import { fetchPrintablesMetadata } from "./services/source-adapters.js";
-import { buildPlanReview } from "./services/plan-review.js";
 
 describe("Phase 5", () => {
   it("matchKeyMatches supports globs", () => {
@@ -169,21 +168,6 @@ describe("Phase 5", () => {
     const bundlePath = exportKitBundle(repo, plan.id, join(dir, "exports"), false);
     const data = parseKitBundleBuffer(readFileSync(bundlePath), bundlePath);
     expect(data.format).toBe(KIT_FORMAT);
-    sqlite.close();
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("plan review reports unsynced blocker", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-rev-"));
-    const sqlite = new SqliteDatabase(dir);
-    sqlite.connect();
-    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
-    const source = repo.createSource({ name: "Offline", url: "https://github.com/a/b" });
-    const plan = repo.createProfile("Review", source.id);
-    repo.setBaseLayer(plan.id, source.id);
-    const review = buildPlanReview(repo, plan.id);
-    expect(review.has_blockers).toBe(true);
-    expect(review.issues.some((i) => i.code === "unsynced_source")).toBe(true);
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });

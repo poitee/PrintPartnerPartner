@@ -55,7 +55,10 @@ describe("known accepted media production caller inventory", () => {
         "clearPartThumbnailCacheAtHexes",
         "services/plan-thumbnails.ts",
       ),
-      buildPlanReview: productionCallers("buildPlanReview", "services/plan-review.ts"),
+      readAcceptedPlanReview: productionCallers(
+        "readAcceptedPlanReview",
+        "services/accepted-plan-review.ts",
+      ),
       observeAcceptedArtifact: productionCallers(
         "observeAcceptedArtifact",
         "services/accepted-artifacts.ts",
@@ -69,6 +72,10 @@ describe("known accepted media production caller inventory", () => {
         "readAcceptedMediaPng",
         "lib/accepted-media-cache.ts",
       ),
+      observeAcceptedMediaPng: productionCallers(
+        "observeAcceptedMediaPng",
+        "lib/accepted-media-cache.ts",
+      ),
       removeAcceptedMediaPng: productionCallers(
         "removeAcceptedMediaPng",
         "lib/accepted-media-cache.ts",
@@ -78,18 +85,20 @@ describe("known accepted media production caller inventory", () => {
         "lib/accepted-media-cache.ts",
       ),
     }).toEqual({
-      readAcceptedPlanOperationalSnapshot: ["routes/parts.ts", "routes/plans.ts"],
+      readAcceptedPlanOperationalSnapshot: [
+        "routes/parts.ts",
+        "routes/plans.ts",
+        "services/accepted-plan-review.ts",
+      ],
       getAcceptedProfileStlRoots: ["services/part-paths.ts"],
       resolvePartStl: [
         "db/repository.ts",
         "routes/plans.ts",
-        "services/plan-review.ts",
         "services/plan-thumbnails.ts",
       ],
       globalThumbnailPath: [
         "lib/secure-path.ts",
         "services/export-html.ts",
-        "services/plan-review.ts",
         "services/plan-thumbnails.ts",
       ],
       globalPreviewPath: [
@@ -101,11 +110,12 @@ describe("known accepted media production caller inventory", () => {
       openStlThumbStream: ["routes/sources.ts"],
       clearPlanThumbnailCache: ["routes/plans.ts"],
       clearPartThumbnailCacheAtHexes: ["routes/plans.ts"],
-      buildPlanReview: ["assistant/tools.ts", "routes/plans.ts"],
-      observeAcceptedArtifact: [],
+      readAcceptedPlanReview: ["assistant/tools.ts", "routes/plans.ts"],
+      observeAcceptedArtifact: ["services/accepted-plan-review.ts"],
       openVerifiedAcceptedArtifact: ["routes/parts.ts"],
-      acceptedMediaBasis: ["routes/parts.ts"],
+      acceptedMediaBasis: ["services/accepted-part-media.ts"],
       readAcceptedMediaPng: ["routes/parts.ts"],
+      observeAcceptedMediaPng: ["services/accepted-plan-review.ts"],
       removeAcceptedMediaPng: ["routes/parts.ts"],
       writeAcceptedMediaPng: ["routes/parts.ts"],
     });

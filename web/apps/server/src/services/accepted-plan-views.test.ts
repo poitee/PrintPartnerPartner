@@ -329,9 +329,6 @@ describe("accepted Plan views", () => {
     expect(productionCallers("getCheckoff")).toEqual([
       { file: "assistant/tools.ts", count: 2 },
     ]);
-    expect(productionCallers("getEnrichedPartsForReview")).toEqual([
-      { file: "services/plan-review.ts", count: 1 },
-    ]);
     expect(productionCallers("getPartAssembled")).toEqual([]);
   });
 });

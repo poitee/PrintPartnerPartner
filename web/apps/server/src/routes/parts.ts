@@ -2,20 +2,20 @@ import { basename } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppRepository } from "../db/repository.js";
 import type { AcceptedOperationalPart } from "../db/accepted-plan-operational.js";
-import { getColorById } from "../services/filament-catalog.js";
 import { PLACEHOLDER_PNG } from "../lib/thumbnails.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import { toAcceptedPartAssembledView } from "../services/accepted-plan-views.js";
 import { openVerifiedAcceptedArtifact } from "../services/accepted-artifacts.js";
 import {
   ACCEPTED_MEDIA_PNG_MAX_BYTES,
-  acceptedMediaBasis,
   readAcceptedMediaPng,
   removeAcceptedMediaPng,
   writeAcceptedMediaPng,
 } from "../lib/accepted-media-cache.js";
-
-const MESH_MAX_BYTES = 15 * 1024 * 1024;
+import {
+  ACCEPTED_PART_MESH_MAX_BYTES,
+  acceptedPartMediaIdentity,
+} from "../services/accepted-part-media.js";
 
 type RouteDeps = {
   repo: AppRepository;
@@ -47,14 +47,6 @@ function readAcceptedPartRequest(deps: RouteDeps, partId: number): AcceptedPartR
   return part
     ? { kind: "ready", profileId: projection.profileId, part }
     : { kind: "part_not_found" };
-}
-
-function acceptedRenderHex(part: AcceptedOperationalPart): string | null {
-  const custom = part.filamentCustomHex?.trim() ?? "";
-  if (/^#[0-9a-f]{6}$/i.test(custom)) return custom.toLowerCase();
-  const catalog = part.filamentColorId ? getColorById(part.filamentColorId) : null;
-  const catalogHex = catalog?.hex.trim() ?? "";
-  return /^#[0-9a-f]{6}$/i.test(catalogHex) ? catalogHex.toLowerCase() : null;
 }
 
 function acceptedStateDetail(reason: "compatibility_dirty" | "uninitialized"): string {
@@ -92,7 +84,7 @@ async function sendPartImage(
     const verified = openVerifiedAcceptedArtifact({
       reposDir: deps.reposDir,
       artifact: part.artifact,
-      maxBytes: MESH_MAX_BYTES,
+      maxBytes: ACCEPTED_PART_MESH_MAX_BYTES,
     });
     if (verified.kind !== "verified") {
       if (verified.kind === "unavailable") {
@@ -101,13 +93,10 @@ async function sendPartImage(
       return reply.status(409).send({ detail: "Accepted Part artifact is unavailable" });
     }
     verified.lease.close();
-    const hex = acceptedRenderHex(part);
-    const basis = acceptedMediaBasis({
-      expectedSha256: part.artifact.expectedSha256,
-      role: part.effectiveRole,
-      hex,
-      variant: preview ? "preview" : "thumbnail",
-    });
+    const { hex, basis } = acceptedPartMediaIdentity(
+      part,
+      preview ? "preview" : "thumbnail",
+    );
     const cached = readAcceptedMediaPng({ thumbsDir: deps.thumbsDir, basis });
     if (!cached) {
       reply.header("Content-Type", "image/png").header("Cache-Control", "no-store");
@@ -252,17 +241,11 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
       if (part.artifact.kind === "unavailable") {
         return reply.status(409).send({ detail: "Accepted Part media is unavailable" });
       }
-      const hex = acceptedRenderHex(part);
-      const basis = acceptedMediaBasis({
-        expectedSha256: part.artifact.expectedSha256,
-        role: part.effectiveRole,
-        hex,
-        variant: "mesh",
-      });
+      const { hex, basis } = acceptedPartMediaIdentity(part, "mesh");
       const opened = openVerifiedAcceptedArtifact({
         reposDir: deps.reposDir,
         artifact: part.artifact,
-        maxBytes: MESH_MAX_BYTES,
+        maxBytes: ACCEPTED_PART_MESH_MAX_BYTES,
       });
       if (opened.kind !== "verified") {
         if (opened.kind === "unavailable") {
@@ -270,7 +253,7 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
         }
         if (opened.reason === "too_large") {
           return reply.status(413).send({
-            detail: `STL exceeds ${MESH_MAX_BYTES / (1024 * 1024)}MB mesh limit`,
+            detail: `STL exceeds ${ACCEPTED_PART_MESH_MAX_BYTES / (1024 * 1024)}MB mesh limit`,
           });
         }
         return reply.status(409).send({ detail: "Accepted Part artifact is unavailable" });
@@ -329,14 +312,8 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
       let cleared = 0;
       for (const part of accepted.snapshot.parts) {
         if (part.artifact.kind !== "tracked") continue;
-        const hex = acceptedRenderHex(part);
         for (const variant of ["thumbnail", "preview"] as const) {
-          const basis = acceptedMediaBasis({
-            expectedSha256: part.artifact.expectedSha256,
-            role: part.effectiveRole,
-            hex,
-            variant,
-          });
+          const { basis } = acceptedPartMediaIdentity(part, variant);
           if (removeAcceptedMediaPng({ thumbsDir: deps.thumbsDir, basis })) cleared += 1;
         }
       }
@@ -390,31 +367,20 @@ export async function registerPartRoutes(app: FastifyInstance, deps: RouteDeps):
       if (part.artifact.kind === "unavailable") {
         return reply.status(409).send({ detail: "Accepted Part media is unavailable" });
       }
-      const hex = acceptedRenderHex(part);
-      const meshBasis = acceptedMediaBasis({
-        expectedSha256: part.artifact.expectedSha256,
-        role: part.effectiveRole,
-        hex,
-        variant: "mesh",
-      });
+      const { basis: meshBasis } = acceptedPartMediaIdentity(part, "mesh");
       if (ifMatch !== `"${meshBasis}"`) {
         return reply.status(409).send({ detail: "Accepted Part media basis is stale" });
       }
       const verified = openVerifiedAcceptedArtifact({
         reposDir: deps.reposDir,
         artifact: part.artifact,
-        maxBytes: MESH_MAX_BYTES,
+        maxBytes: ACCEPTED_PART_MESH_MAX_BYTES,
       });
       if (verified.kind !== "verified") {
         return reply.status(409).send({ detail: "Accepted Part artifact is unavailable" });
       }
       verified.lease.close();
-      const thumbnailBasis = acceptedMediaBasis({
-        expectedSha256: part.artifact.expectedSha256,
-        role: part.effectiveRole,
-        hex,
-        variant: "thumbnail",
-      });
+      const { basis: thumbnailBasis } = acceptedPartMediaIdentity(part, "thumbnail");
       try {
         writeAcceptedMediaPng({ thumbsDir: deps.thumbsDir, basis: thumbnailBasis, png: buf });
       } catch (error) {

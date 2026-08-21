@@ -13,6 +13,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
+import type { Stats } from "node:fs";
 import { join, resolve } from "node:path";
 
 export type AcceptedMediaVariant = "mesh" | "thumbnail" | "preview";
@@ -84,8 +85,21 @@ type ReadAcceptedMediaPngInput = {
   readonly maxBytes?: number;
 };
 
+export type AcceptedMediaPngObservation =
+  | { readonly kind: "present" }
+  | { readonly kind: "missing" };
+
 type AcceptedMediaPngReadResult =
   | { readonly status: "found"; readonly png: Buffer }
+  | { readonly status: "retryable_race" }
+  | { readonly status: "miss" };
+
+type AcceptedMediaDescriptorResult =
+  | {
+      readonly status: "opened";
+      readonly descriptor: number;
+      readonly stats: Stats;
+    }
   | { readonly status: "retryable_race" }
   | { readonly status: "miss" };
 
@@ -97,11 +111,11 @@ function isRenameWindowError(error: unknown): boolean {
   );
 }
 
-function readAcceptedMediaPngOnce(input: {
+function openAcceptedMediaPngDescriptor(input: {
   readonly thumbsDir: string;
   readonly path: string;
   readonly maxBytes: number;
-}): AcceptedMediaPngReadResult {
+}): AcceptedMediaDescriptorResult {
   let descriptor: number | null = null;
   try {
     const rootStats = lstatSync(resolve(input.thumbsDir));
@@ -127,21 +141,52 @@ function readAcceptedMediaPngOnce(input: {
       return { status: "retryable_race" };
     }
 
-    const png = Buffer.alloc(opened.size);
+    const openedDescriptor = descriptor;
+    descriptor = null;
+    return { status: "opened", descriptor: openedDescriptor, stats: opened };
+  } catch {
+    return { status: "miss" };
+  } finally {
+    if (descriptor != null) closeSync(descriptor);
+  }
+}
+
+function descriptorStayedStable(
+  descriptor: number,
+  opened: Stats,
+): boolean {
+  const afterRead = fstatSync(descriptor);
+  return (
+    afterRead.dev === opened.dev &&
+    afterRead.ino === opened.ino &&
+    afterRead.size === opened.size &&
+    afterRead.mtimeMs === opened.mtimeMs &&
+    afterRead.ctimeMs === opened.ctimeMs
+  );
+}
+
+function readAcceptedMediaPngOnce(input: {
+  readonly thumbsDir: string;
+  readonly path: string;
+  readonly maxBytes: number;
+}): AcceptedMediaPngReadResult {
+  const opened = openAcceptedMediaPngDescriptor(input);
+  if (opened.status !== "opened") return opened;
+  try {
+    const png = Buffer.alloc(opened.stats.size);
     let position = 0;
     while (position < png.length) {
-      const bytesRead = readSync(descriptor, png, position, png.length - position, position);
+      const bytesRead = readSync(
+        opened.descriptor,
+        png,
+        position,
+        png.length - position,
+        position,
+      );
       if (bytesRead === 0) return { status: "retryable_race" };
       position += bytesRead;
     }
-    const afterRead = fstatSync(descriptor);
-    if (
-      afterRead.dev !== opened.dev ||
-      afterRead.ino !== opened.ino ||
-      afterRead.size !== opened.size ||
-      afterRead.mtimeMs !== opened.mtimeMs ||
-      afterRead.ctimeMs !== opened.ctimeMs
-    ) {
+    if (!descriptorStayedStable(opened.descriptor, opened.stats)) {
       return { status: "retryable_race" };
     }
     validatePng(png, input.maxBytes);
@@ -149,8 +194,46 @@ function readAcceptedMediaPngOnce(input: {
   } catch {
     return { status: "miss" };
   } finally {
-    if (descriptor != null) closeSync(descriptor);
+    closeSync(opened.descriptor);
   }
+}
+
+function observeAcceptedMediaPngOnce(input: {
+  readonly thumbsDir: string;
+  readonly path: string;
+  readonly maxBytes: number;
+}): Exclude<AcceptedMediaPngReadResult, { readonly status: "found" }> | { readonly status: "found" } {
+  const opened = openAcceptedMediaPngDescriptor(input);
+  if (opened.status !== "opened") return opened;
+  try {
+    const signature = Buffer.alloc(PNG_SIGNATURE.length);
+    if (
+      readSync(opened.descriptor, signature, 0, signature.length, 0) !== signature.length
+    ) {
+      return { status: "retryable_race" };
+    }
+    if (!descriptorStayedStable(opened.descriptor, opened.stats)) {
+      return { status: "retryable_race" };
+    }
+    return signature.equals(PNG_SIGNATURE) ? { status: "found" } : { status: "miss" };
+  } catch {
+    return { status: "miss" };
+  } finally {
+    closeSync(opened.descriptor);
+  }
+}
+
+export function observeAcceptedMediaPng(
+  input: ReadAcceptedMediaPngInput,
+): AcceptedMediaPngObservation {
+  const maxBytes = validatedLimit(input.maxBytes ?? ACCEPTED_MEDIA_PNG_MAX_BYTES);
+  const path = acceptedMediaCachePath(input);
+  for (let attempt = 0; attempt < ACCEPTED_MEDIA_READ_ATTEMPTS; attempt += 1) {
+    const result = observeAcceptedMediaPngOnce({ thumbsDir: input.thumbsDir, path, maxBytes });
+    if (result.status === "found") return { kind: "present" };
+    if (result.status === "miss") return { kind: "missing" };
+  }
+  return { kind: "missing" };
 }
 
 export function readAcceptedMediaPng(input: ReadAcceptedMediaPngInput): Buffer | null {

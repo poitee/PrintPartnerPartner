@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { AppRepository } from "../db/repository.js";
-import { buildPlanReview } from "../services/plan-review.js";
+import { readAcceptedPlanReview } from "../services/accepted-plan-review.js";
 import { applyManifestToProfile } from "../services/manifest-apply.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
 import { buildPlanManifestBuilder } from "../services/plan-manifest-builder.js";
@@ -13,7 +13,7 @@ import { normalizePartRole } from "../services/role-filament.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import { toAcceptedCheckoffView } from "../services/accepted-plan-views.js";
 
-type RouteDeps = { repo: AppRepository; dataDir: string; thumbsDir: string };
+type RouteDeps = { repo: AppRepository; dataDir: string; reposDir: string; thumbsDir: string };
 
 export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.get("/plans", async () => ({ profiles: deps.repo.listProfiles() }));
@@ -201,23 +201,42 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/review", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
     const query = request.query as { include_excluded?: string };
     const include_excluded =
       query.include_excluded === "1" ||
       query.include_excluded === "true";
-    const resolveDeps = { repo: deps.repo, dataDir: deps.dataDir };
-    const { parts: reviewParts } = deps.repo.listParts(id, 10000, 0);
-    const ctx = await preloadSpoolmanForColorIds(
-      resolveDeps,
-      reviewParts.map((p) => p.filament_color_id),
-    );
-    return buildPlanReview(deps.repo, id, {
-      includeExcluded: include_excluded,
-      filamentContext: ctx,
-      dataDir: deps.dataDir,
-      thumbsDir: deps.thumbsDir,
-    });
+    try {
+      const result = await readAcceptedPlanReview({
+        repo: deps.repo,
+        profileId: id,
+        includeExcluded: include_excluded,
+        reposDir: deps.reposDir,
+        thumbsDir: deps.thumbsDir,
+        loadFilamentContext: (colorIds) =>
+          preloadSpoolmanForColorIds({ repo: deps.repo, dataDir: deps.dataDir }, colorIds),
+      });
+      if (result.kind === "not_found") {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      if (result.kind === "accepted_state_unavailable") {
+        const detail =
+          result.reason === "compatibility_dirty"
+            ? "Accepted Plan requires compatibility repair"
+            : "Accepted Plan operational state is not initialized";
+        return reply.status(409).send({ detail });
+      }
+      return result.body;
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error({ code: error.code, profileId: id }, "Accepted Plan integrity failure");
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error(
+        { failure: "unexpected", profileId: id },
+        "Accepted Plan Review failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
   });
 
   app.post("/plans/:id/apply-manifest", async (request, reply) => {

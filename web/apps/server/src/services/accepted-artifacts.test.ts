@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AcceptedOperationalArtifact } from "../db/accepted-plan-operational.js";
 import {
   observeAcceptedArtifact,
+  observeAcceptedSnapshotRoot,
   openVerifiedAcceptedArtifact,
 } from "./accepted-artifacts.js";
 
@@ -48,6 +49,44 @@ afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+describe("observeAcceptedSnapshotRoot", () => {
+  it("observes a contained accepted snapshot directory", () => {
+    const { reposDir, snapshotRoot } = fixture();
+
+    expect(observeAcceptedSnapshotRoot({ reposDir, snapshotRoot })).toEqual({
+      kind: "available",
+    });
+  });
+
+  it("fails closed without exposing a resolved path", () => {
+    const { reposDir, snapshotRoot } = fixture();
+    const missing = join(reposDir, "snapshots", "missing");
+    const outside = join(reposDir, "..", "outside-root");
+    const rootLink = join(reposDir, "snapshot-link");
+    const rootFile = join(reposDir, "snapshot-file");
+    mkdirSync(outside);
+    symlinkSync(snapshotRoot, rootLink);
+    writeFileSync(rootFile, "not a directory");
+
+    expect(observeAcceptedSnapshotRoot({ reposDir, snapshotRoot: missing })).toEqual({
+      kind: "unusable",
+      reason: "missing",
+    });
+    expect(observeAcceptedSnapshotRoot({ reposDir, snapshotRoot: outside })).toEqual({
+      kind: "unusable",
+      reason: "unsafe_path",
+    });
+    expect(observeAcceptedSnapshotRoot({ reposDir, snapshotRoot: rootLink })).toEqual({
+      kind: "unusable",
+      reason: "symlink",
+    });
+    expect(observeAcceptedSnapshotRoot({ reposDir, snapshotRoot: rootFile })).toEqual({
+      kind: "unusable",
+      reason: "not_file",
+    });
+  });
 });
 
 describe("observeAcceptedArtifact", () => {

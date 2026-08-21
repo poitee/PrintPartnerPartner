@@ -495,6 +495,45 @@ server suite passed 149 files and 1129 tests with one file and three tests
 skipped. The full web suite passed 98 files and 429 tests. Server and web
 typecheck, root lint, and `git diff --check` also passed.
 
+The next Unit 5b2b cut moves HTTP Plan Review and assistant
+`get_plan_review` together onto one accepted Review use case. Each request first
+checks tenant ownership. Each owned request captures exactly one accepted
+operational snapshot. Dirty and uninitialized states stop before filament or
+filesystem observation. Ready Reviews derive profile, layer, Part, quantity,
+progress, and issue facts from that captured snapshot only. The filament loader
+receives only accepted color IDs. Accepted Source roots and included Part
+artifacts are observed after capture, then a pure projection produces the
+existing public Review JSON. Excluded Parts perform no artifact or thumbnail
+observation.
+
+Accepted layer IDs use the accepted input coordinate and retain the accepted
+Source ID for links. Stored snapshot paths never enter the response. A layer is
+synced only when its tracked accepted root remains safely available. Part order
+uses UTF-8 byte filename order followed by projection Part ID. Legacy,
+untracked, missing, unsafe, empty, and oversized artifacts retain the public
+missing STL behavior. Thumbnail availability uses only the accepted content
+basis and an eight-byte PNG signature observation, not the working path cache.
+Successful HTTP and assistant responses preserve their prior key sets. Stable
+public errors and coarse route logs prevent exception details, accepted paths, and
+digests from crossing the boundary.
+
+Review observations are complete by construction: the pure projection rejects
+an included Part without a captured media result. Part rows are sorted by UTF-8
+filename bytes and projection ID before Part-derived issues are emitted. Issue
+categories remain stable as Source availability blockers, the empty-Plan blocker, all
+missing-STL blockers, then all stored merge-conflict warnings. Both the full PNG
+reader and signature-only observer share one descriptor validation and
+post-read stability seam.
+
+The cut deletes the mixed-state `plan-review` builder,
+`getEnrichedPartsForReview`, and its private progress helper in the same wave.
+Production and test inventories contain no surviving reference to those APIs.
+Focused accepted media and Review coverage ran 79 tests: 78 passed and one
+platform test skipped. The full server suite passed 152 files with one file
+skipped, 1154 tests passed, and 3 tests skipped. The full web suite passed 98
+files and 429 tests.
+Both typechecks, root lint, both production builds, and the diff check passed.
+
 ## Module shape
 
 ```ts

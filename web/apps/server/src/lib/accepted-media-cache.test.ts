@@ -19,6 +19,7 @@ import {
   ACCEPTED_MEDIA_PNG_MAX_BYTES,
   acceptedMediaBasis,
   acceptedMediaCachePath,
+  observeAcceptedMediaPng,
   readAcceptedMediaPng,
   removeAcceptedMediaPng,
   writeAcceptedMediaPng,
@@ -138,6 +139,72 @@ describe("acceptedMediaBasis", () => {
 });
 
 describe("accepted media PNG cache", () => {
+  it("keeps one shared cache descriptor validation seam", () => {
+    const source = readFileSync(new URL("./accepted-media-cache.ts", import.meta.url), "utf8");
+
+    expect(source.match(/lstatSync\(resolve\(input\.thumbsDir\)\)/g)).toHaveLength(2);
+    expect(source.match(/opened\.dev !== beforeOpen\.dev/g)).toHaveLength(1);
+  });
+
+  it("observes a valid signature without reading the PNG body", () => {
+    const thumbsDir = cacheFixture();
+    writeAcceptedMediaPng({ thumbsDir, basis, png });
+    const read = vi.mocked(readSync);
+    read.mockClear();
+
+    expect(observeAcceptedMediaPng({ thumbsDir, basis })).toEqual({ kind: "present" });
+
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(read.mock.calls[0]?.[1].byteLength).toBe(8);
+  });
+
+  it("accepts the exact observation limit and rejects one byte beyond it", () => {
+    const thumbsDir = cacheFixture();
+    mkdirSync(thumbsDir);
+    const exact = Buffer.concat([png.subarray(0, 8), Buffer.alloc(24)]);
+    writeFileSync(acceptedMediaCachePath({ thumbsDir, basis }), exact);
+
+    expect(observeAcceptedMediaPng({ thumbsDir, basis, maxBytes: exact.length })).toEqual({
+      kind: "present",
+    });
+    expect(observeAcceptedMediaPng({ thumbsDir, basis, maxBytes: exact.length - 1 })).toEqual({
+      kind: "missing",
+    });
+  });
+
+  it("does not retry a stable invalid signature during observation", () => {
+    const thumbsDir = cacheFixture();
+    mkdirSync(thumbsDir);
+    writeFileSync(
+      acceptedMediaCachePath({ thumbsDir, basis }),
+      Buffer.alloc(ACCEPTED_MEDIA_PNG_MAX_BYTES, 0x41),
+    );
+    const read = vi.mocked(readSync);
+    read.mockClear();
+
+    expect(observeAcceptedMediaPng({ thumbsDir, basis })).toEqual({ kind: "missing" });
+
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds observation retries when descriptor identity keeps racing", () => {
+    const thumbsDir = cacheFixture();
+    mkdirSync(thumbsDir);
+    writeFileSync(acceptedMediaCachePath({ thumbsDir, basis }), png);
+    const otherPath = join(thumbsDir, "other-observation.png");
+    writeFileSync(otherPath, png);
+    const otherStats = statSync(otherPath);
+    const descriptorStats = vi.mocked(fstatSync);
+    descriptorStats.mockClear();
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      descriptorStats.mockImplementationOnce(() => otherStats);
+    }
+
+    expect(observeAcceptedMediaPng({ thumbsDir, basis })).toEqual({ kind: "missing" });
+
+    expect(descriptorStats).toHaveBeenCalledTimes(8);
+  });
+
   it("writes and reads a mode-0600 PNG without leaving temporary files", () => {
     const thumbsDir = cacheFixture();
 

@@ -6,15 +6,27 @@ import { join } from "node:path";
 import { SqliteDatabase, getDb } from "./client.js";
 import { AppRepository } from "./repository.js";
 
-function assembledForPart(repo: AppRepository, profileId: number, partId: number) {
-  const part = repo
-    .getEnrichedPartsForReview(profileId, true)
-    .find((candidate) => candidate.id === partId);
-  if (!part) throw new Error("test Part is missing");
-  return {
-    assembled_count: part.assembled_units.filter(Boolean).length,
-    assembled_units: part.assembled_units,
-  };
+function assembledForPart(dataDir: string, partId: number) {
+  const database = new Database(join(dataDir, "print-partner.db"), { readonly: true });
+  try {
+    const rows = database
+      .prepare("SELECT assembled FROM print_progress WHERE part_id = ? ORDER BY unit_index")
+      .all(partId) as { assembled: number }[];
+    const quantity = database
+      .prepare("SELECT quantity_effective FROM parts WHERE id = ?")
+      .pluck()
+      .get(partId) as number;
+    const assembledUnits = Array.from(
+      { length: Math.max(1, quantity) },
+      (_, index) => rows[index]?.assembled === 1,
+    );
+    return {
+      assembled_count: assembledUnits.filter(Boolean).length,
+      assembled_units: assembledUnits,
+    };
+  } finally {
+    database.close();
+  }
 }
 
 /**
@@ -106,19 +118,18 @@ describe("print_progress.assembled migration", () => {
 
       const partId = repo.getCheckoff(plan.id).parts[0].id;
 
-      // New rows default to false via the read accessor.
-      expect(assembledForPart(repo, plan.id, partId)).toMatchObject({
+      expect(assembledForPart(dir, partId)).toMatchObject({
         assembled_count: 0,
         assembled_units: [false],
       });
 
       // Write accessor is gated on the unit being printed first.
       repo.patchPartAssembled(partId, 0, true);
-      expect(assembledForPart(repo, plan.id, partId).assembled_units).toEqual([false]);
+      expect(assembledForPart(dir, partId).assembled_units).toEqual([false]);
 
       repo.patchPartProgress(partId, 0, true);
       repo.patchPartAssembled(partId, 0, true);
-      expect(assembledForPart(repo, plan.id, partId)).toMatchObject({
+      expect(assembledForPart(dir, partId)).toMatchObject({
         assembled_count: 1,
         assembled_units: [true],
       });
@@ -127,8 +138,7 @@ describe("print_progress.assembled migration", () => {
       sqlite.close();
       const reopened = new SqliteDatabase(dir);
       reopened.connect();
-      const repo2 = new AppRepository(getDb(reopened), undefined, reopened.reposDir);
-      expect(assembledForPart(repo2, plan.id, partId).assembled_units).toEqual([true]);
+      expect(assembledForPart(dir, partId).assembled_units).toEqual([true]);
       reopened.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

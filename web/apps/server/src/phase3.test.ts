@@ -10,7 +10,6 @@ import { loadConfig } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { buildStlTreePayload, progressSummary } from "@print-partner/domain";
 import { exportProfileStlPack, exportStlPackJobMessage, STL_EXPORT_MISSING_HINT } from "./services/export-stl-pack.js";
-import { buildPlanReview } from "./services/plan-review.js";
 import { backfillAcceptedPlanRevisions } from "./db/accepted-plan-revisions.js";
 import { backfillCurrentRequiredUnitSets } from "./db/required-units.js";
 
@@ -22,42 +21,6 @@ describe("Phase 3 APIs", () => {
     const payload = buildStlTreePayload(dir, JSON.stringify(["parts/"]));
     expect(payload.total).toBe(1);
     expect(payload.selected).toBe(1);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("plan review includes print_units and include_excluded", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-rev-"));
-    const sqlite = new SqliteDatabase(dir);
-    sqlite.connect();
-    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
-    const source = repo.createSource({ name: "Repo", url: "https://github.com/a/b", source_kind: "github" });
-    const repoPath = join(dir, "repos", String(source.id));
-    mkdirSync(join(repoPath, "x"), { recursive: true });
-    writeFileSync(join(repoPath, "x", "part.stl"), "x");
-    repo.updateSource(source.id, { local_path: repoPath });
-    repo.updateImportRules(source.id, ["x/"]);
-
-    const plan = repo.createProfile("Plan", source.id);
-    await repo.recomputeProfile(plan.id);
-
-    const review = buildPlanReview(repo, plan.id);
-    const parts = review.part_groups.flatMap((g) => g.parts);
-    expect(parts.length).toBeGreaterThan(0);
-    expect(parts[0].print_units).toEqual([false]);
-    expect(parts[0].printed_count).toBe(0);
-    expect(parts[0].missing).toBe(true);
-    expect(parts[0].filament_display).toBeDefined();
-
-    const partId = parts[0].id;
-    repo.patchPart(partId, { included: false });
-    const defaultReview = buildPlanReview(repo, plan.id);
-    expect(defaultReview.part_groups.flatMap((g) => g.parts)).toHaveLength(0);
-
-    const withExcluded = buildPlanReview(repo, plan.id, { includeExcluded: true });
-    const excludedParts = withExcluded.part_groups.flatMap((g) => g.parts);
-    expect(excludedParts.some((p) => !p.included)).toBe(true);
-
-    sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -108,26 +71,16 @@ describe("Phase 3 APIs", () => {
     const checkoff = repo.getCheckoff(plan.id);
     const partId = checkoff.parts[0].id;
 
-    // New print_progress rows default to assembled=false, and it's only
-    // reachable once a unit is completed (mirrors the checkoff UI's own gating).
-    const enriched = repo.getEnrichedPartsForReview(plan.id, false);
-    expect(enriched[0].assembled_units).toEqual([false]);
+    expect(repo.patchPartProgress(partId, 0, false).assembled_units).toEqual([false]);
 
     repo.patchPartProgress(partId, 0, true);
     const patched = repo.patchPartAssembled(partId, 0, true);
     expect(patched.assembled_count).toBe(1);
     expect(patched.assembled_units).toEqual([true]);
 
-    const afterAssembled = repo.getEnrichedPartsForReview(plan.id, false);
-    expect(afterAssembled[0].assembled_units).toEqual([true]);
-
-    // Toggling back off works too — the column is read/write, not append-only.
     const unset = repo.patchPartAssembled(partId, 0, false);
     expect(unset.assembled_units).toEqual([false]);
 
-    // Same round trip through the actual HTTP endpoint used by the frontend,
-    // to prove the route is wired end-to-end and doesn't break the existing
-    // /parts/:id/progress contract alongside it.
     const raw = new Database(join(dir, "print-partner.db"));
     raw.pragma("foreign_keys = ON");
     backfillAcceptedPlanRevisions(raw, "2026-08-21T06:00:00.000Z");
@@ -263,10 +216,6 @@ describe("Phase 3 APIs", () => {
     const plan = repo.createProfile("RemainingFresh", source.id);
     await repo.recomputeProfile(plan.id);
 
-    const review = buildPlanReview(repo, plan.id);
-    expect(review.has_blockers).toBe(false);
-    expect(review.totals.total_print_units).toBeGreaterThan(0);
-
     const app = await buildApp(config, ports);
     const res = await app.inject({
       method: "POST",
@@ -307,10 +256,6 @@ describe("Phase 3 APIs", () => {
     const plan = repo.createProfile("BlockerFresh", source.id);
     await repo.recomputeProfile(plan.id);
     rmSync(join(repoPath, "p", "gone.stl"));
-
-    const review = buildPlanReview(repo, plan.id);
-    expect(review.has_blockers).toBe(true);
-    expect(review.issues.some((i) => i.code === "missing_stl")).toBe(true);
 
     const app = await buildApp(config, ports);
     const res = await app.inject({

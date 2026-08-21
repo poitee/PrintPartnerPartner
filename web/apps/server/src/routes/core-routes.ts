@@ -71,6 +71,7 @@ export async function registerCoreRoutes(
   await registerPlanRoutes(app, {
     repo: deps.repo,
     dataDir: deps.dataDir,
+    reposDir: deps.reposDir,
     thumbsDir: deps.thumbsDir,
   });
   await registerPartRoutes(app, {

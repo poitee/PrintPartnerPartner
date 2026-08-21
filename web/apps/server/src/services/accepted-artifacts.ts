@@ -87,14 +87,14 @@ type ResolvedArtifactPath =
   | { readonly kind: "resolved"; readonly path: string }
   | { readonly kind: "unusable"; readonly reason: AcceptedArtifactObservationFailure };
 
-function resolveArtifactPath(input: {
+type ResolvedSnapshotRoot =
+  | { readonly kind: "resolved"; readonly path: string }
+  | { readonly kind: "unusable"; readonly reason: AcceptedArtifactObservationFailure };
+
+function resolveSnapshotRoot(input: {
   readonly reposDir: string;
   readonly snapshotRoot: string;
-  readonly relativePath: string;
-}): ResolvedArtifactPath {
-  if (!isSafeRelativePath(input.relativePath)) {
-    return { kind: "unusable", reason: "unsafe_path" };
-  }
+}): ResolvedSnapshotRoot {
   try {
     const configuredReposRoot = resolve(input.reposDir);
     const snapshotPath = resolve(input.snapshotRoot);
@@ -113,8 +113,36 @@ function resolveArtifactPath(input: {
     if (!isContained(reposRoot, snapshotRoot) || snapshotRoot === reposRoot) {
       return { kind: "unusable", reason: "unsafe_path" };
     }
+    return { kind: "resolved", path: snapshotRoot };
+  } catch (error) {
+    return { kind: "unusable", reason: fileErrorReason(error) };
+  }
+}
 
-    let current = snapshotRoot;
+export function observeAcceptedSnapshotRoot(input: {
+  readonly reposDir: string;
+  readonly snapshotRoot: string;
+}):
+  | { readonly kind: "available" }
+  | { readonly kind: "unusable"; readonly reason: AcceptedArtifactObservationFailure } {
+  const result = resolveSnapshotRoot(input);
+  return result.kind === "resolved"
+    ? { kind: "available" }
+    : { kind: "unusable", reason: result.reason };
+}
+
+function resolveArtifactPath(input: {
+  readonly reposDir: string;
+  readonly snapshotRoot: string;
+  readonly relativePath: string;
+}): ResolvedArtifactPath {
+  if (!isSafeRelativePath(input.relativePath)) {
+    return { kind: "unusable", reason: "unsafe_path" };
+  }
+  const root = resolveSnapshotRoot(input);
+  if (root.kind === "unusable") return root;
+  try {
+    let current = root.path;
     const segments = input.relativePath.split("/");
     for (const [index, segment] of segments.entries()) {
       const matches = readdirSync(current).filter(

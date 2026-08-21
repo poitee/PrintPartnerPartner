@@ -4,10 +4,15 @@ import type { AssistantActionType, AssistantProposedAction, PrinterHostStatus } 
 import { isAssistantUiAction } from "@print-partner/contracts";
 import { listStlRelativePaths, safeRepoPath } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
+import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import type { IntegrationPort } from "../integrations/store.js";
 import { loadKitCatalog } from "../services/kit-catalog.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
-import { buildPlanReview } from "../services/plan-review.js";
+import {
+  readAcceptedPlanReview,
+  summarizeAcceptedPlanReview,
+} from "../services/accepted-plan-review.js";
+import { preloadSpoolmanForColorIds } from "../services/filament-resolve.js";
 import { applyStackPresetToProfile, resolveStackPresetId } from "../services/stack-preset.js";
 import {
   conflictsForStack,
@@ -735,6 +740,7 @@ export type ToolContext = {
   activePlanId?: number | null;
   useOtherBuildsAsExamples?: boolean;
   dataDir?: string | null;
+  thumbsDir?: string | null;
   /** When set and configured, guide ingest may run a structured LLM refinement pass. */
   assistant?: AssistantPort | null;
   /**
@@ -754,10 +760,13 @@ function asInt(raw: unknown): number | null {
   return null;
 }
 
-function resolvePlanId(input: Record<string, unknown>, ctx: ToolContext): number | null {
+function resolvePlanId(
+  input: Record<string, unknown>,
+  ctx: ToolContext,
+  validateRequested = true,
+): number | null {
   const requested = asInt(input.plan_id);
-  // Models sometimes invent plan ids; only trust input when the plan actually exists.
-  if (requested != null && ctx.repo.getProfile(requested)) return requested;
+  if (requested != null && (!validateRequested || ctx.repo.getProfile(requested))) return requested;
   return ctx.activePlanId != null ? ctx.activePlanId : null;
 }
 
@@ -1128,34 +1137,61 @@ export async function invokeAssistantTool(
       }
 
       case "get_plan_review": {
-        const planId = resolvePlanId(input, ctx);
+        let planId = resolvePlanId(input, ctx, false);
         if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
-        if (!ctx.repo.getProfile(planId)) {
+        let result;
+        try {
+          const read = (profileId: number) => {
+            const dataDir = ctx.dataDir?.trim() || null;
+            return readAcceptedPlanReview({
+              repo: ctx.repo,
+              profileId,
+              includeExcluded: false,
+              reposDir: ctx.repo.reposDir,
+              thumbsDir: ctx.thumbsDir?.trim() || null,
+              loadFilamentContext: dataDir
+                ? (colorIds) =>
+                    preloadSpoolmanForColorIds({ repo: ctx.repo, dataDir }, colorIds)
+                : undefined,
+            });
+          };
+          result = await read(planId);
+          const requested = asInt(input.plan_id);
+          if (
+            result.kind === "not_found" &&
+            requested != null &&
+            ctx.activePlanId != null &&
+            ctx.activePlanId !== requested
+          ) {
+            planId = ctx.activePlanId;
+            result = await read(planId);
+          }
+        } catch (error) {
+          return {
+            content: JSON.stringify({
+              error:
+                error instanceof AcceptedPlanOperationalIntegrityError
+                  ? "Accepted Plan data is inconsistent"
+                  : "Internal Server Error",
+            }),
+          };
+        }
+        if (result.kind === "not_found") {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
-        const review = buildPlanReview(ctx.repo, planId);
-        const blockers = review.issues.filter((i) => i.severity === "blocker");
-        const warnings = review.issues.filter((i) => i.severity === "warning");
+        if (result.kind === "accepted_state_unavailable") {
+          return {
+            content: JSON.stringify({
+              error:
+                result.reason === "compatibility_dirty"
+                  ? "Accepted Plan requires compatibility repair"
+                  : "Accepted Plan operational state is not initialized",
+            }),
+          };
+        }
+        const review = result.body;
         return {
-          content: JSON.stringify({
-            plan_id: review.profile_id,
-            plan_name: review.plan_name,
-            has_blockers: review.has_blockers,
-            blocker_count: blockers.length,
-            warning_count: warnings.length,
-            issue_codes: [...new Set(review.issues.map((i) => i.code))],
-            sample_issues: review.issues.slice(0, 8).map((i) => ({
-              severity: i.severity,
-              code: i.code,
-              message: i.message,
-            })),
-            totals: review.totals,
-            layers: review.layers.map((l) => ({
-              type: l.layer_type,
-              source: l.project_name,
-              synced: l.synced,
-            })),
-          }),
+          content: JSON.stringify(summarizeAcceptedPlanReview(review)),
         };
       }
 

@@ -595,9 +595,6 @@ describe("accepted Plan operational snapshot", () => {
       .get(profile.id) as number;
     const before = context.raw.prepare("SELECT * FROM print_progress ORDER BY id").all();
 
-    expect(context.repo.getEnrichedPartsForReview(profile.id, false)).toMatchObject([
-      { print_units: [false, false], assembled_units: [false, false], printed_count: 0 },
-    ]);
     expect(context.repo.getCheckoff(profile.id).parts).toMatchObject([
       { print_units: [false, false], printed_count: 0 },
     ]);
@@ -634,7 +631,6 @@ describe("accepted Plan operational snapshot", () => {
     expect(body("patchPartProgress(", "patchPartAssembled(")).toMatch(callPattern);
     expect(body("patchPartAssembled(", "patchPart(\n")).toMatch(callPattern);
     expect(body("patchPart(\n", "buildMergePartsForProfile(")).toMatch(callPattern);
-    expect(body("getEnrichedPartsForReview(", "getCheckoff(")).not.toMatch(callPattern);
     expect(body("getCheckoff(", "patchPartProgress(")).not.toMatch(callPattern);
   });
 
@@ -1208,7 +1204,6 @@ describe("accepted Plan operational snapshot", () => {
       pgSchema as unknown as SchemaTables,
     );
     try {
-      expect(repo.getEnrichedPartsForReview(1, false)).toEqual([]);
       expect(repo.getCheckoff(1)).toMatchObject({ profile_id: 1, parts: [] });
       expect(statements.length).toBeGreaterThan(0);
       expect(statements.every((statement) => /^select\b/i.test(statement.trim()))).toBe(true);
