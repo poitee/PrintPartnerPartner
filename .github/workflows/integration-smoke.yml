@@ -78,7 +78,7 @@ jobs:
                 http://127.0.0.1:18765/plans \
                 | python3 -c 'import json,sys; data=json.load(sys.stdin); assert isinstance(data.get("id"), int); assert data.get("name") == "Postgres CI smoke"' \
                 && curl --fail --silent --show-error http://127.0.0.1:18765/plans \
-                | python3 -c 'import json,sys; data=json.load(sys.stdin); profiles=data.get("profiles"); assert isinstance(profiles, list) and len(profiles) == 1; profile=profiles[0]; assert isinstance(profile.get("id"), int); assert profile.get("name") == "Postgres CI smoke"; assert isinstance(profile.get("part_count"), int); assert isinstance(profile.get("remaining_units"), int); assert isinstance(profile.get("total_units"), int); assert isinstance(profile.get("build_stale"), bool)'
+                | python3 -c 'import json,sys; data=json.load(sys.stdin); profiles=data.get("profiles"); assert isinstance(profiles, list) and len(profiles) == 1; profile=profiles[0]; assert isinstance(profile.get("id"), int); assert profile.get("name") == "Postgres CI smoke"; assert isinstance(profile.get("part_count"), int); assert isinstance(profile.get("build_stale"), bool); progress=profile.get("accepted_progress"); assert isinstance(progress, dict) and progress.get("kind") == "empty"'
               then
                 exit 0
               fi
