@@ -59,6 +59,9 @@ vi.mock("../queries/profiles", () => ({
 vi.mock("../hooks/useMediaQuery", () => ({
   useMediaQuery: () => state.mobile,
 }));
+vi.mock("../components/share/IncomingSharesCard", () => ({
+  default: () => <div data-testid="incoming-shares">Shared builds</div>,
+}));
 
 describe("PlansPage", () => {
   afterEach(cleanup);
@@ -98,6 +101,7 @@ describe("PlansPage", () => {
     ).toBe("BUTTON");
     expect(within(mobileBuilds).getByText("6 remaining").textContent).toBe("6 remaining");
     expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByTestId("incoming-shares").textContent).toBe("Shared builds");
   });
 
   it("renders one accessible Builds table on wider screens", () => {

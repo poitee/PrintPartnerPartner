@@ -28,6 +28,7 @@ import { openSponsor } from "../lib/supportLinks";
 import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
 import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import { useWorkflowStages } from "../hooks/useWorkflowStages";
+import { pageDensityFromPath } from "../lib/pageDensity";
 import {
   isBuildPath,
   isExportPath,
@@ -208,8 +209,9 @@ export default function AppLayout() {
             <main
               id="main-content"
               tabIndex={-1}
+              data-density={pageDensityFromPath(location.pathname)}
               className={cn(
-                "flex-1 overflow-x-hidden overflow-y-auto p-3 pb-28 sm:p-5 sm:pb-24 lg:pb-20 print:overflow-visible print:p-0",
+                "flex-1 overflow-x-hidden overflow-y-auto p-[var(--density-page-pad)] pb-28 sm:pb-24 lg:pb-20 print:overflow-visible print:p-0",
               )}
             >
               <ErrorBoundary key={location.pathname}>

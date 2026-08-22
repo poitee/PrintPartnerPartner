@@ -13,6 +13,7 @@ import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import EmptyState from "../components/layout/EmptyState";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
+import IncomingSharesCard from "../components/share/IncomingSharesCard";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import {
@@ -203,6 +204,7 @@ export default function PlansPage() {
           </PageHeaderActions>
         ) : undefined}
       />
+      <IncomingSharesCard />
       <p
         className="sr-only"
         role="status"

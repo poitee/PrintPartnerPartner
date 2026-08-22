@@ -12,6 +12,12 @@ describe("isSpaClientPath", () => {
     expect(isSpaClientPath("/reset-password")).toBe(true);
     expect(isSpaClientPath("/plans/7/studio")).toBe(true);
     expect(isSpaClientPath("/printers")).toBe(true);
+    expect(isSpaClientPath("/library")).toBe(true);
+    expect(isSpaClientPath("/parts")).toBe(true);
+    expect(isSpaClientPath("/progress")).toBe(true);
+    expect(isSpaClientPath("/export")).toBe(true);
+    expect(isSpaClientPath("/production")).toBe(true);
+    expect(isSpaClientPath("/dev/catalog")).toBe(true);
   });
 
   it("ignores API-only paths", () => {

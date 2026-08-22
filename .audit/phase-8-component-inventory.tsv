@@ -1,0 +1,49 @@
+name	status	why	owner
+ui/button	Keep	Primary action primitive; catalog covers default, secondary, ghost, disabled.	web/apps/web/src/components/ui/button.tsx
+ui/input	Keep	Search and form fields share one control.	web/apps/web/src/components/ui/input.tsx
+ui/textarea	Keep	Notes and longer fields.	web/apps/web/src/components/ui/textarea.tsx
+ui/select	Keep	Single-choice menus.	web/apps/web/src/components/ui/select.tsx
+ui/combobox	Keep	Searchable choice lists.	web/apps/web/src/components/ui/combobox.tsx
+ui/switch	Keep	Boolean settings.	web/apps/web/src/components/ui/switch.tsx
+ui/label	Keep	Accessible field names.	web/apps/web/src/components/ui/label.tsx
+ui/field	Keep	Form grouping.	web/apps/web/src/components/ui/field.tsx
+ui/input-group	Keep	Composite search/actions.	web/apps/web/src/components/ui/input-group.tsx
+ui/badge	Keep	Status chips.	web/apps/web/src/components/ui/badge.tsx
+ui/card	Keep	Revise padding via density tokens only.	web/apps/web/src/components/ui/card.tsx
+ui/tabs	Keep	Settings and Help sections.	web/apps/web/src/components/ui/tabs.tsx
+ui/dialog	Keep	Create/rename/archive confirms.	web/apps/web/src/components/ui/dialog.tsx
+ui/sheet	Keep	Detail drawers.	web/apps/web/src/components/ui/sheet.tsx
+ui/popover	Keep	Overflow menus that need a panel.	web/apps/web/src/components/ui/popover.tsx
+ui/dropdown-menu	Keep	Row actions.	web/apps/web/src/components/ui/dropdown-menu.tsx
+ui/tooltip	Keep	Icon-only chrome.	web/apps/web/src/components/ui/tooltip.tsx
+ui/separator	Keep	Visual grouping.	web/apps/web/src/components/ui/separator.tsx
+ui/scroll-area	Keep	Bounded lists.	web/apps/web/src/components/ui/scroll-area.tsx
+ui/skeleton	Keep	Loading states.	web/apps/web/src/components/ui/skeleton.tsx
+ui/spinner	Keep	Inline busy.	web/apps/web/src/components/ui/spinner.tsx
+ui/empty	Keep	Primitive empty; EmptyState owns page copy.	web/apps/web/src/components/ui/empty.tsx
+ui/sonner	Keep	Toasts.	web/apps/web/src/components/ui/sonner.tsx
+ui/command	Keep	Command palette.	web/apps/web/src/components/ui/command.tsx
+ui/segmented-control	Keep	Filter and sketch switches.	web/apps/web/src/components/ui/segmented-control.tsx
+layout/PageHeader	Keep	One title owner per page.	web/apps/web/src/components/layout/PageHeader.tsx
+layout/EmptyState	Keep	Empty copy and icon.	web/apps/web/src/components/layout/EmptyState.tsx
+layout/SpineRail	Keep	Global Builds Production Printers Settings.	web/apps/web/src/components/layout/SpineRail.tsx
+layout/RouteBreadcrumbs	Keep	Build destination trail.	web/apps/web/src/components/layout/RouteBreadcrumbs.tsx
+plan/PlanDraftPanel	Keep	Plan-owned Apply.	web/apps/web/src/components/plan/PlanDraftPanel.tsx
+checkoff/PrintVerifyPanel	Keep	Build Checkoff owns verification.	web/apps/web/src/components/checkoff/PrintVerifyPanel.tsx
+checkoff/paper sheet CSS	Keep	Paper tokens stay independent of interactive density.	web/apps/web/src/App.css
+export/accepted-plates/*	Revise	Production owner; Phase 9 still owes Arrange unplaced/all undo and saved XY editor polish.	web/apps/web/src/components/export/accepted-plates
+export/PrinterSendPanel	Revise	Remove first-printer fallback in Phase 9.	web/apps/web/src/components/export/PrinterSendPanel.tsx
+export/SlicerHandoffPanel	Keep	Download, managed open, local Open with.	web/apps/web/src/components/export/SlicerHandoffPanel.tsx
+share/IncomingSharesCard	Keep	Mounted on Builds; outgoing sharing stays live.	web/apps/web/src/pages/PlansPage.tsx
+settings/PrintersSettingsCard	Merge	Global Printers section owns setup; Settings copy remains until Phase 9 detail view.	web/apps/web/src/components/settings/PrintersSettingsCard.tsx
+settings/PrinterProfileAssignmentSection	Remove	Slicer profiles stay in the user's slicer; Phase 9 retires printer-bound assignment.	web/apps/web/src/components/settings/PrinterProfileAssignmentSection.tsx
+PlanTray leftover copy	Revise	Spine already owns workflow; tray still says plan in places.	web/apps/web/src/components/PlanTray.tsx
+WelcomePage	Remove	Deleted; Builds is home.	web/apps/web/src/pages/WelcomePage.tsx
+pages/PartsPage.tsx filename	Revise	Canonical owner is Plan at /plan; rename is optional cleanup.	web/apps/web/src/pages/PartsPage.tsx
+pages/ExportPage.tsx filename	Revise	Canonical owner is Build Production at /export; rename is optional cleanup.	web/apps/web/src/pages/ExportPage.tsx
+pages/PlansPage.tsx filename	Revise	Canonical owner is Builds at /builds; rename is optional cleanup.	web/apps/web/src/pages/PlansPage.tsx
+pages/DevCatalogPage	Keep	Maintainer catalog for primitives, sketches, and inventory.	web/apps/web/src/pages/DevCatalogPage.tsx
+checkoff/PrinterQueueSuggestionBanner	Revise	Production should own queue suggestions after Phase 9.	web/apps/web/src/components/checkoff/PrinterQueueSuggestionBanner.tsx
+checkoff/PrinterLiveStrip	Revise	Live printer status belongs on Production and Printers.	web/apps/web/src/components/checkoff/PrinterLiveStrip.tsx
+CommandPalette	Keep	Keyboard jumps across the accepted site map.	web/apps/web/src/components/CommandPalette.tsx
+JobTray	Keep	Background jobs stay out of the spine.	web/apps/web/src/components/JobTray.tsx

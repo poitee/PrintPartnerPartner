@@ -33,7 +33,7 @@ import { Skeleton } from "../components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
-import { buildSourcesRoute, checkoffRoute, exportRoute, planRoute } from "../lib/routes";
+import { buildSourcesRoute, catalogRoute, checkoffRoute, exportRoute, planRoute } from "../lib/routes";
 import { resolveEngineState } from "../lib/workflowState";
 
 type LegalTab = "summary" | "license" | "attribution" | "third-party";
@@ -423,6 +423,14 @@ export default function HelpPage() {
           )}
         </CardContent>
       </Card>
+
+      <p className="text-xs text-muted-foreground">
+        Maintainer catalog of primitives and visual sketches:{" "}
+        <Link className="underline-offset-2 hover:underline" to={catalogRoute()}>
+          Component catalog
+        </Link>
+        .
+      </p>
 
       <Card>
         <CardHeader accent>

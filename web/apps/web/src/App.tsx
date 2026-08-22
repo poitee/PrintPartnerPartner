@@ -30,6 +30,7 @@ const PlansPage      = lazy(() => import("./pages/PlansPage"));
 const PrintersPage   = lazy(() => import("./pages/PrintersPage"));
 const SettingsPage   = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage    = lazy(() => import("./pages/SourcesPage"));
+const DevCatalogPage = lazy(() => import("./pages/DevCatalogPage"));
 
 // ─── Minimal page-transition fallback ─────────────────────────────────────────
 // Shown only on first load of a chunk — cached chunks render instantly.
@@ -144,6 +145,7 @@ export default function App() {
                             <Route path="printers" element={<PrintersPage />} />
                             <Route path="settings" element={<SettingsPage />} />
                             <Route path="help" element={<HelpPage />} />
+                            <Route path="dev/catalog" element={<DevCatalogPage />} />
                           </Route>
                         </Route>
                       </Routes>

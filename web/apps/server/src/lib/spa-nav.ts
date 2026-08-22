@@ -18,6 +18,12 @@ const SPA_PATHS = new Set([
   "/plate",
   "/print",
   "/printers",
+  "/library",
+  "/parts",
+  "/progress",
+  "/export",
+  "/production",
+  "/dev/catalog",
 ]);
 
 function requestPathname(url: string): string {

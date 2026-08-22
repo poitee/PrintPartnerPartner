@@ -14,7 +14,7 @@ status, dependencies, and implementation units.
 | 5. API contracts | Partial | Source naming routes and persistence exist, but the browser trusts unparsed JSON and the shared package has no runtime naming contract. Invalid folder rules and invalid default quantities can reach storage. |
 | 6. Frontend state ownership | Partial | Query modules exist, but `SourcesPage` and `BuildPage` keep competing Source snapshots. `PlanWorkspaceContext.revision` is a refetch counter, not a Plan revision. |
 | 7. Workflow model | Partial | Accepted Source input provenance exists. A durable Plan draft, an accepted parts Plan revision, an idempotent apply command, and rebase do not exist. |
-| 8. Site structure | Stale and missing | The shell and route tests still use Library, Plan, Parts, Progress, and Export. The accepted Build-scoped route group does not exist. |
+| 8. Site structure | Landed | Canonical routes, Global vs Build Production, Builds restore/counts, hybrid catalog, calm/dense density, and IncomingShares on Builds are in code. Optional filename renames (PartsPage/ExportPage) remain. |
 | 9. Production workspace | Partial | Translation-only placement, named-object 3MF export, STL bundle modes, printer observation, and verification exist. Stable Plate identity, saved placement, artifact identity, and safe ambiguous matching do not exist. |
 | 10. End-to-end proof | Missing | Current browser tests use static HTML. The real stack has no browser journey or genuine slicer-derived identity fixture. |
 | 11. Platform boundary | Partial | Postgres is explicitly gated, but public documentation still overstates S3, Redis, BullMQ, multitenancy, and multi-instance support. |

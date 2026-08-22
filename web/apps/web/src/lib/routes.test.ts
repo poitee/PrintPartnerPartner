@@ -3,8 +3,10 @@ import {
   buildRoute,
   buildSourcesRoute,
   buildsRoute,
+  catalogRoute,
   checkoffRoute,
   exportRoute,
+  isCatalogPath,
   isBuildPath,
   isBuildsPath,
   isCheckoffPath,
@@ -59,6 +61,7 @@ describe("workflow routes", () => {
     expect(exportRoute(5)).toBe("/export?profile=5");
     expect(buildsRoute(5)).toBe("/builds?profile=5");
     expect(plansRoute(5)).toBe("/builds?profile=5");
+    expect(catalogRoute()).toBe("/dev/catalog");
   });
 
   it("legacy aliases point at canonical paths", () => {
@@ -104,6 +107,8 @@ describe("path matchers", () => {
     expect(isCheckoffPath("/checkoff")).toBe(true);
     expect(isCheckoffPath("/progress")).toBe(true);
     expect(isCheckoffPath("/review")).toBe(false);
+    expect(isCatalogPath("/dev/catalog")).toBe(true);
+    expect(isCatalogPath("/catalog")).toBe(false);
   });
 
   it("detects plan workflow paths", () => {

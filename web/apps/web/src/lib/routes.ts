@@ -63,6 +63,15 @@ export function printersRoute(): string {
   return "/printers";
 }
 
+/** Maintainer catalog for Phase 8 primitives and visual sketches. */
+export function catalogRoute(): string {
+  return "/dev/catalog";
+}
+
+export function isCatalogPath(pathname: string): boolean {
+  return pathname === "/dev/catalog";
+}
+
 export function helpRoute(): string {
   return "/help";
 }

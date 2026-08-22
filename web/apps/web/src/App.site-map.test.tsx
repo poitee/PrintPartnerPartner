@@ -60,6 +60,7 @@ vi.mock("./pages/SourcesPage", () => ({ default: () => <h1>Library</h1> }));
 vi.mock("./pages/PrintersPage", () => ({ default: () => <h1>Printers</h1> }));
 vi.mock("./pages/SettingsPage", () => ({ default: () => <h1>Settings</h1> }));
 vi.mock("./pages/HelpPage", () => ({ default: () => <h1>Help</h1> }));
+vi.mock("./pages/DevCatalogPage", () => ({ default: () => <h1>Component catalog</h1> }));
 vi.mock("./pages/LoginPage", () => ({ default: () => <h1>Login</h1> }));
 vi.mock("./pages/ForgotPasswordPage", () => ({ default: () => <h1>Forgot</h1> }));
 vi.mock("./pages/ResetPasswordPage", () => ({ default: () => <h1>Reset</h1> }));
@@ -161,6 +162,18 @@ describe("accepted site map routes", () => {
 
     expect((await screen.findByRole("heading", { name: "Build Production" })).textContent).toBe(
       "Build Production",
+    );
+  });
+
+  it("opens the maintainer catalog at /dev/catalog", async () => {
+    render(
+      <MemoryRouter initialEntries={["/dev/catalog"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect((await screen.findByRole("heading", { name: "Component catalog" })).textContent).toBe(
+      "Component catalog",
     );
   });
 });
