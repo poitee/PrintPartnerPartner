@@ -30,6 +30,7 @@ describe("DevCatalogPage", () => {
     expect(screen.getByText("Remove").textContent).toBe("Remove");
     expect(screen.queryByText("Merge")).toBeNull();
     expect(screen.getByText("settings/PrintersSettingsCard")).toBeTruthy();
+    expect(screen.getByText("export/DirectExportCard")).toBeTruthy();
     expect(screen.getByText(/Global Printers owns setup/)).toBeTruthy();
   });
 

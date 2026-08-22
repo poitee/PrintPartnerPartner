@@ -174,8 +174,11 @@ export default function ExportPage() {
 
           <div className="space-y-3">
             <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Slicer input
+              Prepare Plates
             </h2>
+            <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+              Allocate units to a Printer, arrange them, then export each Plate as its own 3MF.
+            </p>
 
             <SlicerLinksPanel />
             {selectedProfileId != null ? (
@@ -207,6 +210,14 @@ export default function ExportPage() {
                 </CardContent>
               </Card>
             ) : (
+              <div className="space-y-3">
+                <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Direct export
+                </h2>
+                <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+                  Skip Printer allocation and arrangement. Download one unarranged named-object 3MF
+                  or an STL bundle ZIP for the selected units.
+                </p>
               <div
                 className={cn(
                   "grid gap-4",
@@ -220,6 +231,7 @@ export default function ExportPage() {
                   />
                 </div>
                 <ExportRecentPanel />
+              </div>
               </div>
             )}
 

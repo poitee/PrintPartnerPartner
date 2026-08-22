@@ -14,6 +14,7 @@ import {
   parseUnplaceAcceptedPlateUnitRequest,
   parseTransferAcceptedPlateUnitRequest,
   parseStartAcceptedPlateExportRequest,
+  parseStartDirectExportRequest,
   type AcceptedPlateEndpointError,
   type AcceptedPlateExportRecord,
   type AcceptedPlateMoveReceipt,
@@ -29,6 +30,7 @@ import {
   type UnplaceAcceptedPlateUnitRequest,
   type TransferAcceptedPlateUnitRequest,
   type StartAcceptedPlateExportRequest,
+  type StartDirectExportRequest,
 } from "@print-partner/contracts";
 import {
   ContractRequestError,
@@ -155,6 +157,15 @@ const startExportEndpoint = defineJsonWriteEndpoint({
   parseFailure: parseSafeError,
 });
 
+const startDirectExportEndpoint = defineJsonWriteEndpoint({
+  method: "POST",
+  route: "/jobs/export-direct-3mf",
+  path: () => "/jobs/export-direct-3mf",
+  encodeBody: parseStartDirectExportRequest,
+  parseSuccess: parseJobStart,
+  parseFailure: parseSafeError,
+});
+
 function recentJobsEndpoint(profileId: number) {
   return defineJsonReadEndpoint({
     method: "GET",
@@ -265,6 +276,10 @@ export function restoreAcceptedPlates(
 
 export function startAcceptedPlateExport(input: StartAcceptedPlateExportRequest): Promise<string> {
   return requestJsonWrite(startExportEndpoint, {}, input);
+}
+
+export function startDirectExport(input: StartDirectExportRequest): Promise<string> {
+  return requestJsonWrite(startDirectExportEndpoint, {}, input);
 }
 
 export function fetchAcceptedPlateExportJobs(profileId: number): Promise<readonly AcceptedPlateExportRecord[]> {

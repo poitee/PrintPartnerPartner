@@ -1,18 +1,24 @@
 import { ChevronDown } from "lucide-react";
+import { toast } from "sonner";
+import { parseDirectExportJobResult } from "@print-partner/contracts";
 import {
   startExportStlPack,
   type RoleFilamentRow,
   type StlPackGroupBy,
 } from "../../api/engine";
+import { startDirectExport } from "../../api/endpoints/acceptedPlates";
 import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../../context/ProfileContext";
 import { useEngineHealth } from "../../hooks/useEngineHealth";
 import { useJobRunner } from "../../hooks/useJobRunner";
 import { checkoffUnitTotals } from "../../lib/checkoffProgress";
+import { directExportTokensFromWorkspace } from "../../lib/directExportTokens";
+import { completeExportDownload } from "../../lib/exportActions";
 import { slicerExportGates } from "../../lib/exportActionGates";
 import { handleStlPackExportJobDone } from "../../lib/exportStlJobResult";
 import { planHasUnsetRoleColors } from "../../lib/roleColorSet";
 import { flattenReviewParts } from "../../lib/reviewParts";
+import { useAcceptedPlateWorkspaceQuery } from "../../queries/acceptedPlates";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -30,6 +36,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
+import DirectExportCard from "./DirectExportCard";
 
 type Props = Readonly<{
   onShare: () => void;
@@ -41,6 +48,12 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
   const { selectedProfileId } = useProfileSelection();
   const { review } = usePlanWorkspace();
   const exportStlJob = useJobRunner("stl-export", selectedProfileId);
+  const exportDirectJob = useJobRunner("export-direct-3mf", selectedProfileId);
+  const workspace = useAcceptedPlateWorkspaceQuery(
+    selectedProfileId,
+    selectedProfileId != null && Boolean(health),
+  );
+  const tokens = directExportTokensFromWorkspace(workspace.data);
   const includedParts = review
     ? flattenReviewParts(review.part_groups).filter((part) => part.included)
     : [];
@@ -71,6 +84,26 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
     );
   };
 
+  const exportDirect3mf = () => {
+    if (selectedProfileId == null || tokens.length === 0) return;
+    void exportDirectJob.runJob(
+      () => startDirectExport({ profile_id: selectedProfileId, tokens }),
+      (snapshot) => {
+        if (snapshot.status === "error") {
+          toast.error(snapshot.message || "Direct 3MF failed");
+          return;
+        }
+        try {
+          const result = parseDirectExportJobResult(snapshot.result);
+          completeExportDownload("Direct 3MF", { ...result }, { suggestedFilename: result.filename });
+        } catch {
+          toast.error("Direct 3MF failed");
+        }
+      },
+      { profileId: selectedProfileId },
+    );
+  };
+
   const cards = [
     {
       key: "remaining",
@@ -94,6 +127,11 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
     <div className="space-y-2">
       {colorsUnset ? <p className="text-[12.5px] text-muted-foreground">Colors remain Unassigned on the Plan.</p> : null}
       <div className="grid gap-3 sm:grid-cols-2">
+        <DirectExportCard
+          tokenCount={tokens.length}
+          busy={exportDirectJob.busy}
+          onExport={exportDirect3mf}
+        />
         {cards.map((card) => (
           <Card key={card.key} className="flex flex-col border-border shadow-sm">
             <CardHeader className="space-y-2 pb-2">

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseInitializeAcceptedPlatesRequest } from "@print-partner/contracts";
+import {
+  parseInitializeAcceptedPlatesRequest,
+  parseStartDirectExportRequest,
+} from "@print-partner/contracts";
 import {
   arrangeAcceptedPlates,
   fetchAcceptedPlateExportJobs,
@@ -12,6 +15,7 @@ import {
   restoreAcceptedPlates,
   unplaceAcceptedPlateUnit,
   startAcceptedPlateExport,
+  startDirectExport,
 } from "./acceptedPlates";
 
 const digest = "a".repeat(64);
@@ -141,6 +145,19 @@ describe("accepted Plate endpoints", () => {
       "/slicer-instances/orca%20local/open-accepted-plates",
     ]);
     expect(urls.every((url) => !url.startsWith("/api/v2/jobs"))).toBe(true);
+  });
+
+  it("starts Direct export on the unarranged 3MF job", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ job_id: "job-direct" }));
+
+    await expect(startDirectExport(parseStartDirectExportRequest({
+      profile_id: 7,
+      tokens: [token],
+    }))).resolves.toBe("job-direct");
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method, init?.body])).toEqual([
+      ["/jobs/export-direct-3mf", "POST", JSON.stringify({ profile_id: 7, tokens: [token] })],
+    ]);
   });
 
   it("parses only coarse slicer exchange status without server detail", async () => {
