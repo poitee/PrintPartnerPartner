@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/sponsors/poitee"><img src="https://img.shields.io/badge/GitHub_Sponsors-Sponsor-ea4aaa?style=for-the-badge&logo=github-sponsors&logoColor=white" alt="Sponsor on GitHub Sponsors"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey?style=for-the-badge" alt="CC BY-NC 4.0"></a>
 </p>
 
 <p align="center">
@@ -71,9 +72,9 @@ Optional integrations:
 
 - **[Spoolman](docs/integrations/SPOOLMAN.md)** — pick filaments from inventory on Sources; read-only remaining weights in Plan; optional deduct on send.
 - **Live printers** — **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload with verify-first Checkoff; **Bambu** LAN MQTT is status-only (send deferred). See **[Printer setup](docs/integrations/PRINTER_SETUP.md)**.
-- **Local slicers** - optional Orca/Prusa/Bambu GUI containers with profile watch volumes (`pp-compose.yml`). Print Partner hands off accepted 3MFs; profile and slicing choices stay in the slicer.
+- **Local slicers** — optional Orca/Prusa/Bambu GUI containers with profile watch volumes (`pp-compose.yml`). Print Partner hands off accepted 3MFs; profile and slicing choices stay in the slicer.
 - **Discord digest / Home Assistant** — optional overnight farm digest and HA hooks when configured.
-- **Backups, metrics, rate limits, API keys** — see [`OPERATIONS.md`](OPERATIONS.md).
+- **Backups, metrics, rate limits, API keys** — see [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ---
 
@@ -221,7 +222,7 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 
 The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker upgrade: `docker compose pull && docker compose up -d`.
 
-See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables, MCP attach, and desktop-data migration. Day-two ops (backups, API keys, metrics, rate limits): [`OPERATIONS.md`](OPERATIONS.md).
+See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables, MCP attach, and desktop-data migration. Day-two ops (backups, API keys, metrics, rate limits): [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ---
 
@@ -323,6 +324,6 @@ Credits (people only): **Chad Lynch** ([@poitee](https://github.com/poitee)), **
 - [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, MCP attach
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design
 - [`docs/API.md`](docs/API.md) — HTTP API overview (`/api/v1`, `/api/v2`, MCP)
-- [`OPERATIONS.md`](OPERATIONS.md) — backups, API keys, metrics, day-two ops
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — backups, API keys, metrics, day-two ops
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
 - [`LICENSE`](LICENSE) — full license text

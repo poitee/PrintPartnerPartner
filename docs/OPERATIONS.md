@@ -475,4 +475,4 @@ Last updated: August 15, 2026
 Prepared for: 3.2.0
 <!-- release-version:end -->
 
-For more info: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](SECURITY.md)
+For more info: [ARCHITECTURE.md](ARCHITECTURE.md), [SECURITY.md](../SECURITY.md)

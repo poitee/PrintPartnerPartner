@@ -124,7 +124,7 @@ run, and commit the result:
 ```bash
 node scripts/release.mjs prepare 3.2.0 --dry-run
 node scripts/release.mjs prepare 3.2.0
-git add CHANGELOG.md Dockerfile README.md OPERATIONS.md docker-compose.yml web/package.json web/package-lock.json web/DEPLOY.md
+git add CHANGELOG.md Dockerfile README.md docs/OPERATIONS.md docker-compose.yml web/package.json web/package-lock.json web/DEPLOY.md
 git commit -m "chore(release): prepare v3.2.0"
 node scripts/release.mjs check
 git tag -a v3.2.0 -m "Release v3.2.0"

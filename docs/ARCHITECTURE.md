@@ -55,7 +55,7 @@ File blobs (synced repos, exports, thumbnails) are stored on disk in self-host, 
 
 ## Client rendering
 
-STL previews and Progress thumbnails are rendered **client-side with Three.js** in the React SPA — there is no server-side mesh renderer. The browser downloads STL geometry from the API and rasterizes previews locally. The SPA keeps a small **IndexedDB mesh cache**, decimates heavy meshes for thumbs, and limits concurrent WebGL work so scrolling Progress stays responsive.
+STL previews and Checkoff thumbnails are rendered **client-side with Three.js** in the React SPA — there is no server-side mesh renderer. The browser downloads STL geometry from the API and rasterizes previews locally. The SPA keeps a small **IndexedDB mesh cache**, decimates heavy meshes for thumbs, and limits concurrent WebGL work so scrolling Checkoff stays responsive.
 
 ## HTTP API & integrations
 
@@ -63,8 +63,8 @@ STL previews and Progress thumbnails are rendered **client-side with Three.js** 
 - **Automation auth (self-host):** optional `PRINT_PARTNER_API_KEY` for `/api/v1/*` and `/api/v2/*`.
 - **Integrations:** pluggable adapters under `/api/v1/integrations` (Moonraker, PrusaLink, Bambu status, Spoolman, slicer sidecar, Discord, Home Assistant).
 - **Fleet presets:** `/printers` bed metadata for 3MF packing — separate from live printer hosts.
-- **Live printer hosts:** Moonraker and PrusaLink support status + G-code upload with verify-first Progress; Bambu LAN MQTT is status-only. Setup: [integrations/PRINTER_SETUP.md](./integrations/PRINTER_SETUP.md); research/UX: [integrations/PRINTER_APIS.md](./integrations/PRINTER_APIS.md), [integrations/PRINTER_UX.md](./integrations/PRINTER_UX.md).
-- **Ops endpoints:** backups, API key CRUD, logging export, `/metrics`, and rate limits — see [`../OPERATIONS.md`](../OPERATIONS.md).
+- **Live printer hosts:** Moonraker and PrusaLink support status + G-code upload with verify-first Checkoff; Bambu LAN MQTT is status-only. Setup: [integrations/PRINTER_SETUP.md](./integrations/PRINTER_SETUP.md).
+- **Ops endpoints:** backups, API key CRUD, logging export, `/metrics`, and rate limits — see [OPERATIONS.md](./OPERATIONS.md).
 
 See [API.md](./API.md) for slicer polling, exports, and webhooks.
 

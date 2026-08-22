@@ -210,4 +210,4 @@ Only set `user: "1000:1000"` if `/data` is already owned by uid 1000 (e.g. a pre
 
 ---
 
-**Questions?** See [OPERATIONS.md](OPERATIONS.md) for troubleshooting or [SECURITY.md](SECURITY.md) for security details.
+**Questions?** See [OPERATIONS.md](OPERATIONS.md) for troubleshooting or [SECURITY.md](../SECURITY.md) for security details.

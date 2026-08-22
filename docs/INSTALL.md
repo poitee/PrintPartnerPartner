@@ -198,7 +198,8 @@ Read the log output from `docker compose logs` (or `docker compose up --build` w
 |------|-------------|
 | Run without Docker (Node 22, hot reload) | [README — Run locally without Docker](../README.md#run-locally-without-docker) — `npm run dev` builds shared packages first |
 | Full env var reference, SaaS, API keys | [`web/DEPLOY.md`](../web/DEPLOY.md) |
-| Architecture and design | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) |
+| Architecture and design | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Backups, metrics, day-two ops | [OPERATIONS.md](OPERATIONS.md) |
 
 ---
 

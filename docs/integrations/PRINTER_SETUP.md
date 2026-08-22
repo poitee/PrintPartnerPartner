@@ -1,6 +1,6 @@
 # Printer setup & debugging (desk-first)
 
-How to connect Moonraker / PrusaLink / Bambu (status) hosts, link them to fleet machines, send sliced G-code from Production (Moonraker/PrusaLink), and open Checkoff verify when a host job finishes. Product UX: [PRINTER_UX.md](PRINTER_UX.md). Vendor APIs: [PRINTER_APIS.md](PRINTER_APIS.md).
+How to connect Moonraker / PrusaLink / Bambu (status) hosts, link them to fleet machines, send sliced G-code from Production (Moonraker/PrusaLink), and open Checkoff verify when a host job finishes.
 
 **Phases A–F (desk-first self-host):** Settings hosts + fleet bind + status pill; Production **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Checkoff **live strip** + active **send queue**; **verify-first Checkoff** on successful job complete (confirm/reject); **Bambu LAN MQTT status** (Phase E); thin **Queue for idle** / Send ready (Phase F); **Bambu Connect handoff** (official `bambu-connect://` URL — no MQTT print-start).
 
@@ -150,7 +150,5 @@ The strip polls status about every 5 seconds while the tab is visible; manual �
 
 ## See also
 
-- [Printer UX](PRINTER_UX.md) — screens and phased A→F map
-- [Printer API research](PRINTER_APIS.md) — Moonraker / PrusaLink / Bambu stance
 - [Architecture](../ARCHITECTURE.md) — integrations and fleet presets
 - [HTTP API](../API.md) — `/api/v1/integrations`, jobs

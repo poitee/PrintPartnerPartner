@@ -42,7 +42,7 @@ function fixture() {
     "web/DEPLOY.md",
     `${versioned("Deploy 3.1.0 with PP_VERSION=3.1.0-web.")}Historical v3.1.0 incident.\n`,
   );
-  write(root, "OPERATIONS.md", versioned("Version: 3.1.0"));
+  write(root, "docs/OPERATIONS.md", versioned("Version: 3.1.0"));
   write(
     root,
     "CHANGELOG.md",
@@ -74,7 +74,7 @@ test("release dry-run plan updates every current sink without writing", () => {
       "docker-compose.yml",
       "README.md",
       "web/DEPLOY.md",
-      "OPERATIONS.md",
+      "docs/OPERATIONS.md",
       "CHANGELOG.md",
     ],
   );

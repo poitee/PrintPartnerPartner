@@ -181,7 +181,7 @@ export default function DevCatalogPage() {
           </tbody>
         </table>
         <p className="text-xs text-muted-foreground">
-          Full table: <code>.audit/phase-8-component-inventory.tsv</code>. Return to{" "}
+          Return to{" "}
           <Link className="underline-offset-2 hover:underline" to={buildsRoute()}>
             Builds
           </Link>

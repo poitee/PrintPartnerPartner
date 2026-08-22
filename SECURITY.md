@@ -39,7 +39,7 @@ On start, the entrypoint ensures `/data` is owned by:
 
 Default Compose uses a **named volume** (`print-partner-data`). Named volumes are **not** automatically owned by ppuser — especially on Docker Desktop, a fresh volume is often root-owned. The entrypoint `chown`s `/data` before dropping privileges. Do not set `user: "1000:1000"` in Compose for this path.
 
-If you switch to a **host bind mount** instead (see `NON_ROOT_SETUP.md` Option 2), prepare the host directory for uid 1000:
+If you switch to a **host bind mount** instead (see [`docs/NON_ROOT_SETUP.md`](docs/NON_ROOT_SETUP.md) Option 2), prepare the host directory for uid 1000:
 
 ```bash
 sudo chown 1000:1000 ~/print-partner-data

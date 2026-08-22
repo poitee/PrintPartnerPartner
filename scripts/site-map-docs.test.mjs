@@ -89,7 +89,13 @@ test("public docs describe Builds, Sources, Plan, Checkoff, and Production", () 
       ".superpowers",
       "docs/assistant-research-brief.md",
       "docs/assistant-domain-ingest-schema.md",
+      "docs/research",
+      "docs/integrations/PRINTER_UX.md",
+      "docs/integrations/PRINTER_APIS.md",
       "DATABASE_OPTIMIZATION.md",
+      "CONTEXT.md",
+      "ARCHITECTURE.md",
+      ".audit",
     ],
     { cwd: root, encoding: "utf8" },
   );
@@ -97,6 +103,6 @@ test("public docs describe Builds, Sources, Plan, Checkoff, and Production", () 
   assert.equal(
     trackedPlans.stdout.trim(),
     "",
-    "AI authoring briefs and internal plan trees must not be tracked in git",
+    "AI authoring notes, research packs, and duplicate root docs must not be tracked in git",
   );
 });

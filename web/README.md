@@ -9,7 +9,7 @@ TypeScript monorepo for the browser-hosted Print Partner.
 | `@print-partner/web` | `apps/web` | Vite + React SPA |
 | `@print-partner/server` | `apps/server` | Fastify API |
 | `@print-partner/contracts` | `packages/contracts` | Shared API types |
-| `@print-partner/domain` | `packages/domain` | Domain logic ported from Python |
+| `@print-partner/domain` | `packages/domain` | Domain logic |
 
 ## Quick start
 

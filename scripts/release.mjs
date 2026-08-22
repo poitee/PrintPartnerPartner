@@ -16,7 +16,7 @@ const IMAGE_REPOSITORY = "ghcr.io/poitee/print-partner";
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
-const VERSIONED_DOCS = ["README.md", "web/DEPLOY.md", "OPERATIONS.md"];
+const VERSIONED_DOCS = ["README.md", "web/DEPLOY.md", "docs/OPERATIONS.md"];
 const VERSION_TOKEN = /(?<![\d.])\d+\.\d+\.\d+(?![\d.])/g;
 
 function fail(message) {

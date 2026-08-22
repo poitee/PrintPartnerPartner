@@ -289,7 +289,7 @@ the accepted Plate download.
 
 `GET /filaments/catalog` includes `spoolman_colors` when `default_spoolman_integration_id` is set (Settings) or when `?spoolman_integration_id=` is passed. User guide: [integrations/SPOOLMAN.md](integrations/SPOOLMAN.md).
 
-Moonraker and PrusaLink support test, status, upload, and Progress verify-first checkoff. Bambu supports LAN MQTT status plus **Connect URL handoff** (not MQTT print-start). Setup: [integrations/PRINTER_SETUP.md](integrations/PRINTER_SETUP.md). Research: [integrations/PRINTER_APIS.md](integrations/PRINTER_APIS.md).
+Moonraker and PrusaLink support test, status, upload, and Checkoff verify-first. Bambu supports LAN MQTT status plus **Connect URL handoff** (not MQTT print-start). Setup: [integrations/PRINTER_SETUP.md](integrations/PRINTER_SETUP.md).
 
 **MCP attach (preferred):** streamable HTTP at `/api/v1/mcp` with `PRINT_PARTNER_API_KEY`. There is **no in-app Kit Advisor** and **no Settings → AI**. Guide: [assistant-mcp.md](assistant-mcp.md), [KIT_ADVISOR.md](KIT_ADVISOR.md).
 

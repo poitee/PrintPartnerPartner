@@ -135,5 +135,4 @@ See [API.md](../API.md) for auth and OpenAPI.
 
 ## See also
 
-- [Printer API research](PRINTER_APIS.md) — future live printer hosts (Moonraker, PrusaLink, Bambu) and how Spoolman could bridge to them
-- [Printer UX deep dive](PRINTER_UX.md) — Settings / Production / Checkoff surfaces for live hosts (hosts stay separate from Spoolman inventory)
+- [Printer setup](PRINTER_SETUP.md) — Moonraker / PrusaLink / Bambu hosts (separate from Spoolman inventory)
