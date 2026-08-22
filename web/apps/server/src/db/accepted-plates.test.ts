@@ -17,6 +17,7 @@ import { AppRepository } from "./repository.js";
 import * as pgSchema from "./schema-pg.js";
 import { registerPostgresSyncQuery, unregisterPostgresSyncQuery } from "./sync-db-bridge.js";
 import {
+  arrangeAcceptedPlates,
   initializeAcceptedPlates,
   type AcceptedPlateWorkspaceDependencies,
 } from "../services/accepted-plate-workspace.js";
@@ -904,6 +905,103 @@ endsolid geometry`));
     expect(
       raw.prepare("SELECT count(*) AS count FROM accepted_plate_units").get(),
     ).toEqual({ count: 4 });
+  });
+
+  it("pins a unit, keeps it still for Arrange unplaced, and undoes Arrange all", () => {
+    const { repo, root, profile, accepted, required } = fixture();
+    const plateId = `plate_${"a".repeat(32)}`;
+    const published = repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: null,
+      plates: plateInput(required.map((unit) => unit.token)).map((plate) => ({
+        ...plate,
+        plateId,
+      })),
+    });
+    if (published.kind !== "published") throw new Error("Plate publish failed");
+    const pinnedToken = required[1]!.token;
+    const autoToken = required[0]!.token;
+    const moved = repo.moveAcceptedPlateUnit({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: published.plateRevisionId,
+      plateId,
+      token: pinnedToken,
+      xUm: 70_000,
+      yUm: 10_000,
+    });
+    if (moved.kind !== "moved") throw new Error("Move failed");
+    const pinned = repo.pinAcceptedPlateUnit({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: moved.plateRevisionId,
+      plateId,
+      token: pinnedToken,
+      pinned: true,
+    });
+    expect(pinned).toMatchObject({ kind: "moved" });
+    if (pinned.kind !== "moved") throw new Error("Pin failed");
+
+    const dependencies: AcceptedPlateWorkspaceDependencies = {
+      repository: repo,
+      reposDir: root,
+      limits: {
+        maxArtifactBytes: 1_000_000,
+        maxTotalSourceBytes: 1_000_000,
+        maxObjects: 10,
+        maxTriangles: 10,
+      },
+      loadPrinters: () => [],
+    };
+    const unplaced = arrangeAcceptedPlates(dependencies, {
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: pinned.plateRevisionId,
+      mode: "unplaced",
+    });
+    expect(unplaced.kind).toBe("workspace");
+    if (unplaced.kind !== "workspace" || unplaced.workspace.kind !== "ready") {
+      throw new Error("Arrange unplaced failed");
+    }
+    const pinnedAfterUnplaced = unplaced.workspace.plates[0]!.units.find((unit) => unit.token === pinnedToken);
+    expect(pinnedAfterUnplaced).toMatchObject({ x_um: 70_000, y_um: 10_000, placement: "pinned" });
+    expect(unplaced.workspace.arrange_undo_revision_id).toBeNull();
+
+    const arrangedAll = arrangeAcceptedPlates(dependencies, {
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: unplaced.workspace.plate_revision_id,
+      mode: "all",
+    });
+    expect(arrangedAll.kind).toBe("workspace");
+    if (arrangedAll.kind !== "workspace" || arrangedAll.workspace.kind !== "ready") {
+      throw new Error("Arrange all failed");
+    }
+    expect(arrangedAll.workspace.arrange_undo_revision_id).toBe(unplaced.workspace.plate_revision_id);
+    const pinnedAfterAll = arrangedAll.workspace.plates[0]!.units.find((unit) => unit.token === pinnedToken);
+    expect(pinnedAfterAll?.x_um).not.toBe(70_000);
+    expect(pinnedAfterAll?.y_um).not.toBe(10_000);
+
+    const restored = repo.restoreAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: arrangedAll.workspace.plate_revision_id,
+      restorePlateRevisionId: arrangedAll.workspace.arrange_undo_revision_id!,
+    });
+    expect(restored).toMatchObject({
+      kind: "restored",
+      plateRevisionId: unplaced.workspace.plate_revision_id,
+    });
+    const afterUndo = repo.readAcceptedPlates(profile.id);
+    expect(afterUndo.kind).toBe("ready");
+    if (afterUndo.kind !== "ready") throw new Error("Undo read failed");
+    expect(afterUndo.plates[0]!.units.find((unit) => unit.token === pinnedToken)).toMatchObject({
+      xUm: 70_000,
+      yUm: 10_000,
+      placement: "pinned",
+    });
+    expect(afterUndo.plates[0]!.units.some((unit) => unit.token === autoToken)).toBe(true);
   });
 
   it("returns unchanged for an exact repeated move and rejects a stale Plate revision", () => {

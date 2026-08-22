@@ -5,6 +5,7 @@ import { AcceptedPlateIntegrityError, MAX_ACCEPTED_PLATE_UM } from "../db/accept
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import { ACCEPTED_PART_MESH_MAX_BYTES } from "../services/accepted-part-media.js";
 import {
+  arrangeAcceptedPlates,
   initializeAcceptedPlates,
   readAcceptedPlateWorkspace,
   type AcceptedPlateWorkspaceDependencies,
@@ -130,6 +131,43 @@ function parseMoveRequest(value: unknown): Readonly<{
   const yUm = plateCoordinate(value.y_um);
   if (!expected || expectedPlateRevisionId == null || xUm == null || yUm == null) return null;
   return { expected, expectedPlateRevisionId, xUm, yUm };
+}
+
+function parsePinRequest(value: unknown): Readonly<{
+  expected: AcceptedPlanBasis;
+  expectedPlateRevisionId: number;
+  pinned: boolean;
+}> | null {
+  if (!isRecord(value) || typeof value.pinned !== "boolean") return null;
+  const expected = parseBasis(value.expected);
+  const expectedPlateRevisionId = positiveInteger(value.expected_plate_revision_id);
+  if (!expected || expectedPlateRevisionId == null) return null;
+  return { expected, expectedPlateRevisionId, pinned: value.pinned };
+}
+
+function parseArrangeRequest(value: unknown): Readonly<{
+  expected: AcceptedPlanBasis;
+  expectedPlateRevisionId: number;
+  mode: "unplaced" | "all";
+}> | null {
+  if (!isRecord(value) || (value.mode !== "unplaced" && value.mode !== "all")) return null;
+  const expected = parseBasis(value.expected);
+  const expectedPlateRevisionId = positiveInteger(value.expected_plate_revision_id);
+  if (!expected || expectedPlateRevisionId == null) return null;
+  return { expected, expectedPlateRevisionId, mode: value.mode };
+}
+
+function parseRestoreRequest(value: unknown): Readonly<{
+  expected: AcceptedPlanBasis;
+  expectedPlateRevisionId: number;
+  restorePlateRevisionId: number;
+}> | null {
+  if (!isRecord(value)) return null;
+  const expected = parseBasis(value.expected);
+  const expectedPlateRevisionId = positiveInteger(value.expected_plate_revision_id);
+  const restorePlateRevisionId = positiveInteger(value.restore_plate_revision_id);
+  if (!expected || expectedPlateRevisionId == null || restorePlateRevisionId == null) return null;
+  return { expected, expectedPlateRevisionId, restorePlateRevisionId };
 }
 
 function sendError(
@@ -280,6 +318,73 @@ export async function registerAcceptedPlateRoutes(
         };
       }
       return sendMoveFailure(reply, result);
+    } catch (error) {
+      return sendIntegrityFailure(request, reply, error);
+    }
+  });
+
+  app.patch("/plans/:id/plates/:plateId/units/:token/pin", async (request, reply) => {
+    const id = profileId(request);
+    const params = isRecord(request.params) ? request.params : {};
+    const plateId = typeof params.plateId === "string" ? params.plateId.trim() : "";
+    const token = parseToken(params.token);
+    const body = parsePinRequest(request.body);
+    if (id == null || !plateId || plateId.length > 200 || !token || !body || body.expected.profileId !== id) {
+      return sendError(reply, 400, "invalid_request", "Request is invalid");
+    }
+    try {
+      const result = dependencies.repo.pinAcceptedPlateUnit({
+        profileId: id,
+        expected: body.expected,
+        expectedPlateRevisionId: body.expectedPlateRevisionId,
+        plateId,
+        token,
+        pinned: body.pinned,
+      });
+      if (result.kind === "moved" || result.kind === "unchanged") {
+        return {
+          plate_revision_id: result.plateRevisionId,
+          plate_revision_number: result.plateRevisionNumber,
+        };
+      }
+      return sendMoveFailure(reply, result);
+    } catch (error) {
+      return sendIntegrityFailure(request, reply, error);
+    }
+  });
+
+  app.post("/plans/:id/plates/arrange", async (request, reply) => {
+    const id = profileId(request);
+    const body = parseArrangeRequest(request.body);
+    if (id == null || !body || body.expected.profileId !== id) {
+      return sendError(reply, 400, "invalid_request", "Request is invalid");
+    }
+    try {
+      const result = arrangeAcceptedPlates(service, { profileId: id, ...body });
+      return result.kind === "workspace" ? result.workspace : sendInitializeFailure(reply, result);
+    } catch (error) {
+      return sendIntegrityFailure(request, reply, error);
+    }
+  });
+
+  app.post("/plans/:id/plates/restore", async (request, reply) => {
+    const id = profileId(request);
+    const body = parseRestoreRequest(request.body);
+    if (id == null || !body || body.expected.profileId !== id) {
+      return sendError(reply, 400, "invalid_request", "Request is invalid");
+    }
+    try {
+      const result = dependencies.repo.restoreAcceptedPlates({
+        profileId: id,
+        expected: body.expected,
+        expectedPlateRevisionId: body.expectedPlateRevisionId,
+        restorePlateRevisionId: body.restorePlateRevisionId,
+      });
+      if (result.kind !== "restored" && result.kind !== "unchanged") {
+        return sendMoveFailure(reply, result);
+      }
+      const workspace = readAcceptedPlateWorkspace(service, id);
+      return workspace.kind === "workspace" ? workspace.workspace : sendReadFailure(reply, workspace);
     } catch (error) {
       return sendIntegrityFailure(request, reply, error);
     }

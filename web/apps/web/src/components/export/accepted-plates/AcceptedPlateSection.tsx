@@ -11,8 +11,11 @@ import {
   invalidateAcceptedPlateWorkspace,
   useAcceptedPlateRevisionPending,
   useAcceptedPlateWorkspaceQuery,
+  useArrangeAcceptedPlatesMutation,
   useInitializeAcceptedPlatesMutation,
   useMoveAcceptedPlateUnitMutation,
+  usePinAcceptedPlateUnitMutation,
+  useRestoreAcceptedPlatesMutation,
 } from "../../../queries/acceptedPlates";
 import { settingsPrintersRoute } from "../../../lib/routes";
 import { Button } from "../../ui/button";
@@ -51,6 +54,9 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
   const query = useAcceptedPlateWorkspaceQuery(profileId, enabled);
   const initialize = useInitializeAcceptedPlatesMutation(profileId);
   const move = useMoveAcceptedPlateUnitMutation(profileId);
+  const pin = usePinAcceptedPlateUnitMutation(profileId);
+  const arrange = useArrangeAcceptedPlatesMutation(profileId);
+  const restore = useRestoreAcceptedPlatesMutation(profileId);
   const revisionWritePending = useAcceptedPlateRevisionPending(profileId);
   const [reassigning, setReassigning] = useState(false);
   const workspace = query.data;
@@ -88,6 +94,61 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
       if (isAcceptedPlateStaleError(error)) return false;
       toast.error(error instanceof Error ? error.message : "Could not move this Required unit.");
       throw error;
+    }
+  };
+
+  const submitPin = async (plateId: string, token: string, pinned: boolean) => {
+    if (workspace?.kind !== "ready") return;
+    try {
+      await pin.mutateAsync({
+        plateId,
+        token,
+        input: {
+          expected: workspace.basis,
+          expected_plate_revision_id: workspace.plate_revision_id,
+          pinned,
+        },
+      });
+    } catch (error) {
+      if (isAcceptedPlateStaleError(error)) {
+        await refreshAfterStaleMove();
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : "Could not pin this Required unit.");
+    }
+  };
+
+  const submitArrange = async (mode: "unplaced" | "all") => {
+    if (workspace?.kind !== "ready") return;
+    try {
+      await arrange.mutateAsync({
+        expected: workspace.basis,
+        expected_plate_revision_id: workspace.plate_revision_id,
+        mode,
+      });
+    } catch (error) {
+      if (isAcceptedPlateStaleError(error)) {
+        await refreshAfterStaleMove();
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : "Could not arrange Plates.");
+    }
+  };
+
+  const submitRestore = async () => {
+    if (workspace?.kind !== "ready" || workspace.arrange_undo_revision_id == null) return;
+    try {
+      await restore.mutateAsync({
+        expected: workspace.basis,
+        expected_plate_revision_id: workspace.plate_revision_id,
+        restore_plate_revision_id: workspace.arrange_undo_revision_id,
+      });
+    } catch (error) {
+      if (isAcceptedPlateStaleError(error)) {
+        await refreshAfterStaleMove();
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : "Could not undo Arrange all.");
     }
   };
 
@@ -157,6 +218,9 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
             workspace={workspace}
             disabled={revisionWritePending}
             onMove={submitMove}
+            onPin={submitPin}
+            onArrange={submitArrange}
+            onUndoArrangeAll={workspace.arrange_undo_revision_id == null ? undefined : submitRestore}
             onStaleMove={refreshAfterStaleMove}
           />
         ) : null}

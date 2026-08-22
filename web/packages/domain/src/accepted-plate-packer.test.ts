@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { packAcceptedUnits } from "./accepted-plate-packer.js";
+import { arrangeAcceptedUnits, packAcceptedUnits } from "./accepted-plate-packer.js";
 
 describe("packAcceptedUnits", () => {
   it("uses integer rows with a fixed gap and deterministic unit order", () => {
@@ -63,6 +63,83 @@ describe("packAcceptedUnits", () => {
         { units: [{ token: "a", xUm: 10, yUm: 10 }] },
         { units: [{ token: "b", xUm: 10, yUm: 10 }] },
       ],
+    });
+  });
+});
+
+describe("arrangeAcceptedUnits", () => {
+  const printer = {
+    bedWidthUm: 120,
+    bedDepthUm: 100,
+    bedHeightUm: 80,
+    marginUm: 10,
+  };
+
+  it("keeps a pinned unit still while Arrange unplaced fills remaining space", () => {
+    const pinned = {
+      token: "a",
+      widthUm: 50,
+      depthUm: 30,
+      heightUm: 10,
+      xUm: 40,
+      yUm: 40,
+      placement: "pinned" as const,
+    };
+    const result = arrangeAcceptedUnits({
+      mode: "unplaced",
+      printer,
+      units: [
+        pinned,
+        {
+          token: "c",
+          widthUm: 30,
+          depthUm: 20,
+          heightUm: 10,
+          xUm: 10,
+          yUm: 10,
+          placement: "auto",
+        },
+      ],
+    });
+    expect(result.kind).toBe("packed");
+    if (result.kind !== "packed") return;
+    const first = result.plates[0]?.units ?? [];
+    expect(first.find((unit) => unit.token === "a")).toMatchObject({ xUm: 40, yUm: 40 });
+    const placedC = result.plates.flatMap((plate) => plate.units).find((unit) => unit.token === "c");
+    expect(placedC).toBeDefined();
+    expect(placedC).not.toMatchObject({ xUm: 40, yUm: 40 });
+  });
+
+  it("lets Arrange all replace the current layout including pinned coordinates", () => {
+    const result = arrangeAcceptedUnits({
+      mode: "all",
+      printer,
+      units: [{
+        token: "a",
+        widthUm: 50,
+        depthUm: 30,
+        heightUm: 10,
+        xUm: 40,
+        yUm: 40,
+        placement: "pinned",
+      }, {
+        token: "c",
+        widthUm: 30,
+        depthUm: 20,
+        heightUm: 10,
+        xUm: 70,
+        yUm: 10,
+        placement: "manual",
+      }],
+    });
+    expect(result).toEqual({
+      kind: "packed",
+      plates: [{
+        units: [
+          { token: "a", widthUm: 50, depthUm: 30, heightUm: 10, xUm: 10, yUm: 10 },
+          { token: "c", widthUm: 30, depthUm: 20, heightUm: 10, xUm: 70, yUm: 10 },
+        ],
+      }],
     });
   });
 });

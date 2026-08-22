@@ -95,6 +95,7 @@ function publishingDependencies(machineChange: Record<string, unknown> = {}) {
       plateRevisionId: 31,
       plateRevisionNumber: 1,
       units: setupInput.units,
+      undoFromRevisionId: null,
       plates: plates.map((plate, index) => ({
         ...plate,
         ordinal: index + 1,

@@ -89,6 +89,7 @@ const acceptedPlatePlacedUnitSchema = acceptedPlateSetupUnitSchema.safeExtend({
   width_um: positiveMicrometres,
   depth_um: positiveMicrometres,
   height_um: positiveMicrometres,
+  placement: z.enum(["auto", "manual", "pinned"]).default("auto"),
 });
 
 export type AcceptedPlatePlacedUnit = z.infer<typeof acceptedPlatePlacedUnitSchema>;
@@ -135,6 +136,7 @@ const readyWorkspaceSchema = z.strictObject({
   basis: acceptedPlanBasisSchema,
   plate_revision_id: positiveSafeInteger,
   plate_revision_number: positiveSafeInteger,
+  arrange_undo_revision_id: positiveSafeInteger.nullable().default(null),
   printers: acceptedPlatePrinterListSchema,
   plates: z.array(acceptedPlateViewSchema).min(1),
 }).superRefine((value, context) => {
@@ -202,6 +204,30 @@ const moveAcceptedPlateUnitRequestSchema = z.strictObject({
 });
 
 export type MoveAcceptedPlateUnitRequest = z.infer<typeof moveAcceptedPlateUnitRequestSchema>;
+
+const pinAcceptedPlateUnitRequestSchema = z.strictObject({
+  expected: acceptedPlanBasisSchema,
+  expected_plate_revision_id: positiveSafeInteger,
+  pinned: z.boolean(),
+});
+
+export type PinAcceptedPlateUnitRequest = z.infer<typeof pinAcceptedPlateUnitRequestSchema>;
+
+const arrangeAcceptedPlatesRequestSchema = z.strictObject({
+  expected: acceptedPlanBasisSchema,
+  expected_plate_revision_id: positiveSafeInteger,
+  mode: z.enum(["unplaced", "all"]),
+});
+
+export type ArrangeAcceptedPlatesRequest = z.infer<typeof arrangeAcceptedPlatesRequestSchema>;
+
+const restoreAcceptedPlatesRequestSchema = z.strictObject({
+  expected: acceptedPlanBasisSchema,
+  expected_plate_revision_id: positiveSafeInteger,
+  restore_plate_revision_id: positiveSafeInteger,
+});
+
+export type RestoreAcceptedPlatesRequest = z.infer<typeof restoreAcceptedPlatesRequestSchema>;
 
 const acceptedPlateMoveReceiptSchema = z.strictObject({
   plate_revision_id: positiveSafeInteger,
@@ -422,6 +448,18 @@ export function parseInitializeAcceptedPlatesRequest(value: unknown): Initialize
 
 export function parseMoveAcceptedPlateUnitRequest(value: unknown): MoveAcceptedPlateUnitRequest {
   return moveAcceptedPlateUnitRequestSchema.parse(value);
+}
+
+export function parsePinAcceptedPlateUnitRequest(value: unknown): PinAcceptedPlateUnitRequest {
+  return pinAcceptedPlateUnitRequestSchema.parse(value);
+}
+
+export function parseArrangeAcceptedPlatesRequest(value: unknown): ArrangeAcceptedPlatesRequest {
+  return arrangeAcceptedPlatesRequestSchema.parse(value);
+}
+
+export function parseRestoreAcceptedPlatesRequest(value: unknown): RestoreAcceptedPlatesRequest {
+  return restoreAcceptedPlatesRequestSchema.parse(value);
 }
 
 export function parseAcceptedPlateMoveReceipt(value: unknown): AcceptedPlateMoveReceipt {

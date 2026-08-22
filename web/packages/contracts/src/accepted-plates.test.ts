@@ -4,7 +4,10 @@ import {
   parseAcceptedPlateExportJobList,
   parseAcceptedPlateWorkspace,
   parseAcceptedPlanBasis,
+  parseArrangeAcceptedPlatesRequest,
   parseMoveAcceptedPlateUnitRequest,
+  parsePinAcceptedPlateUnitRequest,
+  parseRestoreAcceptedPlatesRequest,
 } from "./accepted-plates.js";
 import { JOB_KINDS } from "./index.js";
 
@@ -88,7 +91,7 @@ describe("accepted Plate contracts", () => {
           height_um: 10_000,
         }],
       }],
-    })).toMatchObject({ kind: "ready", plates: [{ plate_id: plateId }] });
+    })).toMatchObject({ kind: "ready", plates: [{ plate_id: plateId }], arrange_undo_revision_id: null });
   });
 
   it("rejects unknown fields, duplicate tokens, noncontiguous ordinals, and units outside printable bounds", () => {
@@ -135,6 +138,41 @@ describe("accepted Plate contracts", () => {
       expected_plate_revision_id: null,
       printers: [printer, { ...printer, name: "Duplicate identity" }],
       units: [setupUnit],
+    })).toThrow();
+  });
+
+  it("parses pin, arrange, and restore requests", () => {
+    expect(parsePinAcceptedPlateUnitRequest({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      pinned: true,
+    })).toEqual({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      pinned: true,
+    });
+    expect(parseArrangeAcceptedPlatesRequest({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      mode: "all",
+    })).toEqual({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      mode: "all",
+    });
+    expect(parseRestoreAcceptedPlatesRequest({
+      expected: basis,
+      expected_plate_revision_id: 22,
+      restore_plate_revision_id: 19,
+    })).toEqual({
+      expected: basis,
+      expected_plate_revision_id: 22,
+      restore_plate_revision_id: 19,
+    });
+    expect(() => parseArrangeAcceptedPlatesRequest({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      mode: "overflow",
     })).toThrow();
   });
 

@@ -326,6 +326,7 @@ export const acceptedPlateRevisions = sqliteTable(
     expectedPlateCount: integer("expected_plate_count").notNull(),
     expectedUnitCount: integer("expected_unit_count").notNull(),
     revisionNumber: integer("revision_number").notNull(),
+    undoFromRevisionId: integer("undo_from_revision_id"),
     createdAt: text("created_at").notNull(),
   },
   (t) => [
@@ -402,6 +403,7 @@ export const acceptedPlateUnits = sqliteTable(
     widthUm: integer("width_um").notNull(),
     depthUm: integer("depth_um").notNull(),
     heightUm: integer("height_um").notNull(),
+    placement: text("placement").$type<"auto" | "manual" | "pinned">().notNull().default("auto"),
   },
   (t) => [
     primaryKey({
@@ -413,6 +415,7 @@ export const acceptedPlateUnits = sqliteTable(
     check("chk_accepted_plate_units_width", sql`${t.widthUm} BETWEEN 1 AND 2147483647`),
     check("chk_accepted_plate_units_depth", sql`${t.depthUm} BETWEEN 1 AND 2147483647`),
     check("chk_accepted_plate_units_height", sql`${t.heightUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plate_units_placement", sql`${t.placement} IN ('auto', 'manual', 'pinned')`),
   ],
 );
 
@@ -1140,7 +1143,7 @@ export const appEvents = sqliteTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 29;
+export const currentSchemaVersion = 30;
 
 export const SQLITE_PARTS_INVALIDATE_ACCEPTED_REVISION_UPDATE = `CREATE TRIGGER IF NOT EXISTS trg_parts_invalidate_accepted_revision_update
     AFTER UPDATE ON parts
@@ -2578,6 +2581,7 @@ export const schemaMigrations: string[] = [
     expected_plate_count INTEGER NOT NULL CHECK (expected_plate_count > 0),
     expected_unit_count INTEGER NOT NULL CHECK (expected_unit_count > 0),
     revision_number INTEGER NOT NULL CHECK (revision_number > 0),
+    undo_from_revision_id INTEGER,
     created_at TEXT NOT NULL
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS uq_accepted_plate_revisions_tenant_profile_number
@@ -2613,6 +2617,7 @@ export const schemaMigrations: string[] = [
     width_um INTEGER NOT NULL CHECK (width_um BETWEEN 1 AND 2147483647),
     depth_um INTEGER NOT NULL CHECK (depth_um BETWEEN 1 AND 2147483647),
     height_um INTEGER NOT NULL CHECK (height_um BETWEEN 1 AND 2147483647),
+    placement TEXT NOT NULL DEFAULT 'auto' CHECK (placement IN ('auto', 'manual', 'pinned')),
     CONSTRAINT pk_accepted_plate_units
       PRIMARY KEY (tenant_id, revision_id, required_unit_token)
   )`,
@@ -2763,4 +2768,6 @@ export const schemaMigrations: string[] = [
     BEGIN
       SELECT RAISE(ABORT, 'Accepted Plate unit is immutable');
     END`,
+  `ALTER TABLE accepted_plate_revisions ADD COLUMN undo_from_revision_id INTEGER`,
+  `ALTER TABLE accepted_plate_units ADD COLUMN placement TEXT NOT NULL DEFAULT 'auto'`,
 ];

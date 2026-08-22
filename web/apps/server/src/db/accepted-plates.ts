@@ -12,7 +12,8 @@ import { acceptedPlanBasis, type AcceptedPlanBasis } from "./accepted-plan-progr
 import { parseRequiredUnitToken, type RequiredUnitToken } from "../services/required-units.js";
 
 export const MAX_ACCEPTED_PLATE_UM = 2_147_483_647;
-export const ACCEPTED_PLATE_LAYOUT_FORMAT = 1;
+export const ACCEPTED_PLATE_LAYOUT_FORMAT = 2;
+const LEGACY_ACCEPTED_PLATE_LAYOUT_FORMAT = 1;
 
 export class AcceptedPlateIntegrityError extends Error {
   readonly name = "AcceptedPlateIntegrityError";
@@ -29,6 +30,7 @@ export type AcceptedPlateUnitInput = Readonly<{
   widthUm: number;
   depthUm: number;
   heightUm: number;
+  placement?: "auto" | "manual" | "pinned";
 }>;
 
 export type AcceptedPlateInput = Readonly<{
@@ -54,6 +56,7 @@ export type PublishAcceptedPlatesCommand = Readonly<{
   expected: AcceptedPlanBasis;
   expectedPlateRevisionId: number | null;
   plates: readonly AcceptedPlateInput[];
+  undoFromRevisionId?: number | null;
 }>;
 
 export type MoveAcceptedPlateUnitCommand = Readonly<{
@@ -64,6 +67,29 @@ export type MoveAcceptedPlateUnitCommand = Readonly<{
   token: string;
   xUm: number;
   yUm: number;
+}>;
+
+export type PinAcceptedPlateUnitCommand = Readonly<{
+  profileId: number;
+  expected: AcceptedPlanBasis;
+  expectedPlateRevisionId: number;
+  plateId: string;
+  token: string;
+  pinned: boolean;
+}>;
+
+export type ArrangeAcceptedPlatesCommand = Readonly<{
+  profileId: number;
+  expected: AcceptedPlanBasis;
+  expectedPlateRevisionId: number;
+  mode: "unplaced" | "all";
+}>;
+
+export type RestoreAcceptedPlatesCommand = Readonly<{
+  profileId: number;
+  expected: AcceptedPlanBasis;
+  expectedPlateRevisionId: number;
+  restorePlateRevisionId: number;
 }>;
 
 type AcceptedPlateFailure =
@@ -102,6 +128,17 @@ export type MoveAcceptedPlateUnitResult =
       readonly plateRevisionId: number;
       readonly plateRevisionNumber: number;
     }
+  | { readonly kind: "plate_revision_changed" | "unit_not_found" }
+  | AcceptedPlateFailure;
+
+export type PinAcceptedPlateUnitResult = MoveAcceptedPlateUnitResult;
+export type RestoreAcceptedPlatesResult =
+  | {
+      readonly kind: "restored";
+      readonly plateRevisionId: number;
+      readonly plateRevisionNumber: number;
+    }
+  | { readonly kind: "unchanged"; readonly plateRevisionId: number; readonly plateRevisionNumber: number }
   | { readonly kind: "plate_revision_changed" | "unit_not_found" }
   | AcceptedPlateFailure;
 
@@ -184,6 +221,7 @@ export type ReadAcceptedPlateWorkspaceInputResult =
       readonly plateRevisionNumber: number;
       readonly plates: readonly AcceptedPlate[];
       readonly units: readonly AcceptedPlateSetupUnit[];
+      readonly undoFromRevisionId: number | null;
     }
   | { readonly kind: "profile_not_found" }
   | { readonly kind: "empty_plan" }
@@ -282,6 +320,14 @@ function requiredObjectNames(snapshot: AcceptedPlanOperationalSnapshot): Map<str
   );
 }
 
+function storedPlacement(value: unknown): "auto" | "manual" | "pinned" {
+  return value === "manual" || value === "pinned" ? value : "auto";
+}
+
+function unitPlacement(unit: AcceptedPlateUnitInput): "auto" | "manual" | "pinned" {
+  return storedPlacement(unit.placement);
+}
+
 function storedInteger(value: number): boolean {
   return Number.isInteger(value) && value >= 0 && value <= MAX_ACCEPTED_PLATE_UM;
 }
@@ -358,7 +404,7 @@ function validatePlates(
       ) {
         return { kind: "invalid_geometry", reason: "outside_build_area" };
       }
-      units.push({ ...unit });
+      units.push({ ...unit, placement: unitPlacement(unit) });
     }
     for (let leftIndex = 0; leftIndex < units.length; leftIndex += 1) {
       const left = units[leftIndex]!;
@@ -388,9 +434,12 @@ function validatePlates(
   return { kind: "ready", plates: normalized };
 }
 
-function layoutDigest(plates: readonly ValidatedPlate[]): string {
-  const canonical = {
-    format: ACCEPTED_PLATE_LAYOUT_FORMAT,
+function layoutCanonical(
+  plates: readonly ValidatedPlate[],
+  format: number,
+) {
+  return {
+    format,
     plates: plates.map((plate) => ({
       ordinal: plate.ordinal,
       plateId: plate.plateId,
@@ -410,10 +459,24 @@ function layoutDigest(plates: readonly ValidatedPlate[]): string {
           widthUm: unit.widthUm,
           depthUm: unit.depthUm,
           heightUm: unit.heightUm,
+          ...(format >= 2 ? { placement: unitPlacement(unit) } : {}),
         })),
     })),
   };
-  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+function layoutDigest(
+  plates: readonly ValidatedPlate[],
+  format = ACCEPTED_PLATE_LAYOUT_FORMAT,
+): string {
+  return createHash("sha256").update(JSON.stringify(layoutCanonical(plates, format))).digest("hex");
+}
+
+function storedLayoutDigestMatches(plates: readonly ValidatedPlate[], expectedDigest: string): boolean {
+  return (
+    layoutDigest(plates, ACCEPTED_PLATE_LAYOUT_FORMAT) === expectedDigest ||
+    layoutDigest(plates, LEGACY_ACCEPTED_PLATE_LAYOUT_FORMAT) === expectedDigest
+  );
 }
 
 function insertRevision(
@@ -421,6 +484,7 @@ function insertRevision(
   snapshot: AcceptedPlanOperationalSnapshot,
   revisionNumber: number,
   plates: readonly ValidatedPlate[],
+  undoFromRevisionId: number | null = null,
 ): number {
   const unitCount = plates.reduce((count, plate) => count + plate.units.length, 0);
   const created = dependencies.db
@@ -436,6 +500,7 @@ function insertRevision(
       expectedPlateCount: plates.length,
       expectedUnitCount: unitCount,
       revisionNumber,
+      undoFromRevisionId,
       createdAt: (dependencies.clock?.() ?? new Date()).toISOString(),
     })
     .returning({ id: dependencies.schema.acceptedPlateRevisions.id })
@@ -471,6 +536,7 @@ function insertRevision(
           widthUm: unit.widthUm,
           depthUm: unit.depthUm,
           heightUm: unit.heightUm,
+          placement: unitPlacement(unit),
         })
         .run();
     }
@@ -532,11 +598,12 @@ function readStoredPlates(
         widthUm: unit.widthUm,
         depthUm: unit.depthUm,
         heightUm: unit.heightUm,
+        placement: storedPlacement(unit.placement),
       })),
   }));
   const validated = validatePlates(stored, expectedTokens);
   if (validated.kind !== "ready") throw new AcceptedPlateIntegrityError("layout");
-  if (layoutDigest(validated.plates) !== expectedDigest) {
+  if (!storedLayoutDigestMatches(validated.plates, expectedDigest)) {
     throw new AcceptedPlateIntegrityError("layout_digest");
   }
   return validated.plates;
@@ -550,6 +617,7 @@ type AcceptedPlateStateResult =
       readonly plateRevisionId: number;
       readonly plateRevisionNumber: number;
       readonly layoutDigest: string;
+      readonly undoFromRevisionId: number | null;
       readonly plates: readonly AcceptedPlate[];
     }
   | {
@@ -646,6 +714,7 @@ function readAcceptedPlateState(
       plateRevisionId: revision.id,
       plateRevisionNumber: revision.revisionNumber,
       layoutDigest: revision.layoutDigest,
+      undoFromRevisionId: revision.undoFromRevisionId ?? null,
       plates: stored.map((plate) => ({
         ...plate,
         units: plate.units.map((unit) => {
@@ -776,6 +845,7 @@ export function readAcceptedPlateWorkspaceInputInternal(
       expectedPlateRevisionId: state.plateRevisionId,
       plateRevisionId: state.plateRevisionId,
       plateRevisionNumber: state.plateRevisionNumber,
+      undoFromRevisionId: state.undoFromRevisionId,
       plates: state.plates,
       units: acceptedPlateSetupUnits(state.snapshot),
     };
@@ -865,6 +935,7 @@ export function publishAcceptedPlatesInternal(
       accepted.snapshot,
       revisionNumber,
       validated.plates,
+      command.undoFromRevisionId ?? null,
     );
     if (head) {
       if (expectedPlateRevisionId === null) throw new Error("Accepted Plate CAS is unavailable");
@@ -952,7 +1023,8 @@ export function moveAcceptedPlateUnitInternal(
         if (plate.plateId !== command.plateId || unit.token !== command.token) return unit;
         found = true;
         unchanged = unit.xUm === command.xUm && unit.yUm === command.yUm;
-        return { ...unit, xUm: command.xUm, yUm: command.yUm };
+        const placement = unitPlacement(unit) === "pinned" ? "pinned" : "manual";
+        return { ...unit, xUm: command.xUm, yUm: command.yUm, placement };
       }),
     }));
     if (!found) return { kind: "unit_not_found" };
@@ -987,3 +1059,173 @@ export function moveAcceptedPlateUnitInternal(
     return { kind: "moved", plateRevisionId: revisionId, plateRevisionNumber: revisionNumber };
   });
 }
+
+export function pinAcceptedPlateUnitInternal(
+  dependencies: AcceptedPlateDependencies,
+  command: PinAcceptedPlateUnitCommand,
+): PinAcceptedPlateUnitResult {
+  if (!dependencies.sqlite) return { kind: "transaction_unavailable" };
+  if (command.profileId !== command.expected.profileId) return { kind: "stale_accepted_plan" };
+  return dependencies.transaction(() => {
+    const accepted = currentAccepted(dependencies, command.expected);
+    if (accepted.kind !== "ready") return accepted;
+    const head = dependencies.db
+      .select()
+      .from(dependencies.schema.acceptedPlateHeads)
+      .where(
+        and(
+          eq(dependencies.schema.acceptedPlateHeads.tenantId, dependencies.tenantId),
+          eq(dependencies.schema.acceptedPlateHeads.profileId, command.profileId),
+        ),
+      )
+      .get();
+    if (!head || head.currentRevisionId !== command.expectedPlateRevisionId) {
+      return { kind: "plate_revision_changed" };
+    }
+    const currentRevision = dependencies.db
+      .select()
+      .from(dependencies.schema.acceptedPlateRevisions)
+      .where(eq(dependencies.schema.acceptedPlateRevisions.id, head.currentRevisionId))
+      .get();
+    if (!currentRevision) throw new AcceptedPlateIntegrityError("head");
+    const objectNames = requiredObjectNames(accepted.snapshot);
+    const plates = readStoredPlates(
+      dependencies,
+      currentRevision.id,
+      currentRevision.expectedPlateCount,
+      currentRevision.expectedUnitCount,
+      new Set(objectNames.keys()),
+      currentRevision.layoutDigest,
+    );
+    let found = false;
+    let unchanged = false;
+    const next = plates.map((plate): AcceptedPlateInput => ({
+      ...plate,
+      units: plate.units.map((unit): AcceptedPlateUnitInput => {
+        if (plate.plateId !== command.plateId || unit.token !== command.token) return unit;
+        found = true;
+        const placement = command.pinned ? "pinned" : unitPlacement(unit) === "pinned" ? "manual" : unitPlacement(unit);
+        unchanged = unitPlacement(unit) === placement;
+        return { ...unit, placement };
+      }),
+    }));
+    if (!found) return { kind: "unit_not_found" };
+    if (unchanged) {
+      return {
+        kind: "unchanged",
+        plateRevisionId: currentRevision.id,
+        plateRevisionNumber: currentRevision.revisionNumber,
+      };
+    }
+    const validated = validatePlates(next, new Set(objectNames.keys()));
+    if (validated.kind !== "ready") return validated;
+    const revisionNumber = currentRevision.revisionNumber + 1;
+    const revisionId = insertRevision(
+      dependencies,
+      accepted.snapshot,
+      revisionNumber,
+      validated.plates,
+    );
+    const updated = dependencies.db
+      .update(dependencies.schema.acceptedPlateHeads)
+      .set({ currentRevisionId: revisionId })
+      .where(
+        and(
+          eq(dependencies.schema.acceptedPlateHeads.tenantId, dependencies.tenantId),
+          eq(dependencies.schema.acceptedPlateHeads.profileId, command.profileId),
+          eq(dependencies.schema.acceptedPlateHeads.currentRevisionId, command.expectedPlateRevisionId),
+        ),
+      )
+      .run();
+    if (updated.changes !== 1) throw new Error("Accepted Plate head update failed");
+    return { kind: "moved", plateRevisionId: revisionId, plateRevisionNumber: revisionNumber };
+  });
+}
+
+export function restoreAcceptedPlatesInternal(
+  dependencies: AcceptedPlateDependencies,
+  command: RestoreAcceptedPlatesCommand,
+): RestoreAcceptedPlatesResult {
+  if (!dependencies.sqlite) return { kind: "transaction_unavailable" };
+  if (command.profileId !== command.expected.profileId) return { kind: "stale_accepted_plan" };
+  return dependencies.transaction(() => {
+    const accepted = currentAccepted(dependencies, command.expected);
+    if (accepted.kind !== "ready") return accepted;
+    const head = dependencies.db
+      .select()
+      .from(dependencies.schema.acceptedPlateHeads)
+      .where(
+        and(
+          eq(dependencies.schema.acceptedPlateHeads.tenantId, dependencies.tenantId),
+          eq(dependencies.schema.acceptedPlateHeads.profileId, command.profileId),
+        ),
+      )
+      .get();
+    if (!head || head.currentRevisionId !== command.expectedPlateRevisionId) {
+      return { kind: "plate_revision_changed" };
+    }
+    const currentRevision = dependencies.db
+      .select()
+      .from(dependencies.schema.acceptedPlateRevisions)
+      .where(eq(dependencies.schema.acceptedPlateRevisions.id, head.currentRevisionId))
+      .get();
+    if (!currentRevision) throw new AcceptedPlateIntegrityError("head");
+    if (currentRevision.undoFromRevisionId !== command.restorePlateRevisionId) {
+      return { kind: "plate_revision_changed" };
+    }
+    if (head.currentRevisionId === command.restorePlateRevisionId) {
+      return {
+        kind: "unchanged",
+        plateRevisionId: currentRevision.id,
+        plateRevisionNumber: currentRevision.revisionNumber,
+      };
+    }
+    const restoreRevision = dependencies.db
+      .select()
+      .from(dependencies.schema.acceptedPlateRevisions)
+      .where(
+        and(
+          eq(dependencies.schema.acceptedPlateRevisions.tenantId, dependencies.tenantId),
+          eq(dependencies.schema.acceptedPlateRevisions.profileId, command.profileId),
+          eq(dependencies.schema.acceptedPlateRevisions.id, command.restorePlateRevisionId),
+        ),
+      )
+      .get();
+    if (!restoreRevision) return { kind: "unit_not_found" };
+    if (
+      restoreRevision.planRevisionId !== accepted.snapshot.revisionId ||
+      restoreRevision.planVersion !== accepted.snapshot.planVersion ||
+      restoreRevision.planRevisionDigest !== accepted.snapshot.revisionDigest ||
+      restoreRevision.requiredUnitMappingDigest !== accepted.snapshot.requiredUnitMappingDigest
+    ) {
+      return { kind: "stale_accepted_plan" };
+    }
+    const objectNames = requiredObjectNames(accepted.snapshot);
+    readStoredPlates(
+      dependencies,
+      restoreRevision.id,
+      restoreRevision.expectedPlateCount,
+      restoreRevision.expectedUnitCount,
+      new Set(objectNames.keys()),
+      restoreRevision.layoutDigest,
+    );
+    const updated = dependencies.db
+      .update(dependencies.schema.acceptedPlateHeads)
+      .set({ currentRevisionId: restoreRevision.id })
+      .where(
+        and(
+          eq(dependencies.schema.acceptedPlateHeads.tenantId, dependencies.tenantId),
+          eq(dependencies.schema.acceptedPlateHeads.profileId, command.profileId),
+          eq(dependencies.schema.acceptedPlateHeads.currentRevisionId, command.expectedPlateRevisionId),
+        ),
+      )
+      .run();
+    if (updated.changes !== 1) throw new Error("Accepted Plate head update failed");
+    return {
+      kind: "restored",
+      plateRevisionId: restoreRevision.id,
+      plateRevisionNumber: restoreRevision.revisionNumber,
+    };
+  });
+}
+

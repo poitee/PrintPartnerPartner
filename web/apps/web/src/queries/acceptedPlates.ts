@@ -12,12 +12,18 @@ import type {
   AcceptedPlateWorkspace,
   InitializeAcceptedPlatesRequest,
   MoveAcceptedPlateUnitRequest,
+  PinAcceptedPlateUnitRequest,
+  ArrangeAcceptedPlatesRequest,
+  RestoreAcceptedPlatesRequest,
 } from "@print-partner/contracts";
 import {
   fetchAcceptedPlateExportJobs,
   fetchAcceptedPlateWorkspace,
   initializeAcceptedPlates,
   moveAcceptedPlateUnit,
+  pinAcceptedPlateUnit,
+  arrangeAcceptedPlates,
+  restoreAcceptedPlates,
 } from "../api/endpoints/acceptedPlates";
 import { queryKeys } from "./keys";
 
@@ -54,6 +60,38 @@ export type AcceptedPlateMoveVariables = Readonly<{
   token: string;
   input: MoveAcceptedPlateUnitRequest;
 }>;
+
+export type AcceptedPlatePinVariables = Readonly<{
+  plateId: string;
+  token: string;
+  input: PinAcceptedPlateUnitRequest;
+}>;
+
+export function publishAcceptedPlatePin(
+  workspace: AcceptedPlateWorkspace | undefined,
+  variables: AcceptedPlatePinVariables,
+  receipt: AcceptedPlateMoveReceipt,
+): AcceptedPlateWorkspace | undefined {
+  if (workspace?.kind !== "ready") return workspace;
+  return {
+    ...workspace,
+    plate_revision_id: receipt.plate_revision_id,
+    plate_revision_number: receipt.plate_revision_number,
+    plates: workspace.plates.map((plate) => plate.plate_id !== variables.plateId
+      ? plate
+      : {
+          ...plate,
+          units: plate.units.map((unit) => unit.token !== variables.token
+            ? unit
+            : {
+                ...unit,
+                placement: variables.input.pinned
+                  ? "pinned"
+                  : unit.placement === "pinned" ? "manual" : unit.placement,
+              }),
+        }),
+  };
+}
 
 export function acceptedPlateMutationKey(profileId: number) {
   return ["acceptedPlateRevision", profileId] as const;
@@ -100,7 +138,7 @@ export function publishAcceptedPlateMove(
           ...plate,
           units: plate.units.map((unit) => unit.token !== variables.token
             ? unit
-            : { ...unit, x_um: variables.input.x_um, y_um: variables.input.y_um }),
+            : { ...unit, x_um: variables.input.x_um, y_um: variables.input.y_um, placement: unit.placement === "pinned" ? "pinned" : "manual" }),
         }),
   };
 }
@@ -174,6 +212,54 @@ export function useMoveAcceptedPlateUnitMutation(profileId: number) {
         (workspace) => publishAcceptedPlateMove(workspace, variables, receipt),
       );
       await invalidateAcceptedPlateWorkspace(queryClient, profileId);
+    },
+  });
+}
+
+export function usePinAcceptedPlateUnitMutation(profileId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: acceptedPlateMutationKey(profileId),
+    scope: acceptedPlateMutationScope(profileId),
+    retry: false,
+    mutationFn: (variables: AcceptedPlatePinVariables) => pinAcceptedPlateUnit(
+      profileId,
+      variables.plateId,
+      variables.token,
+      variables.input,
+    ),
+    onSuccess: async (receipt, variables) => {
+      queryClient.setQueryData<AcceptedPlateWorkspace>(
+        queryKeys.acceptedPlateWorkspace(profileId),
+        (workspace) => publishAcceptedPlatePin(workspace, variables, receipt),
+      );
+      await invalidateAcceptedPlateWorkspace(queryClient, profileId);
+    },
+  });
+}
+
+export function useArrangeAcceptedPlatesMutation(profileId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: acceptedPlateMutationKey(profileId),
+    scope: acceptedPlateMutationScope(profileId),
+    retry: false,
+    mutationFn: (input: ArrangeAcceptedPlatesRequest) => arrangeAcceptedPlates(profileId, input),
+    onSuccess: (workspace) => {
+      queryClient.setQueryData(queryKeys.acceptedPlateWorkspace(profileId), workspace);
+    },
+  });
+}
+
+export function useRestoreAcceptedPlatesMutation(profileId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: acceptedPlateMutationKey(profileId),
+    scope: acceptedPlateMutationScope(profileId),
+    retry: false,
+    mutationFn: (input: RestoreAcceptedPlatesRequest) => restoreAcceptedPlates(profileId, input),
+    onSuccess: (workspace) => {
+      queryClient.setQueryData(queryKeys.acceptedPlateWorkspace(profileId), workspace);
     },
   });
 }

@@ -9,10 +9,21 @@ type Props = Readonly<{
   workspace: ReadyWorkspace;
   disabled: boolean;
   onMove: (plateId: string, token: string, xUm: number, yUm: number) => Promise<boolean | undefined>;
+  onPin: (plateId: string, token: string, pinned: boolean) => Promise<void>;
+  onArrange: (mode: "unplaced" | "all") => Promise<void>;
+  onUndoArrangeAll?: () => Promise<void>;
   onStaleMove: () => Promise<void>;
 }>;
 
-export default function AcceptedPlateGallery({ workspace, disabled, onMove, onStaleMove }: Props) {
+export default function AcceptedPlateGallery({
+  workspace,
+  disabled,
+  onMove,
+  onPin,
+  onArrange,
+  onUndoArrangeAll,
+  onStaleMove,
+}: Props) {
   const [selectedPlateId, setSelectedPlateId] = useState<string>(workspace.plates[0]?.plate_id ?? "");
   useEffect(() => {
     if (!workspace.plates.some((plate) => plate.plate_id === selectedPlateId)) {
@@ -41,12 +52,36 @@ export default function AcceptedPlateGallery({ workspace, disabled, onMove, onSt
           </Button>
         ))}
       </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={disabled}
+          onClick={() => void onArrange("unplaced")}
+        >
+          Arrange unplaced
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={disabled}
+          onClick={() => void onArrange("all")}
+        >
+          Arrange all
+        </Button>
+        {onUndoArrangeAll ? (
+          <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void onUndoArrangeAll()}>
+            Undo Arrange all
+          </Button>
+        ) : null}
+      </div>
       <AcceptedPlateBed
         key={plate.plate_id}
         plate={plate}
         revisionId={workspace.plate_revision_id}
         disabled={disabled}
         onMove={onMove}
+        onPin={onPin}
         onStaleMove={onStaleMove}
       />
     </div>

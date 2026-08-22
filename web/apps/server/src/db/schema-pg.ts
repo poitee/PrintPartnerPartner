@@ -323,6 +323,7 @@ export const acceptedPlateRevisions = pgTable(
     expectedPlateCount: integer("expected_plate_count").notNull(),
     expectedUnitCount: integer("expected_unit_count").notNull(),
     revisionNumber: integer("revision_number").notNull(),
+    undoFromRevisionId: integer("undo_from_revision_id"),
     createdAt: text("created_at").notNull(),
   },
   (t) => [
@@ -396,6 +397,7 @@ export const acceptedPlateUnits = pgTable(
     widthUm: integer("width_um").notNull(),
     depthUm: integer("depth_um").notNull(),
     heightUm: integer("height_um").notNull(),
+    placement: text("placement").$type<"auto" | "manual" | "pinned">().notNull().default("auto"),
   },
   (t) => [
     primaryKey({
@@ -407,6 +409,7 @@ export const acceptedPlateUnits = pgTable(
     check("chk_accepted_plate_units_width", sql`${t.widthUm} BETWEEN 1 AND 2147483647`),
     check("chk_accepted_plate_units_depth", sql`${t.depthUm} BETWEEN 1 AND 2147483647`),
     check("chk_accepted_plate_units_height", sql`${t.heightUm} BETWEEN 1 AND 2147483647`),
+    check("chk_accepted_plate_units_placement", sql`${t.placement} IN ('auto', 'manual', 'pinned')`),
   ],
 );
 
@@ -1128,4 +1131,4 @@ export const appEvents = pgTable("app_events", {
 });
 
 export const schemaVersionKey = "schema_version";
-export const currentSchemaVersion = 29;
+export const currentSchemaVersion = 30;

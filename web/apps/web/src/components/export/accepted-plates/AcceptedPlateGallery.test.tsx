@@ -92,6 +92,8 @@ describe("AcceptedPlateGallery successor revisions", () => {
           workspace={workspace}
           disabled={false}
           onMove={move}
+          onPin={() => Promise.resolve()}
+          onArrange={() => Promise.resolve()}
           onStaleMove={() => Promise.resolve()}
         />
       );
@@ -108,5 +110,27 @@ describe("AcceptedPlateGallery successor revisions", () => {
     expect(document.activeElement).toBe(x);
     if (!(x instanceof HTMLInputElement)) throw new Error("Expected X input");
     expect(x.value).toBe("45");
+  });
+
+  it("offers Arrange unplaced, Arrange all, and optional Undo Arrange all", () => {
+    const onArrange = vi.fn();
+    const onUndoArrangeAll = vi.fn();
+    render(
+      <AcceptedPlateGallery
+        workspace={ready}
+        disabled={false}
+        onMove={() => Promise.resolve(true)}
+        onPin={() => Promise.resolve()}
+        onArrange={onArrange}
+        onUndoArrangeAll={onUndoArrangeAll}
+        onStaleMove={() => Promise.resolve()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Arrange unplaced" }));
+    fireEvent.click(screen.getByRole("button", { name: "Arrange all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Undo Arrange all" }));
+    expect(onArrange).toHaveBeenCalledWith("unplaced");
+    expect(onArrange).toHaveBeenCalledWith("all");
+    expect(onUndoArrangeAll).toHaveBeenCalledOnce();
   });
 });

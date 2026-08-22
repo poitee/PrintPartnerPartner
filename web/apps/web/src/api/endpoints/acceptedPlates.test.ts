@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseInitializeAcceptedPlatesRequest } from "@print-partner/contracts";
 import {
+  arrangeAcceptedPlates,
   fetchAcceptedPlateExportJobs,
   fetchAcceptedPlateSlicerExchangeStatus,
   fetchAcceptedPlateWorkspace,
   initializeAcceptedPlates,
   moveAcceptedPlateUnit,
   openAcceptedPlatesInSlicer,
+  pinAcceptedPlateUnit,
+  restoreAcceptedPlates,
   startAcceptedPlateExport,
 } from "./acceptedPlates";
 
@@ -35,7 +38,10 @@ describe("accepted Plate endpoints", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(response({ kind: "empty_plan" }))
       .mockResolvedValueOnce(response({ kind: "empty_plan" }))
-      .mockResolvedValueOnce(response({ plate_revision_id: 20, plate_revision_number: 4 }));
+      .mockResolvedValueOnce(response({ plate_revision_id: 20, plate_revision_number: 4 }))
+      .mockResolvedValueOnce(response({ plate_revision_id: 21, plate_revision_number: 5 }))
+      .mockResolvedValueOnce(response({ kind: "empty_plan" }))
+      .mockResolvedValueOnce(response({ kind: "empty_plan" }));
 
     await fetchAcceptedPlateWorkspace(7);
     await initializeAcceptedPlates(7, parseInitializeAcceptedPlatesRequest({
@@ -48,6 +54,21 @@ describe("accepted Plate endpoints", () => {
       expected_plate_revision_id: 19,
       x_um: 12_345,
       y_um: 20_000,
+    });
+    await pinAcceptedPlateUnit(7, plateId, token, {
+      expected: basis,
+      expected_plate_revision_id: 20,
+      pinned: true,
+    });
+    await arrangeAcceptedPlates(7, {
+      expected: basis,
+      expected_plate_revision_id: 21,
+      mode: "unplaced",
+    });
+    await restoreAcceptedPlates(7, {
+      expected: basis,
+      expected_plate_revision_id: 22,
+      restore_plate_revision_id: 19,
     });
 
     expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method, init?.body])).toEqual([
@@ -62,6 +83,21 @@ describe("accepted Plate endpoints", () => {
         expected_plate_revision_id: 19,
         x_um: 12_345,
         y_um: 20_000,
+      })],
+      [`/plans/7/plates/${plateId}/units/${token}/pin`, "PATCH", JSON.stringify({
+        expected: basis,
+        expected_plate_revision_id: 20,
+        pinned: true,
+      })],
+      ["/plans/7/plates/arrange", "POST", JSON.stringify({
+        expected: basis,
+        expected_plate_revision_id: 21,
+        mode: "unplaced",
+      })],
+      ["/plans/7/plates/restore", "POST", JSON.stringify({
+        expected: basis,
+        expected_plate_revision_id: 22,
+        restore_plate_revision_id: 19,
       })],
     ]);
   });

@@ -17,6 +17,7 @@ import { queryKeys } from "./keys";
 import {
   acceptedPlateCapability,
   publishAcceptedPlateMove,
+  publishAcceptedPlatePin,
   useInitializeAcceptedPlatesMutation,
   useMoveAcceptedPlateUnitMutation,
 } from "./acceptedPlates";
@@ -130,7 +131,26 @@ describe("accepted Plate query ownership", () => {
       kind: "ready",
       plate_revision_id: 20,
       plate_revision_number: 3,
-      plates: [{ units: [{ x_um: 12_345, y_um: 22_000 }] }],
+      plates: [{ units: [{ x_um: 12_345, y_um: 22_000, placement: "manual" }] }],
+    });
+  });
+
+  it("publishes a pin without moving coordinates", () => {
+    expect(publishAcceptedPlatePin(ready, {
+      plateId,
+      token,
+      input: {
+        expected: basis,
+        expected_plate_revision_id: 19,
+        pinned: true,
+      },
+    }, {
+      plate_revision_id: 21,
+      plate_revision_number: 4,
+    })).toMatchObject({
+      kind: "ready",
+      plate_revision_id: 21,
+      plates: [{ units: [{ x_um: 4_000, y_um: 5_000, placement: "pinned" }] }],
     });
   });
 

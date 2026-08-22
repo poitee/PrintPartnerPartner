@@ -201,17 +201,23 @@ import {
 } from "../services/unattributed-print-store.js";
 import {
   moveAcceptedPlateUnitInternal,
+  pinAcceptedPlateUnitInternal,
   publishAcceptedPlatesInternal,
   readAcceptedPlateExportInputInternal,
   readAcceptedPlateWorkspaceInputInternal,
   readAcceptedPlatesInternal,
+  restoreAcceptedPlatesInternal,
   type ReadAcceptedPlateExportInputResult,
   type ReadAcceptedPlateWorkspaceInputResult,
   type MoveAcceptedPlateUnitCommand,
   type MoveAcceptedPlateUnitResult,
+  type PinAcceptedPlateUnitCommand,
+  type PinAcceptedPlateUnitResult,
   type PublishAcceptedPlatesCommand,
   type PublishAcceptedPlatesResult,
   type ReadAcceptedPlatesResult,
+  type RestoreAcceptedPlatesCommand,
+  type RestoreAcceptedPlatesResult,
 } from "./accepted-plates.js";
 
 type PrinterPlanBinding = Readonly<{
@@ -1072,6 +1078,14 @@ export class AppRepository {
 
   moveAcceptedPlateUnit(command: MoveAcceptedPlateUnitCommand): MoveAcceptedPlateUnitResult {
     return moveAcceptedPlateUnitInternal(this.acceptedPlateDependencies(), command);
+  }
+
+  pinAcceptedPlateUnit(command: PinAcceptedPlateUnitCommand): PinAcceptedPlateUnitResult {
+    return pinAcceptedPlateUnitInternal(this.acceptedPlateDependencies(), command);
+  }
+
+  restoreAcceptedPlates(command: RestoreAcceptedPlatesCommand): RestoreAcceptedPlatesResult {
+    return restoreAcceptedPlatesInternal(this.acceptedPlateDependencies(), command);
   }
 
   private planRevisionInputSet(row: PlanRevisionInputSetRow): PlanRevisionInputSet {

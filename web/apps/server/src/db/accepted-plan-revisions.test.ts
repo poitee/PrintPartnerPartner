@@ -998,7 +998,7 @@ describe("accepted Plan revision backfill", () => {
     expect(utf8Bytes(Object.values(revision))).toBe(MAX_ACCEPTED_OPERATIONAL_ROW_TEXT_BYTES);
     expect(
       migratedRaw.prepare("SELECT value FROM app_settings WHERE key = 'schema_version'").get(),
-    ).toEqual({ value: "29" });
+    ).toEqual({ value: "30" });
     migrated.close();
   });
 
@@ -1237,7 +1237,7 @@ describe("accepted Plan revision backfill", () => {
       rawDatabase(upgraded)
         .prepare("SELECT value FROM app_settings WHERE key = 'schema_version'")
         .get(),
-    ).toEqual({ value: "29" });
+    ).toEqual({ value: "30" });
     expect(
       rawDatabase(upgraded)
         .prepare(

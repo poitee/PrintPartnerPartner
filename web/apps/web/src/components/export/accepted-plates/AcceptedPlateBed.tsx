@@ -10,6 +10,7 @@ import {
   screenToAcceptedPlatePoint,
 } from "../../../lib/acceptedPlateCoordinates";
 import AcceptedPlatePositionEditor from "./AcceptedPlatePositionEditor";
+import { Button } from "../../ui/button";
 
 type PositionDraft =
   | { readonly kind: "idle" }
@@ -36,6 +37,7 @@ type Props = Readonly<{
   revisionId: number;
   disabled: boolean;
   onMove: (plateId: string, token: string, xUm: number, yUm: number) => Promise<boolean | undefined>;
+  onPin?: (plateId: string, token: string, pinned: boolean) => Promise<void>;
   onStaleMove: () => Promise<void>;
 }>;
 
@@ -56,7 +58,7 @@ function displayedUnit(unit: AcceptedPlatePlacedUnit, draft: PositionDraft) {
   return { ...unit, x_um: draft.xUm, y_um: draft.yUm };
 }
 
-export default function AcceptedPlateBed({ plate, revisionId, disabled, onMove, onStaleMove }: Props) {
+export default function AcceptedPlateBed({ plate, revisionId, disabled, onMove, onPin, onStaleMove }: Props) {
   const [selectedToken, setSelectedToken] = useState<RequiredUnitToken | null>(plate.units[0]?.token ?? null);
   const [draft, setDraft] = useState<PositionDraft>({ kind: "idle" });
   const selected = plate.units.find((unit) => unit.token === selectedToken) ?? plate.units[0];
@@ -186,7 +188,11 @@ export default function AcceptedPlateBed({ plate, revisionId, disabled, onMove, 
               width={unit.width_um}
               height={unit.depth_um}
               rx={1_000}
-              className="cursor-grab fill-primary/35 stroke-primary active:cursor-grabbing"
+              className={
+                unit.placement === "pinned"
+                  ? "cursor-grab fill-amber-500/35 stroke-amber-700 active:cursor-grabbing dark:stroke-amber-300"
+                  : "cursor-grab fill-primary/35 stroke-primary active:cursor-grabbing"
+              }
               strokeWidth={selectedUnit ? 1_500 : 750}
               role="button"
               tabIndex={0}
@@ -201,14 +207,27 @@ export default function AcceptedPlateBed({ plate, revisionId, disabled, onMove, 
         })}
       </svg>
       {selected ? (
-        <AcceptedPlatePositionEditor
-          key={`${plate.plate_id}:${selected.token}`}
-          unit={displayedUnit(selected, draft)}
-          printer={plate.printer}
-          disabled={disabled || draft.kind !== "idle"}
-          onMove={(xUm, yUm) => onMove(plate.plate_id, selected.token, xUm, yUm)}
-          onStaleMove={onStaleMove}
-        />
+        <>
+          <AcceptedPlatePositionEditor
+            key={`${plate.plate_id}:${selected.token}`}
+            unit={displayedUnit(selected, draft)}
+            printer={plate.printer}
+            disabled={disabled || draft.kind !== "idle"}
+            onMove={(xUm, yUm) => onMove(plate.plate_id, selected.token, xUm, yUm)}
+            onStaleMove={onStaleMove}
+          />
+          {onPin ? (
+            <Button
+              type="button"
+              size="sm"
+              variant={selected.placement === "pinned" ? "default" : "outline"}
+              disabled={disabled || draft.kind !== "idle"}
+              onClick={() => void onPin(plate.plate_id, selected.token, selected.placement !== "pinned")}
+            >
+              {selected.placement === "pinned" ? "Unpin" : "Pin placement"}
+            </Button>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

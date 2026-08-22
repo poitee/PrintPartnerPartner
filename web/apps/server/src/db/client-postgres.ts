@@ -1670,6 +1670,7 @@ export const postgresPostInitMigrations: string[] = [
       CHECK (expected_unit_count > 0),
     revision_number INTEGER NOT NULL CONSTRAINT chk_accepted_plate_revisions_number
       CHECK (revision_number > 0),
+    undo_from_revision_id INTEGER,
     created_at TEXT NOT NULL
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS uq_accepted_plate_revisions_tenant_profile_number
@@ -1714,6 +1715,8 @@ export const postgresPostInitMigrations: string[] = [
       CHECK (depth_um BETWEEN 1 AND 2147483647),
     height_um INTEGER NOT NULL CONSTRAINT chk_accepted_plate_units_height
       CHECK (height_um BETWEEN 1 AND 2147483647),
+    placement TEXT NOT NULL DEFAULT 'auto' CONSTRAINT chk_accepted_plate_units_placement
+      CHECK (placement IN ('auto', 'manual', 'pinned')),
     CONSTRAINT pk_accepted_plate_units
       PRIMARY KEY (tenant_id, revision_id, required_unit_token)
   )`,
@@ -1898,6 +1901,8 @@ export const postgresPostInitMigrations: string[] = [
       END IF;
     END
   $block$`,
+  `ALTER TABLE accepted_plate_revisions ADD COLUMN IF NOT EXISTS undo_from_revision_id INTEGER`,
+  `ALTER TABLE accepted_plate_units ADD COLUMN IF NOT EXISTS placement TEXT NOT NULL DEFAULT 'auto'`,
 ];
 
 export class PostgresDatabase {

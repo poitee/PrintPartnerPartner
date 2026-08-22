@@ -8,6 +8,9 @@ import {
   parseAcceptedPlateWorkspace,
   parseInitializeAcceptedPlatesRequest,
   parseMoveAcceptedPlateUnitRequest,
+  parsePinAcceptedPlateUnitRequest,
+  parseArrangeAcceptedPlatesRequest,
+  parseRestoreAcceptedPlatesRequest,
   parseStartAcceptedPlateExportRequest,
   type AcceptedPlateEndpointError,
   type AcceptedPlateExportRecord,
@@ -16,8 +19,11 @@ import {
   type AcceptedPlateSlicerHandoffResult,
   type AcceptedPlateSlicerExchangeStatus,
   type AcceptedPlateWorkspace,
+  type ArrangeAcceptedPlatesRequest,
   type InitializeAcceptedPlatesRequest,
   type MoveAcceptedPlateUnitRequest,
+  type PinAcceptedPlateUnitRequest,
+  type RestoreAcceptedPlatesRequest,
   type StartAcceptedPlateExportRequest,
 } from "@print-partner/contracts";
 import {
@@ -85,6 +91,34 @@ const moveEndpoint = defineJsonWriteEndpoint({
     `/plans/${encodePositiveInteger(profileId)}/plates/${encodePlateId(plateId)}/units/${encodeToken(token)}`,
   encodeBody: parseMoveAcceptedPlateUnitRequest,
   parseSuccess: parseAcceptedPlateMoveReceipt,
+  parseFailure: parseSafeError,
+});
+
+const pinEndpoint = defineJsonWriteEndpoint({
+  method: "PATCH",
+  route: "/plans/:profileId/plates/:plateId/units/:token/pin",
+  path: ({ profileId, plateId, token }: MoveParams) =>
+    `/plans/${encodePositiveInteger(profileId)}/plates/${encodePlateId(plateId)}/units/${encodeToken(token)}/pin`,
+  encodeBody: parsePinAcceptedPlateUnitRequest,
+  parseSuccess: parseAcceptedPlateMoveReceipt,
+  parseFailure: parseSafeError,
+});
+
+const arrangeEndpoint = defineJsonWriteEndpoint({
+  method: "POST",
+  route: "/plans/:profileId/plates/arrange",
+  path: ({ profileId }: ProfileParams) => `/plans/${encodePositiveInteger(profileId)}/plates/arrange`,
+  encodeBody: parseArrangeAcceptedPlatesRequest,
+  parseSuccess: parseAcceptedPlateWorkspace,
+  parseFailure: parseSafeError,
+});
+
+const restoreEndpoint = defineJsonWriteEndpoint({
+  method: "POST",
+  route: "/plans/:profileId/plates/restore",
+  path: ({ profileId }: ProfileParams) => `/plans/${encodePositiveInteger(profileId)}/plates/restore`,
+  encodeBody: parseRestoreAcceptedPlatesRequest,
+  parseSuccess: parseAcceptedPlateWorkspace,
   parseFailure: parseSafeError,
 });
 
@@ -162,6 +196,29 @@ export function moveAcceptedPlateUnit(
   input: MoveAcceptedPlateUnitRequest,
 ): Promise<AcceptedPlateMoveReceipt> {
   return requestJsonWrite(moveEndpoint, { profileId, plateId, token }, input);
+}
+
+export function pinAcceptedPlateUnit(
+  profileId: number,
+  plateId: string,
+  token: string,
+  input: PinAcceptedPlateUnitRequest,
+): Promise<AcceptedPlateMoveReceipt> {
+  return requestJsonWrite(pinEndpoint, { profileId, plateId, token }, input);
+}
+
+export function arrangeAcceptedPlates(
+  profileId: number,
+  input: ArrangeAcceptedPlatesRequest,
+): Promise<AcceptedPlateWorkspace> {
+  return requestJsonWrite(arrangeEndpoint, { profileId }, input);
+}
+
+export function restoreAcceptedPlates(
+  profileId: number,
+  input: RestoreAcceptedPlatesRequest,
+): Promise<AcceptedPlateWorkspace> {
+  return requestJsonWrite(restoreEndpoint, { profileId }, input);
 }
 
 export function startAcceptedPlateExport(input: StartAcceptedPlateExportRequest): Promise<string> {

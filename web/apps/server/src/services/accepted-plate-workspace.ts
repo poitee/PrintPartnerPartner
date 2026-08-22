@@ -10,7 +10,9 @@ import {
   type AcceptedPlateWorkspace,
 } from "@print-partner/contracts";
 import {
+  arrangeAcceptedUnits,
   packAcceptedUnits,
+  type AcceptedPlacedPackingUnit,
   type PrinterMachine,
 } from "@print-partner/domain";
 import type {
@@ -169,6 +171,7 @@ function placedUnit(
     width_um: unit.widthUm,
     depth_um: unit.depthUm,
     height_um: unit.heightUm,
+    placement: unit.placement === "manual" || unit.placement === "pinned" ? unit.placement : "auto",
   };
 }
 
@@ -200,6 +203,7 @@ function publishedWorkspace(input: Readonly<{
   basis: AcceptedPlanBasis;
   plateRevisionId: number;
   plateRevisionNumber: number;
+  undoFromRevisionId?: number | null;
   printers: readonly AcceptedPlatePrinter[];
   plates: readonly AcceptedPlateInput[];
   units: readonly AcceptedPlateSetupUnit[];
@@ -212,6 +216,7 @@ function publishedWorkspace(input: Readonly<{
     basis: basisContract(input.basis),
     plate_revision_id: input.plateRevisionId,
     plate_revision_number: input.plateRevisionNumber,
+    arrange_undo_revision_id: input.undoFromRevisionId ?? null,
     printers: [...input.printers],
     plates: input.plates.map((plate, index) => plateView({
       ...plate,
@@ -246,6 +251,7 @@ function presentWorkspace(
     basis: basisContract(input.basis),
     plate_revision_id: input.plateRevisionId,
     plate_revision_number: input.plateRevisionNumber,
+    arrange_undo_revision_id: input.undoFromRevisionId ?? null,
     printers,
     plates: input.plates.map((plate) => plateView(plate, setupByToken)),
   };
@@ -357,7 +363,10 @@ function packAssignedPlates(input: Readonly<{
         bedDepthUm: printer.bed_depth_um,
         bedHeightUm: printer.bed_height_um,
         marginUm: printer.margin_um,
-        units: packedPlate.units,
+        units: packedPlate.units.map((unit) => ({
+          ...unit,
+          placement: "auto" as const,
+        })),
       });
     }
   }
@@ -380,8 +389,9 @@ function currentPlateInputs(plates: readonly AcceptedPlate[]): AcceptedPlateInpu
       yUm: unit.yUm,
       widthUm: unit.widthUm,
       depthUm: unit.depthUm,
-      heightUm: unit.heightUm,
-    })),
+        heightUm: unit.heightUm,
+        placement: unit.placement === "manual" || unit.placement === "pinned" ? unit.placement : "auto",
+      })),
   }));
 }
 
@@ -409,7 +419,8 @@ function samePlateInputs(left: readonly AcceptedPlateInput[], right: readonly Ac
         unit.yUm === other.yUm &&
         unit.widthUm === other.widthUm &&
         unit.depthUm === other.depthUm &&
-        unit.heightUm === other.heightUm
+        unit.heightUm === other.heightUm &&
+        (unit.placement ?? "auto") === (other.placement ?? "auto")
       );
     });
   });
@@ -532,3 +543,161 @@ export async function initializeAcceptedPlates(
     }),
   };
 }
+
+export type ArrangeAcceptedPlatesServiceCommand = Readonly<{
+  profileId: number;
+  expected: AcceptedPlanBasis;
+  expectedPlateRevisionId: number;
+  mode: "unplaced" | "all";
+}>;
+
+function printerGeometry(plate: AcceptedPlateInput) {
+  return {
+    bedWidthUm: plate.bedWidthUm,
+    bedDepthUm: plate.bedDepthUm,
+    bedHeightUm: plate.bedHeightUm,
+    marginUm: plate.marginUm,
+  };
+}
+
+function arrangedPlates(
+  mode: "unplaced" | "all",
+  basis: AcceptedPlanBasis,
+  plates: readonly AcceptedPlateInput[],
+): readonly AcceptedPlateInput[] | { readonly kind: "unit_too_large"; readonly token: RequiredUnitToken; readonly printerId: string } {
+  if (mode === "unplaced") {
+    const next: AcceptedPlateInput[] = [];
+    for (const plate of plates) {
+      const placed: AcceptedPlacedPackingUnit[] = plate.units.map((unit) => ({
+        token: unit.token,
+        widthUm: unit.widthUm,
+        depthUm: unit.depthUm,
+        heightUm: unit.heightUm,
+        xUm: unit.xUm,
+        yUm: unit.yUm,
+        placement: unit.placement === "manual" || unit.placement === "pinned" ? unit.placement : "auto",
+      }));
+      const packed = arrangeAcceptedUnits({
+        mode: "unplaced",
+        printer: printerGeometry(plate),
+        units: placed,
+      });
+      if (packed.kind === "unit_too_large") {
+        return {
+          kind: "unit_too_large",
+          token: parseRequiredUnitToken(packed.token),
+          printerId: plate.printerId,
+        };
+      }
+      const placementByToken = new Map(placed.map((unit) => [unit.token, unit.placement]));
+      packed.plates.forEach((packedPlate, index) => {
+        next.push({
+          plateId: index === 0
+            ? plate.plateId
+            : plateId(basis, plate.printerId, packedPlate.units.map((unit) => unit.token)),
+          printerId: plate.printerId,
+          printerName: plate.printerName,
+          printerModel: plate.printerModel,
+          bedWidthUm: plate.bedWidthUm,
+          bedDepthUm: plate.bedDepthUm,
+          bedHeightUm: plate.bedHeightUm,
+          marginUm: plate.marginUm,
+          units: packedPlate.units.map((unit) => ({
+            ...unit,
+            placement: index === 0 ? (placementByToken.get(unit.token) ?? "auto") : "auto",
+          })),
+        });
+      });
+    }
+    return next;
+  }
+
+  const byPrinter = new Map<string, AcceptedPlateInput[]>();
+  for (const plate of plates) {
+    const list = byPrinter.get(plate.printerId) ?? [];
+    list.push(plate);
+    byPrinter.set(plate.printerId, list);
+  }
+  const next: AcceptedPlateInput[] = [];
+  for (const printerPlates of byPrinter.values()) {
+    const first = printerPlates[0]!;
+    const units = printerPlates.flatMap((plate) => plate.units);
+    const packed = arrangeAcceptedUnits({
+      mode: "all",
+      printer: printerGeometry(first),
+      units: units.map((unit) => ({
+        token: unit.token,
+        widthUm: unit.widthUm,
+        depthUm: unit.depthUm,
+        heightUm: unit.heightUm,
+        xUm: unit.xUm,
+        yUm: unit.yUm,
+        placement: "auto",
+      })),
+    });
+    if (packed.kind === "unit_too_large") {
+      return {
+        kind: "unit_too_large",
+        token: parseRequiredUnitToken(packed.token),
+        printerId: first.printerId,
+      };
+    }
+    packed.plates.forEach((packedPlate, index) => {
+      const reused = printerPlates[index];
+      next.push({
+        plateId: reused
+          ? reused.plateId
+          : plateId(basis, first.printerId, packedPlate.units.map((unit) => unit.token)),
+        printerId: first.printerId,
+        printerName: first.printerName,
+        printerModel: first.printerModel,
+        bedWidthUm: first.bedWidthUm,
+        bedDepthUm: first.bedDepthUm,
+        bedHeightUm: first.bedHeightUm,
+        marginUm: first.marginUm,
+        units: packedPlate.units.map((unit) => ({ ...unit, placement: "auto" as const })),
+      });
+    });
+  }
+  return next;
+}
+
+export function arrangeAcceptedPlates(
+  dependencies: AcceptedPlateWorkspaceDependencies,
+  command: ArrangeAcceptedPlatesServiceCommand,
+): InitializeAcceptedPlatesResult {
+  const input = dependencies.repository.readAcceptedPlateWorkspaceInput(command.profileId);
+  if (input.kind === "empty_plan" || input.kind === "profile_not_found" || input.kind === "transaction_unavailable" || input.kind === "accepted_state_unavailable") {
+    return input;
+  }
+  if (input.kind !== "ready") return { kind: "plate_revision_changed" };
+  if (!sameBasis(input.basis, command.expected) || command.profileId !== command.expected.profileId) {
+    return { kind: "stale_accepted_plan" };
+  }
+  if (input.plateRevisionId !== command.expectedPlateRevisionId) {
+    return { kind: "plate_revision_changed" };
+  }
+  const packed = arrangedPlates(command.mode, input.basis, currentPlateInputs(input.plates));
+  if (!isPackedPlateInputs(packed)) return packed;
+  const published = dependencies.repository.publishAcceptedPlates({
+    profileId: command.profileId,
+    expected: command.expected,
+    expectedPlateRevisionId: command.expectedPlateRevisionId,
+    plates: packed,
+    undoFromRevisionId: command.mode === "all" ? input.plateRevisionId : null,
+  });
+  if (published.kind !== "published" && published.kind !== "unchanged") return published;
+  const workspace = publishedWorkspace({
+    basis: input.basis,
+    plateRevisionId: published.plateRevisionId,
+    plateRevisionNumber: published.plateRevisionNumber,
+    undoFromRevisionId: published.kind === "published"
+      ? (command.mode === "all" ? input.plateRevisionId : null)
+      : input.undoFromRevisionId,
+    printers: currentPrinters(dependencies),
+    plates: packed,
+    units: input.units,
+  });
+  return { kind: "workspace", workspace };
+}
+
