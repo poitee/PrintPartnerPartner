@@ -51,22 +51,31 @@ function setupWorkspace(
 
 let mockWorkspace = setupWorkspace();
 
-vi.mock("../../../queries/acceptedPlates", () => ({
-  invalidateAcceptedPlateWorkspace: vi.fn(() => Promise.resolve()),
-  useAcceptedPlateRevisionPending: () => false,
-  useAcceptedPlateWorkspaceQuery: () => ({
-    data: mockWorkspace,
-    isPending: false,
-    isError: false,
-    isFetching: false,
-    refetch: vi.fn(),
-  }),
-  useInitializeAcceptedPlatesMutation: () => ({
-    isPending: false,
-    mutateAsync: vi.fn(() => Promise.resolve()),
-  }),
-  useMoveAcceptedPlateUnitMutation: () => ({ mutateAsync: vi.fn() }),
-}));
+vi.mock("../../../queries/acceptedPlates", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../queries/acceptedPlates")>();
+  const idleMutation = () => ({ mutateAsync: vi.fn() });
+  return {
+    ...actual,
+    invalidateAcceptedPlateWorkspace: vi.fn(() => Promise.resolve()),
+    useAcceptedPlateRevisionPending: () => false,
+    useAcceptedPlateWorkspaceQuery: () => ({
+      data: mockWorkspace,
+      isPending: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    }),
+    useInitializeAcceptedPlatesMutation: () => ({
+      isPending: false,
+      mutateAsync: vi.fn(() => Promise.resolve()),
+    }),
+    useMoveAcceptedPlateUnitMutation: idleMutation,
+    usePinAcceptedPlateUnitMutation: idleMutation,
+    useUnplaceAcceptedPlateUnitMutation: idleMutation,
+    useArrangeAcceptedPlatesMutation: idleMutation,
+    useRestoreAcceptedPlatesMutation: idleMutation,
+  };
+});
 
 afterEach(() => {
   cleanup();
