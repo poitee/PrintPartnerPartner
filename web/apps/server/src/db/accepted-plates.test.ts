@@ -353,7 +353,6 @@ describe("accepted Plate repository", () => {
             { widthUm: 50_000, depthUm: 40_000, heightUm: 30_000, artifact: { kind: "unavailable", reason: "legacy" } },
           ],
         },
-        { plateId: "a-second", ordinal: 2, units: [] },
       ],
     });
     expect(resolved.input.layoutDigest).toMatch(/^[a-f0-9]{64}$/);
