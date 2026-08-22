@@ -173,4 +173,31 @@ describe("AcceptedPlateGallery successor revisions", () => {
     });
     expect(onTransfer).toHaveBeenCalledWith(plateId, firstToken, secondPlateId);
   });
+
+  it("offers a new Plate on a Printer that has none", () => {
+    const unusedPrinter = { ...printer, id: "printer-two", name: "Printer Two" };
+    const withUnused = parseAcceptedPlateWorkspace({
+      ...ready,
+      printers: [printer, unusedPrinter],
+    });
+    if (withUnused.kind !== "ready") throw new Error("Expected ready workspace");
+    const onTransfer = vi.fn(() => Promise.resolve());
+    render(
+      <AcceptedPlateGallery
+        workspace={withUnused}
+        disabled={false}
+        onMove={() => Promise.resolve(true)}
+        onPin={() => Promise.resolve()}
+        onUnplace={() => Promise.resolve()}
+        onTransfer={onTransfer}
+        onArrange={() => Promise.resolve()}
+        onStaleMove={() => Promise.resolve()}
+      />,
+    );
+    expect(screen.getByRole("option", { name: "New Plate · Printer Two" })).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: "Move to Plate" }), {
+      target: { value: "printer:printer-two" },
+    });
+    expect(onTransfer).toHaveBeenCalledWith(plateId, firstToken, "printer:printer-two");
+  });
 });

@@ -30,7 +30,7 @@ import {
   CardTitle,
 } from "../../ui/card";
 import AcceptedPlateAssignmentForm from "./AcceptedPlateAssignmentForm";
-import AcceptedPlateGallery from "./AcceptedPlateGallery";
+import AcceptedPlateGallery, { UNUSED_PRINTER_TRANSFER_PREFIX } from "./AcceptedPlateGallery";
 
 type Props = Readonly<{
   profileId: number;
@@ -143,17 +143,24 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
     }
   };
 
-  const submitTransfer = async (plateId: string, token: string, targetPlateId: string) => {
+  const submitTransfer = async (plateId: string, token: string, target: string) => {
     if (workspace?.kind !== "ready") return;
     try {
+      const input = target.startsWith(UNUSED_PRINTER_TRANSFER_PREFIX)
+        ? {
+            expected: workspace.basis,
+            expected_plate_revision_id: workspace.plate_revision_id,
+            target_printer_id: target.slice(UNUSED_PRINTER_TRANSFER_PREFIX.length),
+          }
+        : {
+            expected: workspace.basis,
+            expected_plate_revision_id: workspace.plate_revision_id,
+            target_plate_id: parseAcceptedPlateId(target),
+          };
       await transfer.mutateAsync({
         plateId,
         token,
-        input: {
-          expected: workspace.basis,
-          expected_plate_revision_id: workspace.plate_revision_id,
-          target_plate_id: parseAcceptedPlateId(targetPlateId),
-        },
+        input,
       });
     } catch (error) {
       if (isAcceptedPlateStaleError(error)) {

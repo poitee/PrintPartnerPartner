@@ -103,7 +103,7 @@ function millimetresToMicrometres(value: number): number | null {
   return Number.isSafeInteger(converted) ? converted : null;
 }
 
-function acceptedPrinter(machine: PrinterMachine): AcceptedPlatePrinter | null {
+export function acceptedPrinter(machine: PrinterMachine): AcceptedPlatePrinter | null {
   const bedWidthUm = millimetresToMicrometres(machine.bed_width_mm);
   const bedDepthUm = millimetresToMicrometres(machine.bed_depth_mm);
   const bedHeightUm = machine.bed_height_mm == null

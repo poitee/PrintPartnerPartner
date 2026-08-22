@@ -1,5 +1,5 @@
 import { and, asc, eq, sql } from "drizzle-orm";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { MAX_ACCEPTED_PLATES } from "@print-partner/domain";
 import type { DrizzleDb } from "./client.js";
 import * as defaultSchema from "./schema.js";
@@ -87,7 +87,8 @@ export type UnplaceAcceptedPlateUnitCommand = Readonly<{
 }>;
 
 export type TransferAcceptedPlateUnitCommand = UnplaceAcceptedPlateUnitCommand & Readonly<{
-  targetPlateId: string;
+  targetPlateId?: string;
+  targetPrinter?: Omit<AcceptedPlateInput, "plateId" | "units">;
 }>;
 
 export type ArrangeAcceptedPlatesCommand = Readonly<{
@@ -340,6 +341,10 @@ function storedPlacement(value: unknown): "auto" | "manual" | "pinned" | "unplac
 
 function unitPlacement(unit: AcceptedPlateUnitInput): "auto" | "manual" | "pinned" | "unplaced" {
   return storedPlacement(unit.placement);
+}
+
+function newAcceptedPlateId(): string {
+  return `plate_${randomBytes(16).toString("hex")}`;
 }
 
 function unitFitsPrintableArea(
@@ -1296,8 +1301,19 @@ export function transferAcceptedPlateUnitInternal(
       currentRevision.layoutDigest,
     );
     const source = plates.find((plate) => plate.plateId === command.plateId);
-    const target = plates.find((plate) => plate.plateId === command.targetPlateId);
     const unit = source?.units.find((candidate) => candidate.token === command.token);
+    let createdPlate: AcceptedPlateInput | null = null;
+    let target: AcceptedPlateInput | undefined = command.targetPlateId
+      ? plates.find((plate) => plate.plateId === command.targetPlateId)
+      : plates.find((plate) => plate.printerId === command.targetPrinter?.printerId);
+    if (!target && command.targetPrinter) {
+      createdPlate = {
+        plateId: newAcceptedPlateId(),
+        ...command.targetPrinter,
+        units: [],
+      };
+      target = createdPlate;
+    }
     if (!source || !target || !unit) return { kind: "unit_not_found" };
     if (source.plateId === target.plateId) {
       return {
@@ -1309,7 +1325,8 @@ export function transferAcceptedPlateUnitInternal(
     if (!unitFitsPrintableArea(target, unit)) {
       return { kind: "invalid_geometry", reason: "outside_build_area" };
     }
-    const next = plates.flatMap((plate): AcceptedPlateInput[] => {
+    const currentPlates = createdPlate ? [...plates, createdPlate] : plates;
+    const next = currentPlates.flatMap((plate): AcceptedPlateInput[] => {
       if (plate.plateId === source.plateId) {
         const units = plate.units.filter((candidate) => candidate.token !== command.token);
         return units.length === 0 ? [] : [{ ...plate, units }];

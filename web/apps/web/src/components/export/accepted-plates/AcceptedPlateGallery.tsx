@@ -1,9 +1,35 @@
 import { useEffect, useState } from "react";
-import type { AcceptedPlateWorkspace } from "@print-partner/contracts";
+import type { AcceptedPlatePrinter, AcceptedPlateView, AcceptedPlateWorkspace } from "@print-partner/contracts";
 import { Button } from "../../ui/button";
 import AcceptedPlateBed from "./AcceptedPlateBed";
 
 type ReadyWorkspace = Extract<AcceptedPlateWorkspace, { kind: "ready" }>;
+
+type TransferDestination = Readonly<{ value: string; label: string }>;
+
+export const UNUSED_PRINTER_TRANSFER_PREFIX = "printer:";
+
+function transferDestinations(
+  printers: readonly AcceptedPlatePrinter[],
+  plates: readonly AcceptedPlateView[],
+  currentPlateId: string,
+): TransferDestination[] {
+  const usedPrinterIds = new Set(plates.map((plate) => plate.printer.id));
+  return [
+    ...plates
+      .filter((plate) => plate.plate_id !== currentPlateId)
+      .map((plate) => ({
+        value: plate.plate_id,
+        label: `Plate ${plate.ordinal} · ${plate.printer.name}`,
+      })),
+    ...printers
+      .filter((printer) => !usedPrinterIds.has(printer.id))
+      .map((printer) => ({
+        value: `${UNUSED_PRINTER_TRANSFER_PREFIX}${printer.id}`,
+        label: `New Plate · ${printer.name}`,
+      })),
+  ];
+}
 
 type Props = Readonly<{
   workspace: ReadyWorkspace;
@@ -88,40 +114,41 @@ export default function AcceptedPlateGallery({
         onPin={onPin}
         onUnplace={onUnplace}
         onTransfer={onTransfer}
-        destinationPlates={workspace.plates.filter((candidate) => candidate.plate_id !== plate.plate_id)}
+        destinations={transferDestinations(workspace.printers, workspace.plates, plate.plate_id)}
         onStaleMove={onStaleMove}
       />
       {workspace.unplaced.length > 0 ? (
         <div className="space-y-2">
           <p className="text-sm font-medium">Unplaced</p>
           <ul className="space-y-1 text-sm text-muted-foreground">
-            {workspace.unplaced.map((unit) => (
-              <li key={unit.token} className="flex flex-wrap items-center gap-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{unit.object_name}</span>
-                {workspace.plates.filter((candidate) => candidate.plate_id !== unit.plate_id).length > 0 ? (
-                  <select
-                    aria-label={`Move ${unit.object_name} to Plate`}
-                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                    disabled={disabled}
-                    value=""
-                    onChange={(event) => {
-                      const targetPlateId = event.target.value;
-                      if (!targetPlateId) return;
-                      void onTransfer(unit.plate_id, unit.token, targetPlateId);
-                    }}
-                  >
-                    <option value="">Move to Plate</option>
-                    {workspace.plates
-                      .filter((candidate) => candidate.plate_id !== unit.plate_id)
-                      .map((candidate) => (
-                        <option key={candidate.plate_id} value={candidate.plate_id}>
-                          Plate {candidate.ordinal} · {candidate.printer.name}
+            {workspace.unplaced.map((unit) => {
+              const destinations = transferDestinations(workspace.printers, workspace.plates, unit.plate_id);
+              return (
+                <li key={unit.token} className="flex flex-wrap items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{unit.object_name}</span>
+                  {destinations.length > 0 ? (
+                    <select
+                      aria-label={`Move ${unit.object_name} to Plate`}
+                      className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                      disabled={disabled}
+                      value=""
+                      onChange={(event) => {
+                        const targetPlateId = event.target.value;
+                        if (!targetPlateId) return;
+                        void onTransfer(unit.plate_id, unit.token, targetPlateId);
+                      }}
+                    >
+                      <option value="">Move to Plate</option>
+                      {destinations.map((destination) => (
+                        <option key={destination.value} value={destination.value}>
+                          {destination.label}
                         </option>
                       ))}
-                  </select>
-                ) : null}
-              </li>
-            ))}
+                    </select>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
           <p className="text-[11px] text-muted-foreground">
             Arrange unplaced packs these names around pinned and manual placements.

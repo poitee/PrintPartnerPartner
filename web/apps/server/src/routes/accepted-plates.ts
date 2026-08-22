@@ -1,10 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppRepository } from "../db/repository.js";
 import type { AcceptedPlanBasis } from "../db/accepted-plan-progress.js";
-import { AcceptedPlateIntegrityError, MAX_ACCEPTED_PLATE_UM } from "../db/accepted-plates.js";
+import { AcceptedPlateIntegrityError, MAX_ACCEPTED_PLATE_UM, type AcceptedPlateInput } from "../db/accepted-plates.js";
 import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
 import { ACCEPTED_PART_MESH_MAX_BYTES } from "../services/accepted-part-media.js";
 import {
+  acceptedPrinter,
   arrangeAcceptedPlates,
   initializeAcceptedPlates,
   readAcceptedPlateWorkspace,
@@ -147,16 +148,40 @@ function parseUnplaceRequest(value: unknown): Readonly<{
 function parseTransferRequest(value: unknown): Readonly<{
   expected: AcceptedPlanBasis;
   expectedPlateRevisionId: number;
-  targetPlateId: string;
+  targetPlateId?: string;
+  targetPrinterId?: string;
 }> | null {
-  if (!isRecord(value) || typeof value.target_plate_id !== "string") return null;
+  if (!isRecord(value)) return null;
   const expected = parseBasis(value.expected);
   const expectedPlateRevisionId = positiveInteger(value.expected_plate_revision_id);
-  const targetPlateId = value.target_plate_id.trim();
-  if (!expected || expectedPlateRevisionId == null || !targetPlateId || targetPlateId.length > 200) {
-    return null;
+  const targetPlateId = typeof value.target_plate_id === "string" ? value.target_plate_id.trim() : "";
+  const targetPrinterId = typeof value.target_printer_id === "string" ? value.target_printer_id.trim() : "";
+  if (!expected || expectedPlateRevisionId == null) return null;
+  if (Boolean(targetPlateId) === Boolean(targetPrinterId)) return null;
+  if (targetPlateId) {
+    if (targetPlateId.length > 200) return null;
+    return { expected, expectedPlateRevisionId, targetPlateId };
   }
-  return { expected, expectedPlateRevisionId, targetPlateId };
+  if (!targetPrinterId || targetPrinterId.length > 200) return null;
+  return { expected, expectedPlateRevisionId, targetPrinterId };
+}
+
+function fleetPrinterGeometry(
+  repo: AppRepository,
+  printerId: string,
+): Omit<AcceptedPlateInput, "plateId" | "units"> | null {
+  const machine = loadFleet(repo).find((candidate) => candidate.id === printerId);
+  const printer = machine ? acceptedPrinter(machine) : null;
+  if (!printer) return null;
+  return {
+    printerId: printer.id,
+    printerName: printer.name,
+    printerModel: printer.model,
+    bedWidthUm: printer.bed_width_um,
+    bedDepthUm: printer.bed_depth_um,
+    bedHeightUm: printer.bed_height_um,
+    marginUm: printer.margin_um,
+  };
 }
 
 function parsePinRequest(value: unknown): Readonly<{
@@ -418,13 +443,22 @@ export async function registerAcceptedPlateRoutes(
       return sendError(reply, 400, "invalid_request", "Request is invalid");
     }
     try {
+      const target = body.targetPlateId
+        ? { targetPlateId: body.targetPlateId }
+        : (() => {
+            const targetPrinter = fleetPrinterGeometry(dependencies.repo, body.targetPrinterId ?? "");
+            return targetPrinter ? { targetPrinter } : null;
+          })();
+      if (!target) {
+        return sendError(reply, 400, "invalid_request", "Unknown printer.");
+      }
       const result = dependencies.repo.transferAcceptedPlateUnit({
         profileId: id,
         expected: body.expected,
         expectedPlateRevisionId: body.expectedPlateRevisionId,
         plateId,
         token,
-        targetPlateId: body.targetPlateId,
+        ...target,
       });
       if (result.kind === "moved" || result.kind === "unchanged") {
         return {

@@ -259,7 +259,18 @@ export type UnplaceAcceptedPlateUnitRequest = z.infer<typeof unplaceAcceptedPlat
 const transferAcceptedPlateUnitRequestSchema = z.strictObject({
   expected: acceptedPlanBasisSchema,
   expected_plate_revision_id: positiveSafeInteger,
-  target_plate_id: acceptedPlateId,
+  target_plate_id: acceptedPlateId.optional(),
+  target_printer_id: printerId.optional(),
+}).superRefine((value, context) => {
+  const hasPlate = Boolean(value.target_plate_id);
+  const hasPrinter = Boolean(value.target_printer_id);
+  if (hasPlate === hasPrinter) {
+    context.addIssue({
+      code: "custom",
+      path: hasPlate ? ["target_printer_id"] : ["target_plate_id"],
+      message: "Provide exactly one of target_plate_id or target_printer_id",
+    });
+  }
 });
 
 export type TransferAcceptedPlateUnitRequest = z.infer<typeof transferAcceptedPlateUnitRequestSchema>;

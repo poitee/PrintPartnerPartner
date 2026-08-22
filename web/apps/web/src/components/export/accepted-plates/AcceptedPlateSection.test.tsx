@@ -50,6 +50,7 @@ function setupWorkspace(
 }
 
 let mockWorkspace = setupWorkspace();
+const transferMutate = vi.fn(() => Promise.resolve());
 
 vi.mock("../../../queries/acceptedPlates", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../queries/acceptedPlates")>();
@@ -72,7 +73,10 @@ vi.mock("../../../queries/acceptedPlates", async (importOriginal) => {
     useMoveAcceptedPlateUnitMutation: idleMutation,
     usePinAcceptedPlateUnitMutation: idleMutation,
     useUnplaceAcceptedPlateUnitMutation: idleMutation,
-    useTransferAcceptedPlateUnitMutation: idleMutation,
+    useTransferAcceptedPlateUnitMutation: () => ({
+      isPending: false,
+      mutateAsync: transferMutate,
+    }),
     useArrangeAcceptedPlatesMutation: idleMutation,
     useRestoreAcceptedPlatesMutation: idleMutation,
   };
@@ -81,6 +85,7 @@ vi.mock("../../../queries/acceptedPlates", async (importOriginal) => {
 afterEach(() => {
   cleanup();
   mockWorkspace = setupWorkspace();
+  transferMutate.mockClear();
 });
 
 describe("AcceptedPlateSection assignment draft identity", () => {
@@ -118,5 +123,54 @@ describe("AcceptedPlateSection assignment draft identity", () => {
       rendered.rerender(<AcceptedPlateSection profileId={7} enabled />);
       expect(rowPrinter().value).toBe("");
     }
+  });
+});
+
+describe("AcceptedPlateSection transfers", () => {
+  it("sends the unused Printer when creating a Plate", async () => {
+    const unusedPrinter = { ...printer, id: "printer-two", name: "Printer Two" };
+    const plateId = `plate_${"c".repeat(32)}`;
+    mockWorkspace = parseAcceptedPlateWorkspace({
+      kind: "ready",
+      basis,
+      plate_revision_id: 19,
+      plate_revision_number: 2,
+      printers: [printer, unusedPrinter],
+      plates: [{
+        plate_id: plateId,
+        ordinal: 1,
+        printer,
+        units: [{
+          token,
+          object_name: `bracket__${token}`,
+          filename: "bracket.stl",
+          source_layer: "Hardware",
+          role: "primary",
+          filament_color_id: null,
+          x_um: 4_000,
+          y_um: 5_000,
+          width_um: 30_000,
+          depth_um: 20_000,
+          height_um: 10_000,
+        }],
+      }],
+    });
+    const queryClient = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    render(<AcceptedPlateSection profileId={7} enabled />, { wrapper });
+    fireEvent.change(screen.getByRole("combobox", { name: "Move to Plate" }), {
+      target: { value: "printer:printer-two" },
+    });
+    expect(transferMutate).toHaveBeenCalledWith({
+      plateId,
+      token,
+      input: {
+        expected: basis,
+        expected_plate_revision_id: 19,
+        target_printer_id: "printer-two",
+      },
+    });
   });
 });

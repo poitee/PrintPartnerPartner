@@ -117,6 +117,16 @@ endsolid tracked`) {
     margin_mm: 4,
     max_filament_slots: 1,
     loaded_filaments: [{ slot: 1, filament_color_id: "wrong", label: "Wrong" }],
+  }, {
+    id: "printer-two",
+    name: "Printer Two",
+    model: "Model Two",
+    bed_width_mm: 220,
+    bed_depth_mm: 220,
+    bed_height_mm: 250,
+    margin_mm: 4,
+    max_filament_slots: 1,
+    loaded_filaments: [],
   }]);
   const app = await buildApp(loadConfig(), ports);
   cleanups.push(async () => {
@@ -396,5 +406,97 @@ endsolid degenerate`);
     });
     const workspace = await app.inject({ method: "GET", url: `/plans/${profile.id}/plates` });
     expect(workspace.json()).toMatchObject({ kind: "setup", expected_plate_revision_id: null });
+  });
+
+  it("creates a Plate when transferring onto a Printer that has none", async () => {
+    const { app, profile, basis, token } = await trackedFixture();
+    const expected = {
+      profile_id: basis.profileId,
+      plan_version: basis.planVersion,
+      plan_revision_id: basis.revisionId,
+      plan_revision_digest: basis.revisionDigest,
+      required_unit_mapping_digest: basis.requiredUnitMappingDigest,
+    };
+    const initialized = await app.inject({
+      method: "POST",
+      url: `/plans/${profile.id}/plates/initialize`,
+      payload: {
+        expected,
+        expected_plate_revision_id: null,
+        assignments: [{ token, printer_id: "printer-one" }],
+      },
+    });
+    expect(initialized.statusCode).toBe(200);
+    const ready = initialized.json() as {
+      plate_revision_id: number;
+      plates: Array<{ plate_id: string; printer: { id: string } }>;
+    };
+    const plateId = ready.plates[0]?.plate_id;
+    if (!plateId) throw new Error("initialized Plate is missing");
+
+    const unknownPrinter = await app.inject({
+      method: "POST",
+      url: `/plans/${profile.id}/plates/${plateId}/units/${token}/transfer`,
+      payload: {
+        expected,
+        expected_plate_revision_id: ready.plate_revision_id,
+        target_printer_id: "printer-missing",
+      },
+    });
+    expect(unknownPrinter.statusCode).toBe(400);
+    expect(unknownPrinter.json()).toEqual({
+      detail: "Unknown printer.",
+      code: "invalid_request",
+    });
+
+    const bothTargets = await app.inject({
+      method: "POST",
+      url: `/plans/${profile.id}/plates/${plateId}/units/${token}/transfer`,
+      payload: {
+        expected,
+        expected_plate_revision_id: ready.plate_revision_id,
+        target_plate_id: plateId,
+        target_printer_id: "printer-two",
+      },
+    });
+    expect(bothTargets.statusCode).toBe(400);
+    expect(bothTargets.json()).toEqual({
+      detail: "Request is invalid",
+      code: "invalid_request",
+    });
+
+    const transferred = await app.inject({
+      method: "POST",
+      url: `/plans/${profile.id}/plates/${plateId}/units/${token}/transfer`,
+      payload: {
+        expected,
+        expected_plate_revision_id: ready.plate_revision_id,
+        target_printer_id: "printer-two",
+      },
+    });
+    expect(transferred.statusCode).toBe(200);
+    expect(transferred.json()).toMatchObject({ plate_revision_number: 2 });
+
+    const reloaded = await app.inject({ method: "GET", url: `/plans/${profile.id}/plates` });
+    expect(reloaded.statusCode).toBe(200);
+    const workspace = reloaded.json() as {
+      kind: string;
+      plate_revision_id: number;
+      plates: Array<{ plate_id: string; printer: { id: string; name: string; model: string } }>;
+      unplaced: Array<{ token: string; plate_id: string; printer_id: string }>;
+    };
+    expect(workspace).toMatchObject({
+      kind: "ready",
+      plate_revision_id: transferred.json().plate_revision_id,
+      plates: [{
+        printer: { id: "printer-two", name: "Printer Two", model: "Model Two" },
+      }],
+    });
+    const nextPlateId = workspace.plates[0]?.plate_id;
+    expect(nextPlateId).toMatch(/^plate_[0-9a-f]{32}$/);
+    expect(nextPlateId).not.toBe(plateId);
+    expect(workspace.unplaced).toEqual([
+      expect.objectContaining({ token, plate_id: nextPlateId, printer_id: "printer-two" }),
+    ]);
   });
 });

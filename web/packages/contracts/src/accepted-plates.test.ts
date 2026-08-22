@@ -184,10 +184,29 @@ describe("accepted Plate contracts", () => {
       expected_plate_revision_id: 19,
       target_plate_id: plateId,
     });
+    expect(parseTransferAcceptedPlateUnitRequest({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      target_printer_id: "printer-mk4",
+    })).toEqual({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      target_printer_id: "printer-mk4",
+    });
     expect(() => parseTransferAcceptedPlateUnitRequest({
       expected: basis,
       expected_plate_revision_id: 19,
       target_plate_id: "plate-main",
+    })).toThrow();
+    expect(() => parseTransferAcceptedPlateUnitRequest({
+      expected: basis,
+      expected_plate_revision_id: 19,
+    })).toThrow();
+    expect(() => parseTransferAcceptedPlateUnitRequest({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      target_plate_id: plateId,
+      target_printer_id: "printer-mk4",
     })).toThrow();
   });
 

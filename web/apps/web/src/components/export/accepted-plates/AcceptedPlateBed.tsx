@@ -40,7 +40,7 @@ type Props = Readonly<{
   onPin?: (plateId: string, token: string, pinned: boolean) => Promise<void>;
   onUnplace?: (plateId: string, token: string) => Promise<void>;
   onTransfer?: (plateId: string, token: string, targetPlateId: string) => Promise<void>;
-  destinationPlates?: readonly AcceptedPlateView[];
+  destinations?: readonly Readonly<{ value: string; label: string }>[];
   onStaleMove: () => Promise<void>;
 }>;
 
@@ -69,7 +69,7 @@ export default function AcceptedPlateBed({
   onPin,
   onUnplace,
   onTransfer,
-  destinationPlates = [],
+  destinations = [],
   onStaleMove,
 }: Props) {
   const [selectedToken, setSelectedToken] = useState<RequiredUnitToken | null>(plate.units[0]?.token ?? null);
@@ -251,7 +251,7 @@ export default function AcceptedPlateBed({
               Return to unplaced
             </Button>
           ) : null}
-          {onTransfer && destinationPlates.length > 0 ? (
+          {onTransfer && destinations.length > 0 ? (
             <select
               aria-label="Move to Plate"
               className="h-8 rounded-md border border-input bg-background px-2 text-sm"
@@ -264,9 +264,9 @@ export default function AcceptedPlateBed({
               }}
             >
               <option value="">Move to Plate</option>
-              {destinationPlates.map((candidate) => (
-                <option key={candidate.plate_id} value={candidate.plate_id}>
-                  Plate {candidate.ordinal} · {candidate.printer.name}
+              {destinations.map((destination) => (
+                <option key={destination.value} value={destination.value}>
+                  {destination.label}
                 </option>
               ))}
             </select>

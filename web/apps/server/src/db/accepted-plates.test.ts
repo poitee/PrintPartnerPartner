@@ -1158,6 +1158,176 @@ endsolid geometry`));
     })).toEqual({ kind: "unit_not_found" });
   });
 
+  it("creates a Plate when transferring onto a Printer that has none", () => {
+    const { repo, profile, accepted, required } = fixture();
+    const firstPlateId = `plate_${"a".repeat(32)}`;
+    const firstToken = required[0]!.token;
+    const secondToken = required[1]!.token;
+    const published = repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: null,
+      plates: [{
+        plateId: firstPlateId,
+        printerId: "printer-core-one",
+        printerName: "Core One",
+        printerModel: "Prusa Core One",
+        bedWidthUm: 250_000,
+        bedDepthUm: 220_000,
+        bedHeightUm: 220_000,
+        marginUm: 5_000,
+        units: [{
+          token: firstToken,
+          xUm: 5_000,
+          yUm: 5_000,
+          widthUm: 50_000,
+          depthUm: 40_000,
+          heightUm: 30_000,
+        }, {
+          token: secondToken,
+          xUm: 65_000,
+          yUm: 5_000,
+          widthUm: 50_000,
+          depthUm: 40_000,
+          heightUm: 30_000,
+        }],
+      }],
+    });
+    if (published.kind !== "published") throw new Error("Plate publish failed");
+
+    const transferred = repo.transferAcceptedPlateUnit({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: published.plateRevisionId,
+      plateId: firstPlateId,
+      token: firstToken,
+      targetPrinter: {
+        printerId: "printer-mk4",
+        printerName: "MK4",
+        printerModel: "Prusa MK4",
+        bedWidthUm: 250_000,
+        bedDepthUm: 210_000,
+        bedHeightUm: 220_000,
+        marginUm: 4_000,
+      },
+    });
+    expect(transferred).toMatchObject({ kind: "moved" });
+    if (transferred.kind !== "moved") throw new Error("Transfer failed");
+
+    const stored = repo.readAcceptedPlates(profile.id);
+    expect(stored.kind).toBe("ready");
+    if (stored.kind !== "ready") throw new Error("Read after transfer failed");
+    expect(stored.plates).toHaveLength(2);
+    expect(stored.plates[0]).toMatchObject({
+      plateId: firstPlateId,
+      printerId: "printer-core-one",
+      ordinal: 1,
+    });
+    expect(stored.plates[0]!.units).toEqual([
+      expect.objectContaining({ token: secondToken }),
+    ]);
+    expect(stored.plates[1]).toMatchObject({
+      printerId: "printer-mk4",
+      printerName: "MK4",
+      printerModel: "Prusa MK4",
+      bedWidthUm: 250_000,
+      bedDepthUm: 210_000,
+      bedHeightUm: 220_000,
+      marginUm: 4_000,
+      ordinal: 2,
+    });
+    expect(stored.plates[1]!.plateId).toMatch(/^plate_[0-9a-f]{32}$/);
+    expect(stored.plates[1]!.plateId).not.toBe(firstPlateId);
+    expect(stored.plates[1]!.units).toEqual([
+      expect.objectContaining({ token: firstToken, placement: "unplaced" }),
+    ]);
+  });
+
+  it("lands on the existing Plate when transferring onto a Printer that already has one", () => {
+    const { repo, profile, accepted, required } = fixture();
+    const firstPlateId = `plate_${"a".repeat(32)}`;
+    const secondPlateId = `plate_${"b".repeat(32)}`;
+    const firstToken = required[0]!.token;
+    const secondToken = required[1]!.token;
+    const published = repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: null,
+      plates: [
+        {
+          plateId: firstPlateId,
+          printerId: "printer-core-one",
+          printerName: "Core One",
+          printerModel: "Prusa Core One",
+          bedWidthUm: 250_000,
+          bedDepthUm: 220_000,
+          bedHeightUm: 220_000,
+          marginUm: 5_000,
+          units: [{
+            token: firstToken,
+            xUm: 5_000,
+            yUm: 5_000,
+            widthUm: 50_000,
+            depthUm: 40_000,
+            heightUm: 30_000,
+          }],
+        },
+        {
+          plateId: secondPlateId,
+          printerId: "printer-mk4",
+          printerName: "MK4",
+          printerModel: "Prusa MK4",
+          bedWidthUm: 250_000,
+          bedDepthUm: 210_000,
+          bedHeightUm: 220_000,
+          marginUm: 4_000,
+          units: [{
+            token: secondToken,
+            xUm: 4_000,
+            yUm: 4_000,
+            widthUm: 50_000,
+            depthUm: 40_000,
+            heightUm: 30_000,
+          }],
+        },
+      ],
+    });
+    if (published.kind !== "published") throw new Error("Plate publish failed");
+
+    const transferred = repo.transferAcceptedPlateUnit({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: published.plateRevisionId,
+      plateId: firstPlateId,
+      token: firstToken,
+      targetPrinter: {
+        printerId: "printer-mk4",
+        printerName: "MK4",
+        printerModel: "Prusa MK4",
+        bedWidthUm: 250_000,
+        bedDepthUm: 210_000,
+        bedHeightUm: 220_000,
+        marginUm: 4_000,
+      },
+    });
+    expect(transferred).toMatchObject({ kind: "moved" });
+    if (transferred.kind !== "moved") throw new Error("Transfer failed");
+
+    const stored = repo.readAcceptedPlates(profile.id);
+    expect(stored.kind).toBe("ready");
+    if (stored.kind !== "ready") throw new Error("Read after transfer failed");
+    expect(stored.plates).toHaveLength(1);
+    expect(stored.plates[0]).toMatchObject({
+      plateId: secondPlateId,
+      printerId: "printer-mk4",
+      ordinal: 1,
+    });
+    expect(stored.plates[0]!.units).toEqual(expect.arrayContaining([
+      expect.objectContaining({ token: firstToken, placement: "unplaced" }),
+      expect.objectContaining({ token: secondToken, placement: "auto" }),
+    ]));
+  });
+
   it("rejects a transfer onto a Printer that cannot fit the Required unit", () => {
     const { repo, profile, accepted, required } = fixture();
     const firstPlateId = `plate_${"c".repeat(32)}`;
@@ -1214,6 +1384,60 @@ endsolid geometry`));
       token: required[0]!.token,
       targetPlateId: secondPlateId,
     })).toEqual({ kind: "invalid_geometry", reason: "outside_build_area" });
+  });
+
+  it("rejects creating a Plate on a Printer that cannot fit the Required unit", () => {
+    const { repo, raw, profile, accepted, required } = fixture();
+    const firstPlateId = `plate_${"c".repeat(32)}`;
+    const published = repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: null,
+      plates: [{
+        plateId: firstPlateId,
+        printerId: "printer-core-one",
+        printerName: "Core One",
+        printerModel: "Prusa Core One",
+        bedWidthUm: 250_000,
+        bedDepthUm: 220_000,
+        bedHeightUm: 220_000,
+        marginUm: 5_000,
+        units: [{
+          token: required[0]!.token,
+          xUm: 5_000,
+          yUm: 5_000,
+          widthUm: 50_000,
+          depthUm: 40_000,
+          heightUm: 30_000,
+        }, {
+          token: required[1]!.token,
+          xUm: 65_000,
+          yUm: 5_000,
+          widthUm: 50_000,
+          depthUm: 40_000,
+          heightUm: 30_000,
+        }],
+      }],
+    });
+    if (published.kind !== "published") throw new Error("Plate publish failed");
+    const before = acceptedPlateRows(raw);
+    expect(repo.transferAcceptedPlateUnit({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: published.plateRevisionId,
+      plateId: firstPlateId,
+      token: required[0]!.token,
+      targetPrinter: {
+        printerId: "printer-mini",
+        printerName: "Mini",
+        printerModel: "Prusa Mini",
+        bedWidthUm: 180_000,
+        bedDepthUm: 180_000,
+        bedHeightUm: 20_000,
+        marginUm: 4_000,
+      },
+    })).toEqual({ kind: "invalid_geometry", reason: "outside_build_area" });
+    expect(acceptedPlateRows(raw)).toEqual(before);
   });
 
   it("returns unchanged for an exact repeated move and rejects a stale Plate revision", () => {
