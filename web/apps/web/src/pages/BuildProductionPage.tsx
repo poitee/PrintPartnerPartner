@@ -47,7 +47,7 @@ import {
  * Slicer-input file cards (STL, 3MF, share, manifest) stay plan-gated below.
  * Farm-queue verbs (Send ready / Send now / Remove) live on Progress, not here.
  */
-export default function ExportPage() {
+export default function BuildProductionPage() {
   const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const {
     selectedProfileId,

@@ -58,7 +58,7 @@ function hintRoute(hint: string | null | undefined, profileId: number | null) {
  * Plan stage — validate quantities, apply saved drafts, surface warnings.
  * Production owns plates and send; Checkoff owns verification.
  */
-export default function PartsPage() {
+export default function PlanPage() {
   const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const { selectedProfileId, profiles } = useProfileSelection();
   const {

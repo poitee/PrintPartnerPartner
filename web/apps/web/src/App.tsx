@@ -19,14 +19,14 @@ import { buildSourcesRoute, productionRoute } from "./lib/routes";
 // thumbnails, not on the initial JS payload.
 const BuildPage      = lazy(() => import("./pages/BuildPage"));
 const CheckoffPage   = lazy(() => import("./pages/CheckoffPage"));
-const ExportPage     = lazy(() => import("./pages/ExportPage"));
+const BuildProductionPage = lazy(() => import("./pages/BuildProductionPage"));
 const GlobalProductionPage = lazy(() => import("./pages/GlobalProductionPage"));
 const HelpPage       = lazy(() => import("./pages/HelpPage"));
 const LoginPage      = lazy(() => import("./pages/LoginPage"));
 const ForgotPasswordPage = lazy(() => import("./pages/ForgotPasswordPage"));
 const ResetPasswordPage  = lazy(() => import("./pages/ResetPasswordPage"));
-const PartsPage      = lazy(() => import("./pages/PartsPage"));
-const PlansPage      = lazy(() => import("./pages/PlansPage"));
+const PlanPage       = lazy(() => import("./pages/PlanPage"));
+const BuildsPage     = lazy(() => import("./pages/BuildsPage"));
 const PrintersPage   = lazy(() => import("./pages/PrintersPage"));
 const SettingsPage   = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage    = lazy(() => import("./pages/SourcesPage"));
@@ -108,12 +108,12 @@ export default function App() {
                               element={<PreserveSearchRedirect to="/sources" />}
                             />
 
-                            <Route path="builds" element={<PlansPage />} />
+                            <Route path="builds" element={<BuildsPage />} />
                             <Route
                               path="plans"
                               element={<PreserveSearchRedirect to="/builds" />}
                             />
-                            <Route path="plan" element={<PartsPage />} />
+                            <Route path="plan" element={<PlanPage />} />
                             <Route
                               path="parts"
                               element={<PreserveSearchRedirect to="/plan" />}
@@ -130,7 +130,7 @@ export default function App() {
                             />
 
                             <Route path="production" element={<GlobalProductionRoute />} />
-                            <Route path="export" element={<ExportPage />} />
+                            <Route path="export" element={<BuildProductionPage />} />
 
                             <Route path="plans/:planId/studio" element={<LegacyStudioRedirect />} />
                             <Route

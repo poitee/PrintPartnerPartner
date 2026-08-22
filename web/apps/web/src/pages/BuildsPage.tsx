@@ -52,7 +52,7 @@ import {
 import { useTouchProfileLastUsedMutation } from "../queries/profiles";
 
 /** Dedicated Builds list — global section, not a Build destination. */
-export default function PlansPage() {
+export default function BuildsPage() {
   const navigate = useNavigate();
   const { health, error: engineError, loading: healthLoading } = useEngineHealth();
   const {

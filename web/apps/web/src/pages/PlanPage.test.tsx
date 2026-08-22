@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { PlanDraftWorkspace } from "../api/engine";
-import PartsPage from "./PartsPage";
+import PlanPage from "./PlanPage";
 
 const readyWorkspace: PlanDraftWorkspace = {
   profile_id: 7,
@@ -85,7 +85,7 @@ vi.mock("../components/review/ReviewPartsSheet", () => ({
   default: () => <div>Review sheet</div>,
 }));
 
-describe("PartsPage Apply ownership", () => {
+describe("PlanPage Apply ownership", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
@@ -98,7 +98,7 @@ describe("PartsPage Apply ownership", () => {
   it("does not show Apply when no saved draft is open", () => {
     render(
       <MemoryRouter>
-        <PartsPage />
+        <PlanPage />
       </MemoryRouter>,
     );
 
@@ -110,7 +110,7 @@ describe("PartsPage Apply ownership", () => {
     workspace.draftWorkspace = readyWorkspace;
     render(
       <MemoryRouter>
-        <PartsPage />
+        <PlanPage />
       </MemoryRouter>,
     );
 

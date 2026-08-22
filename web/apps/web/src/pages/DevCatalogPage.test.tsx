@@ -8,7 +8,7 @@ import DevCatalogPage from "./DevCatalogPage";
 describe("DevCatalogPage", () => {
   afterEach(cleanup);
 
-  it("shows Keep/Revise/Remove inventory and three visual sketches", () => {
+  it("shows Keep/Remove inventory and three visual sketches", () => {
     render(
       <MemoryRouter>
         <DevCatalogPage />
@@ -26,7 +26,8 @@ describe("DevCatalogPage", () => {
     expect(screen.getByTestId("catalog-stage").getAttribute("data-sketch")).toBe("console");
     expect(screen.getByRole("button", { name: "Retry" }).textContent).toBe("Retry");
     expect(screen.getAllByText("Keep").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Revise").length).toBeGreaterThan(0);
+    expect(screen.getByText("pages/PlanPage, BuildsPage, BuildProductionPage")).toBeTruthy();
+    expect(screen.queryByText("PartsPage/ExportPage filenames")).toBeNull();
     expect(screen.getByText("Remove").textContent).toBe("Remove");
     expect(screen.queryByText("Merge")).toBeNull();
     expect(screen.getByText("settings/PrintersSettingsCard")).toBeTruthy();

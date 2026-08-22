@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import PlansPage from "./PlansPage";
+import BuildsPage from "./BuildsPage";
 
 const state = vi.hoisted(() => ({
   profiles: [
@@ -63,7 +63,7 @@ vi.mock("../components/share/IncomingSharesCard", () => ({
   default: () => <div data-testid="incoming-shares">Shared builds</div>,
 }));
 
-describe("PlansPage", () => {
+describe("BuildsPage", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
@@ -88,7 +88,7 @@ describe("PlansPage", () => {
   it("renders one accessible Builds tree with complete controls on small screens", () => {
     render(
       <MemoryRouter>
-        <PlansPage />
+        <BuildsPage />
       </MemoryRouter>,
     );
 
@@ -109,7 +109,7 @@ describe("PlansPage", () => {
 
     render(
       <MemoryRouter>
-        <PlansPage />
+        <BuildsPage />
       </MemoryRouter>,
     );
 
@@ -123,7 +123,7 @@ describe("PlansPage", () => {
 
     const { rerender } = render(
       <MemoryRouter>
-        <PlansPage />
+        <BuildsPage />
       </MemoryRouter>,
     );
 
@@ -135,7 +135,7 @@ describe("PlansPage", () => {
     state.loading = false;
     rerender(
       <MemoryRouter>
-        <PlansPage />
+        <BuildsPage />
       </MemoryRouter>,
     );
 
@@ -148,7 +148,7 @@ describe("PlansPage", () => {
 
     render(
       <MemoryRouter>
-        <PlansPage />
+        <BuildsPage />
       </MemoryRouter>,
     );
 
@@ -185,7 +185,7 @@ describe("PlansPage", () => {
 
     render(
       <MemoryRouter>
-        <PlansPage />
+        <BuildsPage />
       </MemoryRouter>,
     );
 
@@ -201,7 +201,7 @@ describe("PlansPage", () => {
     render(
       <MemoryRouter initialEntries={["/builds"]}>
         <Routes>
-          <Route path="/builds" element={<PlansPage />} />
+          <Route path="/builds" element={<BuildsPage />} />
           <Route path="/plan" element={<div>Plan destination</div>} />
         </Routes>
       </MemoryRouter>,
@@ -217,7 +217,7 @@ describe("PlansPage", () => {
 
     render(
       <MemoryRouter>
-        <PlansPage />
+        <BuildsPage />
       </MemoryRouter>,
     );
 
@@ -243,7 +243,7 @@ describe("PlansPage", () => {
 
     render(
       <MemoryRouter>
-        <PlansPage />
+        <BuildsPage />
       </MemoryRouter>,
     );
 
@@ -275,7 +275,7 @@ describe("PlansPage", () => {
 
     render(
       <MemoryRouter>
-        <PlansPage />
+        <BuildsPage />
       </MemoryRouter>,
     );
 

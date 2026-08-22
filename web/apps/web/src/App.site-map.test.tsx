@@ -44,17 +44,17 @@ vi.mock("./layout/AppLayout", () => ({
     return <Outlet />;
   },
 }));
-vi.mock("./pages/PlansPage", () => ({
+vi.mock("./pages/BuildsPage", () => ({
   default: () => <h1>Builds landing</h1>,
 }));
-vi.mock("./pages/ExportPage", () => ({
+vi.mock("./pages/BuildProductionPage", () => ({
   default: () => <h1>Build Production</h1>,
 }));
 vi.mock("./pages/GlobalProductionPage", () => ({
   default: () => <h1>Global Production</h1>,
 }));
 vi.mock("./pages/BuildPage", () => ({ default: () => <h1>Sources</h1> }));
-vi.mock("./pages/PartsPage", () => ({ default: () => <h1>Plan</h1> }));
+vi.mock("./pages/PlanPage", () => ({ default: () => <h1>Plan</h1> }));
 vi.mock("./pages/CheckoffPage", () => ({ default: () => <h1>Checkoff</h1> }));
 vi.mock("./pages/SourcesPage", () => ({ default: () => <h1>Library</h1> }));
 vi.mock("./pages/PrintersPage", () => ({ default: () => <h1>Printers</h1> }));

@@ -7,6 +7,9 @@ This reference records the verified state of Phases 5 through 11 on August 20,
 individual phase files for accepted requirements and this file for current
 status, dependencies, and implementation units.
 
+This table is a dated snapshot from August 20. Implementation continued after
+that date on the stabilization branch; do not use this file as live status.
+
 ## Status
 
 | Phase | Status | Verified gap |

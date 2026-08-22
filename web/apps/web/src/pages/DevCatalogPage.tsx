@@ -29,7 +29,7 @@ const INVENTORY: Array<{ name: string; status: "Keep" | "Revise" | "Merge" | "Re
   { name: "share/IncomingSharesCard", status: "Keep", why: "Mounted on Builds; outgoing sharing stays live." },
   { name: "settings/PrintersSettingsCard", status: "Keep", why: "Global Printers owns setup; Settings keeps a copy plus Library." },
   { name: "PlanTray leftover copy", status: "Keep", why: "Build summary tray; Sources and Production labels match the spine." },
-  { name: "PartsPage/ExportPage filenames", status: "Revise", why: "Lazy-loaded behind /plan and /export; callers already migrated." },
+  { name: "pages/PlanPage, BuildsPage, BuildProductionPage", status: "Keep", why: "Filenames match spine labels; lazy-loaded behind /plan, /builds, and /export." },
   { name: "WelcomePage", status: "Remove", why: "Deleted; Builds is home." },
 ];
 
