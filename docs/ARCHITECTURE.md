@@ -124,7 +124,7 @@ flowchart LR
 ```
 
 - **Confirm-to-apply**: mutating tools write proposals; nothing changes until confirm/dismiss.
-- **Domain packs** under `assistant-domain/` remain runtime context (not training). See [assistant-domain-ingest-schema.md](./assistant-domain-ingest-schema.md).
+- **Domain packs** under `assistant-domain/` remain runtime context (not training). See [Kit brain](./KIT_ADVISOR.md).
 - **Decision memory**: Apply/Dismiss write `plan_decisions`; feedback writes `assistant_feedback`. This is ranking/context only — **no fine-tuning**.
 
 ## Schema dialects

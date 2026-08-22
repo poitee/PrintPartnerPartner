@@ -74,15 +74,29 @@ test("public docs describe Builds, Sources, Plan, Checkoff, and Production", () 
   assert.match(playbook, /New Build/);
   assert.match(playbook, /Production/);
 
+  const kitAdvisor = read("docs/KIT_ADVISOR.md");
+  assert.doesNotMatch(kitAdvisor, /Plan \/ Parts \/ Progress \/ Export/);
+  assert.match(kitAdvisor, /Checkoff/);
+  assert.doesNotMatch(docsIndex, /assistant-research-brief/);
+  assert.doesNotMatch(docsIndex, /assistant-domain-ingest-schema/);
+
   const trackedPlans = spawnSync(
     "git",
-    ["ls-files", "--", "docs/superpowers", ".superpowers"],
+    [
+      "ls-files",
+      "--",
+      "docs/superpowers",
+      ".superpowers",
+      "docs/assistant-research-brief.md",
+      "docs/assistant-domain-ingest-schema.md",
+      "DATABASE_OPTIMIZATION.md",
+    ],
     { cwd: root, encoding: "utf8" },
   );
   assert.equal(trackedPlans.status, 0);
   assert.equal(
     trackedPlans.stdout.trim(),
     "",
-    "internal plan trees must not be tracked in git",
+    "AI authoring briefs and internal plan trees must not be tracked in git",
   );
 });

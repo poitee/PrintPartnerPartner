@@ -64,8 +64,6 @@ After the app is running, open **Help** in the sidebar for the in-app workflow g
 | [Printer UX deep dive](integrations/PRINTER_UX.md) | Desk-first screens, Production/Checkoff binds, phased UI map |
 | [3MF export validation](3MF_EXPORT_VALIDATION.md) | Slicer import checklist for 3MF packs |
 | [MCP attach](assistant-mcp.md) | HTTP MCP + Cursor / Grok / Claude connect |
-| [Assistant research brief](assistant-research-brief.md) | Prompt/brief for producing domain research packs |
-| [Domain ingest schema](assistant-domain-ingest-schema.md) | YAML/MD schemas for `assistant-domain/` packs |
 
 ---
 

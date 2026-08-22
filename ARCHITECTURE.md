@@ -40,4 +40,3 @@ Progress/Parts thumbs render in-browser with Three.js. The SPA uses an IndexedDB
 - [`OPERATIONS.md`](OPERATIONS.md) — backups, keys, metrics, troubleshooting
 - [`SECURITY.md`](SECURITY.md) — webhooks, SSRF, auth
 - [`NON_ROOT_SETUP.md`](NON_ROOT_SETUP.md) — non-root container notes
-- [`DATABASE_OPTIMIZATION.md`](DATABASE_OPTIMIZATION.md) — indexing / query notes

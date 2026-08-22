@@ -36,3 +36,6 @@ Do Not Push/
 # Internal planning docs — keep local or in a private archive, never ship on GitHub
 docs/superpowers/
 .superpowers/
+docs/assistant-research-brief.md
+docs/assistant-domain-ingest-schema.md
+DATABASE_OPTIMIZATION.md

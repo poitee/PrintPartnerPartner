@@ -1,6 +1,6 @@
 # Kit brain + MCP attach
 
-Print Partner keeps the desk loop (**Plan / Parts / Progress / Export**) and exposes product tools over **MCP**. Attach **Cursor**, **Grok**, or **Claude** — there is **no in-app kit advisor chat** and **no Settings → AI**.
+Print Partner keeps the desk loop (**Library** → **Builds** → **Sources** → **Plan** → **Checkoff** → **Production**) and exposes product tools over **MCP**. Attach **Cursor**, **Grok**, or **Claude** — there is **no in-app kit advisor chat** and **no Settings → AI**.
 
 ## Connect
 
@@ -17,7 +17,7 @@ Mutating tools only **propose**. Apply with `confirm_apply` (or dismiss). Decisi
 ## Never
 
 - Auto-compose
-- Auto-tick Progress
+- Auto-tick Checkoff
 - `start_print` / send print from MCP
 
 ## Settings
