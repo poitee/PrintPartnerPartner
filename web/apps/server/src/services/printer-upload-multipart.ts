@@ -19,6 +19,7 @@ export type PrinterUploadMultipartResult = {
   filename: string;
   artifact_path: string;
   profile_id?: number;
+  plate_revision_id?: number;
   checkoff_units_raw?: string;
   unlabeled_names_raw?: string;
   wait_for_idle?: boolean;
@@ -58,6 +59,7 @@ export async function parsePrinterUploadMultipart(
   let filename = "print.gcode";
   let artifactPath: string | null = null;
   let profileId: number | undefined;
+  let plateRevisionId: number | undefined;
   let checkoffUnitsRaw: string | undefined;
   let unlabeledNamesRaw: string | undefined;
 
@@ -84,6 +86,10 @@ export async function parsePrinterUploadMultipart(
         if (part.fieldname === "profile_id" || part.fieldname === "plan_id") {
           const n = Number(value);
           if (Number.isInteger(n) && n > 0) profileId = n;
+        }
+        if (part.fieldname === "plate_revision_id") {
+          const n = Number(value);
+          if (Number.isInteger(n) && n > 0) plateRevisionId = n;
         }
         if (part.fieldname === "checkoff_units") {
           checkoffUnitsRaw = value;
@@ -178,6 +184,7 @@ export async function parsePrinterUploadMultipart(
       filename: baseName,
       artifact_path: artifactPath,
       profile_id: profileId,
+      plate_revision_id: plateRevisionId,
       checkoff_units_raw: checkoffUnitsRaw,
       unlabeled_names_raw: unlabeledNamesRaw,
     };

@@ -83,6 +83,10 @@ function parseItem(raw: unknown): PrinterSendQueueItem | null {
   if (row.match === "compatible" || row.match === "pinned") {
     item.match = row.match;
   }
+  const plateRevisionId = Number(row.plate_revision_id);
+  if (Number.isInteger(plateRevisionId) && plateRevisionId > 0) {
+    item.plate_revision_id = plateRevisionId;
+  }
   return item;
 }
 
@@ -157,6 +161,7 @@ export type EnqueuePrinterSendInput = {
   match?: PrinterSendQueueMatch;
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
+  plate_revision_id?: number;
   host_name?: string;
 };
 
@@ -182,6 +187,10 @@ export function enqueuePrinterSend(
       start: Boolean(input.start),
       profile_id: input.profile_id,
       checkoff_units: input.checkoff_units?.filter(isUnit),
+      plate_revision_id:
+        Number.isInteger(input.plate_revision_id) && (input.plate_revision_id ?? 0) > 0
+          ? input.plate_revision_id
+          : undefined,
       state: "queued",
       created_at: now,
       updated_at: now,

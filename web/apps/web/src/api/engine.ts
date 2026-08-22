@@ -223,6 +223,8 @@ export type PrinterCheckoffLink = {
   filename: string;
   remote_path?: string;
   upload_job_id?: string;
+  /** Immutable Plate revision this job was bound to. */
+  plate_revision_id?: number;
   units: PrinterCheckoffUnit[];
   /** Parsed object names that did not map — visible on Progress, never in confirm set. */
   unlabeled_names?: string[];
@@ -267,6 +269,7 @@ export type PrinterSendQueueItem = {
   start: boolean;
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
+  plate_revision_id?: number;
   state: PrinterSendQueueState;
   created_at: string;
   updated_at: string;
@@ -1350,6 +1353,7 @@ export async function enqueuePrinterSend(options: {
   match?: PrinterSendQueueMatch;
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
+  plate_revision_id?: number;
 }): Promise<{ item: PrinterSendQueueItem }> {
   const form = new FormData();
   form.append("file", options.file);
@@ -1361,6 +1365,9 @@ export async function enqueuePrinterSend(options: {
   }
   if (options.profile_id != null) {
     form.append("profile_id", String(options.profile_id));
+  }
+  if (options.plate_revision_id != null) {
+    form.append("plate_revision_id", String(options.plate_revision_id));
   }
   if (options.checkoff_units && options.checkoff_units.length > 0) {
     form.append("checkoff_units", JSON.stringify(options.checkoff_units));
@@ -1498,6 +1505,7 @@ export async function startPrinterUpload(options: {
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
   unlabeled_names?: string[];
+  plate_revision_id?: number;
 }): Promise<string> {
   const form = new FormData();
   form.append("file", options.file);
@@ -1505,6 +1513,9 @@ export async function startPrinterUpload(options: {
   form.append("start", options.start ? "1" : "0");
   if (options.profile_id != null) {
     form.append("profile_id", String(options.profile_id));
+  }
+  if (options.plate_revision_id != null) {
+    form.append("plate_revision_id", String(options.plate_revision_id));
   }
   if (options.checkoff_units && options.checkoff_units.length > 0) {
     form.append("checkoff_units", JSON.stringify(options.checkoff_units));

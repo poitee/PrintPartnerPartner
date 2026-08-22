@@ -283,6 +283,11 @@ export type PrinterCheckoffLink = {
   filename: string;
   remote_path?: string;
   upload_job_id?: string;
+  /**
+   * Immutable Plate revision this job was bound to. Later exports must not
+   * retarget an in-flight or historical Printer job.
+   */
+  plate_revision_id?: number;
   units: PrinterCheckoffUnit[];
   /** Parsed object names that did not map to Progress units (visible, not confirmable). */
   unlabeled_names?: string[];
@@ -347,6 +352,8 @@ export type PrinterSendQueueItem = {
   start: boolean;
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
+  /** Immutable Plate revision this queued send prints. */
+  plate_revision_id?: number;
   state: PrinterSendQueueState;
   created_at: string;
   updated_at: string;

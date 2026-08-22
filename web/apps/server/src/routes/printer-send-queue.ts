@@ -39,6 +39,7 @@ export async function registerPrinterSendQueueRoutes(
     host_name?: string;
     profile_id?: number;
     checkoff_units?: ReturnType<typeof parseCheckoffUnits>;
+    plate_revision_id?: number;
   }) =>
     deps.jobs.start(
       "printer-upload",
@@ -119,6 +120,7 @@ export async function registerPrinterSendQueueRoutes(
           filename: baseName,
           artifact_path,
           profile_id: profileId,
+          plate_revision_id: plateRevisionId,
           checkoff_units_raw: checkoffUnitsRaw,
           wait_for_idle: waitForIdle = true,
           match = "pinned",
@@ -174,6 +176,7 @@ export async function registerPrinterSendQueueRoutes(
           match,
           profile_id: profileId,
           checkoff_units,
+          plate_revision_id: plateRevisionId,
           host_name: integration.name,
         });
         if (!item) {

@@ -662,8 +662,10 @@ describe("accepted Plate export delivery routes", () => {
       host_name: "Printer One",
       filename: "plate-one.gcode",
       units: originalUnits,
+      plate_revision_id: plateRevisionId,
     });
     expect(link?.id).toBeTruthy();
+    expect(link?.plate_revision_id).toBe(plateRevisionId);
 
     const republished = repo.publishAcceptedPlates({
       profileId: profile.id,
@@ -707,5 +709,7 @@ describe("accepted Plate export delivery routes", () => {
     expect(loaded?.filename).toBe("plate-one.gcode");
     expect(loaded?.printer_id).toBe("printer-one");
     expect(loaded?.units).toEqual(originalUnits);
+    expect(loaded?.plate_revision_id).toBe(plateRevisionId);
+    expect(loaded?.plate_revision_id).not.toBe(republished.plateRevisionId);
   });
 });

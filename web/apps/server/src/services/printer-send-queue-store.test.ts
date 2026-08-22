@@ -105,6 +105,22 @@ describe("migratePrinterSendQueueArtifactPaths", () => {
   });
 });
 
+describe("enqueuePrinterSend plate revision binding", () => {
+  it("round-trips plate_revision_id with the queued send", () => {
+    const repo = fakeRepo();
+    const queued = enqueuePrinterSend(repo, {
+      filename: "plate.gcode",
+      artifact_path: "/data/exports/printer-uploads/x/plate.gcode",
+      printer_id: "p1",
+      start: false,
+      profile_id: 7,
+      plate_revision_id: 19,
+    });
+    expect(queued?.plate_revision_id).toBe(19);
+    expect(loadPrinterSendQueue(repo)[0]?.plate_revision_id).toBe(19);
+  });
+});
+
 function fakeRepo(): AppRepository {
   const settings = new Map<string, string>();
   return {

@@ -873,6 +873,13 @@ export class InProcessJobRunner {
         : typeof profileRaw === "string" && profileRaw.trim()
           ? Number(profileRaw)
           : undefined;
+    const plateRevisionRaw = payload.plate_revision_id;
+    const plateRevisionId =
+      typeof plateRevisionRaw === "number"
+        ? plateRevisionRaw
+        : typeof plateRevisionRaw === "string" && plateRevisionRaw.trim()
+          ? Number(plateRevisionRaw)
+          : undefined;
     return runPrinterUploadJob(
       this.repo,
       {
@@ -893,6 +900,12 @@ export class InProcessJobRunner {
           return names.length ? names : undefined;
         })(),
         upload_job_id: jobId,
+        plate_revision_id:
+          typeof plateRevisionId === "number" &&
+          Number.isInteger(plateRevisionId) &&
+          plateRevisionId > 0
+            ? plateRevisionId
+            : undefined,
       },
       (patch) => this.emit(jobId, patch),
     );
@@ -1104,6 +1117,7 @@ export async function registerJobRoutes(
           filename: baseName,
           artifact_path,
           profile_id: profileId,
+          plate_revision_id: plateRevisionId,
           checkoff_units_raw: checkoffUnitsRaw,
           unlabeled_names_raw: unlabeledNamesRaw,
         } = parsed.value;
@@ -1184,6 +1198,7 @@ export async function registerJobRoutes(
             profile_id: profileId,
             checkoff_units,
             unlabeled_names,
+            plate_revision_id: plateRevisionId,
           },
           request.tenantId,
         );

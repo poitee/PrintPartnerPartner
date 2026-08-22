@@ -52,6 +52,8 @@ type Props = {
   /** Active spine plan name for quiet “For [Plan].” bind line. */
   planName?: string | null;
   engineReady: boolean;
+  /** Immutable Plate revision this send should stay bound to. */
+  plateRevisionId?: number | null;
 };
 
 function readStickyId(key: string): string {
@@ -140,6 +142,7 @@ export default function PrinterSendPanel({
   profileId,
   planName = null,
   engineReady,
+  plateRevisionId = null,
 }: Props) {
   const printerUploadJob = useJobRunner("printer-upload");
   const pollMs = usePrinterStatusPollMs();
@@ -374,6 +377,7 @@ export default function PrinterSendPanel({
           profile_id: profileId,
           checkoff_units: units,
           unlabeled_names: unlabeled,
+          plate_revision_id: plateRevisionId ?? undefined,
         }),
       (snap) => {
         if (snap.status === "error") {

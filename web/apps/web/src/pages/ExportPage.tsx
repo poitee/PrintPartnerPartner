@@ -197,6 +197,11 @@ export default function ExportPage() {
               profileId={selectedProfileId}
               planName={planName}
               engineReady={engineState === "ready"}
+              plateRevisionId={
+                workspaceQuery.data?.kind === "ready"
+                  ? workspaceQuery.data.plate_revision_id
+                  : null
+              }
             />
           </Suspense>
 

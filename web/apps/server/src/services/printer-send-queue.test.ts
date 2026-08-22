@@ -247,4 +247,26 @@ describe("printer-send-queue dispatch/drain", () => {
     expect(started).toEqual([]);
     expect(loadPrinterSendQueue(repo).find((row) => row.id === item.id)?.printer_id).toBe("p1");
   });
+
+  it("forwards plate_revision_id from the queued send into the upload job", async () => {
+    const queued = enqueuePrinterSend(repo, {
+      filename: "a.gcode",
+      artifact_path: stageArtifact("rev"),
+      printer_id: "p1",
+      start: false,
+      wait_for_idle: false,
+      match: "pinned",
+      plate_revision_id: 19,
+    })!;
+    let forwarded: number | undefined;
+    const result = await dispatchPrinterSendQueueItem(repo, exportsDir, queued.id, {
+      startJob: async (payload) => {
+        forwarded = payload.plate_revision_id;
+        return "job-rev";
+      },
+      getStatus: async () => ({ state: "idle" }),
+    });
+    expect("job_id" in result).toBe(true);
+    expect(forwarded).toBe(19);
+  });
 });

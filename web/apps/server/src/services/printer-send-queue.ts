@@ -19,6 +19,7 @@ export type StartPrinterUploadJob = (payload: {
   host_name?: string;
   profile_id?: number;
   checkoff_units?: PrinterSendQueueItem["checkoff_units"];
+  plate_revision_id?: number;
 }) => Promise<string>;
 
 export type GetHostStatus = (integrationId: string) => Promise<PrinterHostStatus>;
@@ -141,6 +142,7 @@ export async function dispatchPrinterSendQueueItem(
       host_name: target.hostName,
       profile_id: item.profile_id,
       checkoff_units: item.checkoff_units,
+      plate_revision_id: item.plate_revision_id,
     });
     const updated = updatePrinterSendQueueItem(repo, item.id, {
       upload_job_id: job_id,
