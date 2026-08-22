@@ -7,12 +7,19 @@
  *   node docs/scripts/capture-screenshots.mjs --theme dark
  *   node docs/scripts/capture-screenshots.mjs --url http://localhost:8080 --theme light --profile-id 1
  *
- * Prerequisites: app running (e.g. docker compose up --build), Playwright browsers installed once via:
- *   npx playwright install chromium
+ * Chrome: set PLAYWRIGHT_CHROMIUM_EXECUTABLE, or install Playwright Chromium:
+ *   cd docs/scripts && npm install && npx playwright install chromium
+ *
+ * For representative kit data without a long-lived app, run:
+ *   node web/apps/web/test/browser/capture-fixture-screenshots.mjs
  */
 
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
+import process from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -34,6 +41,35 @@ const profileId = values["profile-id"]?.trim() || null;
 const outDir = resolve(
   values.out ?? join(repoRoot, "docs/screenshots", theme),
 );
+
+function browserExecutable() {
+  const candidates = [
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/local/bin/google-chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ].filter(Boolean);
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+async function loadChromium() {
+  try {
+    const playwright = await import("playwright");
+    if (playwright.chromium) return playwright.chromium;
+  } catch {
+    // Prefer the web workspace playwright-core + system Chrome.
+  }
+  const require = createRequire(join(repoRoot, "web/package.json"));
+  const core = require("playwright-core");
+  if (!core?.chromium) {
+    throw new Error(
+      "Neither playwright nor playwright-core.chromium is available. Install web workspace deps.",
+    );
+  }
+  return core.chromium;
+}
 
 /**
  * @typedef {{
@@ -97,12 +133,15 @@ const captures = [
         state: "visible",
         timeout: 60_000,
       });
+      await page.getByRole("button", { name: /Increase quantity for /i }).first().waitFor({
+        timeout: 30_000,
+      }).catch(() => {});
       await page
         .locator(".preview3d-canvas canvas")
         .first()
         .waitFor({
           state: "attached",
-          timeout: 30_000,
+          timeout: 15_000,
         })
         .catch(() => {});
     },
@@ -118,6 +157,7 @@ const captures = [
         state: "visible",
         timeout: 60_000,
       });
+      await page.getByText(".stl", { exact: false }).first().waitFor({ timeout: 15_000 }).catch(() => {});
     },
   },
   {
@@ -131,6 +171,9 @@ const captures = [
         state: "visible",
         timeout: 60_000,
       });
+      await page.getByRole("heading", { name: "Prepare Plates", level: 2 }).waitFor({
+        timeout: 15_000,
+      }).catch(() => {});
     },
   },
 ];
@@ -147,12 +190,32 @@ async function waitForApp(page) {
     } catch {
       // retry
     }
-    await page.waitForTimeout(2000);
+    await delay(2000);
   }
   throw new Error(`App not healthy at ${baseUrl}/health after 120s`);
 }
 
 async function openClientPath(page, path) {
+  const workflow = page.getByRole("navigation", { name: "Workflow stages" });
+  const utility = page.getByRole("navigation", { name: "Utility" });
+  if (path === "/library") {
+    await page.goto(`${baseUrl}/library`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    return;
+  }
+  if (path === "/builds") {
+    await utility.getByRole("link", { name: "Builds" }).click();
+    return;
+  }
+  const workflowLabel = {
+    "/sources": "Sources",
+    "/plan": "Plan",
+    "/progress": "Checkoff",
+    "/export": "Production",
+  }[path];
+  if (workflowLabel) {
+    await workflow.getByRole("link", { name: workflowLabel }).click();
+    return;
+  }
   await page.evaluate((next) => {
     const url = new URL(next, window.location.origin);
     window.history.pushState({}, "", `${url.pathname}${url.search}`);
@@ -161,11 +224,14 @@ async function openClientPath(page, path) {
 }
 
 async function main() {
-  const { chromium } = await import("playwright");
-
+  const chromium = await loadChromium();
   await mkdir(outDir, { recursive: true });
 
-  const browser = await chromium.launch({ headless: true });
+  const executablePath = browserExecutable();
+  const browser = await chromium.launch({
+    headless: true,
+    ...(executablePath ? { executablePath } : {}),
+  });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 1,
@@ -185,22 +251,19 @@ async function main() {
 
   const page = await context.newPage();
 
-  console.log(`Waiting for ${baseUrl}/health…`);
+  process.stdout.write(`Waiting for ${baseUrl}/health…\n`);
   await waitForApp(page);
 
   const homeUrl = profileId
     ? `${baseUrl}/?profile=${encodeURIComponent(profileId)}`
     : `${baseUrl}/`;
-  console.log(`Loading ${homeUrl} (${theme} theme)…`);
+  process.stdout.write(`Loading ${homeUrl} (${theme} theme)…\n`);
   await page.goto(homeUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => {});
 
   for (const shot of captures) {
-    console.log(`Capturing ${shot.label} → ${shot.file}`);
-    const target = profileId && shot.path !== "/library" && shot.path !== "/builds"
-      ? `${shot.path}?profile=${encodeURIComponent(profileId)}`
-      : shot.path;
-    await openClientPath(page, target);
+    process.stdout.write(`Capturing ${shot.label} → ${shot.file}\n`);
+    await openClientPath(page, shot.path);
     await page.waitForURL(
       (url) => {
         const path = url.pathname.replace(/\/$/, "");
@@ -211,7 +274,7 @@ async function main() {
     );
 
     if (shot.ready) await shot.ready(page);
-    if (shot.waitMs) await page.waitForTimeout(shot.waitMs);
+    if (shot.waitMs) await delay(shot.waitMs);
 
     await page.screenshot({
       path: join(outDir, shot.file),
@@ -220,10 +283,10 @@ async function main() {
   }
 
   await browser.close();
-  console.log(`Done — screenshots in ${outDir}`);
+  process.stdout.write(`Done — screenshots in ${outDir}\n`);
 }
 
 main().catch((err) => {
-  console.error(err);
+  process.stderr.write(`${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
   process.exit(1);
 });
