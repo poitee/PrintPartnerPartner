@@ -14,6 +14,7 @@ import {
 } from "../lib/secure-path.js";
 import { listGithubBranches, listGithubTags, syncGithubSource } from "../services/github-sync.js";
 import { writeUploadedZip, writeUploadedFiles, finalizeUploadedSource } from "../services/archive-import.js";
+import { publishLocalSourceWorkingTree } from "../services/local-source-revision.js";
 import { PLACEHOLDER_PNG } from "../lib/thumbnails.js";
 import { importReposTxt, parseReposTxtText } from "../services/repos-txt.js";
 import {
@@ -266,13 +267,18 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
     if (!hasRules && suggestedImportRules.length > 0) {
       deps.repo.updateImportRules(id, suggestedImportRules);
     }
-    const updated = deps.repo.updateSource(id, {
-      localPath: extractDir,
-      source_kind: row.sourceKind === "archive" ? "archive" : row.sourceKind ?? "archive",
-      last_synced_at: new Date().toISOString(),
-      last_commit_sha: null,
-    });
-    indexSourceDocsFromDisk(deps.repo, id, extractDir);
+    let updated;
+    try {
+      updated = await publishLocalSourceWorkingTree({
+        repo: deps.repo,
+        reposDir: deps.reposDir,
+        sourceId: id,
+        workingTree: extractDir,
+      });
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+    }
+    indexSourceDocsFromDisk(deps.repo, id, updated.local_path ?? extractDir);
     void prefetchSourceCover(deps, id);
     return {
       ...updated,
@@ -341,14 +347,18 @@ export async function registerSourceRoutes(app: FastifyInstance, deps: RouteDeps
       deps.repo.updateImportRules(id, result.suggestedImportRules);
     }
 
-    const updated = deps.repo.updateSource(id, {
-      localPath: result.extractDir,
-      source_kind: row.sourceKind === "local" ? "local" : row.sourceKind ?? "local",
-      source_type: "local",
-      last_synced_at: new Date().toISOString(),
-      last_commit_sha: null,
-    });
-    indexSourceDocsFromDisk(deps.repo, id, result.extractDir);
+    let updated;
+    try {
+      updated = await publishLocalSourceWorkingTree({
+        repo: deps.repo,
+        reposDir: deps.reposDir,
+        sourceId: id,
+        workingTree: result.extractDir,
+      });
+    } catch (e) {
+      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+    }
+    indexSourceDocsFromDisk(deps.repo, id, updated.local_path ?? result.extractDir);
     void prefetchSourceCover(deps, id);
     return {
       ...updated,
@@ -602,10 +612,15 @@ export async function syncProjectById(
     };
   }
 
-  // Zip/local: index whatever docs already landed on disk.
+  // Zip/local: snapshot the working tree so accepted export can verify STLs.
   if (row.localPath) {
-    const indexed = indexSourceDocsFromDisk(repo, projectId, row.localPath);
-    repo.markSourceSynced(projectId, row.lastCommitSha);
+    const activated = await publishLocalSourceWorkingTree({
+      repo,
+      reposDir,
+      sourceId: projectId,
+      workingTree: row.localPath,
+    });
+    const indexed = indexSourceDocsFromDisk(repo, projectId, activated.local_path ?? row.localPath);
     return {
       stl_count: 0,
       downloaded: 0,
