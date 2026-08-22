@@ -1074,12 +1074,6 @@ export class AppRepository {
     return moveAcceptedPlateUnitInternal(this.acceptedPlateDependencies(), command);
   }
 
-  private requirePart(partId: number): PartDbRow {
-    const part = this.getPartRow(partId);
-    if (!part) throw new Error("Part not found");
-    return part;
-  }
-
   private planRevisionInputSet(row: PlanRevisionInputSetRow): PlanRevisionInputSet {
     if (!row.publishedAt) throw new Error("Plan revision input set is not published");
     const inputs = this.db
