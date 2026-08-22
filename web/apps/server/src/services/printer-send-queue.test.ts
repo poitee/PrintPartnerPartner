@@ -192,4 +192,59 @@ describe("printer-send-queue dispatch/drain", () => {
     expect(results.some((r) => r.item_id === a.id && r.error)).toBe(true);
     expect(results.some((r) => r.item_id === b.id && r.job_id === "job-ok")).toBe(true);
   });
+
+  it("does not send a sliced file to a same-bed twin when the queued Printer is busy", async () => {
+    loadFleetMock.mockReturnValue([
+      {
+        id: "p1",
+        name: "P1",
+        model: "P1",
+        bed_width_mm: 250,
+        bed_depth_mm: 250,
+        bed_height_mm: 250,
+        margin_mm: 5,
+        max_filament_slots: 1,
+        loaded_filaments: [],
+        integration_id: "int-1",
+      },
+      {
+        id: "p2",
+        name: "P2",
+        model: "P2",
+        bed_width_mm: 250,
+        bed_depth_mm: 250,
+        bed_height_mm: 250,
+        margin_mm: 5,
+        max_filament_slots: 1,
+        loaded_filaments: [],
+        integration_id: "int-2",
+      },
+    ]);
+    const item = enqueuePrinterSend(repo, {
+      filename: "a.gcode",
+      artifact_path: stageArtifact("twin"),
+      printer_id: "p1",
+      start: false,
+      wait_for_idle: true,
+      match: "compatible",
+    })!;
+    const started: string[] = [];
+
+    const result = await dispatchPrinterSendQueueItem(repo, exportsDir, item.id, {
+      startJob: async (payload) => {
+        started.push(payload.printer_id);
+        return "job-twin";
+      },
+      getStatus: async (integrationId) => ({
+        state: integrationId === "int-1" ? "printing" : "idle",
+      }),
+    });
+
+    expect("error" in result).toBe(true);
+    if ("error" in result) {
+      expect(result.status).toBe(409);
+    }
+    expect(started).toEqual([]);
+    expect(loadPrinterSendQueue(repo).find((row) => row.id === item.id)?.printer_id).toBe("p1");
+  });
 });

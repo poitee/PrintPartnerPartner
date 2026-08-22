@@ -3,7 +3,6 @@ import type { PrinterHostStatus, PrinterSendQueueItem } from "@print-partner/con
 import type { PrinterMachine } from "@print-partner/domain";
 import type { AppRepository } from "../db/repository.js";
 import { getIntegrationConfig } from "../integrations/store.js";
-import { rankCompatibleSendPrinters } from "./printer-farm-match.js";
 import { loadFleet } from "./printer-fleet.js";
 import {
   assertPrinterUploadArtifactPath,
@@ -41,36 +40,6 @@ async function resolveDispatchTarget(
   | { printer: PrinterMachine; hostName: string; integrationId: string }
   | { error: string; status: number }
 > {
-  const fleet = loadFleet(repo);
-
-  if (item.match === "compatible") {
-    const ranked = rankCompatibleSendPrinters(repo, item, preferred, fleet, {
-      excludePrinterIds: deps.excludePrinterIds,
-    });
-    for (const { printer } of ranked) {
-      const integrationId = printer.integration_id?.trim();
-      if (!integrationId) continue;
-      const integration = getIntegrationConfig(repo, integrationId);
-      if (!integration) continue;
-      if (item.wait_for_idle && !deps.force) {
-        try {
-          const status = await deps.getStatus(integrationId);
-          if (!isIdleish(status.state)) continue;
-        } catch {
-          continue;
-        }
-      }
-      return { printer, hostName: integration.name, integrationId };
-    }
-    if (!deps.force) {
-      return {
-        error: "No idle printer with matching bed size",
-        status: 409,
-      };
-    }
-    // Force: fall through to preferred even if busy / unmatched idle.
-  }
-
   if (deps.excludePrinterIds?.has(preferred.id)) {
     return { error: "Printer already claimed this drain pass", status: 409 };
   }
@@ -104,9 +73,9 @@ async function resolveDispatchTarget(
 }
 
 /**
- * Dispatch a queued send when the target host is idle (or force=true).
+ * Dispatch a queued send when the queued Printer is idle (or force=true).
  * Claims the item as sending, starts printer-upload job, stores job id.
- * Compatible-match items may reassign printer_id to another same-bed idle host.
+ * Never reassigns the sliced file to another Printer.
  */
 export async function dispatchPrinterSendQueueItem(
   repo: AppRepository,
@@ -191,7 +160,7 @@ export async function dispatchPrinterSendQueueItem(
 export const DRAIN_ITEM_CAP = 8;
 
 /**
- * For each waiting queue item, dispatch when a compatible (or pinned) host is idle.
+ * For each waiting queue item, dispatch to its queued Printer when that host is idle.
  * At most one send per printer per drain pass. Bounded by {@link DRAIN_ITEM_CAP}.
  */
 export async function drainPrinterSendQueue(
