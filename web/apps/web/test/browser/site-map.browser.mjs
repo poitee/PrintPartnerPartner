@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createServer as createNetServer } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import process from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath, URL } from "node:url";
 import { chromium } from "playwright-core";
 import { createServer } from "vite";
 import { browserExecutable } from "./browserExecutable.mjs";
+
+const fetchFn = globalThis.fetch;
 
 const webRoot = fileURLToPath(new URL("../..", import.meta.url));
 const serverRoot = fileURLToPath(new URL("../../../server", import.meta.url));
@@ -33,7 +37,7 @@ async function waitForHealth(url, timeoutMs = 30_000) {
   let lastError = "";
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url);
+      const response = await fetchFn(url);
       if (response.ok) {
         const body = await response.json();
         if (body?.ok) return;
@@ -44,7 +48,7 @@ async function waitForHealth(url, timeoutMs = 30_000) {
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await delay(200);
   }
   throw new Error(`API was not healthy at ${url}: ${lastError}`);
 }
@@ -94,11 +98,15 @@ try {
     headless: true,
   });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await page.addInitScript(() => {
-    localStorage.setItem("print-partner.theme", "light");
-    localStorage.setItem("print-partner.sidebar.ui.v1", "0");
-    localStorage.setItem("print-partner.workflow.onboarding.v1", "1");
-  });
+  await page.addInitScript((pairs) => {
+    for (const [key, value] of pairs) {
+      globalThis.localStorage.setItem(key, value);
+    }
+  }, [
+    ["print-partner.theme", "light"],
+    ["print-partner.sidebar.ui.v1", "0"],
+    ["print-partner.workflow.onboarding.v1", "1"],
+  ]);
   await page.goto(baseUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
 
   await page.getByRole("heading", { name: "Builds", level: 1 }).waitFor({ timeout: 60_000 });
@@ -108,15 +116,14 @@ try {
   await createDialog.waitFor();
   const nameInput = createDialog.getByLabel("Build name");
   await nameInput.fill("Site map journey");
-  await page.waitForFunction(() => {
-    const dialog = [...document.querySelectorAll("[role='dialog']")].find((node) =>
-      node.textContent?.includes("Build name"),
-    );
-    const button =
-      dialog &&
-      [...dialog.querySelectorAll("button")].find((node) => node.textContent?.trim() === "Create");
-    return button instanceof HTMLButtonElement && !button.disabled;
-  });
+  const createBtn = createDialog.getByRole("button", { name: "Create" });
+  const enabledDeadline = Date.now() + 5_000;
+  while (!(await createBtn.isEnabled())) {
+    if (Date.now() > enabledDeadline) {
+      throw new Error("Create stayed disabled after naming the Build");
+    }
+    await delay(50);
+  }
   const posted = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" && new URL(response.url()).pathname === "/plans",
@@ -159,15 +166,14 @@ try {
   await browser?.close();
   await vite?.close();
   api.kill("SIGTERM");
-  await new Promise((resolve) => {
-    const timeout = setTimeout(resolve, 3_000);
-    api.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
+  await Promise.race([
+    new Promise((resolve) => {
+      api.once("exit", resolve);
+    }),
+    delay(3_000),
+  ]);
   rmSync(dataDir, { recursive: true, force: true });
   if (api.exitCode && api.exitCode !== 0 && apiLogs.trim()) {
-    console.error(apiLogs);
+    process.stderr.write(apiLogs);
   }
 }
