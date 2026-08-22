@@ -595,4 +595,72 @@ describe("accepted Plate export delivery routes", () => {
     });
     expect(readFileSync(stagedPath, "utf8")).toBe("tampered");
   });
+
+  it("keeps the original Printer job mapping after a later Plate export", async () => {
+    const { app, repo, profile, plateRevisionId, basis, token } = await fixture();
+    const accepted = repo.readAcceptedPlanOperationalSnapshot(profile.id);
+    if (accepted.kind !== "ready") throw new Error("Accepted Plan is unavailable");
+    const part = accepted.snapshot.parts.find((row) =>
+      row.units.some((unit) => unit.token === token),
+    );
+    const unit = part?.units.find((row) => row.token === token);
+    if (!part || !unit) throw new Error("Required unit is missing");
+    const originalUnits = [{ part_id: part.projectionPartId, unit_index: unit.unitIndex }];
+
+    const { createPrinterCheckoffLink, getPrinterCheckoffLink } = await import(
+      "../services/printer-checkoff-store.js"
+    );
+    const link = createPrinterCheckoffLink(repo, {
+      profile_id: profile.id,
+      integration_id: "int-moon",
+      printer_id: "printer-one",
+      host_name: "Printer One",
+      filename: "plate-one.gcode",
+      units: originalUnits,
+    });
+    expect(link?.id).toBeTruthy();
+
+    const republished = repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: basis,
+      expectedPlateRevisionId: plateRevisionId,
+      plates: [{
+        plateId: `plate_${"c".repeat(32)}`,
+        printerId: "printer-one",
+        printerName: "Printer One",
+        printerModel: "Model One",
+        bedWidthUm: 250_000,
+        bedDepthUm: 210_000,
+        bedHeightUm: 200_000,
+        marginUm: 4_000,
+        units: [{
+          token,
+          xUm: 20_000,
+          yUm: 20_000,
+          widthUm: 30_000,
+          depthUm: 20_000,
+          heightUm: 10_000,
+        }],
+      }],
+    });
+    if (republished.kind !== "published") throw new Error("Later Plate was not published");
+    expect(republished.plateRevisionId).not.toBe(plateRevisionId);
+
+    const started = await app.inject({
+      method: "POST",
+      url: "/jobs/export-accepted-plate-3mf",
+      payload: {
+        profile_id: profile.id,
+        expected_plate_revision_id: republished.plateRevisionId,
+      },
+    });
+    expect(started.statusCode).toBe(200);
+    const snapshot = await waitForJob(app, started.json().job_id as string);
+    expect(snapshot.status).toBe("done");
+
+    const loaded = getPrinterCheckoffLink(repo, link!.id);
+    expect(loaded?.filename).toBe("plate-one.gcode");
+    expect(loaded?.printer_id).toBe("printer-one");
+    expect(loaded?.units).toEqual(originalUnits);
+  });
 });
