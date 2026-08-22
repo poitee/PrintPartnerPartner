@@ -47,7 +47,7 @@ type PlanWorkspaceValue = {
   draftLoading: boolean;
   draftError: string | null;
   startPlanDraft: () => Promise<PlanDraftWorkspace>;
-  applyActivePlanDraft: () => Promise<ApplyPlanDraftReceipt>;
+  applyActivePlanDraft: (options?: { remapCheckoffLinks?: boolean }) => Promise<ApplyPlanDraftReceipt>;
   rebaseActivePlanDraft: () => Promise<PlanDraftWorkspace>;
   reconcileActivePlanDraft: (decisions: RequiredUnitDecisionContract[]) => Promise<PlanDraftWorkspace>;
   editActivePlanDraft: (decisions: PlanDraftPartDecisionContract[]) => Promise<PlanDraftWorkspace>;
@@ -253,14 +253,14 @@ export function PlanWorkspaceProvider({ children }: { children: ReactNode }) {
     return storeWorkspace(next);
   }, [currentDraftWorkspace, storeWorkspace]);
 
-  const applyActivePlanDraft = useCallback(async () => {
+  const applyActivePlanDraft = useCallback(async (options?: { remapCheckoffLinks?: boolean }) => {
     const workspace = currentDraftWorkspace();
     if (!workspace) throw new Error("No saved Plan draft is open");
     if (!workspace.diff.base_is_current) throw new Error("Rebase this saved draft before Apply");
     if (workspace.reconciliation.kind !== "ready") {
       throw new Error("Resolve Required-unit changes before Apply");
     }
-    const receipt = await applyPlanDraft(workspace);
+    const receipt = await applyPlanDraft(workspace, options);
     setRecentlyAppliedDraftId(workspace.draft.draft_id);
     setActiveDraftId(null);
     queryClient.removeQueries({ queryKey: queryKeys.planDraft(workspace.profile_id, workspace.draft.draft_id), exact: true });

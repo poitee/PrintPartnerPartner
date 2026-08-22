@@ -520,6 +520,22 @@ export type ApplyPlanChangesCommand = {
   readonly expectedBase: AcceptedPlanBase;
   readonly actorId: string;
   readonly idempotencyKey: string;
+  /**
+   * When true, existing printer.checkoff_links / printer.send_queue entries for
+   * this profile are re-pointed onto the new plan_revision_part-backed compatibility
+   * rows (matched by stable match_key + unit index) instead of unconditionally
+   * blocking on production_active. Any entry that cannot be safely 1:1 matched
+   * (file removed/renamed, or checked-off unit index now exceeds quantity) still
+   * blocks — Apply never silently drops or misattributes print-progress data.
+   */
+  readonly remapCheckoffLinks?: boolean;
+};
+
+/** A production-linked checkoff record that could not be safely remapped to the new revision. */
+export type UnmappableCheckoffLink = {
+  readonly linkId: string;
+  readonly filename: string;
+  readonly reason: string;
 };
 
 export type AppliedPlanReceipt = {
@@ -550,6 +566,18 @@ export type ApplyPlanChangesResult =
       readonly kind: "production_active";
       readonly checkoffLinkCount: number;
       readonly sendQueueItemCount: number;
+    }
+  | {
+      /**
+       * remapCheckoffLinks was requested but at least one checkoff/send-queue
+       * coordinate could not be matched 1:1 onto the new revision's parts by
+       * match_key + unit index. Nothing was mutated. The caller must resolve
+       * the listed items (e.g. re-verify manually) before Apply can proceed —
+       * either without remap (accepting the production_active block) or after
+       * fixing the source data so every checkoff'd file is present again.
+       */
+      readonly kind: "checkoff_remap_unsafe";
+      readonly unmappable: readonly UnmappableCheckoffLink[];
     }
   | { readonly kind: "token_allocation_failed" }
   | { readonly kind: "transaction_unavailable" };
@@ -944,6 +972,114 @@ function applyJsonRecord(value: unknown, label: string): Record<string, unknown>
     throw new Error(`${label} is corrupt`);
   }
   return value as Record<string, unknown>;
+}
+
+type CheckoffRemapPlan = {
+  /** Raw stored printer.checkoff_links JSON, or null if unset. */
+  readonly checkoffLinksRaw: string | null;
+  /** Raw stored printer.send_queue JSON, or null if unset. */
+  readonly sendQueueRaw: string | null;
+  /** "oldPartId:unitIndex" -> new draft part id (translate to a projection part id after insert). */
+  readonly remapByDraftPart: ReadonlyMap<string, number>;
+};
+
+/**
+ * Determines whether every checkoff/send-queue coordinate for `profileId` can be
+ * safely re-pointed onto the incoming revision's parts. Matching is by stable
+ * match_key (STL relative identity) plus unit_index within the new part's
+ * quantity — never by row id, since ids are recreated on every Apply. A
+ * coordinate is unsafe when: its old part id's match_key can no longer be
+ * resolved (row was deleted out from under settings — corrupt data), no new
+ * part shares that match_key (file removed/renamed in this revision), or its
+ * unit_index is out of range for the new part's quantity (fewer prints
+ * expected now than were physically completed). Read-only: never mutates
+ * settings. Caller applies the returned remap only after every other Apply
+ * invariant succeeds.
+ */
+function assessCheckoffRemap(input: {
+  readonly profileId: number;
+  readonly checkoffLinksRaw: string | null;
+  readonly sendQueueRaw: string | null;
+  readonly oldPartMatchKeyById: ReadonlyMap<number, string>;
+  readonly newPartByMatchKey: ReadonlyMap<
+    string,
+    { readonly draftPartId: number; readonly quantityEffective: number }
+  >;
+}): { readonly kind: "safe" } & CheckoffRemapPlan | { readonly kind: "unsafe"; readonly unmappable: UnmappableCheckoffLink[] } {
+  const remapByDraftPart = new Map<string, number>();
+  const unmappable: UnmappableCheckoffLink[] = [];
+  const seen = new Set<string>();
+
+  function resolve(linkId: string, filename: string, unit: { part_id: number; unit_index: number }): void {
+    const key = `${unit.part_id}:${unit.unit_index}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const matchKey = input.oldPartMatchKeyById.get(unit.part_id);
+    if (!matchKey) {
+      unmappable.push({
+        linkId,
+        filename,
+        reason: `Checked-off part id ${unit.part_id} no longer exists in this Plan's parts`,
+      });
+      return;
+    }
+    const target = input.newPartByMatchKey.get(matchKey);
+    if (!target) {
+      unmappable.push({
+        linkId,
+        filename,
+        reason: `STL for "${filename}" (match_key ${matchKey}) is no longer part of the reconciled Plan`,
+      });
+      return;
+    }
+    if (unit.unit_index >= target.quantityEffective) {
+      unmappable.push({
+        linkId,
+        filename,
+        reason: `Checked-off unit index ${unit.unit_index} exceeds the new quantity (${target.quantityEffective}) for "${filename}"`,
+      });
+      return;
+    }
+    remapByDraftPart.set(key, target.draftPartId);
+  }
+
+  for (const value of applySettingArray(input.checkoffLinksRaw, "Printer Checkoff links")) {
+    const row = applyJsonRecord(value, "Printer Checkoff link");
+    if (row.profile_id !== input.profileId) continue;
+    const linkId = typeof row.id === "string" ? row.id : "unknown";
+    const filename = typeof row.filename === "string" ? row.filename : "unknown file";
+    if (Array.isArray(row.units)) {
+      for (const unitValue of row.units) {
+        const unit = applyJsonRecord(unitValue, "Printer Checkoff coordinate");
+        resolve(linkId, filename, {
+          part_id: unit.part_id as number,
+          unit_index: unit.unit_index as number,
+        });
+      }
+    }
+  }
+  for (const value of applySettingArray(input.sendQueueRaw, "Printer send queue")) {
+    const row = applyJsonRecord(value, "Printer send queue item");
+    const units = row.checkoff_units == null ? [] : row.checkoff_units;
+    if (!Array.isArray(units)) continue;
+    const linkId = typeof row.id === "string" ? row.id : "unknown";
+    const filename = typeof row.filename === "string" ? row.filename : "unknown file";
+    for (const unitValue of units) {
+      const unit = applyJsonRecord(unitValue, "Printer queue coordinate");
+      resolve(linkId, filename, {
+        part_id: unit.part_id as number,
+        unit_index: unit.unit_index as number,
+      });
+    }
+  }
+
+  if (unmappable.length > 0) return { kind: "unsafe", unmappable };
+  return {
+    kind: "safe",
+    checkoffLinksRaw: input.checkoffLinksRaw,
+    sendQueueRaw: input.sendQueueRaw,
+    remapByDraftPart,
+  };
 }
 
 function applySettingArray(value: string | null, label: string): unknown[] {
@@ -5437,6 +5573,49 @@ export class AppRepository {
     };
   }
 
+  /**
+   * Rewrites printer.checkoff_links / printer.send_queue coordinates from
+   * old (deleted) compatibility part ids to the new ones just published.
+   * `finalRemap` maps "oldPartId:unitIndex" -> new (projection) part id.
+   * Every rewritten coordinate was already proven safe (matchKey present,
+   * unit_index within the new quantity) before any table mutation happened,
+   * so this step is pure bookkeeping and cannot itself fail on unmapped data.
+   */
+  private applyCheckoffRemap(
+    plan: CheckoffRemapPlan,
+    finalRemap: ReadonlyMap<string, number>,
+  ): void {
+    if (finalRemap.size === 0) return;
+    const remapUnit = (unit: { part_id: number; unit_index: number }) => {
+      const next = finalRemap.get(`${unit.part_id}:${unit.unit_index}`);
+      return next ? { ...unit, part_id: next } : unit;
+    };
+    if (plan.checkoffLinksRaw != null) {
+      const links = JSON.parse(plan.checkoffLinksRaw) as Array<Record<string, unknown>>;
+      const remapped = links.map((link) => {
+        if (!Array.isArray(link.units)) return link;
+        return {
+          ...link,
+          units: (link.units as Array<{ part_id: number; unit_index: number }>).map(remapUnit),
+        };
+      });
+      this.setSetting("printer.checkoff_links", JSON.stringify(remapped));
+    }
+    if (plan.sendQueueRaw != null) {
+      const queue = JSON.parse(plan.sendQueueRaw) as Array<Record<string, unknown>>;
+      const remapped = queue.map((item) => {
+        if (!Array.isArray(item.checkoff_units)) return item;
+        return {
+          ...item,
+          checkoff_units: (
+            item.checkoff_units as Array<{ part_id: number; unit_index: number }>
+          ).map(remapUnit),
+        };
+      });
+      this.setSetting("printer.send_queue", JSON.stringify(remapped));
+    }
+  }
+
   private strictProductionState(profileId: number): {
     readonly checkoffLinkCount: number;
     readonly sendQueueItemCount: number;
@@ -5883,9 +6062,6 @@ export class AppRepository {
         };
       });
       const production = this.strictProductionState(profileId);
-      if (production.checkoffLinkCount > 0 || production.sendQueueItemCount > 0) {
-        return { kind: "production_active", ...production };
-      }
       const prepared = preparePlanPublication({
         draft: {
           ...draft,
@@ -5904,6 +6080,42 @@ export class AppRepository {
         assignments: reconciliation.assignments,
         baseUnits: publicationBaseUnits,
       });
+      let checkoffRemapPlan: CheckoffRemapPlan | null = null;
+      if (production.checkoffLinkCount > 0 || production.sendQueueItemCount > 0) {
+        if (!command.remapCheckoffLinks) {
+          return { kind: "production_active", ...production };
+        }
+        const oldPartMatchKeyById = new Map(
+          this.db
+            .select({ id: this.schema.parts.id, matchKey: this.schema.parts.matchKey })
+            .from(this.schema.parts)
+            .where(
+              and(
+                eq(this.schema.parts.tenantId, this.tenantId),
+                eq(this.schema.parts.profileId, profileId),
+              ),
+            )
+            .all()
+            .map((row) => [row.id, row.matchKey] as const),
+        );
+        const newPartByMatchKey = new Map(
+          prepared.parts.map((part) => [
+            part.partKey,
+            { draftPartId: part.draftPartId, quantityEffective: part.quantityEffective },
+          ]),
+        );
+        const assessment = assessCheckoffRemap({
+          profileId,
+          checkoffLinksRaw: this.getSetting("printer.checkoff_links"),
+          sendQueueRaw: this.getSetting("printer.send_queue"),
+          oldPartMatchKeyById,
+          newPartByMatchKey,
+        });
+        if (assessment.kind === "unsafe") {
+          return { kind: "checkoff_remap_unsafe", unmappable: assessment.unmappable };
+        }
+        checkoffRemapPlan = assessment;
+      }
       for (const part of prepared.parts) {
         validateAcceptedOperationalTextRow([
           this.tenantId,
@@ -6121,6 +6333,15 @@ export class AppRepository {
           .get();
         if (!revisionPart) throw new Error("Accepted Plan revision Part could not be created");
         revisionPartByDraftPart.set(part.draftPartId, revisionPart.id);
+      }
+      if (checkoffRemapPlan) {
+        const finalRemap = new Map<string, number>();
+        for (const [key, draftPartId] of checkoffRemapPlan.remapByDraftPart) {
+          const projectionPartId = projectionByDraftPart.get(draftPartId);
+          if (!projectionPartId) throw new Error("Checkoff remap target Part is missing");
+          finalRemap.set(key, projectionPartId);
+        }
+        this.applyCheckoffRemap(checkoffRemapPlan, finalRemap);
       }
       for (const allocatedUnit of allocated.values()) {
         this.db

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import type {
-  ApplyPlanDraftReceipt,
-  PlanDraftWorkspace,
-  RequiredUnitDecisionContract,
+import {
+  EngineHttpError,
+  type ApplyPlanDraftReceipt,
+  type PlanDraftWorkspace,
+  type RequiredUnitDecisionContract,
 } from "../../api/engine";
 import { Button } from "../ui/button";
 import {
@@ -74,10 +75,26 @@ export function PlanDraftApplyButton({
 type Props = {
   workspace: PlanDraftWorkspace | null;
   error?: string | null;
-  apply: () => Promise<ApplyPlanDraftReceipt>;
+  apply: (options?: { remapCheckoffLinks?: boolean }) => Promise<ApplyPlanDraftReceipt>;
   rebase: () => Promise<PlanDraftWorkspace>;
   reconcile: (decisions: RequiredUnitDecisionContract[]) => Promise<PlanDraftWorkspace>;
 };
+
+/** Print-progress records that blocked a checkoff-remap Apply attempt. */
+type ProductionBlock = {
+  readonly checkoffLinkCount: number;
+  readonly sendQueueItemCount: number;
+};
+
+function productionBlockFromError(caught: unknown): ProductionBlock | null {
+  if (!(caught instanceof EngineHttpError) || caught.status !== 423) return null;
+  const body = caught.body as { code?: string; checkoff_link_count?: number; send_queue_item_count?: number } | null;
+  if (!body || body.code !== "production_active") return null;
+  return {
+    checkoffLinkCount: body.checkoff_link_count ?? 0,
+    sendQueueItemCount: body.send_queue_item_count ?? 0,
+  };
+}
 
 /** Plan-owned Apply, rebase, and Required-unit conflict resolution. */
 export default function PlanDraftPanel({
@@ -89,9 +106,11 @@ export default function PlanDraftPanel({
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [conflictChoices, setConflictChoices] = useState<Record<string, string>>({});
+  const [productionBlock, setProductionBlock] = useState<ProductionBlock | null>(null);
 
   useEffect(() => {
     setConflictChoices({});
+    setProductionBlock(null);
   }, [workspace?.draft.snapshot_digest]);
 
   const acceptedRevisionPartLabels = useMemo(
@@ -119,13 +138,22 @@ export default function PlanDraftPanel({
 
   if (!workspace && !error) return null;
 
-  const onApply = async () => {
+  const onApply = async (options?: { remapCheckoffLinks?: boolean }) => {
     setBusy(true);
     try {
-      const receipt = await apply();
+      const receipt = await apply(options);
+      setProductionBlock(null);
       toast.success(`Applied Plan version ${receipt.plan_version}`);
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : String(caught));
+      const block = productionBlockFromError(caught);
+      if (block) {
+        setProductionBlock(block);
+        toast.error(
+          `${block.checkoffLinkCount} checkoff record(s) are linked to the current Plan. Remap and apply to preserve them, or resolve production first.`,
+        );
+      } else {
+        toast.error(caught instanceof Error ? caught.message : String(caught));
+      }
     } finally {
       setBusy(false);
     }
@@ -291,6 +319,34 @@ export default function PlanDraftPanel({
                     Save conflict decisions
                   </Button>
                 </div>
+              </div>
+            )}
+            {productionBlock && (
+              <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+                <p className="text-sm text-destructive" role="alert">
+                  {productionBlock.checkoffLinkCount} checkoff record(s)
+                  {productionBlock.sendQueueItemCount > 0
+                    ? ` and ${productionBlock.sendQueueItemCount} send-queue item(s)`
+                    : ""}{" "}
+                  are linked to the current accepted Plan. Applying this draft normally is blocked to
+                  avoid losing that print-progress data.
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Remap and apply re-points those checkoff records onto the matching parts in this
+                  draft (matched by STL identity) so printed counts are preserved. If any checked-off
+                  file was removed or its printed count now exceeds the new quantity, Apply will fail
+                  with the specific item(s) to resolve first.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  loading={busy}
+                  onClick={() => void onApply({ remapCheckoffLinks: true })}
+                >
+                  Remap and apply
+                </Button>
               </div>
             )}
             <PlanDraftApplyButton

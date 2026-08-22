@@ -57,6 +57,11 @@ function sendFailure(
         checkoff_link_count: result.checkoff_link_count,
         send_queue_item_count: result.send_queue_item_count,
       });
+    case "checkoff_remap_unsafe":
+      return reply.status(422).send({
+        code: result.kind,
+        unmappable: result.unmappable,
+      });
     case "domain_error":
       return reply.status(422).send({ code: result.code });
     case "merge_conflicts":

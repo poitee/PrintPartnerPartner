@@ -189,6 +189,14 @@ const applyPlanDraftRequestSchema = z.strictObject({
   expected_snapshot_digest: digest,
   expected_lifecycle_version: nonnegativeVersion,
   expected_base: planDraftBasisSchema,
+  /**
+   * When true, Apply re-points any existing printer.checkoff_links / send_queue
+   * coordinates onto the new revision's parts (matched by stable STL identity)
+   * instead of blocking on production_active. If any checked-off unit cannot be
+   * safely matched (file removed/renamed, or unit count reduced below what was
+   * printed), Apply still fails — see checkoff_remap_unsafe.
+   */
+  remap_checkoff_links: z.boolean().optional(),
 });
 
 export type ApplyPlanDraftRequest = z.infer<typeof applyPlanDraftRequestSchema>;

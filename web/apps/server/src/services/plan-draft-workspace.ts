@@ -37,6 +37,10 @@ export type PlanDraftWorkspaceFailure =
     }
   | { readonly kind: "reconciliation_required"; readonly reason: "missing" | "unresolved" | "stale" }
   | { readonly kind: "production_active"; readonly checkoff_link_count: number; readonly send_queue_item_count: number }
+  | {
+      readonly kind: "checkoff_remap_unsafe";
+      readonly unmappable: readonly { linkId: string; filename: string; reason: string }[];
+    }
   | { readonly kind: "transaction_unavailable" }
   | { readonly kind: "merge_conflicts"; readonly conflicts: readonly Record<string, unknown>[] }
   | { readonly kind: "domain_error"; readonly code: string };
@@ -221,6 +225,7 @@ export class PlanDraftWorkspaceService {
       expectedBase,
       actorId: input.actorId,
       idempotencyKey: input.idempotencyKey,
+      remapCheckoffLinks: input.request.remap_checkoff_links,
     });
     return this.applyResult(result);
   }
@@ -464,6 +469,15 @@ export class PlanDraftWorkspaceService {
           kind: "production_active",
           checkoff_link_count: result.checkoffLinkCount,
           send_queue_item_count: result.sendQueueItemCount,
+        };
+      case "checkoff_remap_unsafe":
+        return {
+          kind: "checkoff_remap_unsafe",
+          unmappable: result.unmappable.map((item) => ({
+            linkId: item.linkId,
+            filename: item.filename,
+            reason: item.reason,
+          })),
         };
       case "reconciliation_required":
         return result;

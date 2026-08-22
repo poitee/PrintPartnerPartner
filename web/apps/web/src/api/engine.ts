@@ -2182,7 +2182,10 @@ export async function reconcilePlanDraft(input: {
   ));
 }
 
-export async function applyPlanDraft(workspace: PlanDraftWorkspace): Promise<ApplyPlanDraftReceipt> {
+export async function applyPlanDraft(
+  workspace: PlanDraftWorkspace,
+  options?: { remapCheckoffLinks?: boolean },
+): Promise<ApplyPlanDraftReceipt> {
   return parseApplyPlanDraftReceipt(await engineFetch(`/plans/${workspace.profile_id}/drafts/${workspace.draft.draft_id}/apply`, {
     method: "POST",
     headers: { "Idempotency-Key": randomIdempotencyKey() },
@@ -2190,6 +2193,7 @@ export async function applyPlanDraft(workspace: PlanDraftWorkspace): Promise<App
       expected_snapshot_digest: workspace.draft.snapshot_digest,
       expected_lifecycle_version: workspace.draft.lifecycle_version,
       expected_base: workspace.draft.base,
+      ...(options?.remapCheckoffLinks ? { remap_checkoff_links: true } : {}),
     }),
   }));
 }

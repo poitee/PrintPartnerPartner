@@ -3245,6 +3245,158 @@ describe("saved Plan drafts", () => {
     database.close();
   });
 
+  it("remaps checkoff links onto the new revision when files are unchanged and remapCheckoffLinks is set", () => {
+    const first = readyTrackedApplyFixture();
+    const { database, raw, profile, repo, command } = first;
+    const oldBracketId = raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? AND filename = 'bracket.stl'")
+      .pluck()
+      .get(profile.id) as number;
+    const oldGearId = raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? AND filename = 'gear.stl'")
+      .pluck()
+      .get(profile.id) as number;
+    const checkoffLinksBefore = JSON.stringify([
+      {
+        id: "bracket-link",
+        profile_id: profile.id,
+        integration_id: "printer-1",
+        printer_id: "printer-1",
+        host_name: "Printer 1",
+        filename: "bracket_0.4n_0.2mm.bgcode",
+        units: [{ part_id: oldBracketId, unit_index: 0 }],
+        state: "awaiting_verify",
+      },
+    ]);
+    repo.setSetting("printer.checkoff_links", checkoffLinksBefore);
+    const sendQueueBefore = JSON.stringify([
+      {
+        id: "gear-queue-item",
+        filename: "gear.stl",
+        state: "queued",
+        checkoff_units: [{ part_id: oldGearId, unit_index: 0 }],
+      },
+    ]);
+    repo.setSetting("printer.send_queue", sendQueueBefore);
+
+    // Without the remap flag, Apply still blocks (safety default is unchanged).
+    expect(repo.applyPlanChanges(command)).toEqual({
+      kind: "production_active",
+      checkoffLinkCount: 1,
+      sendQueueItemCount: 1,
+    });
+
+    const result = repo.applyPlanChanges({ ...command, remapCheckoffLinks: true });
+    expect(result).toMatchObject({ kind: "applied" });
+
+    const newBracketId = raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? AND filename = 'bracket.stl'")
+      .pluck()
+      .get(profile.id) as number;
+    const newGearId = raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? AND filename = 'gear.stl'")
+      .pluck()
+      .get(profile.id) as number;
+    expect(newBracketId).not.toBe(oldBracketId);
+    expect(newGearId).not.toBe(oldGearId);
+
+    const remappedLinks = JSON.parse(repo.getSetting("printer.checkoff_links") ?? "[]") as Array<{
+      id: string;
+      units: Array<{ part_id: number; unit_index: number }>;
+    }>;
+    expect(remappedLinks).toEqual([
+      { id: "bracket-link", units: [{ part_id: newBracketId, unit_index: 0 }] },
+    ].map((expected) => expect.objectContaining(expected)));
+    expect(remappedLinks[0]!.units).toEqual([{ part_id: newBracketId, unit_index: 0 }]);
+
+    const remappedQueue = JSON.parse(repo.getSetting("printer.send_queue") ?? "[]") as Array<{
+      id: string;
+      checkoff_units: Array<{ part_id: number; unit_index: number }>;
+    }>;
+    expect(remappedQueue[0]!.checkoff_units).toEqual([{ part_id: newGearId, unit_index: 0 }]);
+    database.close();
+  });
+
+  it("blocks Apply with checkoff_remap_unsafe when a checked-off file is genuinely removed", () => {
+    const first = readyTrackedApplyFixture();
+    const { database, raw, profile, repo } = first;
+    const oldGearId = raw
+      .prepare("SELECT id FROM parts WHERE profile_id = ? AND filename = 'gear.stl'")
+      .pluck()
+      .get(profile.id) as number;
+    const checkoffLinksBefore = JSON.stringify([
+      {
+        id: "gear-link",
+        profile_id: profile.id,
+        integration_id: "printer-1",
+        printer_id: "printer-1",
+        host_name: "Printer 1",
+        filename: "gear_0.4n_0.2mm.bgcode",
+        units: [{ part_id: oldGearId, unit_index: 0 }],
+        state: "awaiting_verify",
+      },
+    ]);
+    repo.setSetting("printer.checkoff_links", checkoffLinksBefore);
+
+    // Record a new Source revision that drops gear.stl entirely (file genuinely removed).
+    const observed = repo.getProjectRow(first.tracked.source.id);
+    if (!observed) throw new Error("test Source is missing");
+    const locator = `${first.tracked.source.id}/revisions/gear-removed`;
+    const snapshotRoot = join(database.reposDir, locator);
+    mkdirSync(snapshotRoot, { recursive: true });
+    writeFileSync(join(snapshotRoot, "bracket.stl"), "solid bracket");
+    const movedRevision = repo.recordSourceRevision({
+      sourceId: first.tracked.source.id,
+      upstreamRevisionKey: "gear-removed",
+      manifestDigest: "b".repeat(64),
+      snapshotLocator: locator,
+      syncedAt: "2026-08-21T12:00:00.000Z",
+      completeness: "complete",
+    });
+    repo.activateSourceRevision({ sourceId: first.tracked.source.id, revisionId: movedRevision.id, observed });
+
+    const created = repo.recomputePlanDraft({
+      profileId: profile.id,
+      actor: "test:user",
+      idempotencyKey: "gear-removed-draft",
+    });
+    if (created.kind !== "created") throw new Error("gear-removed draft was not created");
+    const reconciled = repo.savePlanDraftRequiredUnitReconciliation({
+      profileId: profile.id,
+      draftId: created.draft.id,
+      expectedSnapshotDigest: created.draft.snapshotDigest,
+      decisions: [],
+      actorId: "test:user",
+      idempotencyKey: "gear-removed-reconciliation",
+    });
+    if (reconciled.kind !== "saved") throw new Error("gear-removed reconciliation failed");
+    const command = {
+      profileId: profile.id,
+      draftId: created.draft.id,
+      expectedSnapshotDigest: reconciled.draft.snapshotDigest,
+      expectedLifecycleVersion: 0,
+      expectedBase: {
+        kind: "revision" as const,
+        revisionId: first.firstReceipt.revisionId,
+        planVersion: first.firstReceipt.planVersion,
+      },
+      actorId: "test:user",
+      idempotencyKey: "gear-removed-apply",
+      remapCheckoffLinks: true,
+    };
+    const before = snapshotTables(raw, APPLY_STATE_TABLES);
+    const result = repo.applyPlanChanges(command);
+    expect(result.kind).toBe("checkoff_remap_unsafe");
+    if (result.kind !== "checkoff_remap_unsafe") throw new Error("expected checkoff_remap_unsafe");
+    expect(result.unmappable).toEqual([
+      expect.objectContaining({ linkId: "gear-link", filename: "gear_0.4n_0.2mm.bgcode" }),
+    ]);
+    // Nothing mutated: the block preserves every existing row exactly.
+    expect(snapshotTables(raw, APPLY_STATE_TABLES)).toEqual(before);
+    expect(repo.getSetting("printer.checkoff_links")).toBe(checkoffLinksBefore);
+    database.close();
+  });
+
   it("publishes the first accepted Plan from a clean empty baseline", () => {
     const { database, raw, repo } = fixture();
     const sourceRoot = join(database.reposDir, "empty-apply-source");
