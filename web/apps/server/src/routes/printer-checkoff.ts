@@ -445,6 +445,7 @@ export async function registerPrinterCheckoffRoutes(
           : [];
         void deductSpoolmanFilamentAfterVerify(
           deps.repo,
+          link.id,
           link.integration_id,
           link.profile_id,
           confirmedDecisions,
