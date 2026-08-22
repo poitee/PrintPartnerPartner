@@ -110,6 +110,34 @@ describe("arrangeAcceptedUnits", () => {
     expect(placedC).not.toMatchObject({ xUm: 40, yUm: 40 });
   });
 
+  it("packs an unplaced unit around a pinned unit", () => {
+    const result = arrangeAcceptedUnits({
+      mode: "unplaced",
+      printer,
+      units: [{
+        token: "a",
+        widthUm: 50,
+        depthUm: 30,
+        heightUm: 10,
+        xUm: 40,
+        yUm: 40,
+        placement: "pinned",
+      }, {
+        token: "c",
+        widthUm: 30,
+        depthUm: 20,
+        heightUm: 10,
+        xUm: 0,
+        yUm: 0,
+        placement: "unplaced",
+      }],
+    });
+    expect(result.kind).toBe("packed");
+    if (result.kind !== "packed") return;
+    expect(result.plates[0]?.units.find((unit) => unit.token === "a")).toMatchObject({ xUm: 40, yUm: 40 });
+    expect(result.plates.flatMap((plate) => plate.units).some((unit) => unit.token === "c")).toBe(true);
+  });
+
   it("lets Arrange all replace the current layout including pinned coordinates", () => {
     const result = arrangeAcceptedUnits({
       mode: "all",

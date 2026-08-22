@@ -403,7 +403,7 @@ export const acceptedPlateUnits = sqliteTable(
     widthUm: integer("width_um").notNull(),
     depthUm: integer("depth_um").notNull(),
     heightUm: integer("height_um").notNull(),
-    placement: text("placement").$type<"auto" | "manual" | "pinned">().notNull().default("auto"),
+    placement: text("placement").$type<"auto" | "manual" | "pinned" | "unplaced">().notNull().default("auto"),
   },
   (t) => [
     primaryKey({
@@ -415,7 +415,7 @@ export const acceptedPlateUnits = sqliteTable(
     check("chk_accepted_plate_units_width", sql`${t.widthUm} BETWEEN 1 AND 2147483647`),
     check("chk_accepted_plate_units_depth", sql`${t.depthUm} BETWEEN 1 AND 2147483647`),
     check("chk_accepted_plate_units_height", sql`${t.heightUm} BETWEEN 1 AND 2147483647`),
-    check("chk_accepted_plate_units_placement", sql`${t.placement} IN ('auto', 'manual', 'pinned')`),
+    check("chk_accepted_plate_units_placement", sql`${t.placement} IN ('auto', 'manual', 'pinned', 'unplaced')`),
   ],
 );
 
@@ -2617,7 +2617,7 @@ export const schemaMigrations: string[] = [
     width_um INTEGER NOT NULL CHECK (width_um BETWEEN 1 AND 2147483647),
     depth_um INTEGER NOT NULL CHECK (depth_um BETWEEN 1 AND 2147483647),
     height_um INTEGER NOT NULL CHECK (height_um BETWEEN 1 AND 2147483647),
-    placement TEXT NOT NULL DEFAULT 'auto' CHECK (placement IN ('auto', 'manual', 'pinned')),
+    placement TEXT NOT NULL DEFAULT 'auto' CHECK (placement IN ('auto', 'manual', 'pinned', 'unplaced')),
     CONSTRAINT pk_accepted_plate_units
       PRIMARY KEY (tenant_id, revision_id, required_unit_token)
   )`,

@@ -93,6 +93,7 @@ describe("AcceptedPlateGallery successor revisions", () => {
           disabled={false}
           onMove={move}
           onPin={() => Promise.resolve()}
+          onUnplace={() => Promise.resolve()}
           onArrange={() => Promise.resolve()}
           onStaleMove={() => Promise.resolve()}
         />
@@ -121,6 +122,7 @@ describe("AcceptedPlateGallery successor revisions", () => {
         disabled={false}
         onMove={() => Promise.resolve(true)}
         onPin={() => Promise.resolve()}
+        onUnplace={() => Promise.resolve()}
         onArrange={onArrange}
         onUndoArrangeAll={onUndoArrangeAll}
         onStaleMove={() => Promise.resolve()}

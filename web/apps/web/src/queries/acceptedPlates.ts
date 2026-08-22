@@ -15,6 +15,7 @@ import type {
   PinAcceptedPlateUnitRequest,
   ArrangeAcceptedPlatesRequest,
   RestoreAcceptedPlatesRequest,
+  UnplaceAcceptedPlateUnitRequest,
 } from "@print-partner/contracts";
 import {
   fetchAcceptedPlateExportJobs,
@@ -24,6 +25,7 @@ import {
   pinAcceptedPlateUnit,
   arrangeAcceptedPlates,
   restoreAcceptedPlates,
+  unplaceAcceptedPlateUnit,
 } from "../api/endpoints/acceptedPlates";
 import { queryKeys } from "./keys";
 
@@ -61,11 +63,52 @@ export type AcceptedPlateMoveVariables = Readonly<{
   input: MoveAcceptedPlateUnitRequest;
 }>;
 
+export type AcceptedPlateUnplaceVariables = Readonly<{
+  plateId: string;
+  token: string;
+  input: UnplaceAcceptedPlateUnitRequest;
+}>;
+
 export type AcceptedPlatePinVariables = Readonly<{
   plateId: string;
   token: string;
   input: PinAcceptedPlateUnitRequest;
 }>;
+
+export function publishAcceptedPlateUnplace(
+  workspace: AcceptedPlateWorkspace | undefined,
+  variables: AcceptedPlateUnplaceVariables,
+  receipt: AcceptedPlateMoveReceipt,
+): AcceptedPlateWorkspace | undefined {
+  if (workspace?.kind !== "ready") return workspace;
+  const plate = workspace.plates.find((candidate) => candidate.plate_id === variables.plateId);
+  const unit = plate?.units.find((candidate) => candidate.token === variables.token);
+  if (!plate || !unit) return workspace;
+  return {
+    ...workspace,
+    plate_revision_id: receipt.plate_revision_id,
+    plate_revision_number: receipt.plate_revision_number,
+    plates: workspace.plates.map((candidate) => candidate.plate_id !== variables.plateId
+      ? candidate
+      : { ...candidate, units: candidate.units.filter((item) => item.token !== variables.token) }),
+    unplaced: [
+      ...workspace.unplaced,
+      {
+        token: unit.token,
+        object_name: unit.object_name,
+        filename: unit.filename,
+        source_layer: unit.source_layer,
+        role: unit.role,
+        filament_color_id: unit.filament_color_id,
+        plate_id: plate.plate_id,
+        printer_id: plate.printer.id,
+        width_um: unit.width_um,
+        depth_um: unit.depth_um,
+        height_um: unit.height_um,
+      },
+    ],
+  };
+}
 
 export function publishAcceptedPlatePin(
   workspace: AcceptedPlateWorkspace | undefined,
@@ -232,6 +275,28 @@ export function usePinAcceptedPlateUnitMutation(profileId: number) {
       queryClient.setQueryData<AcceptedPlateWorkspace>(
         queryKeys.acceptedPlateWorkspace(profileId),
         (workspace) => publishAcceptedPlatePin(workspace, variables, receipt),
+      );
+      await invalidateAcceptedPlateWorkspace(queryClient, profileId);
+    },
+  });
+}
+
+export function useUnplaceAcceptedPlateUnitMutation(profileId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: acceptedPlateMutationKey(profileId),
+    scope: acceptedPlateMutationScope(profileId),
+    retry: false,
+    mutationFn: (variables: AcceptedPlateUnplaceVariables) => unplaceAcceptedPlateUnit(
+      profileId,
+      variables.plateId,
+      variables.token,
+      variables.input,
+    ),
+    onSuccess: async (receipt, variables) => {
+      queryClient.setQueryData<AcceptedPlateWorkspace>(
+        queryKeys.acceptedPlateWorkspace(profileId),
+        (workspace) => publishAcceptedPlateUnplace(workspace, variables, receipt),
       );
       await invalidateAcceptedPlateWorkspace(queryClient, profileId);
     },

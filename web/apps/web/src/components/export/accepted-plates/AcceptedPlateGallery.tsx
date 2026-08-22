@@ -10,6 +10,7 @@ type Props = Readonly<{
   disabled: boolean;
   onMove: (plateId: string, token: string, xUm: number, yUm: number) => Promise<boolean | undefined>;
   onPin: (plateId: string, token: string, pinned: boolean) => Promise<void>;
+  onUnplace: (plateId: string, token: string) => Promise<void>;
   onArrange: (mode: "unplaced" | "all") => Promise<void>;
   onUndoArrangeAll?: () => Promise<void>;
   onStaleMove: () => Promise<void>;
@@ -20,6 +21,7 @@ export default function AcceptedPlateGallery({
   disabled,
   onMove,
   onPin,
+  onUnplace,
   onArrange,
   onUndoArrangeAll,
   onStaleMove,
@@ -82,8 +84,24 @@ export default function AcceptedPlateGallery({
         disabled={disabled}
         onMove={onMove}
         onPin={onPin}
+        onUnplace={onUnplace}
         onStaleMove={onStaleMove}
       />
+      {workspace.unplaced.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Unplaced</p>
+          <ul className="space-y-1 text-sm text-muted-foreground">
+            {workspace.unplaced.map((unit) => (
+              <li key={unit.token} className="truncate font-mono text-[11px]">
+                {unit.object_name}
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-muted-foreground">
+            Arrange unplaced packs these names around pinned and manual placements.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

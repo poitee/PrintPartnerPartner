@@ -1004,6 +1004,63 @@ endsolid geometry`));
     expect(afterUndo.plates[0]!.units.some((unit) => unit.token === autoToken)).toBe(true);
   });
 
+  it("returns a unit to the unplaced list and Arrange unplaced puts it back", () => {
+    const { repo, root, profile, accepted, required } = fixture();
+    const plateId = `plate_${"a".repeat(32)}`;
+    const published = repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: null,
+      plates: plateInput(required.map((unit) => unit.token)).map((plate) => ({
+        ...plate,
+        plateId,
+      })),
+    });
+    if (published.kind !== "published") throw new Error("Plate publish failed");
+    const token = required[0]!.token;
+    const unplaced = repo.unplaceAcceptedPlateUnit({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: published.plateRevisionId,
+      plateId,
+      token,
+    });
+    expect(unplaced).toMatchObject({ kind: "moved" });
+    if (unplaced.kind !== "moved") throw new Error("Unplace failed");
+    const stored = repo.readAcceptedPlates(profile.id);
+    expect(stored.kind).toBe("ready");
+    if (stored.kind !== "ready") throw new Error("Read after unplace failed");
+    expect(stored.plates[0]!.units.find((unit) => unit.token === token)).toMatchObject({
+      placement: "unplaced",
+    });
+
+    const dependencies: AcceptedPlateWorkspaceDependencies = {
+      repository: repo,
+      reposDir: root,
+      limits: {
+        maxArtifactBytes: 1_000_000,
+        maxTotalSourceBytes: 1_000_000,
+        maxObjects: 10,
+        maxTriangles: 10,
+      },
+      loadPrinters: () => [],
+    };
+    const arranged = arrangeAcceptedPlates(dependencies, {
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted),
+      expectedPlateRevisionId: unplaced.plateRevisionId,
+      mode: "unplaced",
+    });
+    expect(arranged.kind).toBe("workspace");
+    if (arranged.kind !== "workspace" || arranged.workspace.kind !== "ready") {
+      throw new Error("Arrange unplaced after return failed");
+    }
+    expect(arranged.workspace.unplaced).toEqual([]);
+    expect(arranged.workspace.plates[0]!.units.find((unit) => unit.token === token)).toMatchObject({
+      placement: "auto",
+    });
+  });
+
   it("returns unchanged for an exact repeated move and rejects a stale Plate revision", () => {
     const { repo, raw, profile, accepted, required } = fixture();
     const published = repo.publishAcceptedPlates({

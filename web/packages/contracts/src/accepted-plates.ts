@@ -89,10 +89,20 @@ const acceptedPlatePlacedUnitSchema = acceptedPlateSetupUnitSchema.safeExtend({
   width_um: positiveMicrometres,
   depth_um: positiveMicrometres,
   height_um: positiveMicrometres,
-  placement: z.enum(["auto", "manual", "pinned"]).default("auto"),
+  placement: z.enum(["auto", "manual", "pinned", "unplaced"]).default("auto"),
 });
 
 export type AcceptedPlatePlacedUnit = z.infer<typeof acceptedPlatePlacedUnitSchema>;
+
+const acceptedPlateUnplacedUnitSchema = acceptedPlateSetupUnitSchema.safeExtend({
+  plate_id: acceptedPlateId,
+  printer_id: printerId,
+  width_um: positiveMicrometres,
+  depth_um: positiveMicrometres,
+  height_um: positiveMicrometres,
+});
+
+export type AcceptedPlateUnplacedUnit = z.infer<typeof acceptedPlateUnplacedUnitSchema>;
 
 const acceptedPlateViewSchema = z.strictObject({
   plate_id: acceptedPlateId,
@@ -139,6 +149,7 @@ const readyWorkspaceSchema = z.strictObject({
   arrange_undo_revision_id: positiveSafeInteger.nullable().default(null),
   printers: acceptedPlatePrinterListSchema,
   plates: z.array(acceptedPlateViewSchema).min(1),
+  unplaced: z.array(acceptedPlateUnplacedUnitSchema).default([]),
 }).superRefine((value, context) => {
   const plateIds = new Set<string>();
   const ordinals = new Set<number>();
@@ -157,6 +168,15 @@ const readyWorkspaceSchema = z.strictObject({
         context.addIssue({ code: "custom", path: ["plates", plateIndex, "units", unitIndex, "token"], message: "Duplicate Required-unit token" });
       }
       tokens.add(unit.token);
+    }
+  }
+  for (const [index, unit] of value.unplaced.entries()) {
+    if (tokens.has(unit.token)) {
+      context.addIssue({ code: "custom", path: ["unplaced", index, "token"], message: "Duplicate Required-unit token" });
+    }
+    tokens.add(unit.token);
+    if (!plateIds.has(unit.plate_id)) {
+      context.addIssue({ code: "custom", path: ["unplaced", index, "plate_id"], message: "Unplaced unit Plate was not found" });
     }
   }
   for (let ordinal = 1; ordinal <= value.plates.length; ordinal += 1) {
@@ -228,6 +248,13 @@ const restoreAcceptedPlatesRequestSchema = z.strictObject({
 });
 
 export type RestoreAcceptedPlatesRequest = z.infer<typeof restoreAcceptedPlatesRequestSchema>;
+
+const unplaceAcceptedPlateUnitRequestSchema = z.strictObject({
+  expected: acceptedPlanBasisSchema,
+  expected_plate_revision_id: positiveSafeInteger,
+});
+
+export type UnplaceAcceptedPlateUnitRequest = z.infer<typeof unplaceAcceptedPlateUnitRequestSchema>;
 
 const acceptedPlateMoveReceiptSchema = z.strictObject({
   plate_revision_id: positiveSafeInteger,
@@ -460,6 +487,10 @@ export function parseArrangeAcceptedPlatesRequest(value: unknown): ArrangeAccept
 
 export function parseRestoreAcceptedPlatesRequest(value: unknown): RestoreAcceptedPlatesRequest {
   return restoreAcceptedPlatesRequestSchema.parse(value);
+}
+
+export function parseUnplaceAcceptedPlateUnitRequest(value: unknown): UnplaceAcceptedPlateUnitRequest {
+  return unplaceAcceptedPlateUnitRequestSchema.parse(value);
 }
 
 export function parseAcceptedPlateMoveReceipt(value: unknown): AcceptedPlateMoveReceipt {

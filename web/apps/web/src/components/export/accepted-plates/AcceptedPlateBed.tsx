@@ -38,6 +38,7 @@ type Props = Readonly<{
   disabled: boolean;
   onMove: (plateId: string, token: string, xUm: number, yUm: number) => Promise<boolean | undefined>;
   onPin?: (plateId: string, token: string, pinned: boolean) => Promise<void>;
+  onUnplace?: (plateId: string, token: string) => Promise<void>;
   onStaleMove: () => Promise<void>;
 }>;
 
@@ -58,7 +59,7 @@ function displayedUnit(unit: AcceptedPlatePlacedUnit, draft: PositionDraft) {
   return { ...unit, x_um: draft.xUm, y_um: draft.yUm };
 }
 
-export default function AcceptedPlateBed({ plate, revisionId, disabled, onMove, onPin, onStaleMove }: Props) {
+export default function AcceptedPlateBed({ plate, revisionId, disabled, onMove, onPin, onUnplace, onStaleMove }: Props) {
   const [selectedToken, setSelectedToken] = useState<RequiredUnitToken | null>(plate.units[0]?.token ?? null);
   const [draft, setDraft] = useState<PositionDraft>({ kind: "idle" });
   const selected = plate.units.find((unit) => unit.token === selectedToken) ?? plate.units[0];
@@ -225,6 +226,17 @@ export default function AcceptedPlateBed({ plate, revisionId, disabled, onMove, 
               onClick={() => void onPin(plate.plate_id, selected.token, selected.placement !== "pinned")}
             >
               {selected.placement === "pinned" ? "Unpin" : "Pin placement"}
+            </Button>
+          ) : null}
+          {onUnplace ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={disabled || draft.kind !== "idle"}
+              onClick={() => void onUnplace(plate.plate_id, selected.token)}
+            >
+              Return to unplaced
             </Button>
           ) : null}
         </>

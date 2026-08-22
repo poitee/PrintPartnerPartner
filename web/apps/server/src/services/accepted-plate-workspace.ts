@@ -6,6 +6,7 @@ import {
   type AcceptedPlatePlacedUnit,
   type AcceptedPlatePrinter,
   type AcceptedPlateSetupUnit as AcceptedPlateSetupUnitContract,
+  type AcceptedPlateUnplacedUnit,
   type AcceptedPlateView,
   type AcceptedPlateWorkspace,
 } from "@print-partner/contracts";
@@ -160,6 +161,34 @@ function setupUnit(unit: AcceptedPlateSetupUnit): AcceptedPlateSetupUnitContract
   };
 }
 
+function unitPlacementKind(value: unknown): "auto" | "manual" | "pinned" | "unplaced" {
+  return value === "manual" || value === "pinned" || value === "unplaced" ? value : "auto";
+}
+
+function packedPlacementKind(value: unknown): "auto" | "manual" | "pinned" {
+  return value === "manual" || value === "pinned" ? value : "auto";
+}
+
+function unplacedWorkspaceUnits(
+  plates: readonly AcceptedPlate[],
+  setupByToken: ReadonlyMap<string, AcceptedPlateSetupUnit>,
+): AcceptedPlateUnplacedUnit[] {
+  return plates.flatMap((plate) => plate.units
+    .filter((unit) => unit.placement === "unplaced")
+    .map((unit) => {
+      const setup = setupByToken.get(unit.token);
+      if (!setup) throw new Error("Accepted Plate setup metadata is missing");
+      return {
+        ...setupUnit(setup),
+        plate_id: parseAcceptedPlateId(plate.plateId),
+        printer_id: plate.printerId,
+        width_um: unit.widthUm,
+        depth_um: unit.depthUm,
+        height_um: unit.heightUm,
+      };
+    }));
+}
+
 function placedUnit(
   unit: AcceptedPlate["units"][number],
   setup: AcceptedPlateSetupUnit,
@@ -171,7 +200,7 @@ function placedUnit(
     width_um: unit.widthUm,
     depth_um: unit.depthUm,
     height_um: unit.heightUm,
-    placement: unit.placement === "manual" || unit.placement === "pinned" ? unit.placement : "auto",
+    placement: packedPlacementKind(unit.placement),
   };
 }
 
@@ -191,7 +220,9 @@ function plateView(
       bed_height_um: plate.bedHeightUm,
       margin_um: plate.marginUm,
     },
-    units: plate.units.map((unit) => {
+    units: plate.units
+      .filter((unit) => unit.placement !== "unplaced")
+      .map((unit) => {
       const setup = setupByToken.get(unit.token);
       if (!setup) throw new Error("Accepted Plate setup metadata is missing");
       return placedUnit(unit, setup);
@@ -227,6 +258,15 @@ function publishedWorkspace(input: Readonly<{
         return { ...unit, objectName: setup.objectName };
       }),
     }, setupByToken)),
+    unplaced: unplacedWorkspaceUnits(input.plates.map((plate, index) => ({
+      ...plate,
+      ordinal: index + 1,
+      units: plate.units.map((unit) => {
+        const setup = setupByToken.get(unit.token);
+        if (!setup) throw new Error("Accepted Plate setup metadata is missing");
+        return { ...unit, objectName: setup.objectName, placement: unitPlacementKind(unit.placement) };
+      }),
+    })), setupByToken),
   };
 }
 
@@ -254,6 +294,7 @@ function presentWorkspace(
     arrange_undo_revision_id: input.undoFromRevisionId ?? null,
     printers,
     plates: input.plates.map((plate) => plateView(plate, setupByToken)),
+    unplaced: unplacedWorkspaceUnits(input.plates, setupByToken),
   };
 }
 
@@ -390,7 +431,7 @@ function currentPlateInputs(plates: readonly AcceptedPlate[]): AcceptedPlateInpu
       widthUm: unit.widthUm,
       depthUm: unit.depthUm,
         heightUm: unit.heightUm,
-        placement: unit.placement === "manual" || unit.placement === "pinned" ? unit.placement : "auto",
+        placement: unitPlacementKind(unit.placement),
       })),
   }));
 }
@@ -575,7 +616,7 @@ function arrangedPlates(
         heightUm: unit.heightUm,
         xUm: unit.xUm,
         yUm: unit.yUm,
-        placement: unit.placement === "manual" || unit.placement === "pinned" ? unit.placement : "auto",
+        placement: unitPlacementKind(unit.placement),
       }));
       const packed = arrangeAcceptedUnits({
         mode: "unplaced",
@@ -604,7 +645,7 @@ function arrangedPlates(
           marginUm: plate.marginUm,
           units: packedPlate.units.map((unit) => ({
             ...unit,
-            placement: index === 0 ? (placementByToken.get(unit.token) ?? "auto") : "auto",
+            placement: packedPlacementKind(placementByToken.get(unit.token)),
           })),
         });
       });

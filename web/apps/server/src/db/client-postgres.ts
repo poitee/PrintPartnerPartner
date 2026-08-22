@@ -1716,7 +1716,7 @@ export const postgresPostInitMigrations: string[] = [
     height_um INTEGER NOT NULL CONSTRAINT chk_accepted_plate_units_height
       CHECK (height_um BETWEEN 1 AND 2147483647),
     placement TEXT NOT NULL DEFAULT 'auto' CONSTRAINT chk_accepted_plate_units_placement
-      CHECK (placement IN ('auto', 'manual', 'pinned')),
+      CHECK (placement IN ('auto', 'manual', 'pinned', 'unplaced')),
     CONSTRAINT pk_accepted_plate_units
       PRIMARY KEY (tenant_id, revision_id, required_unit_token)
   )`,

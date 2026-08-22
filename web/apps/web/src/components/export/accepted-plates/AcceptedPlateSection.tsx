@@ -16,6 +16,7 @@ import {
   useMoveAcceptedPlateUnitMutation,
   usePinAcceptedPlateUnitMutation,
   useRestoreAcceptedPlatesMutation,
+  useUnplaceAcceptedPlateUnitMutation,
 } from "../../../queries/acceptedPlates";
 import { settingsPrintersRoute } from "../../../lib/routes";
 import { Button } from "../../ui/button";
@@ -55,6 +56,7 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
   const initialize = useInitializeAcceptedPlatesMutation(profileId);
   const move = useMoveAcceptedPlateUnitMutation(profileId);
   const pin = usePinAcceptedPlateUnitMutation(profileId);
+  const unplace = useUnplaceAcceptedPlateUnitMutation(profileId);
   const arrange = useArrangeAcceptedPlatesMutation(profileId);
   const restore = useRestoreAcceptedPlatesMutation(profileId);
   const revisionWritePending = useAcceptedPlateRevisionPending(profileId);
@@ -115,6 +117,26 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
         return;
       }
       toast.error(error instanceof Error ? error.message : "Could not pin this Required unit.");
+    }
+  };
+
+  const submitUnplace = async (plateId: string, token: string) => {
+    if (workspace?.kind !== "ready") return;
+    try {
+      await unplace.mutateAsync({
+        plateId,
+        token,
+        input: {
+          expected: workspace.basis,
+          expected_plate_revision_id: workspace.plate_revision_id,
+        },
+      });
+    } catch (error) {
+      if (isAcceptedPlateStaleError(error)) {
+        await refreshAfterStaleMove();
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : "Could not return this Required unit to unplaced.");
     }
   };
 
@@ -219,6 +241,7 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
             disabled={revisionWritePending}
             onMove={submitMove}
             onPin={submitPin}
+            onUnplace={submitUnplace}
             onArrange={submitArrange}
             onUndoArrangeAll={workspace.arrange_undo_revision_id == null ? undefined : submitRestore}
             onStaleMove={refreshAfterStaleMove}

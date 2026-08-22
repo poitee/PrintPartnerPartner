@@ -17,7 +17,7 @@ export type AcceptedPackedUnit = AcceptedPackingUnit & Readonly<{
   yUm: number;
 }>;
 
-export type AcceptedPlacementKind = "auto" | "manual" | "pinned";
+export type AcceptedPlacementKind = "auto" | "manual" | "pinned" | "unplaced";
 
 export type AcceptedPlacedPackingUnit = AcceptedPackedUnit & Readonly<{
   placement: AcceptedPlacementKind;
@@ -254,7 +254,9 @@ export function arrangeAcceptedUnits(input: Readonly<{
   const occupied = input.units.filter(
     (unit) => unit.placement === "pinned" || unit.placement === "manual",
   );
-  const moving = input.units.filter((unit) => unit.placement === "auto");
+  const moving = input.units.filter(
+    (unit) => unit.placement === "auto" || unit.placement === "unplaced",
+  );
   return packAcceptedUnitsAround({
     printer: input.printer,
     occupied,

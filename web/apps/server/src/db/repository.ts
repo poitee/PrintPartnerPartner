@@ -202,6 +202,7 @@ import {
 import {
   moveAcceptedPlateUnitInternal,
   pinAcceptedPlateUnitInternal,
+  unplaceAcceptedPlateUnitInternal,
   publishAcceptedPlatesInternal,
   readAcceptedPlateExportInputInternal,
   readAcceptedPlateWorkspaceInputInternal,
@@ -213,6 +214,8 @@ import {
   type MoveAcceptedPlateUnitResult,
   type PinAcceptedPlateUnitCommand,
   type PinAcceptedPlateUnitResult,
+  type UnplaceAcceptedPlateUnitCommand,
+  type UnplaceAcceptedPlateUnitResult,
   type PublishAcceptedPlatesCommand,
   type PublishAcceptedPlatesResult,
   type ReadAcceptedPlatesResult,
@@ -1082,6 +1085,10 @@ export class AppRepository {
 
   pinAcceptedPlateUnit(command: PinAcceptedPlateUnitCommand): PinAcceptedPlateUnitResult {
     return pinAcceptedPlateUnitInternal(this.acceptedPlateDependencies(), command);
+  }
+
+  unplaceAcceptedPlateUnit(command: UnplaceAcceptedPlateUnitCommand): UnplaceAcceptedPlateUnitResult {
+    return unplaceAcceptedPlateUnitInternal(this.acceptedPlateDependencies(), command);
   }
 
   restoreAcceptedPlates(command: RestoreAcceptedPlatesCommand): RestoreAcceptedPlatesResult {

@@ -10,6 +10,7 @@ import {
   openAcceptedPlatesInSlicer,
   pinAcceptedPlateUnit,
   restoreAcceptedPlates,
+  unplaceAcceptedPlateUnit,
   startAcceptedPlateExport,
 } from "./acceptedPlates";
 
@@ -40,6 +41,7 @@ describe("accepted Plate endpoints", () => {
       .mockResolvedValueOnce(response({ kind: "empty_plan" }))
       .mockResolvedValueOnce(response({ plate_revision_id: 20, plate_revision_number: 4 }))
       .mockResolvedValueOnce(response({ plate_revision_id: 21, plate_revision_number: 5 }))
+      .mockResolvedValueOnce(response({ plate_revision_id: 22, plate_revision_number: 6 }))
       .mockResolvedValueOnce(response({ kind: "empty_plan" }))
       .mockResolvedValueOnce(response({ kind: "empty_plan" }));
 
@@ -60,14 +62,18 @@ describe("accepted Plate endpoints", () => {
       expected_plate_revision_id: 20,
       pinned: true,
     });
-    await arrangeAcceptedPlates(7, {
+    await unplaceAcceptedPlateUnit(7, plateId, token, {
       expected: basis,
       expected_plate_revision_id: 21,
+    });
+    await arrangeAcceptedPlates(7, {
+      expected: basis,
+      expected_plate_revision_id: 22,
       mode: "unplaced",
     });
     await restoreAcceptedPlates(7, {
       expected: basis,
-      expected_plate_revision_id: 22,
+      expected_plate_revision_id: 23,
       restore_plate_revision_id: 19,
     });
 
@@ -89,14 +95,18 @@ describe("accepted Plate endpoints", () => {
         expected_plate_revision_id: 20,
         pinned: true,
       })],
-      ["/plans/7/plates/arrange", "POST", JSON.stringify({
+      [`/plans/7/plates/${plateId}/units/${token}/unplace`, "POST", JSON.stringify({
         expected: basis,
         expected_plate_revision_id: 21,
+      })],
+      ["/plans/7/plates/arrange", "POST", JSON.stringify({
+        expected: basis,
+        expected_plate_revision_id: 22,
         mode: "unplaced",
       })],
       ["/plans/7/plates/restore", "POST", JSON.stringify({
         expected: basis,
-        expected_plate_revision_id: 22,
+        expected_plate_revision_id: 23,
         restore_plate_revision_id: 19,
       })],
     ]);

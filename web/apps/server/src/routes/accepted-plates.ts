@@ -133,6 +133,17 @@ function parseMoveRequest(value: unknown): Readonly<{
   return { expected, expectedPlateRevisionId, xUm, yUm };
 }
 
+function parseUnplaceRequest(value: unknown): Readonly<{
+  expected: AcceptedPlanBasis;
+  expectedPlateRevisionId: number;
+}> | null {
+  if (!isRecord(value)) return null;
+  const expected = parseBasis(value.expected);
+  const expectedPlateRevisionId = positiveInteger(value.expected_plate_revision_id);
+  if (!expected || expectedPlateRevisionId == null) return null;
+  return { expected, expectedPlateRevisionId };
+}
+
 function parsePinRequest(value: unknown): Readonly<{
   expected: AcceptedPlanBasis;
   expectedPlateRevisionId: number;
@@ -340,6 +351,35 @@ export async function registerAcceptedPlateRoutes(
         plateId,
         token,
         pinned: body.pinned,
+      });
+      if (result.kind === "moved" || result.kind === "unchanged") {
+        return {
+          plate_revision_id: result.plateRevisionId,
+          plate_revision_number: result.plateRevisionNumber,
+        };
+      }
+      return sendMoveFailure(reply, result);
+    } catch (error) {
+      return sendIntegrityFailure(request, reply, error);
+    }
+  });
+
+  app.post("/plans/:id/plates/:plateId/units/:token/unplace", async (request, reply) => {
+    const id = profileId(request);
+    const params = isRecord(request.params) ? request.params : {};
+    const plateId = typeof params.plateId === "string" ? params.plateId.trim() : "";
+    const token = parseToken(params.token);
+    const body = parseUnplaceRequest(request.body);
+    if (id == null || !plateId || plateId.length > 200 || !token || !body || body.expected.profileId !== id) {
+      return sendError(reply, 400, "invalid_request", "Request is invalid");
+    }
+    try {
+      const result = dependencies.repo.unplaceAcceptedPlateUnit({
+        profileId: id,
+        expected: body.expected,
+        expectedPlateRevisionId: body.expectedPlateRevisionId,
+        plateId,
+        token,
       });
       if (result.kind === "moved" || result.kind === "unchanged") {
         return {

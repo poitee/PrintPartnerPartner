@@ -30,7 +30,7 @@ export type AcceptedPlateUnitInput = Readonly<{
   widthUm: number;
   depthUm: number;
   heightUm: number;
-  placement?: "auto" | "manual" | "pinned";
+  placement?: "auto" | "manual" | "pinned" | "unplaced";
 }>;
 
 export type AcceptedPlateInput = Readonly<{
@@ -76,6 +76,14 @@ export type PinAcceptedPlateUnitCommand = Readonly<{
   plateId: string;
   token: string;
   pinned: boolean;
+}>;
+
+export type UnplaceAcceptedPlateUnitCommand = Readonly<{
+  profileId: number;
+  expected: AcceptedPlanBasis;
+  expectedPlateRevisionId: number;
+  plateId: string;
+  token: string;
 }>;
 
 export type ArrangeAcceptedPlatesCommand = Readonly<{
@@ -132,6 +140,7 @@ export type MoveAcceptedPlateUnitResult =
   | AcceptedPlateFailure;
 
 export type PinAcceptedPlateUnitResult = MoveAcceptedPlateUnitResult;
+export type UnplaceAcceptedPlateUnitResult = MoveAcceptedPlateUnitResult;
 export type RestoreAcceptedPlatesResult =
   | {
       readonly kind: "restored";
@@ -320,11 +329,11 @@ function requiredObjectNames(snapshot: AcceptedPlanOperationalSnapshot): Map<str
   );
 }
 
-function storedPlacement(value: unknown): "auto" | "manual" | "pinned" {
-  return value === "manual" || value === "pinned" ? value : "auto";
+function storedPlacement(value: unknown): "auto" | "manual" | "pinned" | "unplaced" {
+  return value === "manual" || value === "pinned" || value === "unplaced" ? value : "auto";
 }
 
-function unitPlacement(unit: AcceptedPlateUnitInput): "auto" | "manual" | "pinned" {
+function unitPlacement(unit: AcceptedPlateUnitInput): "auto" | "manual" | "pinned" | "unplaced" {
   return storedPlacement(unit.placement);
 }
 
@@ -393,7 +402,12 @@ function validatePlates(
         !storedInteger(unit.heightUm) ||
         unit.widthUm <= 0 ||
         unit.depthUm <= 0 ||
-        unit.heightUm <= 0 ||
+        unit.heightUm <= 0
+      ) {
+        return { kind: "invalid_geometry", reason: "outside_build_area" };
+      }
+      const placement = unitPlacement(unit);
+      if (placement !== "unplaced" && (
         unit.xUm < plate.marginUm ||
         unit.yUm < plate.marginUm ||
         unit.xUm > plate.bedWidthUm - plate.marginUm ||
@@ -401,15 +415,16 @@ function validatePlates(
         unit.yUm > plate.bedDepthUm - plate.marginUm ||
         unit.depthUm > plate.bedDepthUm - plate.marginUm - unit.yUm ||
         unit.heightUm > plate.bedHeightUm
-      ) {
+      )) {
         return { kind: "invalid_geometry", reason: "outside_build_area" };
       }
-      units.push({ ...unit, placement: unitPlacement(unit) });
+      units.push({ ...unit, placement });
     }
-    for (let leftIndex = 0; leftIndex < units.length; leftIndex += 1) {
-      const left = units[leftIndex]!;
-      for (let rightIndex = leftIndex + 1; rightIndex < units.length; rightIndex += 1) {
-        const right = units[rightIndex]!;
+    const onBed = units.filter((unit) => unit.placement !== "unplaced");
+    for (let leftIndex = 0; leftIndex < onBed.length; leftIndex += 1) {
+      const left = onBed[leftIndex]!;
+      for (let rightIndex = leftIndex + 1; rightIndex < onBed.length; rightIndex += 1) {
+        const right = onBed[rightIndex]!;
         if (
           left.xUm < right.xUm + right.widthUm &&
           right.xUm < left.xUm + left.widthUm &&
@@ -760,14 +775,7 @@ export function readAcceptedPlateExportInputInternal(
         if (unit.required) artifactByToken.set(unit.token, part.artifact);
       }
     }
-    return {
-      kind: "ready",
-      input: {
-        basis: state.basis,
-        plateRevisionId: state.plateRevisionId,
-        plateRevisionNumber: state.plateRevisionNumber,
-        layoutDigest: state.layoutDigest,
-        plates: state.plates.map((plate) => ({
+    const plates = state.plates.map((plate) => ({
           plateId: plate.plateId,
           ordinal: plate.ordinal,
           printerId: plate.printerId,
@@ -777,7 +785,9 @@ export function readAcceptedPlateExportInputInternal(
           bedDepthUm: plate.bedDepthUm,
           bedHeightUm: plate.bedHeightUm,
           marginUm: plate.marginUm,
-          units: plate.units.map((unit) => {
+          units: plate.units
+            .filter((unit) => storedPlacement(unit.placement) !== "unplaced")
+            .map((unit) => {
             const artifact = artifactByToken.get(unit.token);
             if (!artifact) throw new AcceptedPlateIntegrityError("layout");
             return {
@@ -791,7 +801,16 @@ export function readAcceptedPlateExportInputInternal(
               artifact,
             };
           }),
-        })),
+        })).filter((plate) => plate.units.length > 0);
+    if (plates.length === 0) return { kind: "plates_not_published" };
+    return {
+      kind: "ready",
+      input: {
+        basis: state.basis,
+        plateRevisionId: state.plateRevisionId,
+        plateRevisionNumber: state.plateRevisionNumber,
+        layoutDigest: state.layoutDigest,
+        plates,
       },
     };
   });
@@ -1107,6 +1126,87 @@ export function pinAcceptedPlateUnitInternal(
         const placement = command.pinned ? "pinned" : unitPlacement(unit) === "pinned" ? "manual" : unitPlacement(unit);
         unchanged = unitPlacement(unit) === placement;
         return { ...unit, placement };
+      }),
+    }));
+    if (!found) return { kind: "unit_not_found" };
+    if (unchanged) {
+      return {
+        kind: "unchanged",
+        plateRevisionId: currentRevision.id,
+        plateRevisionNumber: currentRevision.revisionNumber,
+      };
+    }
+    const validated = validatePlates(next, new Set(objectNames.keys()));
+    if (validated.kind !== "ready") return validated;
+    const revisionNumber = currentRevision.revisionNumber + 1;
+    const revisionId = insertRevision(
+      dependencies,
+      accepted.snapshot,
+      revisionNumber,
+      validated.plates,
+    );
+    const updated = dependencies.db
+      .update(dependencies.schema.acceptedPlateHeads)
+      .set({ currentRevisionId: revisionId })
+      .where(
+        and(
+          eq(dependencies.schema.acceptedPlateHeads.tenantId, dependencies.tenantId),
+          eq(dependencies.schema.acceptedPlateHeads.profileId, command.profileId),
+          eq(dependencies.schema.acceptedPlateHeads.currentRevisionId, command.expectedPlateRevisionId),
+        ),
+      )
+      .run();
+    if (updated.changes !== 1) throw new Error("Accepted Plate head update failed");
+    return { kind: "moved", plateRevisionId: revisionId, plateRevisionNumber: revisionNumber };
+  });
+}
+
+export function unplaceAcceptedPlateUnitInternal(
+  dependencies: AcceptedPlateDependencies,
+  command: UnplaceAcceptedPlateUnitCommand,
+): UnplaceAcceptedPlateUnitResult {
+  if (!dependencies.sqlite) return { kind: "transaction_unavailable" };
+  if (command.profileId !== command.expected.profileId) return { kind: "stale_accepted_plan" };
+  return dependencies.transaction(() => {
+    const accepted = currentAccepted(dependencies, command.expected);
+    if (accepted.kind !== "ready") return accepted;
+    const head = dependencies.db
+      .select()
+      .from(dependencies.schema.acceptedPlateHeads)
+      .where(
+        and(
+          eq(dependencies.schema.acceptedPlateHeads.tenantId, dependencies.tenantId),
+          eq(dependencies.schema.acceptedPlateHeads.profileId, command.profileId),
+        ),
+      )
+      .get();
+    if (!head || head.currentRevisionId !== command.expectedPlateRevisionId) {
+      return { kind: "plate_revision_changed" };
+    }
+    const currentRevision = dependencies.db
+      .select()
+      .from(dependencies.schema.acceptedPlateRevisions)
+      .where(eq(dependencies.schema.acceptedPlateRevisions.id, head.currentRevisionId))
+      .get();
+    if (!currentRevision) throw new AcceptedPlateIntegrityError("head");
+    const objectNames = requiredObjectNames(accepted.snapshot);
+    const plates = readStoredPlates(
+      dependencies,
+      currentRevision.id,
+      currentRevision.expectedPlateCount,
+      currentRevision.expectedUnitCount,
+      new Set(objectNames.keys()),
+      currentRevision.layoutDigest,
+    );
+    let found = false;
+    let unchanged = false;
+    const next = plates.map((plate): AcceptedPlateInput => ({
+      ...plate,
+      units: plate.units.map((unit): AcceptedPlateUnitInput => {
+        if (plate.plateId !== command.plateId || unit.token !== command.token) return unit;
+        found = true;
+        unchanged = unitPlacement(unit) === "unplaced";
+        return { ...unit, placement: "unplaced" };
       }),
     }));
     if (!found) return { kind: "unit_not_found" };
