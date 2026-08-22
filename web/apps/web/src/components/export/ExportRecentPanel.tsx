@@ -11,6 +11,7 @@ export const EXPORT_JOB_KINDS = new Set([
   "stl-export",
   "export",
   "export-accepted-plate-3mf",
+  "export-direct-3mf",
   "kit-export",
   "export-checklist-html",
   "export-kit-bundle",

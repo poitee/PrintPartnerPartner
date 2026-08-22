@@ -1,6 +1,7 @@
 const JOB_KIND_LABELS: Record<string, string> = {
   export: "Export",
   "export-accepted-plate-3mf": "Accepted Plate 3MF",
+  "export-direct-3mf": "Direct 3MF",
   kit: "Kit bundle",
   "stl-export": "STL export",
   sync: "Sync",

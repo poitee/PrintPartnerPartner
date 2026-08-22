@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { strFromU8, unzipSync } from "fflate";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   parseAcceptedPlateExportJobResult,
@@ -243,6 +244,50 @@ describe("accepted Plate export delivery routes", () => {
     expect(exportedCalls).toHaveLength(completedJobIds.length);
     expect(exportedCalls.map(([, , payload]) => payload.job_id).sort()).toEqual(completedJobIds.sort());
     expect((await app.inject({ method: "GET", url: "/api/v2/jobs/not-a-job" })).statusCode).toBe(404);
+  });
+
+  it("exports one unarranged named-object 3MF without published plates", async () => {
+    const { app, profile, token } = await fixture(undefined, { publishPlates: false });
+    const started = await app.inject({
+      method: "POST",
+      url: "/jobs/export-direct-3mf",
+      payload: { profile_id: profile.id, tokens: [token] },
+    });
+    expect(started.statusCode).toBe(200);
+    const snapshot = await waitForJob(app, started.json().job_id);
+    expect(snapshot.status).toBe("done");
+    expect(snapshot.kind).toBe("export-direct-3mf");
+    expect(snapshot.result).toMatchObject({
+      format: "direct-export-3mf-job-v1",
+      profile_id: profile.id,
+      download_url: expect.stringMatching(/^\/exports\//),
+    });
+    const downloadUrl = (snapshot.result as { download_url: string }).download_url;
+    const downloaded = await app.inject({ method: "GET", url: downloadUrl });
+    expect(downloaded.statusCode).toBe(200);
+    const xml = strFromU8(unzipSync(downloaded.rawPayload)["3D/3dmodel.model"]!);
+    expect(xml).toContain(`name="part__${token}"`);
+    expect(xml).toContain(`partnumber="${token}"`);
+    expect(xml).toContain('vertex x="0" y="0" z="0"');
+  });
+
+  it("still exports an unarranged 3MF after Plates are published", async () => {
+    const { app, profile, token } = await fixture();
+    const started = await app.inject({
+      method: "POST",
+      url: "/jobs/export-direct-3mf",
+      payload: { profile_id: profile.id, tokens: [token] },
+    });
+    expect(started.statusCode).toBe(200);
+    const snapshot = await waitForJob(app, started.json().job_id);
+    expect(snapshot.status).toBe("done");
+    expect(snapshot.kind).toBe("export-direct-3mf");
+    const xml = strFromU8(unzipSync((await app.inject({
+      method: "GET",
+      url: (snapshot.result as { download_url: string }).download_url,
+    })).rawPayload)["3D/3dmodel.model"]!);
+    expect(xml).toContain(`partnumber="${token}"`);
+    expect(xml).toContain('vertex x="0" y="0" z="0"');
   });
 
   it("exports 3MF for a planning Printer with no connection and no filament setup", async () => {

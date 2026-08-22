@@ -124,6 +124,7 @@ export const JOB_KINDS = [
   "export-checklist-html",
   "export-kit-bundle",
   "export-accepted-plate-3mf",
+  "export-direct-3mf",
   "printer-upload",
 ] as const;
 

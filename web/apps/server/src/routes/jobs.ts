@@ -5,11 +5,14 @@ import {
   DATE_FORMAT_DEFAULT,
   JOB_KINDS,
   parseAcceptedPlateId,
+  parseDirectExportJobResult,
+  parseStartDirectExportRequest,
   type AcceptedPlateExportJobResult,
   type DateFormatId,
   type JobSnapshot,
   type JobKind,
   type StartAcceptedPlateExportRequest,
+  type StartDirectExportRequest,
 } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import { exportDownloadKey, tenantExportDirectory } from "../lib/secure-path.js";
@@ -40,6 +43,10 @@ import {
   materializeAcceptedPlateExport,
   type MaterializeAcceptedPlateExportResult,
 } from "../services/accepted-plate-export-delivery.js";
+import {
+  materializeDirectExport3mf,
+  type MaterializeDirectExport3mfResult,
+} from "../services/accepted-direct-export-3mf.js";
 import {
   AcceptedOperationalExportPublicError,
   acceptedOperationalExportPublicError,
@@ -120,6 +127,28 @@ function acceptedPlateExportError(result: Exclude<
       return ACCEPTED_PLATE_EXPORT_ERRORS.transaction;
     case "output_conflict":
       return ACCEPTED_PLATE_EXPORT_ERRORS.output;
+  }
+}
+
+function directExportError(result: Exclude<
+  MaterializeDirectExport3mfResult,
+  { readonly kind: "materialized" }
+>): string {
+  switch (result.kind) {
+    case "empty_plan":
+    case "accepted_state_unavailable":
+    case "profile_not_found":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.accepted_state;
+    case "unknown_token":
+      return "A selected Required unit is not on this Plan.";
+    case "artifact_unavailable":
+    case "invalid_stl":
+    case "artifact_geometry_mismatch":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.artifact;
+    case "limit_exceeded":
+      return "Direct export exceeds the configured limit.";
+    case "output_failure":
+      return "Direct export could not be published safely.";
   }
 }
 
@@ -269,6 +298,7 @@ export class InProcessJobRunner {
         "export-checklist-html",
         "export-kit-bundle",
         "export-accepted-plate-3mf",
+        "export-direct-3mf",
       ]);
       if (event.status === "done" && EXPORT_KINDS.has(event.kind)) {
         const meta = this.jobMeta.get(jobId);
@@ -399,6 +429,8 @@ export class InProcessJobRunner {
           result = await this.runExportKitBundle(payload);
         } else if (kind === "export-accepted-plate-3mf") {
           result = await this.runAcceptedPlateExport(payload);
+        } else if (kind === "export-direct-3mf") {
+          result = await this.runDirectExport3mf(payload);
         } else if (kind === "printer-upload") {
           result = await this.runPrinterUpload(jobId, payload);
         } else {
@@ -781,6 +813,55 @@ export class InProcessJobRunner {
     }
   }
 
+  private async runDirectExport3mf(
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const unexpectedFailure = (): never => {
+      getLogger().log("error", "Direct export failed unexpectedly", {
+        operation: "direct_export_3mf",
+        failure: "unexpected",
+        profileId: payload.profile_id,
+      });
+      throw new Error("Direct export failed.");
+    };
+    try {
+      const command = parseStartDirectExportRequest({
+        profile_id: payload.profile_id,
+        tokens: payload.tokens,
+      });
+      const materialized = await materializeDirectExport3mf({
+        repository: this.repo,
+        reposDir: this.deps.reposDir,
+        tenantExportsDir: this.getExportsDir(),
+      }, {
+        profileId: command.profile_id,
+        tokens: command.tokens,
+      });
+      if (materialized.kind !== "materialized") {
+        throw new AcceptedPlateExportPublicError(directExportError(materialized));
+      }
+      const downloadUrl = this.downloadUrlForPath(materialized.absolutePath);
+      if (!downloadUrl) throw new Error("Direct export failed.");
+      return parseDirectExportJobResult({
+        format: "direct-export-3mf-job-v1",
+        profile_id: command.profile_id,
+        basis: {
+          profile_id: materialized.basis.profileId,
+          plan_version: materialized.basis.planVersion,
+          plan_revision_id: materialized.basis.revisionId,
+          plan_revision_digest: materialized.basis.revisionDigest,
+          required_unit_mapping_digest: materialized.basis.requiredUnitMappingDigest,
+        },
+        download_url: downloadUrl,
+        filename: materialized.filename,
+        tokens: materialized.tokens,
+      });
+    } catch (error) {
+      if (error instanceof AcceptedPlateExportPublicError) throw error;
+      return unexpectedFailure();
+    }
+  }
+
   private async runPrinterUpload(
     jobId: string,
     payload: Record<string, unknown>,
@@ -978,6 +1059,23 @@ export async function registerJobRoutes(
       expected_plate_revision_id: expectedPlateRevisionId,
     };
     const job_id = await jobs.start("export-accepted-plate-3mf", payload, request.tenantId);
+    return { job_id };
+  });
+
+  app.post("/jobs/export-direct-3mf", limited, async (request, reply) => {
+    let payload: StartDirectExportRequest;
+    try {
+      payload = parseStartDirectExportRequest(request.body);
+    } catch {
+      return reply.status(400).send({
+        detail: "profile_id and tokens are required",
+        code: "invalid_request",
+      });
+    }
+    if (!jobs.getRepo().getOwnedProfileIdentity(payload.profile_id)) {
+      return reply.status(404).send({ detail: "Profile not found", code: "profile_not_found" });
+    }
+    const job_id = await jobs.start("export-direct-3mf", payload, request.tenantId);
     return { job_id };
   });
 

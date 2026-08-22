@@ -5,9 +5,11 @@ import {
   parseAcceptedPlateWorkspace,
   parseAcceptedPlanBasis,
   parseArrangeAcceptedPlatesRequest,
+  parseDirectExportJobResult,
   parseMoveAcceptedPlateUnitRequest,
   parsePinAcceptedPlateUnitRequest,
   parseRestoreAcceptedPlatesRequest,
+  parseStartDirectExportRequest,
   parseTransferAcceptedPlateUnitRequest,
 } from "./accepted-plates.js";
 import { JOB_KINDS } from "./index.js";
@@ -60,6 +62,7 @@ describe("accepted Plate contracts", () => {
       "export-checklist-html",
       "export-kit-bundle",
       "export-accepted-plate-3mf",
+      "export-direct-3mf",
       "printer-upload",
     ]);
   });
@@ -292,5 +295,21 @@ describe("accepted Plate contracts", () => {
       result: { ...result, profile_id: 8 },
       error: null,
     }] }, 7)).toThrow();
+  });
+
+  it("parses a Direct export start request and job result", () => {
+    expect(parseStartDirectExportRequest({
+      profile_id: 7,
+      tokens: [token],
+    })).toEqual({ profile_id: 7, tokens: [token] });
+    expect(() => parseStartDirectExportRequest({ profile_id: 7, tokens: [] })).toThrow();
+    expect(parseDirectExportJobResult({
+      format: "direct-export-3mf-job-v1",
+      profile_id: 7,
+      basis,
+      download_url: "/exports/direct.3mf",
+      filename: "direct-abcd.3mf",
+      tokens: [token],
+    })).toMatchObject({ profile_id: 7, tokens: [token] });
   });
 });

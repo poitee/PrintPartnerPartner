@@ -177,6 +177,7 @@ describe("accepted Plate routes", () => {
       expect(paths).not.toContain(`/api/v1${route.path}`);
     }
     expect(paths).toContain("/jobs/export-accepted-plate-3mf");
+    expect(paths).toContain("/jobs/export-direct-3mf");
     expect(paths).toContain("/slicer-instances/{id}/open-accepted-plates");
 
     const health = await app.inject({ method: "GET", url: "/health" });

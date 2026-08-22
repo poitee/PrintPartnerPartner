@@ -289,6 +289,32 @@ const startAcceptedPlateExportRequestSchema = z.strictObject({
 
 export type StartAcceptedPlateExportRequest = z.infer<typeof startAcceptedPlateExportRequestSchema>;
 
+const startDirectExportRequestSchema = z.strictObject({
+  profile_id: positiveSafeInteger,
+  tokens: z.array(requiredUnitToken).min(1),
+});
+
+export type StartDirectExportRequest = z.infer<typeof startDirectExportRequestSchema>;
+
+const directExportJobResultSchema = z.strictObject({
+  format: z.literal("direct-export-3mf-job-v1"),
+  profile_id: positiveSafeInteger,
+  basis: acceptedPlanBasisSchema,
+  download_url: tenantExportUrl,
+  filename: z.string().regex(/^[^/\\]{1,255}$/),
+  tokens: z.array(requiredUnitToken).min(1),
+}).superRefine((value, context) => {
+  if (value.profile_id !== value.basis.profile_id) {
+    context.addIssue({
+      code: "custom",
+      path: ["profile_id"],
+      message: "Direct export result basis belongs to another Build",
+    });
+  }
+});
+
+export type DirectExportJobResult = z.infer<typeof directExportJobResultSchema>;
+
 const acceptedPlateExportJobResultSchema = z.strictObject({
   format: z.literal("accepted-plate-export-job-v1"),
   profile_id: positiveSafeInteger,
@@ -522,6 +548,14 @@ export function parseAcceptedPlateMoveReceipt(value: unknown): AcceptedPlateMove
 
 export function parseStartAcceptedPlateExportRequest(value: unknown): StartAcceptedPlateExportRequest {
   return startAcceptedPlateExportRequestSchema.parse(value);
+}
+
+export function parseStartDirectExportRequest(value: unknown): StartDirectExportRequest {
+  return startDirectExportRequestSchema.parse(value);
+}
+
+export function parseDirectExportJobResult(value: unknown): DirectExportJobResult {
+  return directExportJobResultSchema.parse(value);
 }
 
 export function parseAcceptedPlateExportJobResult(value: unknown): AcceptedPlateExportJobResult {
