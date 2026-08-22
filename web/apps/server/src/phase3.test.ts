@@ -13,6 +13,27 @@ import { exportStlPackJobMessage, STL_EXPORT_MISSING_HINT } from "./services/exp
 import { acceptedPlanBasis } from "./db/accepted-plan-progress.js";
 import { parseRequiredUnitToken } from "./services/required-units.js";
 
+async function waitForExportJob(
+  app: Awaited<ReturnType<typeof buildApp>>,
+  jobId: string,
+): Promise<{
+  status: string;
+  result?: { root_path?: string; file_total?: number; warnings?: string[] };
+}> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const jobRes = await app.inject({ method: "GET", url: `/jobs/${jobId}` });
+    const job = jobRes.json() as {
+      status: string;
+      result?: { root_path?: string; file_total?: number; warnings?: string[] };
+    };
+    if (job.status === "done" || job.status === "error" || job.status === "cancelled") {
+      return job;
+    }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`export job ${jobId} did not finish`);
+}
+
 function applyTrackedPlan(repo: AppRepository, sourceId: number, profileId: number): void {
   const observed = repo.getProjectRow(sourceId);
   if (!observed) throw new Error("Source is missing");
@@ -234,9 +255,7 @@ describe("Phase 3 APIs", () => {
     });
     expect(res.statusCode).toBe(200);
     const { job_id } = res.json() as { job_id: string };
-    await new Promise((r) => setTimeout(r, 300));
-    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
-    const job = jobRes.json() as { status: string; result?: { root_path?: string } };
+    const job = await waitForExportJob(app, job_id);
     expect(job.status).toBe("done");
     expect(job.result?.root_path).toBeTruthy();
 
@@ -269,12 +288,7 @@ describe("Phase 3 APIs", () => {
     });
     expect(res.statusCode).toBe(200);
     const { job_id } = res.json() as { job_id: string };
-    await new Promise((r) => setTimeout(r, 300));
-    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
-    const job = jobRes.json() as {
-      status: string;
-      result?: { file_total?: number; warnings?: string[] };
-    };
+    const job = await waitForExportJob(app, job_id);
     expect(job.status).toBe("done");
     expect(job.result?.file_total ?? 0).toBeGreaterThan(0);
     expect((job.result?.warnings ?? []).some((w) => /already marked printed/i.test(w))).toBe(false);
@@ -310,9 +324,7 @@ describe("Phase 3 APIs", () => {
     });
     expect(res.statusCode).toBe(200);
     const { job_id } = res.json() as { job_id: string };
-    await new Promise((r) => setTimeout(r, 300));
-    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
-    const job = jobRes.json() as { status: string; result?: { file_total?: number } };
+    const job = await waitForExportJob(app, job_id);
     expect(job.status).toBe("done");
     expect(job.result?.file_total ?? 0).toBeGreaterThan(0);
 
@@ -347,12 +359,7 @@ describe("Phase 3 APIs", () => {
     });
     expect(res.statusCode).toBe(200);
     const { job_id } = res.json() as { job_id: string };
-    await new Promise((r) => setTimeout(r, 300));
-    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
-    const job = jobRes.json() as {
-      status: string;
-      result?: { root_path?: string };
-    };
+    const job = await waitForExportJob(app, job_id);
     expect(job.status).toBe("done");
     const rootPath = job.result?.root_path;
     expect(rootPath).toBeTruthy();
