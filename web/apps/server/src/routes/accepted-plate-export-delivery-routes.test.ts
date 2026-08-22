@@ -38,7 +38,10 @@ async function waitForJob(app: Awaited<ReturnType<typeof buildApp>>, jobId: stri
   throw new Error("accepted Plate export job did not finish");
 }
 
-async function fixture(jobOptions?: ConstructorParameters<typeof InProcessJobRunner>[1]) {
+async function fixture(
+  jobOptions?: ConstructorParameters<typeof InProcessJobRunner>[1],
+  options: { readonly publishPlates?: boolean } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "pp-accepted-export-routes-"));
   const exchangeDir = join(root, "exchange");
   mkdirSync(exchangeDir);
@@ -106,30 +109,34 @@ endsolid accepted`);
     .flatMap((part) => part.units)
     .find((candidate) => candidate.required);
   if (!unit) throw new Error("Required unit is missing");
-  const published = repo.publishAcceptedPlates({
-    profileId: profile.id,
-    expected: acceptedPlanBasis(accepted.snapshot),
-    expectedPlateRevisionId: null,
-    plates: [{
-      plateId: `plate_${"c".repeat(32)}`,
-      printerId: "printer-one",
-      printerName: "Printer One",
-      printerModel: "Model One",
-      bedWidthUm: 250_000,
-      bedDepthUm: 210_000,
-      bedHeightUm: 200_000,
-      marginUm: 4_000,
-      units: [{
-        token: unit.token,
-        xUm: 4_000,
-        yUm: 4_000,
-        widthUm: 30_000,
-        depthUm: 20_000,
-        heightUm: 10_000,
+  let plateRevisionId = 0;
+  if (options.publishPlates !== false) {
+    const published = repo.publishAcceptedPlates({
+      profileId: profile.id,
+      expected: acceptedPlanBasis(accepted.snapshot),
+      expectedPlateRevisionId: null,
+      plates: [{
+        plateId: `plate_${"c".repeat(32)}`,
+        printerId: "printer-one",
+        printerName: "Printer One",
+        printerModel: "Model One",
+        bedWidthUm: 250_000,
+        bedDepthUm: 210_000,
+        bedHeightUm: 200_000,
+        marginUm: 4_000,
+        units: [{
+          token: unit.token,
+          xUm: 4_000,
+          yUm: 4_000,
+          widthUm: 30_000,
+          depthUm: 20_000,
+          heightUm: 10_000,
+        }],
       }],
-    }],
-  });
-  if (published.kind !== "published") throw new Error("Plate was not published");
+    });
+    if (published.kind !== "published") throw new Error("Plate was not published");
+    plateRevisionId = published.plateRevisionId;
+  }
   const slicer = repo.upsertSlicerInstance({
     name: "Orca",
     kind: "orca",
@@ -152,7 +159,17 @@ endsolid accepted`);
     ports.db.close();
     rmSync(root, { recursive: true, force: true });
   });
-  return { app, root, exchangeDir, repo, profile, plateRevisionId: published.plateRevisionId, slicer };
+  return {
+    app,
+    root,
+    exchangeDir,
+    repo,
+    profile,
+    plateRevisionId,
+    slicer,
+    token: unit.token,
+    basis: acceptedPlanBasis(accepted.snapshot),
+  };
 }
 
 describe("accepted Plate export delivery routes", () => {
@@ -226,6 +243,61 @@ describe("accepted Plate export delivery routes", () => {
     expect(exportedCalls).toHaveLength(completedJobIds.length);
     expect(exportedCalls.map(([, , payload]) => payload.job_id).sort()).toEqual(completedJobIds.sort());
     expect((await app.inject({ method: "GET", url: "/api/v2/jobs/not-a-job" })).statusCode).toBe(404);
+  });
+
+  it("exports 3MF for a planning Printer with no connection and no filament setup", async () => {
+    const { app, profile, token, basis } = await fixture(undefined, { publishPlates: false });
+    const created = await app.inject({
+      method: "POST",
+      url: "/printers",
+      payload: { name: "Planning Voron", preset_id: "preset-voron-250" },
+    });
+    expect(created.statusCode).toBe(200);
+    const printer = created.json() as {
+      id: string;
+      integration_id?: string | null;
+      loaded_filaments: Array<{ filament_color_id: string | null }>;
+    };
+    expect(printer.integration_id ?? null).toBeNull();
+    expect(printer.loaded_filaments.every((slot) => slot.filament_color_id == null)).toBe(true);
+
+    const expected = {
+      profile_id: basis.profileId,
+      plan_version: basis.planVersion,
+      plan_revision_id: basis.revisionId,
+      plan_revision_digest: basis.revisionDigest,
+      required_unit_mapping_digest: basis.requiredUnitMappingDigest,
+    };
+    const initialized = await app.inject({
+      method: "POST",
+      url: `/plans/${profile.id}/plates/initialize`,
+      payload: {
+        expected,
+        expected_plate_revision_id: null,
+        assignments: [{ token, printer_id: printer.id }],
+      },
+    });
+    expect(initialized.statusCode).toBe(200);
+    const ready = initialized.json() as { kind: string; plate_revision_id: number };
+    expect(ready.kind).toBe("ready");
+
+    const started = await app.inject({
+      method: "POST",
+      url: "/jobs/export-accepted-plate-3mf",
+      payload: {
+        profile_id: profile.id,
+        expected_plate_revision_id: ready.plate_revision_id,
+      },
+    });
+    expect(started.statusCode).toBe(200);
+    const snapshot = await waitForJob(app, started.json().job_id);
+    expect(snapshot.status).toBe("done");
+    const result = parseAcceptedPlateExportJobResult(snapshot.result);
+    expect(result.plates).toHaveLength(1);
+    const downloaded = await app.inject({ method: "GET", url: result.plates[0]!.download_url });
+    expect(downloaded.statusCode).toBe(200);
+    expect(downloaded.headers["content-type"]).toMatch(/octet-stream|zip|3mf|xml/i);
+    expect(downloaded.rawPayload.byteLength).toBeGreaterThan(0);
   });
 
   it("logs only coarse context for an unexpected accepted Plate job failure", async () => {
