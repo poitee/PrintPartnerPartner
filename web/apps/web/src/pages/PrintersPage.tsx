@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Printer } from "lucide-react";
 import {
   fetchIntegrationStatus,
@@ -37,8 +37,9 @@ import {
   liveJobPlanCaption,
 } from "../lib/printerPlanBind";
 import { usePrinterStatusPollMs } from "../hooks/usePrinterStatusPollMs";
-import { exportRoute, settingsPrintersRoute } from "../lib/routes";
+import { exportRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
+import PrintersSettingsCard from "../components/settings/PrintersSettingsCard";
 
 const HOST_TYPES = new Set<LiveStripHostType>(["moonraker", "prusalink", "bambu"]);
 
@@ -69,6 +70,7 @@ function toneBadgeVariant(
 
 export default function PrintersPage() {
   const { health, error: engineError, loading: healthLoading } = useEngineHealth();
+  const location = useLocation();
   const { profiles } = useProfileSelection();
   const engineState = resolveEngineState({
     health,
@@ -209,6 +211,15 @@ export default function PrintersPage() {
     };
   }, [engineReady, linked, refreshStatuses, pollMs]);
 
+  useEffect(() => {
+    const hash = location.hash.replace(/^#/, "").trim();
+    if (!hash) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.hash]);
+
   return (
     <div className="space-y-4">
       <RouteBreadcrumbs items={[{ label: "Printers" }]} />
@@ -220,7 +231,7 @@ export default function PrintersPage() {
         actions={
           <PageHeaderActions>
             <Button size="sm" variant="outline" asChild>
-              <Link to={settingsPrintersRoute()}>Add printer</Link>
+              <a href="#printer-setup">Printer setup</a>
             </Button>
           </PageHeaderActions>
         }
@@ -236,23 +247,10 @@ export default function PrintersPage() {
             ? "Engine offline — start the print-partner engine to view printers."
             : "Connecting to the engine…"}
         </p>
-      ) : linked.length === 0 && planning.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">No printers</CardTitle>
-            <CardDescription>
-              Add a Printer in Settings for planning and local 3MF. A connection is optional
-              until you send or read status.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button size="sm" asChild>
-              <Link to={settingsPrintersRoute()}>Add printer</Link>
-            </Button>
-          </CardContent>
-        </Card>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <>
+          {linked.length > 0 || planning.length > 0 ? (
+            <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {planning.map((printer) => (
             <li key={printer.id}>
               <Card className="h-full border-dashed border-border shadow-sm">
@@ -280,7 +278,7 @@ export default function PrintersPage() {
                   </p>
                   <div className="flex flex-wrap gap-2 pt-1">
                     <Button size="sm" variant="outline" asChild>
-                      <Link to={settingsPrintersRoute()}>Add connection</Link>
+                      <a href="#printer-setup">Add connection</a>
                     </Button>
                   </div>
                 </CardContent>
@@ -361,6 +359,14 @@ export default function PrintersPage() {
             );
           })}
         </ul>
+          ) : null}
+          <div id="printer-setup">
+            <PrintersSettingsCard
+              engineReady={engineReady}
+              onFleetChange={refreshRoster}
+            />
+          </div>
+        </>
       )}
     </div>
   );

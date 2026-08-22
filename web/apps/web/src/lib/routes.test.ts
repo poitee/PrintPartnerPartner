@@ -26,6 +26,7 @@ import {
   planStudioRoute,
   productionRoute,
   progressRoute,
+  printersSetupRoute,
   reviewRoute,
   withProfile,
 } from "./routes";
@@ -62,6 +63,7 @@ describe("workflow routes", () => {
     expect(buildsRoute(5)).toBe("/builds?profile=5");
     expect(plansRoute(5)).toBe("/builds?profile=5");
     expect(catalogRoute()).toBe("/dev/catalog");
+    expect(printersSetupRoute()).toBe("/printers#printer-setup");
   });
 
   it("legacy aliases point at canonical paths", () => {

@@ -25,7 +25,7 @@ const INVENTORY: Array<{ name: string; status: "Keep" | "Revise" | "Merge" | "Re
   { name: "checkoff/PrintVerifyPanel", status: "Keep", why: "Build Checkoff owns verification." },
   { name: "export/accepted-plates/*", status: "Revise", why: "Production owner; Phase 9 still owes saved XY and Arrange." },
   { name: "share/IncomingSharesCard", status: "Keep", why: "Mounted on Builds; outgoing sharing stays live." },
-  { name: "settings/PrintersSettingsCard", status: "Merge", why: "Global Printers section owns setup." },
+  { name: "settings/PrintersSettingsCard", status: "Keep", why: "Global Printers owns setup; Settings keeps a copy plus Library." },
   { name: "PlanTray leftover copy", status: "Revise", why: "Still says plan in places the spine already owns." },
   { name: "WelcomePage", status: "Remove", why: "Deleted; Builds is home." },
 ];

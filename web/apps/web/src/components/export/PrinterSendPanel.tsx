@@ -25,7 +25,7 @@ import {
 } from "../../lib/proposeCheckoffFromObjects";
 import { printerHostTypeLabel, type LiveStripHostType } from "../../lib/printerLiveStrip";
 import { usePrinterStatusPollMs } from "../../hooks/usePrinterStatusPollMs";
-import { settingsPrintersRoute } from "../../lib/routes";
+import { printersSetupRoute } from "../../lib/routes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -698,11 +698,11 @@ export default function PrinterSendPanel({
           ) : (
             <div className="flex flex-col gap-2">
               <p className="text-[12.5px] leading-relaxed text-muted-foreground">
-                No linked printers yet. Add a Klipper or Prusa printer in Settings to Send
+                No linked printers yet. Add a Klipper or Prusa printer to Send
                 and Start print.
               </p>
               <Button size="sm" variant="outline" asChild className="w-fit">
-                <Link to={settingsPrintersRoute()}>Add printers in Settings</Link>
+                <Link to={printersSetupRoute()}>Add printers</Link>
               </Button>
               {!hasBambuLinked ? (
                 <p className="text-[11px] leading-relaxed text-muted-foreground">

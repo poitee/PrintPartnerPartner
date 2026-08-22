@@ -63,6 +63,11 @@ export function printersRoute(): string {
   return "/printers";
 }
 
+/** Global Printers setup (create, connection, and edits). */
+export function printersSetupRoute(): string {
+  return "/printers#printer-setup";
+}
+
 /** Maintainer catalog for Phase 8 primitives and visual sketches. */
 export function catalogRoute(): string {
   return "/dev/catalog";

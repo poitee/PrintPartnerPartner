@@ -20,7 +20,7 @@ import {
   useTransferAcceptedPlateUnitMutation,
   useUnplaceAcceptedPlateUnitMutation,
 } from "../../../queries/acceptedPlates";
-import { settingsPrintersRoute } from "../../../lib/routes";
+import { printersSetupRoute } from "../../../lib/routes";
 import { Button } from "../../ui/button";
 import {
   Card,
@@ -247,7 +247,7 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
         {workspace?.kind === "setup" ? (
           <>
             {workspace.printers.length === 0 ? (
-              <Link className="text-sm underline" to={settingsPrintersRoute()}>Add a Printer in Settings</Link>
+              <Link className="text-sm underline" to={printersSetupRoute()}>Add a Printer</Link>
             ) : null}
             <AcceptedPlateAssignmentForm
               key={assignmentIdentity(workspace)}

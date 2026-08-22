@@ -52,6 +52,8 @@ import {
 
 type Props = {
   engineReady: boolean;
+  /** Called after a successful fleet reload so live rosters can catch up. */
+  onFleetChange?: () => void;
 };
 
 type HostType = "moonraker" | "prusalink" | "bambu";
@@ -288,7 +290,7 @@ function ConnectionFields({
  * Printers settings: create a planning Printer from a preset or Custom bed,
  * then optionally attach a host connection later.
  */
-export default function PrintersSettingsCard({ engineReady }: Props) {
+export default function PrintersSettingsCard({ engineReady, onFleetChange }: Props) {
   const [printers, setPrinters] = useState<PrinterMachine[]>([]);
   const [presets, setPresets] = useState<PrinterPreset[]>([]);
   const [hosts, setHosts] = useState<IntegrationSummary[]>([]);
@@ -386,10 +388,11 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
       setProfiles(profileList);
       setCatalog(filamentCatalog);
       void refreshStatuses(fleet);
+      onFleetChange?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
-  }, [engineReady, refreshStatuses]);
+  }, [engineReady, onFleetChange, refreshStatuses]);
 
   useEffect(() => {
     void refresh();
@@ -645,6 +648,7 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
     try {
       const saved = await savePrinterFleet(next);
       setPrinters(saved);
+      onFleetChange?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
       await refresh();
@@ -663,6 +667,7 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
     try {
       const updated = await updatePrinterSlicer(printer.id, next);
       setPrinters((prev) => prev.map((p) => (p.id === printer.id ? updated : p)));
+      onFleetChange?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
       await refresh();
