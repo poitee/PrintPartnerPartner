@@ -535,6 +535,13 @@ export class EngineHttpError extends Error {
   }
 }
 
+function randomIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `idem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body && !headers.has("Content-Type")) {
@@ -2133,7 +2140,7 @@ export async function fetchPlanDraftWorkspace(
 export async function recomputePlanDraft(profileId: number): Promise<PlanDraftWorkspace> {
   return parsePlanDraftWorkspace(await engineFetch(`/plans/${profileId}/drafts/recompute`, {
     method: "POST",
-    headers: { "Idempotency-Key": crypto.randomUUID() },
+    headers: { "Idempotency-Key": randomIdempotencyKey() },
     body: JSON.stringify({ apply_manifest: true }),
   }));
 }
@@ -2166,7 +2173,7 @@ export async function reconcilePlanDraft(input: {
     `/plans/${input.profileId}/drafts/${input.draftId}/reconciliation`,
     {
       method: "PUT",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
+      headers: { "Idempotency-Key": randomIdempotencyKey() },
       body: JSON.stringify({
         expected_snapshot_digest: input.expectedSnapshotDigest,
         decisions: input.decisions,
@@ -2178,7 +2185,7 @@ export async function reconcilePlanDraft(input: {
 export async function applyPlanDraft(workspace: PlanDraftWorkspace): Promise<ApplyPlanDraftReceipt> {
   return parseApplyPlanDraftReceipt(await engineFetch(`/plans/${workspace.profile_id}/drafts/${workspace.draft.draft_id}/apply`, {
     method: "POST",
-    headers: { "Idempotency-Key": crypto.randomUUID() },
+    headers: { "Idempotency-Key": randomIdempotencyKey() },
     body: JSON.stringify({
       expected_snapshot_digest: workspace.draft.snapshot_digest,
       expected_lifecycle_version: workspace.draft.lifecycle_version,
@@ -2208,7 +2215,7 @@ export async function rebasePlanDraft(
     `/plans/${profileId}/drafts/${draft.draft_id}/rebase`,
     {
       method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
+      headers: { "Idempotency-Key": randomIdempotencyKey() },
       body: JSON.stringify({
         expected_source_lifecycle_version: draft.lifecycle_version,
         expected_source_snapshot_digest: draft.snapshot_digest,
