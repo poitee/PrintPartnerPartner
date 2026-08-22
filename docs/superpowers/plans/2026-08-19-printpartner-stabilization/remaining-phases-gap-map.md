@@ -15,7 +15,7 @@ status, dependencies, and implementation units.
 | 6. Frontend state ownership | Partial | Query modules exist, but `SourcesPage` and `BuildPage` keep competing Source snapshots. `PlanWorkspaceContext.revision` is a refetch counter, not a Plan revision. |
 | 7. Workflow model | Partial | Accepted Source input provenance exists. A durable Plan draft, an accepted parts Plan revision, an idempotent apply command, and rebase do not exist. |
 | 8. Site structure | Landed | Canonical routes, Global vs Build Production, Builds restore/counts, hybrid catalog, calm/dense density, and IncomingShares on Builds are in code. Optional filename renames (PartsPage/ExportPage) remain. |
-| 9. Production workspace | Partial | Translation-only placement, named-object 3MF, STL bundles, printer observation, verification, no first-printer Send fallback, and one Spoolman deduction per Printer job exist. Remaining: Arrange unplaced/all undo and confirmation for ambiguous Object matches. |
+| 9. Production workspace | Partial | Translation-only placement, named-object 3MF, STL bundles, printer observation, verification, no first-printer Send fallback, one Spoolman deduction per Printer job, ambiguous Object-name confirmation, pin, Arrange unplaced, and undoable Arrange all exist. Remaining: return units to an unplaced list; move units across Plates or Printers; Printer identity without a required connection; Settings copies of Printer and Library. |
 | 10. End-to-end proof | Partial | Screenshot capture script targets current Builds/Sources/Plan/Checkoff/Production routes. Catalog and density were proven in a real browser. A genuine slicer-derived Object-name fixture and README PNG recapture still need an installed slicer and representative data. |
 | 11. Platform boundary | Landed | Health reports a deployment capability. Docs name SQLite + local disk + in-process jobs as supported. Redis/BullMQ claims removed. SaaS Postgres and S3 stay experimental. |
 
@@ -31,8 +31,8 @@ verification remains open until an authorized push of `main` and annotated tag
   accepted parts Plan revision required by Phase 7.
 - A saved `KitPlateLayout` stores membership but not X and Y positions. Preview
   and export can repack the same Plate differently.
-- Duplicate STL basenames can select the first matching part silently. Phase 10
-  must not certify that behavior in an end-to-end test.
+- Duplicate STL basenames stay unmatched and require confirmation before send.
+  Phase 10 must not certify silent first-match mapping.
 - The supported deployment is one self-hosted process with SQLite, local disk,
   and an in-process job runner. Database rows and local artifacts can survive a
   restart. In-flight job state cannot.
