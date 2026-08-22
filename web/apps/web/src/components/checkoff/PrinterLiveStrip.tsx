@@ -50,8 +50,8 @@ type Props = {
   onCheckoffUpdate?: (profileId: number) => void;
   /** Reports whether any linked host is actively printing/paused. */
   onLiveStateChange?: (state: PrinterLiveStripState) => void;
-  /** Called when unattributed print count changes. */
-  onUnattributedUpdate?: (count: number) => void;
+  /** Requests an authoritative global unattributed-print refresh after reconcile. */
+  onUnattributedUpdate?: () => void;
   className?: string;
 };
 
@@ -176,6 +176,7 @@ export default function PrinterLiveStrip({
         return next;
       });
     }
+    let receivedReconcileResult = false;
     await Promise.allSettled(
       linked.map(async (h) => {
         try {
@@ -186,7 +187,7 @@ export default function PrinterLiveStrip({
             const reconcileResult = await reconcilePrinterCheckoff({
               integration_id: h.integrationId,
             });
-            const { updates, status: s } = reconcileResult;
+            const { updates, created_links: createdLinks, status: s } = reconcileResult;
             status = s;
             for (const row of updates ?? []) {
               if (toastedLinks.current.has(row.link_id)) continue;
@@ -200,10 +201,13 @@ export default function PrinterLiveStrip({
               }
               onCheckoffUpdateRef.current?.(row.profile_id);
             }
-            // Report unattributed print count
+            for (const link of createdLinks ?? []) {
+              onCheckoffUpdateRef.current?.(link.profile_id);
+            }
+            // A per-host result is only a hint to refresh the authoritative global list.
             const unattributed = (reconcileResult as Record<string, unknown>).unattributed;
             if (Array.isArray(unattributed)) {
-              onUnattributedUpdateRef.current?.(unattributed.length);
+              receivedReconcileResult = true;
             }
           }
           if (id === requestId.current) {
@@ -223,6 +227,9 @@ export default function PrinterLiveStrip({
         }
       }),
     );
+    if (id === requestId.current && receivedReconcileResult) {
+      onUnattributedUpdateRef.current?.();
+    }
   }, []);
 
   useEffect(() => {

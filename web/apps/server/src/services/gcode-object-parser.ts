@@ -196,37 +196,55 @@ export function matchObjectsToFilenames(
     }
   }
 
+  const libraryStems = new Map<string, string[]>();
+  const normalizedStem = (name: string): string => {
+    let stem = basename(name).toLowerCase();
+    for (let i = 0; i < 4; i += 1) {
+      const next = stem.replace(/\.(stl|3mf|gcode|gco|bgcode)$/i, "");
+      if (next === stem) break;
+      stem = next;
+    }
+    return stem.replace(/_stl$/i, "");
+  };
+  for (const filename of libraryFilenames) {
+    const stem = normalizedStem(filename);
+    const existing = libraryStems.get(stem);
+    if (existing) {
+      if (!existing.includes(filename)) existing.push(filename);
+    } else {
+      libraryStems.set(stem, [filename]);
+    }
+  }
+
   const result = new Map<string, string[]>();
   for (const [stlKey, _plateMatch] of plateMatches) {
     const matches: string[] = [];
+    const addMatches = (rows: string[] | undefined) => {
+      for (const filename of rows ?? []) {
+        if (!matches.includes(filename)) matches.push(filename);
+      }
+    };
 
     // Try direct match
-    const direct = libraryNorm.get(stlKey);
-    if (direct) {
-      for (const f of direct) {
-        if (!matches.includes(f)) matches.push(f);
-      }
-    }
+    addMatches(libraryNorm.get(stlKey));
 
     // Try with .stl -> _stl substitution (for Prusa format plate keys that already got .stl)
     const withUnderscoreStl = stlKey.replace(/\.stl$/i, "_stl");
     if (withUnderscoreStl !== stlKey) {
-      const altMatches = libraryNorm.get(withUnderscoreStl);
-      if (altMatches) {
-        for (const f of altMatches) {
-          if (!matches.includes(f)) matches.push(f);
-        }
-      }
+      addMatches(libraryNorm.get(withUnderscoreStl));
     }
 
     // Try _stl -> .stl substitution (for Prusa format where key has _stl suffix)
     const withDotStl = stlKey.replace(/_stl$/i, ".stl");
     if (withDotStl !== stlKey) {
-      const altMatches = libraryNorm.get(withDotStl);
-      if (altMatches) {
-        for (const f of altMatches) {
-          if (!matches.includes(f)) matches.push(f);
-        }
+      addMatches(libraryNorm.get(withDotStl));
+    }
+
+    if (matches.length === 0) {
+      const stem = normalizedStem(stlKey);
+      addMatches(libraryStems.get(stem));
+      if (matches.length === 0) {
+        addMatches(libraryStems.get(stem.replace(/_\d{1,3}$/u, "")));
       }
     }
 

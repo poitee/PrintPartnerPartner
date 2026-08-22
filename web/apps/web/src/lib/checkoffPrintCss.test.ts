@@ -11,25 +11,25 @@ import { describe, expect, it } from "vitest";
 const cssPath = join(dirname(fileURLToPath(import.meta.url)), "../App.css");
 const css = readFileSync(cssPath, "utf8");
 
-function printBlock(source: string): string {
-  const start = source.indexOf("@media print");
-  expect(start).toBeGreaterThanOrEqual(0);
+function mediaBlock(source: string, query: "print" | "screen"): string {
+  const re = new RegExp(`@media\\s+${query}\\s*\\{`);
+  const match = re.exec(source);
+  expect(match, `missing @media ${query} block`).toBeTruthy();
+  const brace = source.indexOf("{", match!.index);
   let depth = 0;
-  let i = source.indexOf("{", start);
-  expect(i).toBeGreaterThan(start);
-  const from = i + 1;
-  for (; i < source.length; i++) {
+  for (let i = brace; i < source.length; i++) {
     const ch = source[i];
     if (ch === "{") depth++;
     else if (ch === "}") {
       depth--;
-      if (depth === 0) return source.slice(from, i);
+      if (depth === 0) return source.slice(brace + 1, i);
     }
   }
-  throw new Error("unclosed @media print block");
+  throw new Error(`unclosed @media ${query} block`);
 }
 
-const printCss = printBlock(css);
+const printCss = mediaBlock(css, "print");
+const screenCss = mediaBlock(css, "screen");
 
 describe("checkoff print CSS (GRE-233)", () => {
   it("does not break-inside-avoid a whole repo or folder on print", () => {
@@ -56,8 +56,14 @@ describe("checkoff print CSS (GRE-233)", () => {
   });
 
   it("hides Progress print-only sheet on screen", () => {
-    expect(css).toMatch(
-      /@media screen\s*\{[^}]*\.checkoff-sheet-print-only:not\(\.is-print-prep\)\s*\{[^}]*display:\s*none\s*!important/s,
+    expect(screenCss).toMatch(
+      /\.checkoff-sheet-print-only:not\(\.is-print-prep\)\s*\{[^}]*display:\s*none\s*!important/s,
     );
+  });
+
+  it("remaps checkoff sheet to dark card tokens on screen only", () => {
+    expect(screenCss).toMatch(/\.dark\s+\.checkoff-sheet\s*\{[^}]*--paper-bg:\s*var\(--card\)/s);
+    expect(screenCss).toMatch(/\.dark\s+\.checkoff-sheet\s*\{[^}]*--paper-fg:\s*var\(--foreground\)/s);
+    expect(printCss).toMatch(/\.checkoff-sheet\s*\{[^}]*--paper-bg:\s*#ffffff/s);
   });
 });
