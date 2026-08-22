@@ -1,6 +1,6 @@
 # Print Partner architecture
 
-Kit planning for the web: sync STL repositories, compose layered plans, export STLs by role/folder, and check off prints — served as a single container you can self-host, with an optional multi-tenant SaaS mode.
+Kit planning for the web: sync STL repositories, compose Builds, export STLs by role/folder, and check off prints — served as a single container you can self-host. SQLite and local disk are the supported mode. Optional multi-tenant SaaS (Postgres, S3) is experimental.
 
 ## Overview
 
@@ -21,7 +21,7 @@ flowchart LR
   API --> Ports["Ports (db / storage / repoSource / auth / jobs)"]
   Ports --> SelfHost["self-host adapter: SQLite + local disk"]
   Ports --> Saas["saas adapter: Postgres + S3"]
-  API --> Jobs["Background job runner"]
+  API --> Jobs["In-process job runner"]
   Jobs -->|progress| WS["/ws/jobs/:id"]
 ```
 
@@ -82,29 +82,32 @@ flowchart LR
 
 ## Background jobs & progress
 
-Long-running work such as repo sync, STL pack export, HTML checklist export, kit-bundle import/export, and accepted Plate 3MF export runs through a background **job runner** (`web/apps/server/src/routes/jobs.ts`). Self-host and SaaS both use the in-process runner by default; SaaS can be backed by a BullMQ/Redis queue (`REDIS_URL`) for horizontal scaling. Clients start a job over REST and subscribe to live progress via the WebSocket at `/ws/jobs/:id`.
+Long-running work such as repo sync, STL pack export, HTML checklist export, kit-bundle import/export, and accepted Plate 3MF export runs through an **in-process job runner** (`web/apps/server/src/routes/jobs.ts`). There is no Redis or BullMQ queue. Database rows and local artifacts survive a process restart; in-flight job state does not. Clients start a job over REST and subscribe to live progress via the WebSocket at `/ws/jobs/:id`. `GET /health` reports a `deployment` object with the selected database, artifact store, job runner, tenant mode, and support status.
 
 ## Workflow
 
 ```mermaid
 flowchart LR
-  Library[Library] --> Plan[Plan]
-  Plan --> Parts[Parts]
-  Parts --> Progress[Progress]
-  Progress --> Export[Export]
+  Library[Library] --> Builds[Builds]
+  Builds --> Sources[Build Sources]
+  Sources --> Plan[Plan]
+  Plan --> Checkoff[Checkoff]
+  Plan --> Production[Build Production]
+  Builds --> Global[Global Production]
   Library -->|sync| DB[(App DB)]
   Plan -->|save draft and apply| DB
-  Export -->|export STLs| FS[exports/]
-  Progress -->|progress| DB
+  Production -->|export STLs and 3MF| FS[exports/]
+  Checkoff -->|progress| DB
 ```
 
 1. **Library** — register GitHub/local/zip sources; categories; import rules; cross-repo STL search; update-available badges.
-2. **Plan**: attach sources, rebuild a saved draft, choose files, quantities, and role filament colors, then review and apply the draft; inline repo Docs viewer; kit/manifest options.
-3. **Parts** — validation summary by role/filament; full parts list with 3D previews.
-4. **Progress** — per-unit progress (saved per plan), assembled toggles, printable checklist, and missing-STL export.
-5. **Export** - explicit Required-unit Printer allocation, deterministic arrangement, immutable Plate revisions, accepted 3MF download and handoff, STL packs, share bundles, checklist HTML, and printer send. Slicer profile assignment and sync status live on **Settings → Printers** (not a flat profile library on Export). **Settings → Slicers** registers slicer instances (GUI URL + watch path + dialect); profile-sync and Export slicer links follow enabled instances. Self-host Docker pull/start/stop/logs operate only on containers labeled `printpartner.slicer_instance_id`. Export can hand one accepted Plate revision to a managed exchange inbox or download it for a local slicer.
+2. **Builds** — list-first home. New Build asks only for a name and opens Sources. Existing Builds open Plan.
+3. **Build Sources** — attach sources, picks, and roles for this Build (`/sources`).
+4. **Plan** — quantities, warnings, saved draft, and explicit Apply (`/plan`).
+5. **Checkoff** — per-unit progress, assembled toggles, printable checklist (`/progress`). Paper Checkoff uses independent paper tokens.
+6. **Build Production** — Printer allocation, Plate editor, 3MF/STL downloads, slicer handoff, and send (`/export?profile=`). Global Production (`/production`) aggregates jobs across Builds.
 
-Plan switching lives in the spine **PlanPicker**; create/rename/duplicate/archive open from **Create plan** or the **Plans** page. The active plan is shared across Plan, Parts, Progress, and Export. Settings: **Printers / Slicers / Library / Appearance / Account**.
+Plan switching lives in the spine **PlanPicker**; create/rename/duplicate/archive/restore open from **New Build** or the **Builds** page. Settings and Printers sit outside the main production path. Slicer machine, filament, and process profiles stay in the user's slicer.
 
 ## MCP attach (kit brain)
 

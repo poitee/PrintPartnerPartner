@@ -5,6 +5,7 @@ import multipart from "@fastify/multipart";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import type { ServerConfig } from "./config.js";
+import { ignoredRedisUrlWarning } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { createSaasPorts } from "./adapters/saas/index.js";
 import type { AppPorts } from "./ports/index.js";
@@ -366,6 +367,10 @@ export async function startServer(config: ServerConfig) {
 
   try {
     await app.listen({ host: config.host, port: config.port });
+    const redisWarning = ignoredRedisUrlWarning();
+    if (redisWarning) {
+      app.log.warn(redisWarning);
+    }
     return { app, ports };
   } catch (err) {
     await ports.db.close();

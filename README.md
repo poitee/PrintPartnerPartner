@@ -104,39 +104,39 @@ Screenshots switch with your GitHub **light / dark** theme (or see both on the [
 
 Source library: categories, sync status, **update available** badges, global STL search, per-source import rules.
 
-### Plans
+### Builds
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/builds.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/builds.png">
-  <img src="docs/screenshots/light/builds.png" alt="Plans — plan manager with create, rename, duplicate, and archive.">
+  <img src="docs/screenshots/light/builds.png" alt="Builds — list-first home with create, rename, duplicate, archive, and restore.">
 </picture>
 
-Sidebar **Plans** page plus **Create plan** in the header spine.
+Sidebar **Builds** page plus **New Build** in the header spine.
 
-### Plan
+### Sources
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/build.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/build.png">
-  <img src="docs/screenshots/light/build.png" alt="Plan — role filament colors, STL pickers with live preview, and recompute.">
+  <img src="docs/screenshots/light/build.png" alt="Sources — attach sources, pick STLs, and set role colors for a Build.">
 </picture>
 
-Role colors, attach sources, pick STLs (live 3D preview), recompute when stale, kit options, **Docs**.
+Attach sources, pick STLs (live 3D preview), role colors, kit options, **Docs**.
 
-### Parts
+### Plan
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/review.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/review.png">
-  <img src="docs/screenshots/light/review.png" alt="Parts — validation, parts with 3D previews, quantity edits.">
+  <img src="docs/screenshots/light/review.png" alt="Plan — quantities, warnings, and Apply.">
 </picture>
 
-Validation by role and filament, parts list with **3D previews**, quantity edits.
+Quantities, warnings, saved draft, and explicit **Apply**.
 
-### Progress & Export
+### Checkoff & Production
 
-Print checkoff lives on **Progress**. Plate packing, slicer links, profile library, and send live on **Export**. Re-run `docs/scripts/capture-screenshots.mjs` to refresh PNGs for those stages.
+Print checkoff lives on **Checkoff**. Plates, downloads, slicer handoff, and send live on **Production**. Re-run `docs/scripts/capture-screenshots.mjs` to refresh PNGs for those stages.
 
 ---
 
@@ -170,7 +170,7 @@ docker compose up --build
 2. Clone this repo and `cd` into it.
 3. Run `docker compose pull && docker compose up -d` (or `docker compose up --build` to build from source).
 4. Open [http://localhost:8080](http://localhost:8080) (or `http://<lan-ip>:8080`).
-5. Add a source on **Library**, create a plan with **Create plan** or **Plans**, then walk **Plan → Parts → Progress → Export**.
+5. Add a source on **Library**, create a Build with **New Build**, then walk **Sources → Plan → Checkoff → Production**.
 6. For MCP attach on Docker (`HOST=0.0.0.0`): set `PRINT_PARTNER_API_KEY`, prefer HTTPS via a reverse proxy, then connect via [`docs/assistant-mcp.md`](docs/assistant-mcp.md).
 
 Optional local slicer GUI stack with profile watch volumes: `docker compose -f docker-compose.yml -f pp-compose.yml up -d`. See comments in `pp-compose.yml`.

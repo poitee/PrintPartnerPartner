@@ -55,7 +55,6 @@ The app service has a healthcheck that polls `GET /health` every 30s using Node'
 | `SOURCE_DOCS_MAX_BYTES` | `1073741824` | Per-source budget for synced markdown/PDF docs (~1 GiB). Operator escape hatch only. |
 | `PRINT_PARTNER_API_KEY` | unset | When set, requires Bearer or `X-Print-Partner-Api-Key` on `/api/v1/*`. **Required for `/api/v1/mcp` unless `HOST` is loopback** (Docker uses `0.0.0.0`) |
 | `OPENAPI_UI` | unset | Set to `1` to expose `/api/v1/docs` in production |
-| `REDIS_URL` | unset | Optional; when set in SaaS, enables BullMQ job queue (see SaaS) |
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped override — skip GitHub and compare against this version |
@@ -164,7 +163,9 @@ Versioned API for integrations: `http://127.0.0.1:18765/api/v1` — see [`../doc
 
 ## SaaS mode (`DEPLOY_MODE=saas`)
 
-SaaS mode can use **Postgres for app data** when `DATABASE_URL` is set (tenant-scoped rows). The current Postgres repository runs through a synchronous compatibility bridge and is **experimental, not production-ready**: it does not provide native transaction semantics for repository mutations. Production startup fails closed unless `POSTGRES_EXPERIMENTAL=1` explicitly acknowledges this limitation. SQLite remains the supported database. `GET /health` reports `db.support_status` as `supported` or `experimental`.
+SaaS, Postgres, and S3 are **experimental**. The supported self-hosted mode is SQLite, local disk, and the in-process job runner. There is no Redis or BullMQ queue; `REDIS_URL` is ignored if set.
+
+SaaS mode can use **Postgres for app data** when `DATABASE_URL` is set (tenant-scoped rows). The current Postgres repository runs through a synchronous compatibility bridge and is **experimental, not production-ready**: it does not provide native transaction semantics for repository mutations. Production startup fails closed unless `POSTGRES_EXPERIMENTAL=1` explicitly acknowledges this limitation. SQLite remains the supported database. `GET /health` reports `db.support_status` and a `deployment` capability object.
 
 The bridge also depends on Drizzle's private prepared-field metadata and
 `drizzle-orm/utils` result mapper. Dependency updates must pass
@@ -216,7 +217,6 @@ and authentication protect the shared interface.
 | `DISCORD_CLIENT_ID` / `SECRET` / `DISCORD_CALLBACK_URL` | OAuth | Discord OAuth app (`/auth/discord/callback`) |
 | `GOOGLE_CLIENT_ID` | Optional | Public Google OAuth **Web** client id for parts-manifest Drive open/save (SPA GIS + Drive API). Not a secret; exposed on `GET /health`. Enable Drive API and add your app origin to Authorized JavaScript origins. Dev SPA fallback: `VITE_GOOGLE_CLIENT_ID`. |
 | `SAAS_ALLOW_ANONYMOUS` | Optional | `1` to allow unauthenticated API (dev only) |
-| `REDIS_URL` | Optional | BullMQ-backed job queue for horizontal scaling |
 | `UPLOAD_MAX_BYTES` | Optional | Request body / upload size limit |
 
 ### Auth routes

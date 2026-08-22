@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="description" content="Print Partner — self-hostable desk workflow for layered STL kits. Library → Plan → Parts → Progress → Export. Docker on port 8080. MCP attach for Cursor, Grok, and Claude.">
+  <meta name="description" content="Print Partner — self-hostable desk workflow for layered STL kits. Library → Builds → Sources → Plan → Checkoff → Production. Docker on port 8080. MCP attach for Cursor, Grok, and Claude.">
   <title>Print Partner</title>
   <style>
     :root {
@@ -192,15 +192,17 @@
       <div class="pipeline" aria-label="Print Partner workflow">
         <span class="pipeline-step">Library</span>
         <span class="pipeline-arrow" aria-hidden="true">→</span>
+        <span class="pipeline-step">Builds</span>
+        <span class="pipeline-arrow" aria-hidden="true">→</span>
+        <span class="pipeline-step">Sources</span>
+        <span class="pipeline-arrow" aria-hidden="true">→</span>
         <span class="pipeline-step">Plan</span>
         <span class="pipeline-arrow" aria-hidden="true">→</span>
-        <span class="pipeline-step">Parts</span>
+        <span class="pipeline-step">Checkoff</span>
         <span class="pipeline-arrow" aria-hidden="true">→</span>
-        <span class="pipeline-step">Progress</span>
-        <span class="pipeline-arrow" aria-hidden="true">→</span>
-        <span class="pipeline-step">Export</span>
+        <span class="pipeline-step">Production</span>
       </div>
-      <p class="pipeline-note">Plan management — header <strong>Create plan</strong> or sidebar <strong>Plans</strong>. Utility nav: Plans · Printers · Settings · Help.</p>
+      <p class="pipeline-note">Build management — header <strong>New Build</strong> or sidebar <strong>Builds</strong>. Utility nav: Builds · Production · Printers · Settings.</p>
     </header>
 
     <section>
@@ -209,7 +211,7 @@
       <pre><code>git clone https://github.com/poitee/PrintPartnerPartner.git
 cd PrintPartnerPartner
 docker compose pull && docker compose up -d</code></pre>
-      <p>Open <a href="http://localhost:8080">localhost:8080</a> on the host, or <code>http://&lt;lan-ip&gt;:8080</code> from another machine on your network. Add a source on <strong>Library</strong>, then create a plan with <strong>Create plan</strong> or <strong>Plans</strong>.</p>
+      <p>Open <a href="http://localhost:8080">localhost:8080</a> on the host, or <code>http://&lt;lan-ip&gt;:8080</code> from another machine on your network. Add a source on <strong>Library</strong>, then create a Build with <strong>New Build</strong> or <strong>Builds</strong>.</p>
       <div class="cta-row">
         <a class="cta" href="https://github.com/poitee/PrintPartnerPartner">View on GitHub</a>
         <a class="cta cta-secondary" href="https://github.com/poitee/PrintPartnerPartner/blob/main/docs/INSTALL.md">Install guide</a>
@@ -221,10 +223,11 @@ docker compose pull && docker compose up -d</code></pre>
       <h2>Desk loop</h2>
       <ul>
         <li><strong>Library</strong> — GitHub, local folders, or zips; categories; import rules; STL search; update badges.</li>
-        <li><strong>Plan</strong>: attach layers, rebuild a saved draft, choose files, quantities, and role filament colors, then review and apply it.</li>
-        <li><strong>Parts</strong> — validation by role and filament, 3D previews, quantity edits.</li>
-        <li><strong>Progress</strong> — print checkoff: per-unit progress, assembled toggles, filters, printable checklist.</li>
-        <li><strong>Export</strong> — plate workspace, height bands, slicer links, profile library, STL/3MF packs, printer bind/send.</li>
+        <li><strong>Builds</strong> — list-first home. New Build asks only for a name and opens Sources.</li>
+        <li><strong>Sources</strong> — attach sources, picks, and roles for this Build.</li>
+        <li><strong>Plan</strong> — quantities, warnings, saved draft, then explicit Apply.</li>
+        <li><strong>Checkoff</strong> — per-unit progress, assembled toggles, printable checklist.</li>
+        <li><strong>Production</strong> — plates, downloads, slicer handoff, and printer send. Global Production lists jobs across Builds.</li>
       </ul>
       <p>Optional: Spoolman, Moonraker/PrusaLink/Bambu status, Discord digest, Home Assistant, slicer sidecar — see the README.</p>
     </section>
@@ -285,23 +288,23 @@ docker compose pull && docker compose up -d</code></pre>
       </div>
 
       <div class="shot-block">
-        <p class="shot-title">Parts</p>
+        <p class="shot-title">Plan</p>
         <p class="shot-desc">Validation summary, parts list with 3D previews, quantity edits.</p>
         <div class="theme-pair">
           <figure>
-            <img src="screenshots/light/review.png" alt="Parts — light theme" loading="lazy">
+            <img src="screenshots/light/review.png" alt="Plan — light theme" loading="lazy">
             <figcaption>Light</figcaption>
           </figure>
           <figure>
-            <img src="screenshots/dark/review.png" alt="Parts — dark theme" loading="lazy">
+            <img src="screenshots/dark/review.png" alt="Plan — dark theme" loading="lazy">
             <figcaption>Dark</figcaption>
           </figure>
         </div>
       </div>
 
       <div class="shot-block">
-        <p class="shot-title">Progress &amp; Export</p>
-        <p class="shot-desc">Progress is print checkoff; Export is plates, slicer links, and profile library. Re-run <code>docs/scripts/capture-screenshots.mjs</code> to refresh PNGs for those stages.</p>
+        <p class="shot-title">Checkoff &amp; Production</p>
+        <p class="shot-desc">Checkoff is print verification; Production is plates, downloads, and slicer handoff. Re-run <code>docs/scripts/capture-screenshots.mjs</code> to refresh PNGs for those stages.</p>
       </div>
     </section>
 

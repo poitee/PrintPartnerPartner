@@ -76,17 +76,18 @@ docker compose pull && docker compose up -d
 
 ## First-time app tour
 
-Print Partner follows a five-step desk loop: **Library → Plan → Parts → Progress → Export**.
+Print Partner follows a Build workflow: **Library → Builds → Sources → Plan → Checkoff → Production**.
 
 1. **Library** — Add GitHub repos, local folders, or zip archives. Assign categories, set import rules, and sync STLs.
-2. **Plan**: Create or switch plans (**Create plan** in the header, or **Plans** in the sidebar). Attach sources, rebuild a saved draft, choose STL files and quantities, review the changes, and click **Apply plan** to accept them.
-3. **Parts** — Validate totals by role and filament, browse 3D previews, and edit quantities.
-4. **Progress** — Track per-unit print progress (and assembled toggles), print a checklist, or export missing STLs.
-5. **Export** — Plate workspace, height-band packing, slicer links, profile library, STL/3MF packs, and printer bind/send.
+2. **Builds**: Create or switch Builds (**New Build** in the header, or **Builds** in the sidebar). A new Build asks only for a name, then opens Sources.
+3. **Sources** — Attach sources, pick STLs, and set role colors for this Build.
+4. **Plan** — Review quantities and warnings, then **Apply** the saved draft so Checkoff and Production see the accepted requirements.
+5. **Checkoff** — Track per-unit print progress (and assembled toggles), print a checklist, or export missing STLs.
+6. **Production** — Plate workspace, downloads, slicer handoff, and printer send for one Build. Global Production (`/production`) lists jobs across Builds.
 
 Use the **spine** to move between steps. The left rail can be **collapsed** to icons. **Theme** (light, dark, or system) is under Settings → Appearance.
 
-**Tip:** After the first load, always navigate with the spine. Pasting legacy paths like `/sources` or `/build` directly into the address bar on a cold load can hit API routes and show raw JSON instead of the UI.
+**Tip:** After the first load, always navigate with the spine. Pasting API-colliding paths like `/sources` directly into the address bar on a cold load in single-port Docker can hit the API and show raw JSON instead of the UI. Client-side navigation from `/` (Builds) avoids that.
 
 **LAN tip:** From another machine, open `http://<host-lan-ip>:8080`. Set `PRINT_PARTNER_API_KEY` before attaching MCP from a remote agent.
 

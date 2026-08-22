@@ -10,10 +10,10 @@ Print Partner is a self-hosted desk workflow for layered STL kits:
 
 - **Frontend**: React + TypeScript SPA (Vite)
 - **Backend**: Fastify + TypeScript API server
-- **Database**: SQLite (default self-host) or PostgreSQL (SaaS)
+- **Database**: SQLite (supported self-host) or experimental PostgreSQL (SaaS)
 - **Deployment**: Docker Compose on port **8080** (LAN box friendly)
 
-**Desk loop:** Library → Plan → Parts → Progress → Export. Plans / Printers / Settings / Help sit in utility nav. Kit brain is **HTTP MCP attach** (no in-app Kit Advisor).
+**Desk loop:** Library → Builds → Sources → Plan → Checkoff → Production. Global Production, Printers, Settings, and Help sit in utility nav. Kit brain is **HTTP MCP attach** (no in-app Kit Advisor).
 
 ## Directory structure (abridged)
 

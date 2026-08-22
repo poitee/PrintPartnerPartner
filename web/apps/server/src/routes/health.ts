@@ -3,6 +3,7 @@ import type { ServerConfig } from "../config.js";
 import type { AppPorts } from "../ports/index.js";
 import { pingBundle } from "../db/database.js";
 import type { SaasDbStore } from "../adapters/saas/index.js";
+import { deploymentCapability } from "../lib/deployment-capability.js";
 import { getVersionInfo, getBuildSemver } from "../lib/version.js";
 
 export async function registerHealthRoutes(
@@ -66,6 +67,11 @@ export async function registerHealthRoutes(
         support_status:
           saasDb.bundle?.driver === "postgres" ? "experimental" : "supported",
       },
+      deployment: deploymentCapability({
+        databaseDriver: saasDb.bundle?.driver === "postgres" ? "postgres" : "sqlite",
+        s3Bucket: config.s3Bucket,
+        multiUser: config.multiUser,
+      }),
       google_drive: {
         client_id: config.googleClientId,
       },

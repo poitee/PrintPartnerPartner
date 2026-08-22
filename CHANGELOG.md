@@ -13,6 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deterministic Required-unit 3MF identity, revision-keyed downloads, and
   local slicer handoff. The Export page uses this state on desktop and mobile.
 
+### Changed
+
+- **Platform boundary** — supported self-host is SQLite, local disk, and
+  in-process jobs. Documentation no longer claims a Redis/BullMQ queue.
+  `GET /health` reports a `deployment` capability object. SaaS Postgres and S3
+  remain experimental.
+
 ### Removed
 
 - **Legacy Plate and auto-slice APIs** - removed mutable `print-plan`,

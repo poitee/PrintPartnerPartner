@@ -17,7 +17,7 @@ status, dependencies, and implementation units.
 | 8. Site structure | Landed | Canonical routes, Global vs Build Production, Builds restore/counts, hybrid catalog, calm/dense density, and IncomingShares on Builds are in code. Optional filename renames (PartsPage/ExportPage) remain. |
 | 9. Production workspace | Partial | Translation-only placement, named-object 3MF export, STL bundle modes, printer observation, and verification exist. Stable Plate identity, saved placement, artifact identity, and safe ambiguous matching do not exist. |
 | 10. End-to-end proof | Missing | Current browser tests use static HTML. The real stack has no browser journey or genuine slicer-derived identity fixture. |
-| 11. Platform boundary | Partial | Postgres is explicitly gated, but public documentation still overstates S3, Redis, BullMQ, multitenancy, and multi-instance support. |
+| 11. Platform boundary | Landed | Health reports a deployment capability. Docs name SQLite + local disk + in-process jobs as supported. Redis/BullMQ claims removed. SaaS Postgres and S3 stay experimental. |
 
 Phase 4 has passed local release checks at commit `fbef877`. Public release
 verification remains open until an authorized push of `main` and annotated tag

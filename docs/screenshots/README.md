@@ -6,7 +6,7 @@ Workflow screenshots of the Print Partner web app, used by the root [README](../
 
 ```text
 docs/screenshots/
-  light/   sources.png builds.png build.png review.png
+  light/   sources.png builds.png build.png review.png progress.png export.png
   dark/    (same filenames)
   README.md
 ```
@@ -14,22 +14,24 @@ docs/screenshots/
 Filenames are stable for README / GitHub Pages embeds. Spine labels and routes:
 
 - **Library** `/library`
+- **Builds** `/builds`
+- **Sources** `/sources`
 - **Plan** `/plan`
-- **Parts** `/parts`
-- **Progress** `/progress`
-- **Export** `/export`
-- **Plans** `/plans` (utility nav; legacy `/builds` redirects)
+- **Checkoff** `/progress`
+- **Production** `/export?profile=` (Build) and `/production` (global)
 
-Optional Progress/Export PNGs (`progress.png`, `export.png`) can be added by extending the capture script. Older `advisor.png` / `settings-ai.png` files (if present) are leftovers from the removed in-app Kit Advisor — do not re-link them from README or Pages.
+Optional Progress/Export PNGs (`progress.png`, `export.png`) are captured by the current script. Older `advisor.png` / `settings-ai.png` files (if present) are leftovers from the removed in-app Kit Advisor — do not re-link them from README or Pages.
 
 The root README embeds **light** PNGs. GitHub Pages uses theme pairs for light/dark.
 
 | File | Spine label | Route / UI | Shows |
 |------|-------------|------------|-------|
 | `sources.png` | Library | `/library` | Source library: categories, sync, update badges, STL search |
-| `builds.png` | Plans | `/plans` | Plans page: create, rename, duplicate, archive |
-| `build.png` | Plan | `/plan` | Role filament colors, source file pickers with STL preview |
-| `review.png` | Parts | `/parts` | Validation, parts with 3D previews, quantity edits |
+| `builds.png` | Builds | `/builds` | Builds list: create, rename, duplicate, archive, restore |
+| `build.png` | Sources | `/sources` | Attach sources and picks for a Build |
+| `review.png` | Plan | `/plan` | Quantities, warnings, Apply |
+| `progress.png` | Checkoff | `/progress` | Print checkoff |
+| `export.png` | Production | `/export` | Plates, downloads, slicer handoff |
 
 ## Prerequisites (representative data)
 

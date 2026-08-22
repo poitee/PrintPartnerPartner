@@ -235,11 +235,18 @@ describe("Phase 5", () => {
       ok: boolean;
       deploy_mode: string;
       db: { driver: string; support_status: string };
+      deployment: { database: string; artifact_store: string; job_runner: string; support_status: string };
     };
     expect(body.ok).toBe(true);
     expect(body.deploy_mode).toBe("saas");
     expect(body.db).toMatchObject({
       driver: "sqlite",
+      support_status: "supported",
+    });
+    expect(body.deployment).toMatchObject({
+      database: "sqlite",
+      artifact_store: "local_disk",
+      job_runner: "in_process",
       support_status: "supported",
     });
 

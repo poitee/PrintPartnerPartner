@@ -221,6 +221,11 @@ function aiCredentialsPresent(
   return false;
 }
 
+export function ignoredRedisUrlWarning(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (!env.REDIS_URL?.trim()) return null;
+  return "REDIS_URL is set but ignored. Jobs always run in-process; there is no BullMQ adapter.";
+}
+
 export function loadConfig(): ServerConfig {
   const deployMode = parseDeployMode(process.env.DEPLOY_MODE);
   const releaseIdentity = resolveRuntimeReleaseIdentity({
