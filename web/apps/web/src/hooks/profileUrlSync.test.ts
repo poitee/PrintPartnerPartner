@@ -3,6 +3,7 @@ import {
   parseProfileParam,
   profileIdFromUrl,
   searchParamsWithProfile,
+  shouldStampProfileOnPath,
 } from "./profileUrlSync";
 
 describe("parseProfileParam", () => {
@@ -53,6 +54,12 @@ describe("searchParamsWithProfile", () => {
     const next = searchParamsWithProfile(prev, null);
     expect(next?.has("profile")).toBe(false);
     expect(next?.get("foo")).toBe("bar");
+  });
+
+  it("does not stamp profile onto global Production", () => {
+    expect(shouldStampProfileOnPath("/production")).toBe(false);
+    expect(shouldStampProfileOnPath("/builds")).toBe(true);
+    expect(shouldStampProfileOnPath("/plan")).toBe(true);
   });
 
   it("does not loop when user picks a new plan before url catches up", () => {

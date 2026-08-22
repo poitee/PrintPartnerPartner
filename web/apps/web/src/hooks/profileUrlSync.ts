@@ -36,3 +36,11 @@ export function searchParamsWithProfile(
   next.set("profile", expected);
   return next;
 }
+
+/**
+ * Global Production must stay `/production` with no profile. URL sync would
+ * otherwise stamp `?profile=` and the compatibility shim would bounce to Build Production.
+ */
+export function shouldStampProfileOnPath(pathname: string): boolean {
+  return pathname !== "/production";
+}

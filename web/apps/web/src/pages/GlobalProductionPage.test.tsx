@@ -25,6 +25,15 @@ const state = vi.hoisted(() => ({
       build_stale: false,
       last_used_at: null,
     },
+    {
+      id: 9,
+      name: "Fresh Build",
+      archived_at: null,
+      part_count: 0,
+      accepted_progress: { kind: "empty" as const },
+      build_stale: false,
+      last_used_at: null,
+    },
   ],
   loading: false,
   error: null as string | null,
@@ -116,6 +125,7 @@ describe("GlobalProductionPage", () => {
     expect(screen.getByRole("link", { name: "Checkoff for Voron" }).getAttribute("href")).toBe(
       "/progress?profile=7",
     );
+    expect(screen.getByText("Not applied").textContent).toBe("Not applied");
     await waitFor(() => {
       expect(screen.getByRole("link", { name: "Awaiting verification for Voron" }).getAttribute("href")).toBe(
         "/progress?profile=7",
