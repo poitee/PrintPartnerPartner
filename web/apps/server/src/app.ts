@@ -150,6 +150,17 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     setRequestTenantId(request.tenantId ?? "default");
   });
 
+  app.addHook("onSend", async (_request, reply, payload) => {
+    const contentType = String(reply.getHeader("content-type") ?? "");
+    if (
+      contentType.includes("application/json") &&
+      reply.getHeader("cache-control") == null
+    ) {
+      void reply.header("Cache-Control", "no-store");
+    }
+    return payload;
+  });
+
   if (config.staticDir && existsSync(config.staticDir)) {
     app.addHook("preHandler", async (request, reply) => {
       if (

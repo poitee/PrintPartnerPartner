@@ -18,6 +18,24 @@ export function profileIdFromUrl(
   return urlId;
 }
 
+/**
+ * Search string to write for the live location. `undefined` means leave the
+ * URL alone. Using the pathname from the current location (not a captured
+ * render) keeps New Build's navigate to Sources from being rewound to Builds.
+ */
+export function searchAfterProfileStamp(
+  pathname: string,
+  search: string,
+  selectedProfileId: number | null,
+): string | undefined {
+  if (!shouldStampProfileOnPath(pathname)) return undefined;
+  const raw = search.startsWith("?") ? search.slice(1) : search;
+  const next = searchParamsWithProfile(new URLSearchParams(raw), selectedProfileId);
+  if (!next) return undefined;
+  const encoded = next.toString();
+  return encoded ? `?${encoded}` : "";
+}
+
 /** Merge selected plan into search params; return undefined when unchanged. */
 export function searchParamsWithProfile(
   prev: URLSearchParams,

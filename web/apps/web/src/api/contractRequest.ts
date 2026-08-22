@@ -190,6 +190,7 @@ async function performJsonRequest<Success, EndpointError>(
   try {
     response = await fetch(resolveEngineUrl(path), {
       method: endpoint.method,
+      cache: "no-store",
       credentials: "include",
       ...(body === undefined
         ? {}

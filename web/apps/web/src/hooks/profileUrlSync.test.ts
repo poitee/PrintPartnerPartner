@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseProfileParam,
   profileIdFromUrl,
+  searchAfterProfileStamp,
   searchParamsWithProfile,
   shouldStampProfileOnPath,
 } from "./profileUrlSync";
@@ -60,6 +61,13 @@ describe("searchParamsWithProfile", () => {
     expect(shouldStampProfileOnPath("/production")).toBe(false);
     expect(shouldStampProfileOnPath("/builds")).toBe(true);
     expect(shouldStampProfileOnPath("/plan")).toBe(true);
+    expect(shouldStampProfileOnPath("/sources")).toBe(true);
+  });
+
+  it("stamps the live path so New Build cannot rewind Sources back to Builds", () => {
+    expect(searchAfterProfileStamp("/sources", "", 7)).toBe("?profile=7");
+    expect(searchAfterProfileStamp("/sources", "?profile=7", 7)).toBeUndefined();
+    expect(searchAfterProfileStamp("/production", "", 7)).toBeUndefined();
   });
 
   it("does not loop when user picks a new plan before url catches up", () => {

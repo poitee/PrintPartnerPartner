@@ -540,7 +540,12 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(resolveEngineUrl(path), { ...init, headers, credentials: "include" });
+  const res = await fetch(resolveEngineUrl(path), {
+    ...init,
+    headers,
+    credentials: "include",
+    cache: "no-store",
+  });
   if (res.status === 401) {
     notifyEngineUnauthorized();
     throw new Error(`Engine ${path} failed: 401`);
@@ -570,7 +575,10 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function engineFetchText(path: string): Promise<string> {
-  const res = await fetch(resolveEngineUrl(path), { credentials: "include" });
+  const res = await fetch(resolveEngineUrl(path), {
+    cache: "no-store",
+    credentials: "include",
+  });
   if (res.status === 401) {
     notifyEngineUnauthorized();
     throw new Error(`Engine ${path} failed: 401`);

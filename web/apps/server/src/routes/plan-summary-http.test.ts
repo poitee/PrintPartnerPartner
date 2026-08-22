@@ -50,7 +50,9 @@ describe("Plan summary HTTP contracts", () => {
       const template = ports.repository.createProfile("Template");
 
       const flatList = await app.inject({ method: "GET", url: "/plans" });
+      expect(flatList.headers["cache-control"]).toBe("no-store");
       const v2List = await app.inject({ method: "GET", url: "/api/v2/plans" });
+      expect(v2List.headers["cache-control"]).toBe("no-store");
       expect(v2List.json()).toEqual(flatList.json());
 
       const flatDetail = await app.inject({ method: "GET", url: `/plans/${template.id}` });
