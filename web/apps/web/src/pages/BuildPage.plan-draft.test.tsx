@@ -3,7 +3,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { PlanDraftWorkspace } from "../api/engine";
-import { PlanDraftApplyButton, planDraftRevisionPartLabels } from "./BuildPage";
+import { PlanDraftApplyButton, planDraftRevisionPartLabels } from "../components/plan/PlanDraftPanel";
 
 const readyWorkspace: PlanDraftWorkspace = {
   profile_id: 7,

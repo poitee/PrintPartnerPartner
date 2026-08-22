@@ -11,6 +11,7 @@ import {
   XCircle,
 } from "lucide-react";
 import PlanFreshnessNotice from "../components/PlanFreshnessNotice";
+import PlanDraftPanel from "../components/plan/PlanDraftPanel";
 import StlSyncBanner from "../components/StlSyncBanner";
 import DeskNextStep from "../components/layout/DeskNextStep";
 import EmptyState from "../components/layout/EmptyState";
@@ -54,8 +55,8 @@ function hintRoute(hint: string | null | undefined, profileId: number | null) {
 }
 
 /**
- * Parts stage — validate quantities, group by filament role, surface warnings.
- * Heavy export actions live on `/export`; Progress owns checkoff.
+ * Plan stage — validate quantities, apply saved drafts, surface warnings.
+ * Production owns plates and send; Checkoff owns verification.
  */
 export default function PartsPage() {
   const { health, error: engineError, loading: healthLoading } = useEngineHealth();
@@ -65,6 +66,11 @@ export default function PartsPage() {
     loading,
     error: workspaceError,
     refresh,
+    draftWorkspace,
+    draftError,
+    applyActivePlanDraft,
+    rebaseActivePlanDraft,
+    reconcileActivePlanDraft,
   } = usePlanWorkspace();
   const { banner: stlBanner, runSync: runStlSync, busy: stlSyncBusy } =
     useStlAutoSync();
@@ -173,7 +179,7 @@ export default function PartsPage() {
         title="Plan"
         description={
           summaryLine ??
-          "Validate parts, edit quantities, and export when ready."
+          "Validate parts, apply saved drafts, and send when ready."
         }
         actions={
           <PageHeaderActions>
@@ -343,6 +349,14 @@ export default function PartsPage() {
                 ))}
             </section>
           )}
+
+          <PlanDraftPanel
+            workspace={draftWorkspace}
+            error={draftError}
+            apply={applyActivePlanDraft}
+            rebase={rebaseActivePlanDraft}
+            reconcile={reconcileActivePlanDraft}
+          />
 
           <section className="section-card">
             <h2 className="mb-2 text-sm font-semibold">Sources</h2>
