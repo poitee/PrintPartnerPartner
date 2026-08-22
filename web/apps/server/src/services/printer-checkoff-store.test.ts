@@ -44,4 +44,33 @@ describe("printer-checkoff-store plate revision binding", () => {
       closeRepo(dir, sqlite);
     }
   });
+
+  it("round-trips the Object-name mapping used for each Progress unit", () => {
+    const { dir, sqlite, repo } = openRepo();
+    try {
+      const created = createPrinterCheckoffLink(repo, {
+        profile_id: 7,
+        integration_id: "int-moon",
+        printer_id: "printer-one",
+        host_name: "Printer One",
+        filename: "plate-one.gcode",
+        units: [
+          { part_id: 11, unit_index: 0, object_name: "  bracket.stl (1)  " },
+          { part_id: 11, unit_index: 1 },
+        ],
+      });
+      expect(created?.units).toEqual([
+        { part_id: 11, unit_index: 0, object_name: "bracket.stl (1)" },
+        { part_id: 11, unit_index: 1 },
+      ]);
+
+      const loaded = getPrinterCheckoffLink(repo, created!.id);
+      expect(loaded?.units).toEqual([
+        { part_id: 11, unit_index: 0, object_name: "bracket.stl (1)" },
+        { part_id: 11, unit_index: 1 },
+      ]);
+    } finally {
+      closeRepo(dir, sqlite);
+    }
+  });
 });

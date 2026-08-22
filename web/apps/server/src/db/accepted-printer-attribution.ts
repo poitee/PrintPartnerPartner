@@ -99,6 +99,16 @@ type AcceptedUnitSlot = Readonly<{
   coordinate: Readonly<PrinterCheckoffUnit>;
 }>;
 
+function mappedUnit(
+  coordinate: Readonly<PrinterCheckoffUnit>,
+  objectName: string,
+): PrinterCheckoffUnit {
+  const name = objectName.trim().slice(0, 200);
+  return name
+    ? { part_id: coordinate.part_id, unit_index: coordinate.unit_index, object_name: name }
+    : { part_id: coordinate.part_id, unit_index: coordinate.unit_index };
+}
+
 function parsedObjectName(rawName: string): string {
   const grouped = groupObjectsByPart([rawName]);
   return grouped.values().next().value?.objects[0]?.stlBasename ?? rawName;
@@ -168,7 +178,7 @@ export function resolveAcceptedPrinterAttribution(
       inputIndex,
       rawName,
       kind: "required_object_name",
-      unit: canonical.coordinate,
+      unit: mappedUnit(canonical.coordinate, rawName),
     });
   }
 
@@ -196,7 +206,7 @@ export function resolveAcceptedPrinterAttribution(
       inputIndex,
       rawName,
       kind: "legacy_filename",
-      unit: slot.coordinate,
+      unit: mappedUnit(slot.coordinate, rawName),
     });
   }
 
@@ -216,7 +226,7 @@ export function resolveAcceptedPrinterAttribution(
         (slot) => slot.part.projectionPartId === parts[0]!.projectionPartId,
       );
       if (fallbackSlot) {
-        units.push(fallbackSlot.coordinate);
+        units.push(mappedUnit(fallbackSlot.coordinate, observation.fallbackFilename.trim()));
         fallback = "used";
       }
     }

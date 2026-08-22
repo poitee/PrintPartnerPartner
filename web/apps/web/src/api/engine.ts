@@ -154,6 +154,7 @@ export type PrinterHostStatus = {
 export type PrinterCheckoffUnit = {
   part_id: number;
   unit_index: number;
+  object_name?: string;
 };
 
 export type PrinterHostOutcome = "unknown" | "success" | "failed" | "cancelled";

@@ -43,6 +43,17 @@ describe("printer-checkoff helpers", () => {
     expect(parseCheckoffUnits("not-json")).toEqual([]);
   });
 
+  it("keeps the Object-name mapping used for each Progress unit", () => {
+    expect(
+      parseCheckoffUnits(
+        '[{"part_id":11,"unit_index":0,"object_name":"bracket.stl (1)"},{"part_id":11,"unit_index":1}]',
+      ),
+    ).toEqual([
+      { part_id: 11, unit_index: 0, object_name: "bracket.stl (1)" },
+      { part_id: 11, unit_index: 1 },
+    ]);
+  });
+
   it("computes pending units after partial resolve", () => {
     expect(
       pendingCheckoffUnits(
@@ -55,6 +66,20 @@ describe("printer-checkoff helpers", () => {
         }),
       ),
     ).toEqual([{ part_id: 1, unit_index: 1 }]);
+  });
+
+  it("keeps Object-name mapping on pending units without using it as identity", () => {
+    expect(
+      pendingCheckoffUnits(
+        link({
+          units: [
+            { part_id: 1, unit_index: 0, object_name: "bracket_01" },
+            { part_id: 1, unit_index: 1, object_name: "bracket_02" },
+          ],
+          resolved_units: [{ part_id: 1, unit_index: 0, result: "confirmed" }],
+        }),
+      ),
+    ).toEqual([{ part_id: 1, unit_index: 1, object_name: "bracket_02" }]);
   });
 
   it("trims terminal links before active ones", () => {

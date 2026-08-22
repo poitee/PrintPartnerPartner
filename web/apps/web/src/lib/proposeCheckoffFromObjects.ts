@@ -246,10 +246,12 @@ export function proposeCheckoffFromObjects(
     }
   }
 
-  const units: PrinterCheckoffUnit[] = matches.map((m) => ({
-    part_id: m.part_id,
-    unit_index: m.unit_index,
-  }));
+  const units: PrinterCheckoffUnit[] = matches.map((m) => {
+    const name = m.objectName.trim().slice(0, 200);
+    return name
+      ? { part_id: m.part_id, unit_index: m.unit_index, object_name: name }
+      : { part_id: m.part_id, unit_index: m.unit_index };
+  });
 
   return { units, matches, unmatchedNames };
 }

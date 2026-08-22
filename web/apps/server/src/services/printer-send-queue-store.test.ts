@@ -119,6 +119,29 @@ describe("enqueuePrinterSend plate revision binding", () => {
     expect(queued?.plate_revision_id).toBe(19);
     expect(loadPrinterSendQueue(repo)[0]?.plate_revision_id).toBe(19);
   });
+
+  it("round-trips the Object-name mapping used for queued units", () => {
+    const repo = fakeRepo();
+    const queued = enqueuePrinterSend(repo, {
+      filename: "plate.gcode",
+      artifact_path: "/data/exports/printer-uploads/x/plate.gcode",
+      printer_id: "p1",
+      start: false,
+      profile_id: 7,
+      checkoff_units: [
+        { part_id: 11, unit_index: 0, object_name: "  bracket_01.stl  " },
+        { part_id: 11, unit_index: 1 },
+      ],
+    });
+    expect(queued?.checkoff_units).toEqual([
+      { part_id: 11, unit_index: 0, object_name: "bracket_01.stl" },
+      { part_id: 11, unit_index: 1 },
+    ]);
+    expect(loadPrinterSendQueue(repo)[0]?.checkoff_units).toEqual([
+      { part_id: 11, unit_index: 0, object_name: "bracket_01.stl" },
+      { part_id: 11, unit_index: 1 },
+    ]);
+  });
 });
 
 function fakeRepo(): AppRepository {

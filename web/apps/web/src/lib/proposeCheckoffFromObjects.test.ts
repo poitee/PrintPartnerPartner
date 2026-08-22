@@ -43,11 +43,22 @@ describe("proposeCheckoffFromObjects", () => {
       parts,
     );
     expect(result.units).toEqual([
-      { part_id: 1, unit_index: 0 },
-      { part_id: 2, unit_index: 0 },
+      { part_id: 1, unit_index: 0, object_name: "bracket_01.stl" },
+      { part_id: 2, unit_index: 0, object_name: "spacer_01.stl" },
     ]);
     expect(result.unmatchedNames).toEqual(["unknown_part"]);
     expect(result.matches.every((m) => m.match === "export_name")).toBe(true);
+  });
+
+  it("persists the Object-name mapping used for each proposed unit", () => {
+    const parts = [
+      part({ id: 1, filename: "bracket.stl", quantity_effective: 2, print_units: [false, false] }),
+    ];
+    const result = proposeCheckoffFromObjects(["bracket_01.stl", "bracket_02"], parts);
+    expect(result.units).toEqual([
+      { part_id: 1, unit_index: 0, object_name: "bracket_01.stl" },
+      { part_id: 1, unit_index: 1, object_name: "bracket_02" },
+    ]);
   });
 
   it("applies 5+3 by stem when labels share a stem", () => {

@@ -85,13 +85,13 @@ describe("accepted printer attribution", () => {
       objectNames: [`BRACKET__${token(1).toUpperCase()}`],
     });
 
-    expect(result.units).toEqual([{ part_id: 41, unit_index: 1 }]);
+    expect(result.units).toEqual([{ part_id: 41, unit_index: 1, object_name: `BRACKET__${token(1).toUpperCase()}` }]);
     expect(result.outcomes).toEqual([
       {
         inputIndex: 0,
         rawName: `BRACKET__${token(1).toUpperCase()}`,
         kind: "required_object_name",
-        unit: { part_id: 41, unit_index: 1 },
+        unit: { part_id: 41, unit_index: 1, object_name: `BRACKET__${token(1).toUpperCase()}` },
       },
     ]);
     expect(result.expected).toMatchObject({
@@ -99,6 +99,25 @@ describe("accepted printer attribution", () => {
       planVersion: 3,
       revisionId: 11,
     });
+  });
+
+  it("persists the observed Object name on each mapped Required unit", () => {
+    const accepted = snapshot([
+      {
+        id: 41,
+        filename: "bracket.stl",
+        units: [{ index: 1, token: token(1), objectName: `Bracket__${token(1)}` }],
+      },
+    ]);
+    const rawName = `BRACKET__${token(1).toUpperCase()}`;
+
+    const result = resolveAcceptedPrinterAttribution(accepted, {
+      objectNames: [rawName],
+    });
+
+    expect(result.units).toEqual([
+      { part_id: 41, unit_index: 1, object_name: rawName },
+    ]);
   });
 
   it("maps known slicer wrappers and a unique accepted filename", () => {
@@ -118,8 +137,8 @@ describe("accepted printer attribution", () => {
     });
 
     expect(result.units).toEqual([
-      { part_id: 5, unit_index: 0 },
-      { part_id: 5, unit_index: 1 },
+      { part_id: 5, unit_index: 0, object_name: `frame__${token(2)}_id_0_copy_0` },
+      { part_id: 5, unit_index: 1, object_name: "frame.stl (Instance 2)" },
     ]);
     expect(result.outcomes.map((outcome) => outcome.kind)).toEqual([
       "required_object_name",
@@ -148,13 +167,13 @@ describe("accepted printer attribution", () => {
         inputIndex: 0,
         rawName: "frame.stl",
         kind: "legacy_filename",
-        unit: { part_id: 5, unit_index: 1 },
+        unit: { part_id: 5, unit_index: 1, object_name: "frame.stl" },
       },
       {
         inputIndex: 1,
         rawName: `frame__${token(2)}`,
         kind: "required_object_name",
-        unit: { part_id: 5, unit_index: 0 },
+        unit: { part_id: 5, unit_index: 0, object_name: `frame__${token(2)}` },
       },
     ]);
   });
@@ -198,7 +217,7 @@ describe("accepted printer attribution", () => {
       objectNames: ["frame.stl", "frame.stl", "frame.stl", "other.stl"],
     });
 
-    expect(result.units).toEqual([{ part_id: 1, unit_index: 2 }]);
+    expect(result.units).toEqual([{ part_id: 1, unit_index: 2, object_name: "frame.stl" }]);
     expect(result.outcomes.map((outcome) => outcome.kind)).toEqual([
       "legacy_filename",
       "unmatched",
@@ -221,7 +240,7 @@ describe("accepted printer attribution", () => {
       objectNames: [name, name, "unknown", name],
     });
 
-    expect(result.units).toEqual([{ part_id: 1, unit_index: 0 }]);
+    expect(result.units).toEqual([{ part_id: 1, unit_index: 0, object_name: name }]);
     expect(result.outcomes.map(({ rawName, kind }) => ({ rawName, kind }))).toEqual([
       { rawName: name, kind: "required_object_name" },
       { rawName: name, kind: "duplicate_observation" },
@@ -267,7 +286,7 @@ describe("accepted printer attribution", () => {
       objectNames: ["unknown", "unknown"],
       fallbackFilename: "bracket.bgcode",
     });
-    expect(fallback.units).toEqual([{ part_id: 1, unit_index: 0 }]);
+    expect(fallback.units).toEqual([{ part_id: 1, unit_index: 0, object_name: "bracket.bgcode" }]);
     expect(fallback.fallback).toBe("used");
     expect(fallback.unmatchedObjectNames).toEqual(["unknown", "unknown"]);
 
@@ -275,7 +294,7 @@ describe("accepted printer attribution", () => {
       objectNames: ["bracket.stl"],
       fallbackFilename: "bracket.bgcode",
     });
-    expect(mapped.units).toEqual([{ part_id: 1, unit_index: 0 }]);
+    expect(mapped.units).toEqual([{ part_id: 1, unit_index: 0, object_name: "bracket.stl" }]);
     expect(mapped.fallback).toBe("unused");
   });
 

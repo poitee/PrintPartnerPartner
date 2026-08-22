@@ -273,7 +273,11 @@ describe("accepted printer attribution repository command", () => {
       link: { id: link.id, units: [{ part_id: bracket.id, unit_index: 0 }] },
     });
     expect(getPrinterCheckoffLink(repo, link.id)?.units).toEqual([
-      { part_id: bracket.id, unit_index: 0 },
+      {
+        part_id: bracket.id,
+        unit_index: 0,
+        object_name: acceptedPart.units[0]!.objectName,
+      },
     ]);
   });
 

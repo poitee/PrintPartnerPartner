@@ -191,7 +191,7 @@ describe("printer progress route", () => {
       }],
     });
     expect(getPrinterCheckoffLink(repo, link.id)?.units).toEqual([
-      { part_id: bracket.id, unit_index: 0 },
+      { part_id: bracket.id, unit_index: 0, object_name: "bracket.bgcode" },
     ]);
     expect(setSetting).toHaveBeenCalled();
     const storedPrint = listUnattributedPrints(repo).find((p) => p.id === stale.id);
@@ -331,7 +331,11 @@ describe("printer progress route", () => {
       url: `/printer-checkoff?state=awaiting_verify&profile_id=${plan.id}`,
     });
     expect(awaiting.json().links[0].units).toEqual([
-      { part_id: bracket.id, unit_index: 0 },
+      {
+        part_id: bracket.id,
+        unit_index: 0,
+        object_name: acceptedPart.units[0]!.objectName,
+      },
     ]);
 
     const verify = await app.inject({

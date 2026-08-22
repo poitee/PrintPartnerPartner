@@ -21,17 +21,17 @@ const STATES = new Set<PrinterSendQueueState>([
   "cancelled",
 ]);
 
-function isUnit(x: unknown): x is PrinterCheckoffUnit {
-  if (!x || typeof x !== "object") return false;
+function normalizeUnit(x: unknown): PrinterCheckoffUnit | null {
+  if (!x || typeof x !== "object") return null;
   const row = x as Record<string, unknown>;
-  return (
-    typeof row.part_id === "number" &&
-    Number.isInteger(row.part_id) &&
-    row.part_id > 0 &&
-    typeof row.unit_index === "number" &&
-    Number.isInteger(row.unit_index) &&
-    row.unit_index >= 0
-  );
+  const partId = Number(row.part_id);
+  const unitIndex = Number(row.unit_index);
+  if (!Number.isInteger(partId) || partId <= 0) return null;
+  if (!Number.isInteger(unitIndex) || unitIndex < 0) return null;
+  const unit: PrinterCheckoffUnit = { part_id: partId, unit_index: unitIndex };
+  const objectName = typeof row.object_name === "string" ? row.object_name.trim() : "";
+  if (objectName) unit.object_name = objectName.slice(0, 200);
+  return unit;
 }
 
 function parseItem(raw: unknown): PrinterSendQueueItem | null {
@@ -68,7 +68,10 @@ function parseItem(raw: unknown): PrinterSendQueueItem | null {
     item.profile_id = profileId;
   }
   if (Array.isArray(row.checkoff_units)) {
-    const units = row.checkoff_units.filter(isUnit);
+    const units = row.checkoff_units.flatMap((rawUnit) => {
+      const unit = normalizeUnit(rawUnit);
+      return unit ? [unit] : [];
+    });
     if (units.length) item.checkoff_units = units;
   }
   if (typeof row.upload_job_id === "string" && row.upload_job_id.trim()) {
@@ -186,7 +189,10 @@ export function enqueuePrinterSend(
       wait_for_idle: input.wait_for_idle !== false,
       start: Boolean(input.start),
       profile_id: input.profile_id,
-      checkoff_units: input.checkoff_units?.filter(isUnit),
+      checkoff_units: input.checkoff_units?.flatMap((item) => {
+        const unit = normalizeUnit(item);
+        return unit ? [unit] : [];
+      }),
       plate_revision_id:
         Number.isInteger(input.plate_revision_id) && (input.plate_revision_id ?? 0) > 0
           ? input.plate_revision_id

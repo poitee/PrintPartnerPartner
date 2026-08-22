@@ -49,7 +49,10 @@ export function parseCheckoffUnits(raw: unknown): PrinterCheckoffUnit[] {
     const key = `${partId}:${unitIndex}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ part_id: partId, unit_index: unitIndex });
+    const unit: PrinterCheckoffUnit = { part_id: partId, unit_index: unitIndex };
+    const objectName = typeof row.object_name === "string" ? row.object_name.trim() : "";
+    if (objectName) unit.object_name = objectName.slice(0, 200);
+    out.push(unit);
   }
   return out;
 }

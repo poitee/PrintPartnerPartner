@@ -208,6 +208,8 @@ export type PrinterHostStatus = {
 export type PrinterCheckoffUnit = {
   part_id: number;
   unit_index: number;
+  /** Sliced Object name that mapped to this Required unit. */
+  object_name?: string;
 };
 
 export type PrinterHostOutcome = "unknown" | "success" | "failed" | "cancelled";
