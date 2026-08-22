@@ -28,11 +28,12 @@ const setupInput = {
     sourceLayer: "base:test",
     role: "primary",
     filamentColorId: "black",
+    completed: false,
     artifact: { kind: "unavailable" as const, reason: "untracked_source" as const },
   }],
 };
 
-function dependencies(): AcceptedPlateWorkspaceDependencies & {
+function dependencies(input = setupInput): AcceptedPlateWorkspaceDependencies & {
   publish: ReturnType<typeof vi.fn>;
   loadGeometry: ReturnType<typeof vi.fn>;
 } {
@@ -40,7 +41,7 @@ function dependencies(): AcceptedPlateWorkspaceDependencies & {
   const loadGeometry = vi.fn();
   return {
     repository: {
-      readAcceptedPlateWorkspaceInput: vi.fn(() => setupInput),
+      readAcceptedPlateWorkspaceInput: vi.fn(() => input),
       publishAcceptedPlates: publish,
     },
     reposDir: "/tmp/unused-accepted-workspace",
@@ -80,21 +81,24 @@ endsolid accepted`));
   return { mesh, dimensions: { widthUm, depthUm, heightUm } };
 }
 
-function publishingDependencies(machineChange: Record<string, unknown> = {}) {
+function publishingDependencies(
+  machineChange: Record<string, unknown> = {},
+  input = setupInput,
+) {
   let plates: readonly AcceptedPlateInput[] | null = null;
   const publish = vi.fn((command: { plates: readonly AcceptedPlateInput[] }) => {
     plates = command.plates;
     return { kind: "published" as const, plateRevisionId: 31, plateRevisionNumber: 1 };
   });
   const read = vi.fn(() => {
-    if (!plates) return setupInput;
+    if (!plates) return input;
     return {
       kind: "ready" as const,
       basis,
       expectedPlateRevisionId: 31,
       plateRevisionId: 31,
       plateRevisionNumber: 1,
-      units: setupInput.units,
+      units: input.units,
       undoFromRevisionId: null,
       plates: plates.map((plate, index) => ({
         ...plate,
@@ -170,7 +174,23 @@ describe("accepted Plate workspace", () => {
           source_layer: "base:test",
           role: "primary",
           filament_color_id: "black",
+          completed: false,
         }],
+      },
+    });
+  });
+
+  it("projects Checkoff completion onto each Required unit", () => {
+    const deps = dependencies({
+      ...setupInput,
+      units: [{ ...setupInput.units[0], completed: true }],
+    });
+
+    expect(readAcceptedPlateWorkspace(deps, 7)).toMatchObject({
+      kind: "workspace",
+      workspace: {
+        kind: "setup",
+        units: [{ token, completed: true }],
       },
     });
   });
@@ -212,7 +232,7 @@ describe("accepted Plate workspace", () => {
       kind: "unknown_unit_token",
       tokens: [parseRequiredUnitToken("ppu_00000000000000000000000000000002")],
     }],
-  ])("requires exact accepted token coverage before opening artifacts %#", async (assignments, expected) => {
+  ])("rejects empty or unknown assignments before opening artifacts %#", async (assignments, expected) => {
     const deps = dependencies();
 
     await expect(initializeAcceptedPlates(deps, {
@@ -224,6 +244,47 @@ describe("accepted Plate workspace", () => {
 
     expect(deps.loadGeometry).not.toHaveBeenCalled();
     expect(deps.publish).not.toHaveBeenCalled();
+  });
+
+  it("initializes only assigned tokens and leaves omitted Required units Missing", async () => {
+    const second = parseRequiredUnitToken("ppu_00000000000000000000000000000002");
+    const twoUnitSetup = {
+      ...setupInput,
+      units: [
+        setupInput.units[0],
+        {
+          ...setupInput.units[0],
+          token: second,
+          objectName: `clip__${second}`,
+          filename: "clip.stl",
+        },
+      ],
+    };
+    const deps = publishingDependencies({}, twoUnitSetup);
+
+    const result = await initializeAcceptedPlates(deps, {
+      profileId: 7,
+      expected: basis,
+      expectedPlateRevisionId: null,
+      assignments: [{ token, printerId: "printer-one" }],
+    });
+
+    expect(result).toMatchObject({
+      kind: "workspace",
+      workspace: {
+        kind: "ready",
+        plates: [{ units: [{ token }] }],
+        unassigned: [{ token: second }],
+      },
+    });
+    expect(deps.loadGeometry).toHaveBeenCalledWith(expect.objectContaining({
+      units: [expect.objectContaining({ token })],
+    }));
+    expect(deps.publish).toHaveBeenCalledWith(expect.objectContaining({
+      plates: [expect.objectContaining({
+        units: [expect.objectContaining({ token })],
+      })],
+    }));
   });
 
   it("uses the explicit Printer even when its loaded filament does not match", async () => {

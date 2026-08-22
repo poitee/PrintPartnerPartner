@@ -158,6 +158,7 @@ function setupUnit(unit: AcceptedPlateSetupUnit): AcceptedPlateSetupUnitContract
     source_layer: unit.sourceLayer,
     role: unit.role,
     filament_color_id: unit.filamentColorId,
+    completed: unit.completed ?? false,
   };
 }
 
@@ -230,6 +231,14 @@ function plateView(
   };
 }
 
+function unassignedWorkspaceUnits(
+  plates: readonly { units: readonly { token: string }[] }[],
+  units: readonly AcceptedPlateSetupUnit[],
+): AcceptedPlateSetupUnitContract[] {
+  const assigned = new Set(plates.flatMap((plate) => plate.units.map((unit) => unit.token)));
+  return units.filter((unit) => !assigned.has(unit.token)).map(setupUnit);
+}
+
 function publishedWorkspace(input: Readonly<{
   basis: AcceptedPlanBasis;
   plateRevisionId: number;
@@ -267,6 +276,7 @@ function publishedWorkspace(input: Readonly<{
         return { ...unit, objectName: setup.objectName, placement: unitPlacementKind(unit.placement) };
       }),
     })), setupByToken),
+    unassigned: unassignedWorkspaceUnits(input.plates, input.units),
   };
 }
 
@@ -295,6 +305,7 @@ function presentWorkspace(
     printers,
     plates: input.plates.map((plate) => plateView(plate, setupByToken)),
     unplaced: unplacedWorkspaceUnits(input.plates, setupByToken),
+    unassigned: unassignedWorkspaceUnits(input.plates, input.units),
   };
 }
 
@@ -326,8 +337,9 @@ function assignmentFailure(
   const byToken = (left: RequiredUnitToken, right: RequiredUnitToken) => compareUtf8(left, right);
   if (unknown.size > 0) return { kind: "unknown_unit_token", tokens: [...unknown].sort(byToken) };
   if (duplicates.size > 0) return { kind: "duplicate_assignment", tokens: [...duplicates].sort(byToken) };
-  const missing = [...expected].filter((token) => !seen.has(token)).sort(byToken);
-  if (missing.length > 0) return { kind: "missing_assignment", tokens: missing };
+  if (assignments.length === 0) {
+    return { kind: "missing_assignment", tokens: [...expected].sort(byToken) };
+  }
   const unassigned = assignments
     .filter((assignment) => assignment.printerId === null)
     .map((assignment) => assignment.token)
@@ -546,9 +558,10 @@ export async function initializeAcceptedPlates(
     return { kind: "plate_revision_changed" };
   }
 
+  const assignedTokens = new Set(command.assignments.map((assignment) => assignment.token));
   const loaded = await (dependencies.loadGeometry ?? loadAcceptedArtifactGeometry)({
     reposDir: dependencies.reposDir,
-    units: input.units,
+    units: input.units.filter((unit) => assignedTokens.has(unit.token)),
     limits: dependencies.limits,
   });
   if (loaded.kind !== "ready") return loaded;

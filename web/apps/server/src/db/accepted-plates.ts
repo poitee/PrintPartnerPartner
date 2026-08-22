@@ -218,6 +218,7 @@ export type AcceptedPlateSetupUnit = Readonly<{
   sourceLayer: string;
   role: string;
   filamentColorId: string | null;
+  completed?: boolean;
   artifact: AcceptedOperationalArtifact;
 }>;
 
@@ -849,6 +850,7 @@ function acceptedPlateSetupUnits(snapshot: AcceptedPlanOperationalSnapshot): Acc
         sourceLayer: part.sourceLayer,
         role: part.effectiveRole,
         filamentColorId: part.filamentColorId,
+        completed: unit.completed,
         artifact: part.artifact,
       })));
 }
