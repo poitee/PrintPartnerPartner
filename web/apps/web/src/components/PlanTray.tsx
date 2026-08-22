@@ -8,7 +8,7 @@ import { Button } from "./ui/button";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useFlushBuildPageSaves } from "../hooks/useFlushBuildPageSaves";
-import { exportRoute, isExportPath, isSourcesPath, planRoute } from "../lib/routes";
+import { exportRoute, isExportPath, isSourcesPath, planRoute, buildSourcesRoute } from "../lib/routes";
 import { cn } from "../lib/utils";
 import { planPrintTotals } from "../lib/workflowStages";
 import { countMissingStls } from "../lib/stlAutoSync";
@@ -45,8 +45,8 @@ export function partFilenameInitials(filename: string): string {
  * Sets `--plan-tray-height` so JobTray can stack above it.
  *
  * Shows included-part thumbnails with qty badges, print progress, and
- * shortcuts into Export / Plan. Hidden on Export (design) and when no plan
- * is selected.
+ * shortcuts into Production / Plan. Hidden on Production (design) and when no
+ * Build is selected.
  */
 export default function PlanTray() {
   const location = useLocation();
@@ -86,7 +86,7 @@ export default function PlanTray() {
         : 0;
   const hasParts = partCount > 0 || thumbs.length > 0;
 
-  // Design: hide on Export hub; also require an active plan.
+  // Design: hide on Build Production; also require an active Build.
   const visible =
     selectedProfileId != null &&
     selected != null &&
@@ -179,7 +179,11 @@ export default function PlanTray() {
 
         {expanded && !loading && !hasParts ? (
           <span className="hidden min-w-0 truncate text-[11.5px] text-muted-foreground md:inline">
-            Pick STLs in Library or open Plan to assemble parts
+            Pick STLs in{" "}
+            <Link className="underline" to={buildSourcesRoute(selectedProfileId)}>
+              Sources
+            </Link>{" "}
+            or open Plan to assemble parts
           </span>
         ) : null}
 
@@ -224,10 +228,10 @@ export default function PlanTray() {
               navigate(to);
             }}
           >
-            Export {'>'}
+            Production
           </Button>
           <Button size="sm" className="h-8" asChild>
-            <Link to={planRoute(selectedProfileId)}>Open plan →</Link>
+            <Link to={planRoute(selectedProfileId)}>Open Plan</Link>
           </Button>
           <Button
             type="button"

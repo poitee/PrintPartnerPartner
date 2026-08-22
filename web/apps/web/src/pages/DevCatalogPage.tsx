@@ -26,7 +26,8 @@ const INVENTORY: Array<{ name: string; status: "Keep" | "Revise" | "Merge" | "Re
   { name: "export/accepted-plates/*", status: "Keep", why: "Production owner; saved XY, pin, Arrange, and transfer are in code." },
   { name: "share/IncomingSharesCard", status: "Keep", why: "Mounted on Builds; outgoing sharing stays live." },
   { name: "settings/PrintersSettingsCard", status: "Keep", why: "Global Printers owns setup; Settings keeps a copy plus Library." },
-  { name: "PlanTray leftover copy", status: "Revise", why: "Still says plan in places the spine already owns." },
+  { name: "PlanTray leftover copy", status: "Keep", why: "Build summary tray; Sources and Production labels match the spine." },
+  { name: "PartsPage/ExportPage filenames", status: "Revise", why: "Lazy-loaded behind /plan and /export; callers already migrated." },
   { name: "WelcomePage", status: "Remove", why: "Deleted; Builds is home." },
 ];
 
