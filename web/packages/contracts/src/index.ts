@@ -336,15 +336,15 @@ export type PrinterSendQueueItem = {
   /** Absolute path under data/exports/printer-uploads/… */
   artifact_path: string;
   /**
-   * Preferred fleet printer. For `match: "compatible"`, bed size (and optional
-   * Progress filament) are taken from this machine; drain may reassign to
-   * another idle host with the same bed.
+   * Queued Printer. Drain and dispatch always send to this host. Same-bed
+   * twins may appear in suggestions, but a sliced file is never moved
+   * automatically.
    */
   printer_id: string;
   /**
    * `pinned` (default): wait for this printer only.
-   * `compatible`: pick any idle linked Moonraker/PrusaLink with the same bed;
-   * prefer loaded-filament overlap with tracked Progress units.
+   * `compatible`: retained for suggestion ranking against same-bed idle
+   * hosts. Dispatch still sends only to `printer_id`.
    */
   match?: PrinterSendQueueMatch;
   /** When true, wait for host Idle before dispatch (default). */
