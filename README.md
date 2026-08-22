@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Self-hostable desk workflow for layered STL kits</strong><br>
-  Sync kit repos, compose a plan, pack plates, export, and check off prints — one Docker container on your LAN.
+  Sync kit repositories, compose a plan, pack plates, export files, and track prints in one Docker container on your LAN.
 </p>
 
 <p align="center">
@@ -17,9 +17,9 @@
 <p align="center">
   <a href="https://poitee.github.io/PrintPartnerPartner/">Project site</a>
   ·
-  <a href="#quick-start--docker-self-host">Quick start</a>
+  <a href="#start-with-docker">Quick start</a>
   ·
-  <a href="#attach-mcp-cursor--grok--claude">Attach MCP</a>
+  <a href="#connect-an-mcp-client">Connect MCP</a>
   ·
   <a href="#screenshots">Screenshots</a>
   ·
@@ -42,10 +42,10 @@
 
 <p align="center">
   <sub>
-    Ships as a single Docker container — <strong>Fastify</strong> API + <strong>React</strong> SPA on port <strong>8080</strong>.
+    One Docker container runs the <strong>Fastify</strong> API and <strong>React</strong> SPA on port <strong>8080</strong>.
     Brand theme with <strong>light</strong>, <strong>dark</strong>, or <strong>system</strong> preference. Data stays in a volume you control.
-    Attach <strong>Cursor / Grok / Claude</strong> over HTTP MCP (kit brain; confirm-to-apply — no in-app Kit Advisor).
-    Multi-tenant <strong>SaaS</strong> mode includes S3 + OAuth; its Postgres compatibility bridge remains experimental.
+    Attach <strong>Cursor</strong>, <strong>Grok</strong>, or <strong>Claude</strong> over HTTP MCP. Write operations require confirmation.
+    Multi-tenant <strong>SaaS</strong> mode supports S3 and OAuth. Its Postgres compatibility bridge remains experimental.
   </sub>
 </p>
 
@@ -62,29 +62,29 @@
 | **Checkoff** | Track **print checkoff** (per-unit progress, assembled toggles, filters, printable checklist). |
 | **Production** | Assign Required units to Printers, arrange accepted Plates, download revision-bound 3MFs, open a local slicer, send G-code, and deduct Spoolman when configured. |
 
-**Builds** (home, not a pipeline step after Library): create, rename, duplicate, archive, and restore from **New Build** or the **Builds** page. The active Build is shared across Sources, Plan, Checkoff, and Production.
+Manage Builds from **New Build** or the **Builds** page. You can create, rename, duplicate, archive, and restore Builds there. The active Build is shared across Sources, Plan, Checkoff, and Production.
 
-**MCP attach:** Print Partner is the kit brain. Connect Cursor / Grok / Claude to HTTP MCP (`/api/v1/mcp` + `PRINT_PARTNER_API_KEY`). Mutations stay confirm-to-apply. Guide: [`docs/assistant-mcp.md`](docs/assistant-mcp.md). There is **no in-app Ask / Kit Advisor sheet** and **no Settings → AI**.
+To use Print Partner through an agent, connect Cursor, Grok, or Claude to `/api/v1/mcp`. Set `PRINT_PARTNER_API_KEY` when the server is not bound to loopback. Write operations remain pending until you confirm them. See [Connect an MCP client](docs/assistant-mcp.md). Print Partner has no in-app chat or AI settings.
 
-**Tips:** **⌘K / Ctrl+K** opens the command palette (sync, recompute, exports, navigation). Collapse the left spine to an icon rail. Open **Help** for the full workflow guide.
+Press **Cmd+K** on macOS or **Ctrl+K** on Windows and Linux to open the command palette. Use it to sync sources, recompute plans, start exports, or navigate. Open **Help** for the full workflow guide.
 
 Optional integrations:
 
-- **[Spoolman](docs/integrations/SPOOLMAN.md)** — pick filaments from inventory on Sources; read-only remaining weights in Plan; optional deduct on send.
-- **Live printers** — **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload with verify-first Checkoff; **Bambu** LAN MQTT is status-only (send deferred). See **[Printer setup](docs/integrations/PRINTER_SETUP.md)**.
-- **Local slicers** — optional Orca/Prusa/Bambu GUI containers with profile watch volumes (`pp-compose.yml`). Print Partner hands off accepted 3MFs; profile and slicing choices stay in the slicer.
-- **Discord digest / Home Assistant** — optional overnight farm digest and HA hooks when configured.
-- **Backups, metrics, rate limits, API keys** — see [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+- [Spoolman](docs/integrations/SPOOLMAN.md) supplies filament inventory and optional usage deductions.
+- [Live printer support](docs/integrations/PRINTER_SETUP.md) covers status and G-code uploads for Moonraker and PrusaLink. Bambu LAN MQTT support is status-only.
+- Optional OrcaSlicer, PrusaSlicer, and Bambu Studio containers watch local profiles. Print Partner hands accepted 3MF files to the slicer. See `pp-compose.yml`.
+- Discord digests and Home Assistant hooks report farm activity when configured.
+- [Operations](docs/OPERATIONS.md) covers backups, metrics, rate limits, and API keys.
 
 ---
 
-## Attach MCP (Cursor / Grok / Claude)
+## Connect an MCP client
 
 Print Partner exposes product tools over **streamable HTTP MCP** on the running host.
 
 | | |
 |--|--|
-| URL | `https://<host>/api/v1/mcp` (remote) · `http://127.0.0.1:<port>/api/v1/mcp` (loopback/tunnel only) |
+| URL | `https://<host>/api/v1/mcp` for remote access, or `http://127.0.0.1:<port>/api/v1/mcp` for loopback access |
 | Auth | `PRINT_PARTNER_API_KEY` required when `HOST` is not loopback |
 | Cursor plugin | [`cursor-plugin/print-partner`](cursor-plugin/print-partner) |
 | Connect guide | [`docs/assistant-mcp.md`](docs/assistant-mcp.md) |
@@ -94,7 +94,7 @@ Print Partner exposes product tools over **streamable HTTP MCP** on the running 
 
 ## Screenshots
 
-Screenshots switch with your GitHub **light / dark** theme (or see both on the [project site](https://poitee.github.io/PrintPartnerPartner/)).
+GitHub selects the light or dark screenshots to match your theme. The [project site](https://poitee.github.io/PrintPartnerPartner/) shows both themes.
 
 ### Library
 
@@ -158,7 +158,7 @@ Assign Required units to Printers, arrange accepted Plates, download revision-bo
 
 ---
 
-## Quick start — Docker self-host
+## Start with Docker
 
 **Requirements:** Docker with Compose v2.
 
@@ -171,8 +171,8 @@ docker compose pull && docker compose up -d
 Open [http://localhost:8080](http://localhost:8080). Data persists in the `print-partner-data` volume, mounted at `/data` inside the container (SQLite database, synced repos, exports, and thumbnails).
 
 <!-- release-version:start -->
-Images are published to **`ghcr.io/poitee/print-partner`** (`latest` plus a tag
-per release, e.g. `3.2.0`). Compose defaults to the prepared `3.2.0` tag; set
+Images are published to `ghcr.io/poitee/print-partner` as `latest` and with one tag
+per release, such as `3.2.0`. Compose defaults to the tested `3.2.0` tag. Set
 `PRINT_PARTNER_VERSION` to another release explicitly. To build from source
 instead:
 
@@ -180,7 +180,7 @@ instead:
 docker compose up --build
 ```
 
-**LAN Docker host tip:** replace `localhost` with the host’s LAN IP (e.g. `http://192.168.x.x:8080`) from other machines on the network. Keep `PRINT_PARTNER_API_KEY` set if you expose MCP beyond loopback.
+To open Print Partner from another computer on your LAN, replace `localhost` with the Docker host's IP, such as `http://192.168.x.x:8080`. Set `PRINT_PARTNER_API_KEY` before you expose MCP beyond loopback.
 
 **New to Docker?** See the step-by-step guide in [`docs/INSTALL.md`](docs/INSTALL.md). Quick checklist:
 
@@ -269,7 +269,7 @@ See [`web/DEPLOY.md`](web/DEPLOY.md) for SaaS environment variables, auth routes
 
 ---
 
-## Architecture / monorepo layout
+## Architecture and monorepo layout
 
 The application lives in the `web/` TypeScript monorepo; the `Dockerfile` and Compose files stay at the repository root.
 
@@ -299,19 +299,17 @@ The server uses a **ports/adapters** design: a `self-host` adapter (SQLite + loc
 
 ## Support
 
-If Print Partner saves you time on a kit build, **[GitHub Sponsors](https://github.com/sponsors/poitee)** helps fund development. Sponsorships are voluntary and do not grant commercial license rights — see [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md).
+If Print Partner saves you time on a kit build, [GitHub Sponsors](https://github.com/sponsors/poitee) helps fund development. Sponsorship does not grant commercial license rights. See the [license summary](LICENSE-SUMMARY.md).
 
 ---
 
-## License & attribution
+## License and attribution
 
 Print Partner is licensed under the **[Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)](LICENSE)**. Plain-language summary: [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md).
 
-Print Partner builds on **[ThunderKeys' STL Manifest Generator](https://github.com/thunderkeys/stl-manifest-generator)** — see [ATTRIBUTION.md](ATTRIBUTION.md).
+Print Partner builds on [ThunderKeys' STL Manifest Generator](https://github.com/thunderkeys/stl-manifest-generator). See [ATTRIBUTION.md](ATTRIBUTION.md) for project attribution.
 
-- **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)** — bundled dependency notices
-
-Credits (people only): **Chad Lynch** ([@poitee](https://github.com/poitee)), **ThunderKeys** ([@thunderkeys](https://github.com/thunderkeys)).
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists bundled dependencies and their licenses.
 
 ---
 

@@ -1,4 +1,4 @@
-# Print Partner — Web Platform
+# Print Partner web platform
 
 TypeScript monorepo for the browser-hosted Print Partner.
 
@@ -35,14 +35,14 @@ does not provide native repository transactions. Production startup requires
 [DEPLOY.md](./DEPLOY.md) for Docker Compose, credentials, and environment
 variables.
 
-## Tests
+## Test changes
 
 ```bash
 cd web
 npm test
 ```
 
-See [scripts/SMOKE_CHECKLIST.md](./scripts/SMOKE_CHECKLIST.md) for manual QA.
+Run `npm run quality` before opening a pull request. It runs linting, type checks, unit tests, workflow smoke tests, the production build, and browser tests. See the [smoke-test checklist](./scripts/SMOKE_CHECKLIST.md) for manual checks.
 
 ## Changelog
 
