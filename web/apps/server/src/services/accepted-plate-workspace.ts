@@ -448,6 +448,22 @@ function currentPlateInputs(plates: readonly AcceptedPlate[]): AcceptedPlateInpu
   }));
 }
 
+function mergeLeftoverPlates(
+  input: Extract<ReadAcceptedPlateWorkspaceInputResult, { kind: "setup" | "ready" }>,
+  packed: readonly AcceptedPlateInput[],
+  assignments: InitializeAcceptedPlatesCommand["assignments"],
+): readonly AcceptedPlateInput[] {
+  if (input.kind !== "ready") return packed;
+  const existingTokens = new Set(
+    input.plates.flatMap((plate) => plate.units.map((unit) => unit.token)),
+  );
+  const reassignsExisting = assignments.some(
+    (assignment) => assignment.printerId != null && existingTokens.has(assignment.token),
+  );
+  if (reassignsExisting) return packed;
+  return [...currentPlateInputs(input.plates), ...packed];
+}
+
 function samePlateInputs(left: readonly AcceptedPlateInput[], right: readonly AcceptedPlateInput[]): boolean {
   if (left.length !== right.length) return false;
   return left.every((plate, plateIndex) => {
@@ -577,12 +593,13 @@ export async function initializeAcceptedPlates(
     dimensions,
   });
   if (!isPackedPlateInputs(packed)) return packed;
+  const plates = mergeLeftoverPlates(input, packed, command.assignments);
 
   const published = dependencies.repository.publishAcceptedPlates({
     profileId: command.profileId,
     expected: command.expected,
     expectedPlateRevisionId: command.expectedPlateRevisionId,
-    plates: packed,
+    plates,
   });
   if (published.kind !== "published" && published.kind !== "unchanged") return published;
   return {
@@ -592,7 +609,7 @@ export async function initializeAcceptedPlates(
       plateRevisionId: published.plateRevisionId,
       plateRevisionNumber: published.plateRevisionNumber,
       printers,
-      plates: packed,
+      plates,
       units: input.units,
     }),
   };

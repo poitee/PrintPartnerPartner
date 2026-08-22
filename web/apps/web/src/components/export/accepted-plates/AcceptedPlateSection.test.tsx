@@ -174,3 +174,52 @@ describe("AcceptedPlateSection transfers", () => {
     });
   });
 });
+
+describe("AcceptedPlateSection leftover Missing units", () => {
+  it("lets leftover Missing units be assigned without rearranging existing Plates", () => {
+    const leftover = `ppu_${"d".repeat(32)}`;
+    const plateId = `plate_${"c".repeat(32)}`;
+    mockWorkspace = parseAcceptedPlateWorkspace({
+      kind: "ready",
+      basis,
+      plate_revision_id: 19,
+      plate_revision_number: 2,
+      printers: [printer],
+      plates: [{
+        plate_id: plateId,
+        ordinal: 1,
+        printer,
+        units: [{
+          token,
+          object_name: `bracket__${token}`,
+          filename: "bracket.stl",
+          source_layer: "Hardware",
+          role: "primary",
+          filament_color_id: null,
+          x_um: 4_000,
+          y_um: 5_000,
+          width_um: 30_000,
+          depth_um: 20_000,
+          height_um: 10_000,
+        }],
+      }],
+      unassigned: [{
+        token: leftover,
+        object_name: `clip__${leftover}`,
+        filename: "clip.stl",
+        source_layer: "Hardware",
+        role: "primary",
+        filament_color_id: null,
+      }],
+    });
+    const queryClient = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    render(<AcceptedPlateSection profileId={7} enabled />, { wrapper });
+
+    expect(screen.getByText(`clip__${leftover}`)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Arrange Plates" })).toBeTruthy();
+    expect(screen.queryByText("Rearranging replaces all manual Plate positions.")).toBeNull();
+  });
+});

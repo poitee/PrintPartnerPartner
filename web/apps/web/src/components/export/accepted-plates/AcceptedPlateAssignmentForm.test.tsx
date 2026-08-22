@@ -187,4 +187,57 @@ describe("AcceptedPlateAssignmentForm", () => {
       ],
     })));
   });
+
+  it("includes leftover Missing units on a ready workspace so they can be assigned", async () => {
+    const leftover = `ppu_${"d".repeat(32)}`;
+    const workspace = parseAcceptedPlateWorkspace({
+      kind: "ready",
+      basis,
+      plate_revision_id: 19,
+      plate_revision_number: 2,
+      printers: [printer],
+      plates: [{
+        plate_id: plateId,
+        ordinal: 1,
+        printer,
+        units: [{
+          ...unit,
+          x_um: 4_000,
+          y_um: 5_000,
+          width_um: 30_000,
+          depth_um: 20_000,
+          height_um: 10_000,
+        }],
+      }],
+      unassigned: [{
+        ...unit,
+        token: leftover,
+        object_name: `clip__${leftover}`,
+        filename: "clip.stl",
+      }],
+    });
+    if (workspace.kind !== "ready") throw new Error("Expected ready workspace");
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AcceptedPlateAssignmentForm
+        workspace={workspace}
+        submitting={false}
+        selectedTokens={new Set([leftover])}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.getByText(`clip__${leftover}`)).toBeTruthy();
+    expect(screen.queryByText(unit.object_name)).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Printer" }), {
+      target: { value: printer.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Arrange Plates" }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      assignments: [{ token: leftover, printer_id: printer.id }],
+    }));
+  });
 });

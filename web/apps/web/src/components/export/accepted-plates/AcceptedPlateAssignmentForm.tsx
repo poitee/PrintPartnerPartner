@@ -23,10 +23,21 @@ function assignmentRows(workspace: AssignmentWorkspace) {
       return { unit, printerId };
     });
   }
-  return workspace.plates.flatMap((plate) => plate.units.map((unit) => ({
+  const plated = workspace.plates.flatMap((plate) => plate.units.map((unit) => ({
     unit,
     printerId: currentPrinterIds.has(plate.printer.id) ? plate.printer.id : null,
   })));
+  const leftover = workspace.unassigned.map((unit) => ({ unit, printerId: null as string | null }));
+  return [...plated, ...leftover];
+}
+
+function isLeftoverOnlyAssignment(
+  workspace: AssignmentWorkspace,
+  rows: ReturnType<typeof assignmentRows>,
+): boolean {
+  if (workspace.kind !== "ready" || rows.length === 0) return false;
+  const leftoverTokens = new Set(workspace.unassigned.map((unit) => unit.token));
+  return rows.every((row) => leftoverTokens.has(row.unit.token));
 }
 
 export default function AcceptedPlateAssignmentForm({
@@ -46,6 +57,7 @@ export default function AcceptedPlateAssignmentForm({
   );
   const sourceLayers = useMemo(() => [...new Set(rows.map((row) => row.unit.source_layer))], [rows]);
   const roles = useMemo(() => [...new Set(rows.map((row) => row.unit.role))], [rows]);
+  const leftoverOnly = isLeftoverOnlyAssignment(workspace, rows);
   const complete = rows.length > 0 && rows.every((row) => {
     const printerId = assignments[row.unit.token];
     return printerId != null && workspace.printers.some((printer) => printer.id === printerId);
@@ -99,7 +111,7 @@ export default function AcceptedPlateAssignmentForm({
 
   return (
     <div className="space-y-4">
-      {workspace.kind === "ready" ? (
+      {workspace.kind === "ready" && !leftoverOnly ? (
         <p className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
           Rearranging replaces all manual Plate positions.
         </p>
@@ -160,7 +172,7 @@ export default function AcceptedPlateAssignmentForm({
       </div>
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => void submit()} disabled={!complete || submitting} loading={submitting}>
-          {workspace.kind === "ready" ? "Rearrange Plates" : "Arrange Plates"}
+          {workspace.kind === "ready" && !leftoverOnly ? "Rearrange Plates" : "Arrange Plates"}
         </Button>
         {onCancel ? (
           <Button variant="ghost" onClick={onCancel} disabled={submitting}>Cancel</Button>

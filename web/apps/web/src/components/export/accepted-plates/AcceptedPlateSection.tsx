@@ -268,6 +268,15 @@ export default function AcceptedPlateSection({ profileId, enabled, selectedToken
             onCancel={() => setReassigning(false)}
           />
         ) : null}
+        {workspace?.kind === "ready" && !reassigning && workspace.unassigned.length > 0 ? (
+          <AcceptedPlateAssignmentForm
+            key={`${assignmentIdentity(workspace)}:leftover`}
+            workspace={workspace}
+            submitting={initialize.isPending}
+            selectedTokens={new Set(workspace.unassigned.map((unit) => unit.token))}
+            onSubmit={submitAssignments}
+          />
+        ) : null}
         {workspace?.kind === "ready" && !reassigning ? (
           <AcceptedPlateGallery
             workspace={workspace}

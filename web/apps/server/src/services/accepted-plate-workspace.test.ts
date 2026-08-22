@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseAcceptedStlMesh } from "@print-partner/domain";
-import type { AcceptedPlateInput } from "../db/accepted-plates.js";
+import type { AcceptedPlateInput, ReadAcceptedPlateWorkspaceInputResult } from "../db/accepted-plates.js";
 import { parseRequiredUnitToken } from "./required-units.js";
 import {
   initializeAcceptedPlates,
@@ -33,7 +33,7 @@ const setupInput = {
   }],
 };
 
-function dependencies(input = setupInput): AcceptedPlateWorkspaceDependencies & {
+function dependencies(input: ReadAcceptedPlateWorkspaceInputResult = setupInput): AcceptedPlateWorkspaceDependencies & {
   publish: ReturnType<typeof vi.fn>;
   loadGeometry: ReturnType<typeof vi.fn>;
 } {
@@ -284,6 +284,92 @@ describe("accepted Plate workspace", () => {
       plates: [expect.objectContaining({
         units: [expect.objectContaining({ token })],
       })],
+    }));
+  });
+
+  it("assigns leftover Missing units onto a ready workspace without replacing existing Plates", async () => {
+    const second = parseRequiredUnitToken("ppu_00000000000000000000000000000002");
+    const existingPlateId = `plate_${"c".repeat(32)}`;
+    const readyInput = {
+      kind: "ready" as const,
+      basis,
+      expectedPlateRevisionId: 31,
+      plateRevisionId: 31,
+      plateRevisionNumber: 1,
+      undoFromRevisionId: null,
+      units: [
+        setupInput.units[0],
+        {
+          ...setupInput.units[0],
+          token: second,
+          objectName: `clip__${second}`,
+          filename: "clip.stl",
+        },
+      ],
+      plates: [{
+        plateId: existingPlateId,
+        ordinal: 1,
+        printerId: "printer-one",
+        printerName: "Printer One",
+        printerModel: "Model One",
+        bedWidthUm: 250_000,
+        bedDepthUm: 210_000,
+        bedHeightUm: 200_000,
+        marginUm: 4_000,
+        units: [{
+          token,
+          objectName: `bracket__${token}`,
+          xUm: 20_000,
+          yUm: 20_000,
+          widthUm: 30_000,
+          depthUm: 20_000,
+          heightUm: 10_000,
+          placement: "pinned" as const,
+        }],
+      }],
+    };
+    const deps = dependencies(readyInput);
+    deps.loadGeometry.mockResolvedValue({
+      kind: "ready",
+      geometryByToken: new Map([[second, geometry()]]),
+    });
+    deps.publish.mockReturnValue({
+      kind: "published",
+      plateRevisionId: 32,
+      plateRevisionNumber: 2,
+    });
+
+    const result = await initializeAcceptedPlates(deps, {
+      profileId: 7,
+      expected: basis,
+      expectedPlateRevisionId: 31,
+      assignments: [{ token: second, printerId: "printer-one" }],
+    });
+
+    expect(result).toMatchObject({
+      kind: "workspace",
+      workspace: {
+        kind: "ready",
+        plate_revision_id: 32,
+        plates: [
+          { plate_id: existingPlateId, units: [{ token, x_um: 20_000, y_um: 20_000 }] },
+          { units: [{ token: second }] },
+        ],
+      },
+    });
+    expect(deps.loadGeometry).toHaveBeenCalledWith(expect.objectContaining({
+      units: [expect.objectContaining({ token: second })],
+    }));
+    expect(deps.publish).toHaveBeenCalledWith(expect.objectContaining({
+      plates: [
+        expect.objectContaining({
+          plateId: existingPlateId,
+          units: [expect.objectContaining({ token, xUm: 20_000, yUm: 20_000, placement: "pinned" })],
+        }),
+        expect.objectContaining({
+          units: [expect.objectContaining({ token: second })],
+        }),
+      ],
     }));
   });
 
