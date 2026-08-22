@@ -108,6 +108,7 @@ export function publishAcceptedPlateUnplace(
         source_layer: unit.source_layer,
         role: unit.role,
         filament_color_id: unit.filament_color_id,
+        completed: unit.completed,
         plate_id: plate.plate_id,
         printer_id: plate.printer.id,
         width_um: unit.width_um,

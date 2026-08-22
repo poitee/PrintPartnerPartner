@@ -36,6 +36,13 @@ export function productionRoute(profileId?: number | null): string {
   return withProfile("/export", profileId ?? null);
 }
 
+/** Open Production with every Missing Required unit selected. */
+export function prepareMissingPartsRoute(profileId?: number | null): string {
+  const path = productionRoute(profileId);
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}select=missing`;
+}
+
 /** @deprecated Prefer `productionRoute`. */
 export function exportRoute(profileId?: number | null): string {
   return productionRoute(profileId);

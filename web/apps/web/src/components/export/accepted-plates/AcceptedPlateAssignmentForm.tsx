@@ -10,6 +10,7 @@ type AssignmentWorkspace = Extract<AcceptedPlateWorkspace, { kind: "setup" | "re
 type Props = Readonly<{
   workspace: AssignmentWorkspace;
   submitting: boolean;
+  selectedTokens?: ReadonlySet<string>;
   onSubmit: (request: InitializeAcceptedPlatesRequest) => Promise<void>;
   onCancel?: () => void;
 }>;
@@ -31,16 +32,21 @@ function assignmentRows(workspace: AssignmentWorkspace) {
 export default function AcceptedPlateAssignmentForm({
   workspace,
   submitting,
+  selectedTokens,
   onSubmit,
   onCancel,
 }: Props) {
-  const rows = useMemo(() => assignmentRows(workspace), [workspace]);
+  const rows = useMemo(() => {
+    const all = assignmentRows(workspace);
+    if (selectedTokens == null) return all;
+    return all.filter((row) => selectedTokens.has(row.unit.token));
+  }, [selectedTokens, workspace]);
   const [assignments, setAssignments] = useState<Record<string, string | null>>(() =>
     Object.fromEntries(rows.map((row) => [row.unit.token, row.printerId])),
   );
   const sourceLayers = useMemo(() => [...new Set(rows.map((row) => row.unit.source_layer))], [rows]);
   const roles = useMemo(() => [...new Set(rows.map((row) => row.unit.role))], [rows]);
-  const complete = rows.every((row) => {
+  const complete = rows.length > 0 && rows.every((row) => {
     const printerId = assignments[row.unit.token];
     return printerId != null && workspace.printers.some((printer) => printer.id === printerId);
   });

@@ -143,4 +143,48 @@ describe("AcceptedPlateAssignmentForm", () => {
       ],
     })));
   });
+
+  it("submits only the selected Required units so cleared units stay Missing", async () => {
+    const secondToken = `ppu_${"d".repeat(32)}`;
+    const thirdToken = `ppu_${"e".repeat(32)}`;
+    const workspace = parseAcceptedPlateWorkspace({
+      kind: "setup",
+      basis,
+      expected_plate_revision_id: null,
+      printers: [printer],
+      units: [
+        unit,
+        { ...unit, token: secondToken, object_name: `clip__${secondToken}` },
+        {
+          ...unit,
+          token: thirdToken,
+          object_name: `knob__${thirdToken}`,
+          source_layer: "Controls",
+        },
+      ],
+    });
+    if (workspace.kind !== "setup") throw new Error("Expected setup workspace");
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AcceptedPlateAssignmentForm
+        workspace={workspace}
+        submitting={false}
+        selectedTokens={new Set([unit.token, secondToken])}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    expect(screen.queryByText(`knob__${thirdToken}`)).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Assign Hardware Source layer" }), {
+      target: { value: printer.id },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Arrange Plates" }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      assignments: [
+        { token: unit.token, printer_id: printer.id },
+        { token: secondToken, printer_id: printer.id },
+      ],
+    })));
+  });
 });

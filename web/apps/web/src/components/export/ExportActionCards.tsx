@@ -1,6 +1,6 @@
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
-import { parseDirectExportJobResult } from "@print-partner/contracts";
+import { parseDirectExportJobResult, type RequiredUnitToken } from "@print-partner/contracts";
 import {
   startExportStlPack,
   type RoleFilamentRow,
@@ -41,9 +41,14 @@ import DirectExportCard from "./DirectExportCard";
 type Props = Readonly<{
   onShare: () => void;
   roleFilaments?: RoleFilamentRow[];
+  selectedTokens?: RequiredUnitToken[];
 }>;
 
-export default function ExportActionCards({ onShare, roleFilaments = [] }: Props) {
+export default function ExportActionCards({
+  onShare,
+  roleFilaments = [],
+  selectedTokens,
+}: Props) {
   const { health } = useEngineHealth();
   const { selectedProfileId } = useProfileSelection();
   const { review } = usePlanWorkspace();
@@ -53,7 +58,7 @@ export default function ExportActionCards({ onShare, roleFilaments = [] }: Props
     selectedProfileId,
     selectedProfileId != null && Boolean(health),
   );
-  const tokens = directExportTokensFromWorkspace(workspace.data);
+  const tokens = selectedTokens ?? directExportTokensFromWorkspace(workspace.data);
   const includedParts = review
     ? flattenReviewParts(review.part_groups).filter((part) => part.included)
     : [];

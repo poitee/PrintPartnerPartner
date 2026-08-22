@@ -1,5 +1,5 @@
-import { lazy, Suspense, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { FileArchive } from "lucide-react";
 import DeskNextStep from "../components/layout/DeskNextStep";
 import PageHeader from "../components/layout/PageHeader";
@@ -7,12 +7,14 @@ import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
 import ExportActionCards from "../components/export/ExportActionCards";
 import ExportRecentPanel from "../components/export/ExportRecentPanel";
 import PartsManifestTransfer from "../components/export/PartsManifestTransfer";
+import ProductionSelectionPanel from "../components/export/ProductionSelectionPanel";
 import SlicerLinksPanel from "../components/export/SlicerLinksPanel";
 import SlicerHandoffPanel from "../components/export/SlicerHandoffPanel";
 import AcceptedPlateSection from "../components/export/accepted-plates/AcceptedPlateSection";
 // Lazy: PrinterSendPanel pulls in heavy printer integration + dnd-kit
 const PrinterSendPanel = lazy(() => import("../components/export/PrinterSendPanel"));
 import ShareBuildExportDialog from "../components/share/ShareBuildExportDialog";
+import type { RequiredUnitToken } from "@print-partner/contracts";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
@@ -20,10 +22,18 @@ import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useSourcesQuery } from "../queries/sources";
 import { useRoleFilamentsQuery } from "../queries/roleFilaments";
+import { useAcceptedPlateWorkspaceQuery } from "../queries/acceptedPlates";
 import { checkoffUnitTotals } from "../lib/checkoffProgress";
 import { deskNextStepLine } from "../lib/deskNextStep";
 import { flattenReviewParts } from "../lib/reviewParts";
 import { planRoute } from "../lib/routes";
+import {
+  clearProductionSelectionGroup,
+  initialProductionSelection,
+  productionSelectableUnits,
+  selectedProductionTokens,
+  toggleProductionUnit,
+} from "../lib/productionSelection";
 import { cn } from "../lib/utils";
 import {
   getBackgroundError,
@@ -50,6 +60,7 @@ export default function ExportPage() {
     usePlanWorkspace();
   const { data: sources = [] } = useSourcesQuery();
   const [shareOpen, setShareOpen] = useState(false);
+  const [searchParams] = useSearchParams();
   const roleFilamentsQuery = useRoleFilamentsQuery(
     selectedProfileId,
     Boolean(health?.ok),
@@ -93,6 +104,23 @@ export default function ExportPage() {
   );
   const remainingUnits = checkoffUnitTotals(includedParts).remainingUnits;
   const exportNextStep = deskNextStepLine("export", { remainingUnits });
+  const workspaceQuery = useAcceptedPlateWorkspaceQuery(
+    selectedProfileId,
+    selectedProfileId != null && engineState === "ready",
+  );
+  const selectableUnits = useMemo(
+    () => productionSelectableUnits(workspaceQuery.data ?? { kind: "empty_plan" }),
+    [workspaceQuery.data],
+  );
+  const selectParam = searchParams.get("select");
+  const selectionKey = `${selectParam ?? ""}:${selectableUnits.map((unit) => unit.token).join(",")}`;
+  const [selection, setSelection] = useState<ReadonlySet<RequiredUnitToken>>(() => new Set());
+  useEffect(() => {
+    setSelection(initialProductionSelection(selectableUnits, selectParam));
+    // Reset only when the Required-unit set or select= query changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selectionKey already encodes those inputs
+  }, [selectionKey]);
+  const selectedTokens = selectedProductionTokens(selectableUnits, selection);
 
   const planIdentity =
     planName && includedParts.length > 0
@@ -180,9 +208,26 @@ export default function ExportPage() {
               Allocate units to a Printer, arrange them, then export each Plate as its own 3MF.
             </p>
 
+            {selectableUnits.length > 0 ? (
+              <ProductionSelectionPanel
+                units={selectableUnits}
+                selection={selection}
+                onToggle={(token) => setSelection((current) => toggleProductionUnit(current, token))}
+                onClearGroup={(field, value) => setSelection((current) =>
+                  clearProductionSelectionGroup(current, selectableUnits, field, value)
+                )}
+              />
+            ) : null}
+
             <SlicerLinksPanel />
             {selectedProfileId != null ? (
-              <AcceptedPlateSection profileId={selectedProfileId} enabled={engineState === "ready"} />
+              <AcceptedPlateSection
+                profileId={selectedProfileId}
+                enabled={engineState === "ready"}
+                selectedTokens={
+                  workspaceQuery.data?.kind === "setup" ? new Set(selectedTokens) : undefined
+                }
+              />
             ) : null}
             <SlicerHandoffPanel />
 
@@ -228,6 +273,7 @@ export default function ExportPage() {
                   <ExportActionCards
                     onShare={() => setShareOpen(true)}
                     roleFilaments={roleFilaments}
+                    selectedTokens={selectedTokens}
                   />
                 </div>
                 <ExportRecentPanel />

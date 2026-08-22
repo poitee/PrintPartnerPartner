@@ -198,6 +198,17 @@ describe("CheckoffPage accessibility", () => {
     expect(folderTitle?.tagName).toBe("H4");
   });
 
+  it("opens Prepare missing parts with Missing Required units selected", () => {
+    render(
+      <MemoryRouter>
+        <CheckoffPage />
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole("link", { name: "Prepare missing parts" });
+    expect(link.getAttribute("href")).toBe("/export?profile=7&select=missing");
+  });
+
   it("announces initial progress failures as alerts", () => {
     state.profiles = [];
     state.profilesError = "profiles unavailable";

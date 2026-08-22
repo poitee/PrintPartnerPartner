@@ -25,6 +25,7 @@ const INVENTORY: Array<{ name: string; status: "Keep" | "Revise" | "Merge" | "Re
   { name: "checkoff/PrintVerifyPanel", status: "Keep", why: "Build Checkoff owns verification." },
   { name: "export/accepted-plates/*", status: "Keep", why: "Production owner; saved XY, pin, Arrange, and transfer are in code." },
   { name: "export/DirectExportCard", status: "Keep", why: "Direct export skips arrangement and writes one named-object 3MF." },
+  { name: "export/ProductionSelectionPanel", status: "Keep", why: "Prepare missing parts selects Required units before Prepare Plates or Direct export." },
   { name: "share/IncomingSharesCard", status: "Keep", why: "Mounted on Builds; outgoing sharing stays live." },
   { name: "settings/PrintersSettingsCard", status: "Keep", why: "Global Printers owns setup; Settings keeps a copy plus Library." },
   { name: "PlanTray leftover copy", status: "Keep", why: "Build summary tray; Sources and Production labels match the spine." },

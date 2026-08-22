@@ -35,6 +35,7 @@ import AcceptedPlateGallery, { UNUSED_PRINTER_TRANSFER_PREFIX } from "./Accepted
 type Props = Readonly<{
   profileId: number;
   enabled: boolean;
+  selectedTokens?: ReadonlySet<string>;
 }>;
 
 function assignmentIdentity(
@@ -52,7 +53,7 @@ function assignmentIdentity(
   ].join(":");
 }
 
-export default function AcceptedPlateSection({ profileId, enabled }: Props) {
+export default function AcceptedPlateSection({ profileId, enabled, selectedTokens }: Props) {
   const queryClient = useQueryClient();
   const query = useAcceptedPlateWorkspaceQuery(profileId, enabled);
   const initialize = useInitializeAcceptedPlatesMutation(profileId);
@@ -253,6 +254,7 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
               key={assignmentIdentity(workspace)}
               workspace={workspace}
               submitting={initialize.isPending}
+              selectedTokens={workspace.kind === "setup" ? selectedTokens : undefined}
               onSubmit={submitAssignments}
             />
           </>

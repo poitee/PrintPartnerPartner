@@ -27,6 +27,7 @@ import {
   productionRoute,
   progressRoute,
   printersSetupRoute,
+  prepareMissingPartsRoute,
   reviewRoute,
   withProfile,
 } from "./routes";
@@ -60,6 +61,7 @@ describe("workflow routes", () => {
     expect(progressRoute(5)).toBe("/progress?profile=5");
     expect(productionRoute(5)).toBe("/export?profile=5");
     expect(exportRoute(5)).toBe("/export?profile=5");
+    expect(prepareMissingPartsRoute(5)).toBe("/export?profile=5&select=missing");
     expect(buildsRoute(5)).toBe("/builds?profile=5");
     expect(plansRoute(5)).toBe("/builds?profile=5");
     expect(catalogRoute()).toBe("/dev/catalog");

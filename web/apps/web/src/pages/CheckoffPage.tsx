@@ -57,7 +57,7 @@ import {
   type UnattributedPrint,
 } from "../api/engine";
 import { useBuildTrackingSettingsQuery } from "../queries/buildTracking";
-import { buildSourcesRoute, exportRoute, planRoute } from "../lib/routes";
+import { buildSourcesRoute, planRoute, prepareMissingPartsRoute } from "../lib/routes";
 import { groupCheckoffParts } from "../lib/checkoffGroups";
 import {
   checkoffUnitTotals,
@@ -932,7 +932,7 @@ export default function CheckoffPage() {
                 Print sheet
               </Button>
               <Button className="min-h-10 w-full sm:w-auto" asChild>
-                <Link to={exportRoute(selectedProfileId)}>Production</Link>
+                <Link to={prepareMissingPartsRoute(selectedProfileId)}>Production</Link>
               </Button>
             </PageHeaderActions>
           }
@@ -1272,7 +1272,7 @@ export default function CheckoffPage() {
             <Link to={planRoute(selectedProfileId)}>Back to Plan</Link>
           </Button>
           <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
-            <Link to={exportRoute(selectedProfileId)}>Open Production</Link>
+            <Link to={prepareMissingPartsRoute(selectedProfileId)}>Prepare missing parts</Link>
           </Button>
         </div>
       )}
