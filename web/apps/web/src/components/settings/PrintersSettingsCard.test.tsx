@@ -127,4 +127,31 @@ describe("PrintersSettingsCard", () => {
       ]);
     });
   });
+
+  it("edits a planning Printer's model and bed size without a connection", async () => {
+    api.fetchPrinters.mockResolvedValue([planningPrinter]);
+    render(<PrintersSettingsCard engineReady />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit size" }));
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "Voron 300" } });
+    fireEvent.change(screen.getByLabelText("Width (mm)"), { target: { value: "300" } });
+    fireEvent.change(screen.getByLabelText("Depth (mm)"), { target: { value: "300" } });
+    fireEvent.change(screen.getByLabelText("Height (mm)"), { target: { value: "320" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save size" }));
+
+    await waitFor(() => {
+      expect(api.savePrinterFleet).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: "printer-plan",
+          model: "Voron 300",
+          bed_width_mm: 300,
+          bed_depth_mm: 300,
+          bed_height_mm: 320,
+          preset_id: "preset-voron-250",
+          integration_id: null,
+        }),
+      ]);
+    });
+    expect(api.createIntegration).not.toHaveBeenCalled();
+  });
 });

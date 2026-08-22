@@ -118,6 +118,80 @@ describe("POST /printers", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ detail: "Unknown Printer preset" });
   });
+
+  it("keeps copied model and bed size after the preset_id is unknown", async () => {
+    const app = await makeApp();
+    const created = await app.inject({
+      method: "POST",
+      url: "/printers",
+      payload: { name: "Shop Voron", preset_id: "preset-voron-250" },
+    });
+    expect(created.statusCode).toBe(200);
+    const machine = created.json() as Record<string, unknown>;
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/printers",
+      payload: {
+        printers: [{ ...machine, preset_id: "preset-retired-voron" }],
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+
+    const listed = await app.inject({ method: "GET", url: "/printers" });
+    expect(listed.statusCode).toBe(200);
+    const fleet = listed.json() as { printers: Array<Record<string, unknown>> };
+    expect(fleet.printers).toHaveLength(1);
+    expect(fleet.printers[0]).toMatchObject({
+      id: machine.id,
+      name: "Shop Voron",
+      model: "voron-250",
+      bed_width_mm: 250,
+      bed_depth_mm: 250,
+      bed_height_mm: 250,
+      preset_id: "preset-retired-voron",
+    });
+    expect(fleet.printers[0]?.integration_id ?? null).toBeNull();
+  });
+
+  it("updates a planning Printer's model and bed size without a connection", async () => {
+    const app = await makeApp();
+    const created = await app.inject({
+      method: "POST",
+      url: "/printers",
+      payload: { name: "Shop Voron", preset_id: "preset-voron-250" },
+    });
+    const machine = created.json() as Record<string, unknown>;
+
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/printers",
+      payload: {
+        printers: [
+          {
+            ...machine,
+            model: "Voron 300",
+            bed_width_mm: 300,
+            bed_depth_mm: 300,
+            bed_height_mm: 320,
+          },
+        ],
+      },
+    });
+    expect(saved.statusCode).toBe(200);
+    const fleet = saved.json() as { printers: Array<Record<string, unknown>> };
+    expect(fleet.printers).toHaveLength(1);
+    expect(fleet.printers[0]).toMatchObject({
+      id: machine.id,
+      name: "Shop Voron",
+      model: "Voron 300",
+      bed_width_mm: 300,
+      bed_depth_mm: 300,
+      bed_height_mm: 320,
+      preset_id: "preset-voron-250",
+    });
+    expect(fleet.printers[0]?.integration_id ?? null).toBeNull();
+  });
 });
 
 describe("PUT /printers/:id", () => {

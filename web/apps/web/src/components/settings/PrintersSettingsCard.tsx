@@ -321,6 +321,13 @@ export default function PrintersSettingsCard({ engineReady, onFleetChange }: Pro
   const [customDepth, setCustomDepth] = useState("250");
   const [customHeight, setCustomHeight] = useState("250");
   const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [editingSizeId, setEditingSizeId] = useState<string | null>(null);
+  const [sizeDraft, setSizeDraft] = useState({
+    model: "",
+    width: "",
+    depth: "",
+    height: "",
+  });
   const [pollSeconds, setPollSeconds] = useState<PrinterStatusPollSeconds>(() =>
     readPrinterStatusPollSeconds(),
   );
@@ -613,6 +620,55 @@ export default function PrintersSettingsCard({ engineReady, onFleetChange }: Pro
         await updateIntegration(integrationId, { name: nextName });
       }
       await refresh();
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onStartEditSize = (printer: PrinterMachine) => {
+    setEditingSizeId(printer.id);
+    setSizeDraft({
+      model: printer.model,
+      width: String(printer.bed_width_mm),
+      depth: String(printer.bed_depth_mm),
+      height: printer.bed_height_mm != null ? String(printer.bed_height_mm) : "",
+    });
+  };
+
+  const onSaveSize = async (printer: PrinterMachine) => {
+    const model = sizeDraft.model.trim();
+    const width = Number(sizeDraft.width);
+    const depth = Number(sizeDraft.depth);
+    const height = Number(sizeDraft.height);
+    if (!model) {
+      setLoadError("Model is required.");
+      return;
+    }
+    if (!(width > 0) || !(depth > 0) || !(height > 0)) {
+      setLoadError("Enter custom bed width, depth, and height.");
+      return;
+    }
+    setBusy(true);
+    setLoadError(null);
+    try {
+      const next = printers.map((p) =>
+        p.id === printer.id
+          ? {
+              ...p,
+              model,
+              bed_width_mm: width,
+              bed_depth_mm: depth,
+              bed_height_mm: height,
+            }
+          : p,
+      );
+      const saved = await savePrinterFleet(next);
+      setPrinters(saved);
+      setEditingSizeId(null);
+      onFleetChange?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
       await refresh();
@@ -1043,6 +1099,16 @@ export default function PrintersSettingsCard({ engineReady, onFleetChange }: Pro
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
+                        {!attaching && editingSizeId !== printer.id && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => onStartEditSize(printer)}
+                          >
+                            Edit size
+                          </Button>
+                        )}
                         {!attaching && (
                           <Button
                             variant="secondary"
@@ -1063,6 +1129,80 @@ export default function PrintersSettingsCard({ engineReady, onFleetChange }: Pro
                         </Button>
                       </div>
                     </div>
+                    {editingSizeId === printer.id && (
+                      <div className="space-y-2 border-t border-border pt-2">
+                        <label className="block text-sm">
+                          <span className="mb-1 block text-muted-foreground">Model</span>
+                          <input
+                            className={inputClass}
+                            value={sizeDraft.model}
+                            onChange={(e) =>
+                              setSizeDraft((prev) => ({ ...prev, model: e.target.value }))
+                            }
+                            disabled={!engineReady || busy}
+                            aria-label="Model"
+                          />
+                        </label>
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          <label className="block text-sm">
+                            <span className="mb-1 block text-muted-foreground">Width (mm)</span>
+                            <input
+                              className={inputClass}
+                              inputMode="numeric"
+                              value={sizeDraft.width}
+                              onChange={(e) =>
+                                setSizeDraft((prev) => ({ ...prev, width: e.target.value }))
+                              }
+                              disabled={!engineReady || busy}
+                              aria-label="Width (mm)"
+                            />
+                          </label>
+                          <label className="block text-sm">
+                            <span className="mb-1 block text-muted-foreground">Depth (mm)</span>
+                            <input
+                              className={inputClass}
+                              inputMode="numeric"
+                              value={sizeDraft.depth}
+                              onChange={(e) =>
+                                setSizeDraft((prev) => ({ ...prev, depth: e.target.value }))
+                              }
+                              disabled={!engineReady || busy}
+                              aria-label="Depth (mm)"
+                            />
+                          </label>
+                          <label className="block text-sm">
+                            <span className="mb-1 block text-muted-foreground">Height (mm)</span>
+                            <input
+                              className={inputClass}
+                              inputMode="numeric"
+                              value={sizeDraft.height}
+                              onChange={(e) =>
+                                setSizeDraft((prev) => ({ ...prev, height: e.target.value }))
+                              }
+                              disabled={!engineReady || busy}
+                              aria-label="Height (mm)"
+                            />
+                          </label>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => void onSaveSize(printer)}
+                          >
+                            Save size
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => setEditingSizeId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                     {attaching && (
                       <div className="space-y-2 border-t border-border pt-2">
                         <ConnectionFields
