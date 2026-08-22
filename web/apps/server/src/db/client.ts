@@ -109,63 +109,21 @@ export class SqliteDatabase {
         if (!/duplicate column name/i.test(msg)) throw e;
       }
     }
-    const planInputCols = this.sqlite.pragma("table_info(plan_revision_inputs)") as {
-      name: string;
-      notnull: number;
-    }[];
-    if (planInputCols.find((column) => column.name === "source_revision_id")?.notnull === 1) {
-      const orphan = this.sqlite
-        .prepare(
-          `SELECT input.id
-             FROM plan_revision_inputs input
-             LEFT JOIN source_revisions revision ON revision.id = input.source_revision_id
-            WHERE revision.id IS NULL
-            LIMIT 1`,
-        )
-        .get() as { id: number } | undefined;
-      if (orphan) {
-        throw new Error(
-          `Cannot migrate Plan revision input ${orphan.id}: Source revision is missing`,
-        );
-      }
-      this.sqlite.transaction(() => {
-        this.sqlite!.exec(`
-        ALTER TABLE plan_revision_inputs RENAME TO plan_revision_inputs_v17;
-        CREATE TABLE plan_revision_inputs (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          tenant_id TEXT NOT NULL DEFAULT 'default',
-          input_set_id INTEGER NOT NULL REFERENCES plan_revision_input_sets(id) ON DELETE CASCADE,
-          source_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
-          source_layer TEXT NOT NULL,
-          layer_order INTEGER NOT NULL DEFAULT 0,
-          tracking_kind TEXT NOT NULL DEFAULT 'revision'
-            CHECK (tracking_kind IN ('revision', 'untracked')),
-          source_revision_id INTEGER REFERENCES source_revisions(id) ON DELETE RESTRICT,
-          manifest_digest TEXT,
-          effective_naming_digest TEXT,
-          CHECK (
-            (tracking_kind = 'revision' AND source_revision_id IS NOT NULL AND manifest_digest IS NOT NULL)
-            OR
-            (tracking_kind = 'untracked' AND source_revision_id IS NULL AND manifest_digest IS NULL)
-          )
-        );
-        INSERT INTO plan_revision_inputs (
-          id, tenant_id, input_set_id, source_id, source_layer, layer_order,
-          tracking_kind, source_revision_id, manifest_digest, effective_naming_digest
-        )
-        SELECT
-          id, tenant_id, input_set_id, source_id, source_layer, layer_order,
-          tracking_kind, source_revision_id, manifest_digest, effective_naming_digest
-        FROM plan_revision_inputs_v17;
-        DROP TABLE plan_revision_inputs_v17;
-        CREATE UNIQUE INDEX uq_plan_revision_inputs_v2_set_source
-          ON plan_revision_inputs (input_set_id, source_id)
-          WHERE effective_naming_digest IS NOT NULL;
-        CREATE INDEX idx_plan_revision_inputs_tenant_set
-          ON plan_revision_inputs (tenant_id, input_set_id);
-        `);
-      })();
-    }
+    // NOTE: The build_profiles column additions (in particular
+    // accepted_plan_revision_id) MUST run before any statement that forces
+    // SQLite to recompile/revalidate trigger bodies across the whole schema
+    // (e.g. `ALTER TABLE ... RENAME TO ...`, used below for
+    // plan_revision_inputs). Triggers such as trg_plan_drafts_consumption_update
+    // (created earlier via schemaMigrations) reference
+    // build_profiles.accepted_plan_revision_id, and SQLite validates every
+    // trigger's body against the live schema when a RENAME TABLE occurs. On
+    // an in-place upgrade from an old database where that column had not
+    // been added yet, running the rename first crashes with
+    // "no such column: profile.accepted_plan_revision_id" even though the
+    // ADD COLUMN below would have fixed it moments later. Fresh installs are
+    // unaffected because schemaMigrations' CREATE TABLE already includes the
+    // column. Keep this block ordered ahead of the plan_revision_inputs
+    // rename migration.
     const partCols = this.sqlite.pragma("table_info(parts)") as { name: string }[];
     if (!partCols.some((c) => c.name === "spoolman_spool_id")) {
       this.sqlite.exec("ALTER TABLE parts ADD COLUMN spoolman_spool_id TEXT");
@@ -224,6 +182,67 @@ export class SqliteDatabase {
         SELECT RAISE(ABORT, 'Accepted Plan revision ownership violation');
       END;
     `);
+    // Must run after the build_profiles column additions above: the RENAME
+    // TABLE below forces SQLite to revalidate every trigger body against the
+    // live schema, and trg_plan_drafts_consumption_update references
+    // build_profiles.accepted_plan_revision_id.
+    const planInputCols = this.sqlite.pragma("table_info(plan_revision_inputs)") as {
+      name: string;
+      notnull: number;
+    }[];
+    if (planInputCols.find((column) => column.name === "source_revision_id")?.notnull === 1) {
+      const orphan = this.sqlite
+        .prepare(
+          `SELECT input.id
+             FROM plan_revision_inputs input
+             LEFT JOIN source_revisions revision ON revision.id = input.source_revision_id
+            WHERE revision.id IS NULL
+            LIMIT 1`,
+        )
+        .get() as { id: number } | undefined;
+      if (orphan) {
+        throw new Error(
+          `Cannot migrate Plan revision input ${orphan.id}: Source revision is missing`,
+        );
+      }
+      this.sqlite.transaction(() => {
+        this.sqlite!.exec(`
+        ALTER TABLE plan_revision_inputs RENAME TO plan_revision_inputs_v17;
+        CREATE TABLE plan_revision_inputs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tenant_id TEXT NOT NULL DEFAULT 'default',
+          input_set_id INTEGER NOT NULL REFERENCES plan_revision_input_sets(id) ON DELETE CASCADE,
+          source_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+          source_layer TEXT NOT NULL,
+          layer_order INTEGER NOT NULL DEFAULT 0,
+          tracking_kind TEXT NOT NULL DEFAULT 'revision'
+            CHECK (tracking_kind IN ('revision', 'untracked')),
+          source_revision_id INTEGER REFERENCES source_revisions(id) ON DELETE RESTRICT,
+          manifest_digest TEXT,
+          effective_naming_digest TEXT,
+          CHECK (
+            (tracking_kind = 'revision' AND source_revision_id IS NOT NULL AND manifest_digest IS NOT NULL)
+            OR
+            (tracking_kind = 'untracked' AND source_revision_id IS NULL AND manifest_digest IS NULL)
+          )
+        );
+        INSERT INTO plan_revision_inputs (
+          id, tenant_id, input_set_id, source_id, source_layer, layer_order,
+          tracking_kind, source_revision_id, manifest_digest, effective_naming_digest
+        )
+        SELECT
+          id, tenant_id, input_set_id, source_id, source_layer, layer_order,
+          tracking_kind, source_revision_id, manifest_digest, effective_naming_digest
+        FROM plan_revision_inputs_v17;
+        DROP TABLE plan_revision_inputs_v17;
+        CREATE UNIQUE INDEX uq_plan_revision_inputs_v2_set_source
+          ON plan_revision_inputs (input_set_id, source_id)
+          WHERE effective_naming_digest IS NOT NULL;
+        CREATE INDEX idx_plan_revision_inputs_tenant_set
+          ON plan_revision_inputs (tenant_id, input_set_id);
+        `);
+      })();
+    }
     if (versionBeforeMigration < ACCEPTED_PLAN_REVISION_SCHEMA_VERSION) {
       backfillAcceptedPlanRevisions(this.sqlite);
     }
