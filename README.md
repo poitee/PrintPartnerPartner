@@ -28,14 +28,14 @@
 </p>
 
 <p align="center">
-  <code>Library</code> → <code>Plan</code> → <code>Parts</code> → <code>Progress</code> → <code>Export</code>
+  <code>Library</code> → <code>Builds</code> → <code>Sources</code> → <code>Plan</code> → <code>Checkoff</code> → <code>Production</code>
 </p>
 
 <p align="center">
   <sub>
-    Manage plans from the header <strong>Create plan</strong> control or the sidebar <strong>Plans</strong> page.
-    Print checkoff lives on <strong>Progress</strong> (legacy <code>/checkoff</code> redirects there).
-    Utility nav: Plans · Printers · Settings · Help.
+    <strong>New Build</strong> asks only for a name, then opens Sources.
+    Opening an existing Build opens Plan.
+    Utility nav: Builds · Production · Printers · Settings.
   </sub>
 </p>
 
@@ -55,12 +55,13 @@
 | Step | What you are doing |
 |------|--------------------|
 | **Library** | Add GitHub repos, local folders, or zips; assign categories; search STLs across every synced repo; see **update available** badges; sync and set import rules. |
-| **Plan** | Attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), recompute when stale, kit/manifest options, inline repo **Docs**. |
-| **Parts** | Confirm validation by role and filament, browse included parts with 3D previews, edit quantities. |
-| **Progress** | Track **print checkoff** (per-unit progress, assembled toggles, filters, printable checklist). |
-| **Export** | Assign Required units to Printers, arrange accepted Plates, download revision-bound 3MFs, open a local slicer, send G-code, and deduct Spoolman when configured. |
+| **Builds** | Name a Build, search, filter, archive, and restore. **New Build** asks only for a name, then opens Sources. |
+| **Sources** | Attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), kit/manifest options, inline repo **Docs**. |
+| **Plan** | Review quantities and warnings, save a draft, and **Apply** so Checkoff and Production use the accepted list. |
+| **Checkoff** | Track **print checkoff** (per-unit progress, assembled toggles, filters, printable checklist). |
+| **Production** | Assign Required units to Printers, arrange accepted Plates, download revision-bound 3MFs, open a local slicer, send G-code, and deduct Spoolman when configured. |
 
-**Plans** (not a pipeline step): create, rename, duplicate, archive, and delete plans from **Create plan** or the **Plans** page. The active plan is shared across Plan, Parts, Progress, and Export.
+**Builds** (home, not a pipeline step after Library): create, rename, duplicate, archive, and restore from **New Build** or the **Builds** page. The active Build is shared across Sources, Plan, Checkoff, and Production.
 
 **MCP attach:** Print Partner is the kit brain. Connect Cursor / Grok / Claude to HTTP MCP (`/api/v1/mcp` + `PRINT_PARTNER_API_KEY`). Mutations stay confirm-to-apply. Guide: [`docs/assistant-mcp.md`](docs/assistant-mcp.md). There is **no in-app Ask / Kit Advisor sheet** and **no Settings → AI**.
 
@@ -68,8 +69,8 @@
 
 Optional integrations:
 
-- **[Spoolman](docs/integrations/SPOOLMAN.md)** — pick filaments from inventory on Plan; read-only remaining weights in Parts; optional deduct on send.
-- **Live printers** — **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload with verify-first Progress; **Bambu** LAN MQTT is status-only (send deferred). See **[Printer setup](docs/integrations/PRINTER_SETUP.md)**.
+- **[Spoolman](docs/integrations/SPOOLMAN.md)** — pick filaments from inventory on Sources; read-only remaining weights in Plan; optional deduct on send.
+- **Live printers** — **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload with verify-first Checkoff; **Bambu** LAN MQTT is status-only (send deferred). See **[Printer setup](docs/integrations/PRINTER_SETUP.md)**.
 - **Local slicers** - optional Orca/Prusa/Bambu GUI containers with profile watch volumes (`pp-compose.yml`). Print Partner hands off accepted 3MFs; profile and slicing choices stay in the slicer.
 - **Discord digest / Home Assistant** — optional overnight farm digest and HA hooks when configured.
 - **Backups, metrics, rate limits, API keys** — see [`OPERATIONS.md`](OPERATIONS.md).

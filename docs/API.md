@@ -8,7 +8,7 @@ Self-host Docker serves the API on **http://localhost:8080**. The SPA uses flat 
 |----------|-------------|
 | `GET /health` | Liveness, deploy mode, `api_version`, `capabilities` |
 | `GET /api/v1` | API index: OpenAPI URL, docs, health |
-| `GET /api/v1/openapi.json` | OpenAPI 3.1 spec (alias: `GET /openapi.json` → redirect) |
+| `GET /api/v1/openapi.json` | OpenAPI 3.1 document generated from Fastify routes that declare schema metadata (alias: `GET /openapi.json` → redirect). It is not a complete contract for every operational route. |
 | `GET /api/v1/docs` | Swagger UI (dev / when `OPENAPI_UI=1`) |
 | `GET /api/v2` | Plan API index |
 | `GET /api/v2/openapi.json` | OpenAPI 3.1 alias. Only v2 Plan paths are registered. |

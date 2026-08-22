@@ -59,7 +59,7 @@ STL previews and Progress thumbnails are rendered **client-side with Three.js** 
 
 ## HTTP API & integrations
 
-- **Versioned routes:** `/api/v1` keeps legacy numeric Plan summaries and the existing integration routes. `/api/v2` contains only Plan routes with accepted Progress summaries. Both versions have an OpenAPI JSON path.
+- **Versioned routes:** `/api/v1` keeps legacy numeric Plan summaries and the existing integration routes. `/api/v2` contains only Plan routes with accepted Progress summaries. Both versions have an OpenAPI JSON path generated from Fastify routes that declare schema metadata. Many operational routes exist without those schemas; [API.md](./API.md) is the overview, not a claim that every endpoint is fully specified.
 - **Automation auth (self-host):** optional `PRINT_PARTNER_API_KEY` for `/api/v1/*` and `/api/v2/*`.
 - **Integrations:** pluggable adapters under `/api/v1/integrations` (Moonraker, PrusaLink, Bambu status, Spoolman, slicer sidecar, Discord, Home Assistant).
 - **Fleet presets:** `/printers` bed metadata for 3MF packing — separate from live printer hosts.
