@@ -20,7 +20,7 @@ Filenames are stable for README / GitHub Pages embeds. Spine labels and routes:
 - **Checkoff** `/progress`
 - **Production** `/export?profile=` (Build) and `/production` (global)
 
-Optional Progress/Export PNGs (`progress.png`, `export.png`) are captured by the current script. Older `advisor.png` / `settings-ai.png` files (if present) are leftovers from the removed in-app Kit Advisor — do not re-link them from README or Pages.
+Optional Progress/Export PNGs (`progress.png`, `export.png`) are captured by the current script and embedded from README and GitHub Pages. Older `advisor.png` / `settings-ai.png` files (if present) are leftovers from the removed in-app Kit Advisor — do not re-link them from README or Pages.
 
 The root README embeds **light** PNGs. GitHub Pages uses theme pairs for light/dark.
 
@@ -41,20 +41,26 @@ The root README embeds **light** PNGs. GitHub Pages uses theme pairs for light/d
 
 Optional: pass `--profile-id N` to select a specific plan when multiple exist.
 
+To seed a representative Source, accepted Build, and unbound Printer, then capture both themes:
+
+```bash
+node web/apps/web/test/browser/capture-fixture-screenshots.mjs
+```
+
 ## Automated capture (Playwright)
 
-1. Install capture dependencies once:
+The capture script uses system Chrome when `PLAYWRIGHT_CHROMIUM_EXECUTABLE` is set
+(or `/usr/bin/google-chrome`). To use Playwright's bundled Chromium instead:
 
 ```bash
 cd docs/scripts && npm install && npx playwright install chromium
 ```
 
-2. Capture both themes:
+Capture one theme against an already-running app:
 
 ```bash
-cd docs/scripts
-node capture-screenshots.mjs --theme light
-node capture-screenshots.mjs --theme dark
+node docs/scripts/capture-screenshots.mjs --theme light --profile-id 1
+node docs/scripts/capture-screenshots.mjs --theme dark --profile-id 1
 ```
 
 Optional flags:

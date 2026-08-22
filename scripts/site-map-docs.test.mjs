@@ -27,6 +27,8 @@ test("public docs describe Builds, Sources, Plan, Checkoff, and Production", () 
   assert.match(readme, /Checkoff/);
   assert.match(readme, /Production/);
   assert.match(readme, /New Build/);
+  assert.match(readme, /docs\/screenshots\/light\/progress\.png/);
+  assert.match(readme, /docs\/screenshots\/light\/export\.png/);
 
   assert.match(pages, /pipeline-step">Builds</);
   assert.match(pages, /pipeline-step">Sources</);
@@ -43,4 +45,12 @@ test("public docs describe Builds, Sources, Plan, Checkoff, and Production", () 
 
   const api = read("docs/API.md");
   assert.match(api, /not a complete contract for every operational route/);
+
+  const capture = read("docs/scripts/capture-screenshots.mjs");
+  assert.match(capture, /path: "\/library"/);
+  assert.match(capture, /path: "\/builds"/);
+  assert.match(capture, /path: "\/sources"/);
+  assert.match(capture, /path: "\/plan"/);
+  assert.match(capture, /path: "\/progress"/);
+  assert.match(capture, /path: "\/export"/);
 });

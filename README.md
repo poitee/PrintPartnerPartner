@@ -135,9 +135,25 @@ Attach sources, pick STLs (live 3D preview), role colors, kit options, **Docs**.
 
 Quantities, warnings, saved draft, and explicit **Apply**.
 
-### Checkoff & Production
+### Checkoff
 
-Print checkoff lives on **Checkoff**. Plates, downloads, slicer handoff, and send live on **Production**. Re-run `docs/scripts/capture-screenshots.mjs` to refresh PNGs for those stages.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/progress.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/progress.png">
+  <img src="docs/screenshots/light/progress.png" alt="Checkoff — per-unit print verification for remaining parts.">
+</picture>
+
+Track remaining units, bag/sort, and print the checklist.
+
+### Production
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/export.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/export.png">
+  <img src="docs/screenshots/light/export.png" alt="Production — Prepare Plates, named-object 3MF, and slicer handoff.">
+</picture>
+
+Assign Required units to Printers, arrange accepted Plates, download revision-bound 3MFs, and send G-code.
 
 ---
 
