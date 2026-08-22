@@ -35,12 +35,15 @@ class SmokeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def _read_json(self) -> object:
+        length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(length) if length else b"{}"
+        return json.loads(raw or b"{}")
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/health":
             self._send({"ok": True})
-        elif path == "/jobs/recompute-job":
-            self._send({"status": "done", "result": {"part_count": self.parts}})
         elif path == "/jobs/export-job":
             self._send({"status": "done", "result": {"file_total": self.exports}})
         elif path == "/plans/1/parts":
@@ -63,8 +66,42 @@ class SmokeHandler(BaseHTTPRequestHandler):
             self._send({"id": 1, "stl_count": 1})
         elif path == "/plans":
             self._send({"id": 1})
-        elif path == "/jobs/recompute":
-            self._send({"job_id": "recompute-job"})
+        elif path == "/plans/1/drafts/recompute":
+            payload = self._read_json()
+            if payload.get("apply_manifest") is not True or not self.headers.get("Idempotency-Key"):
+                self._send({"detail": "Request is invalid", "code": "invalid_request"}, 400)
+                return
+            self._send({
+                "profile_id": 1,
+                "draft": {
+                    "draft_id": 1,
+                    "state": "open",
+                    "lifecycle_version": 0,
+                    "snapshot_digest": "a" * 64,
+                    "base": {"revision_id": None, "plan_version": 0},
+                },
+                "reconciliation": {"kind": "ready"},
+            })
+        elif path == "/plans/1/drafts/1/apply":
+            payload = self._read_json()
+            if (
+                not self.headers.get("Idempotency-Key")
+                or payload.get("expected_snapshot_digest") != "a" * 64
+                or payload.get("expected_lifecycle_version") != 0
+                or payload.get("expected_base") != {"revision_id": None, "plan_version": 0}
+            ):
+                self._send({"detail": "Request is invalid", "code": "invalid_request"}, 400)
+                return
+            self._send({
+                "profile_id": 1,
+                "draft_id": 1,
+                "revision_id": 1,
+                "plan_version": 1,
+                "draft_lifecycle_version": 1,
+                "revision_digest": "b" * 64,
+                "required_unit_mapping_digest": "c" * 64,
+                "applied_at": "2026-08-22T00:00:00Z",
+            })
         elif path == "/jobs/export-stl-pack":
             self._send({"job_id": "export-job"})
         else:

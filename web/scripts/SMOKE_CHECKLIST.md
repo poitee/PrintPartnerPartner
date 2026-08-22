@@ -16,7 +16,7 @@ Automated workflow: `BASE=http://localhost:8080 ./web/scripts/workflow-smoke.sh`
 | Sync | `POST /jobs/sync` | **200** — job `status:done`, 4 STLs downloaded |
 | Create plan | `POST /plans` | **200** — `Smoke Test Plan` → `id:2` |
 | Base layer | `PUT /plans/{id}/layers/base` | **200** — layer linked to source |
-| Recompute | `POST /jobs/recompute` | **200** — `part_count:4` |
+| Recompute | `POST /plans/{id}/drafts/recompute` then `POST /plans/{id}/drafts/{draftId}/apply` | **200** — reconciliation `ready`, then applied `revision_digest` |
 | Parts | `GET /plans/{id}/parts` | **200** — 4 parts (calibrate_size, ringing_tower, …) |
 | Checkoff | `GET /plans/{id}/checkoff` | **200** — summary + print_units |
 | Progress | `PATCH /parts/{id}/progress` | **200** — `printed_count:1`, `missing:false` |
