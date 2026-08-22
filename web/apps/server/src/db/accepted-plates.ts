@@ -86,6 +86,10 @@ export type UnplaceAcceptedPlateUnitCommand = Readonly<{
   token: string;
 }>;
 
+export type TransferAcceptedPlateUnitCommand = UnplaceAcceptedPlateUnitCommand & Readonly<{
+  targetPlateId: string;
+}>;
+
 export type ArrangeAcceptedPlatesCommand = Readonly<{
   profileId: number;
   expected: AcceptedPlanBasis;
@@ -141,6 +145,7 @@ export type MoveAcceptedPlateUnitResult =
 
 export type PinAcceptedPlateUnitResult = MoveAcceptedPlateUnitResult;
 export type UnplaceAcceptedPlateUnitResult = MoveAcceptedPlateUnitResult;
+export type TransferAcceptedPlateUnitResult = MoveAcceptedPlateUnitResult;
 export type RestoreAcceptedPlatesResult =
   | {
       readonly kind: "restored";
@@ -335,6 +340,17 @@ function storedPlacement(value: unknown): "auto" | "manual" | "pinned" | "unplac
 
 function unitPlacement(unit: AcceptedPlateUnitInput): "auto" | "manual" | "pinned" | "unplaced" {
   return storedPlacement(unit.placement);
+}
+
+function unitFitsPrintableArea(
+  plate: AcceptedPlateInput,
+  unit: AcceptedPlateUnitInput,
+): boolean {
+  return (
+    unit.widthUm <= plate.bedWidthUm - 2 * plate.marginUm &&
+    unit.depthUm <= plate.bedDepthUm - 2 * plate.marginUm &&
+    unit.heightUm <= plate.bedHeightUm
+  );
 }
 
 function storedInteger(value: number): boolean {
@@ -1217,6 +1233,95 @@ export function unplaceAcceptedPlateUnitInternal(
         plateRevisionNumber: currentRevision.revisionNumber,
       };
     }
+    const validated = validatePlates(next, new Set(objectNames.keys()));
+    if (validated.kind !== "ready") return validated;
+    const revisionNumber = currentRevision.revisionNumber + 1;
+    const revisionId = insertRevision(
+      dependencies,
+      accepted.snapshot,
+      revisionNumber,
+      validated.plates,
+    );
+    const updated = dependencies.db
+      .update(dependencies.schema.acceptedPlateHeads)
+      .set({ currentRevisionId: revisionId })
+      .where(
+        and(
+          eq(dependencies.schema.acceptedPlateHeads.tenantId, dependencies.tenantId),
+          eq(dependencies.schema.acceptedPlateHeads.profileId, command.profileId),
+          eq(dependencies.schema.acceptedPlateHeads.currentRevisionId, command.expectedPlateRevisionId),
+        ),
+      )
+      .run();
+    if (updated.changes !== 1) throw new Error("Accepted Plate head update failed");
+    return { kind: "moved", plateRevisionId: revisionId, plateRevisionNumber: revisionNumber };
+  });
+}
+
+export function transferAcceptedPlateUnitInternal(
+  dependencies: AcceptedPlateDependencies,
+  command: TransferAcceptedPlateUnitCommand,
+): TransferAcceptedPlateUnitResult {
+  if (!dependencies.sqlite) return { kind: "transaction_unavailable" };
+  if (command.profileId !== command.expected.profileId) return { kind: "stale_accepted_plan" };
+  return dependencies.transaction(() => {
+    const accepted = currentAccepted(dependencies, command.expected);
+    if (accepted.kind !== "ready") return accepted;
+    const head = dependencies.db
+      .select()
+      .from(dependencies.schema.acceptedPlateHeads)
+      .where(
+        and(
+          eq(dependencies.schema.acceptedPlateHeads.tenantId, dependencies.tenantId),
+          eq(dependencies.schema.acceptedPlateHeads.profileId, command.profileId),
+        ),
+      )
+      .get();
+    if (!head || head.currentRevisionId !== command.expectedPlateRevisionId) {
+      return { kind: "plate_revision_changed" };
+    }
+    const currentRevision = dependencies.db
+      .select()
+      .from(dependencies.schema.acceptedPlateRevisions)
+      .where(eq(dependencies.schema.acceptedPlateRevisions.id, head.currentRevisionId))
+      .get();
+    if (!currentRevision) throw new AcceptedPlateIntegrityError("head");
+    const objectNames = requiredObjectNames(accepted.snapshot);
+    const plates = readStoredPlates(
+      dependencies,
+      currentRevision.id,
+      currentRevision.expectedPlateCount,
+      currentRevision.expectedUnitCount,
+      new Set(objectNames.keys()),
+      currentRevision.layoutDigest,
+    );
+    const source = plates.find((plate) => plate.plateId === command.plateId);
+    const target = plates.find((plate) => plate.plateId === command.targetPlateId);
+    const unit = source?.units.find((candidate) => candidate.token === command.token);
+    if (!source || !target || !unit) return { kind: "unit_not_found" };
+    if (source.plateId === target.plateId) {
+      return {
+        kind: "unchanged",
+        plateRevisionId: currentRevision.id,
+        plateRevisionNumber: currentRevision.revisionNumber,
+      };
+    }
+    if (!unitFitsPrintableArea(target, unit)) {
+      return { kind: "invalid_geometry", reason: "outside_build_area" };
+    }
+    const next = plates.flatMap((plate): AcceptedPlateInput[] => {
+      if (plate.plateId === source.plateId) {
+        const units = plate.units.filter((candidate) => candidate.token !== command.token);
+        return units.length === 0 ? [] : [{ ...plate, units }];
+      }
+      if (plate.plateId === target.plateId) {
+        return [{
+          ...plate,
+          units: [...plate.units, { ...unit, placement: "unplaced" }],
+        }];
+      }
+      return [plate];
+    });
     const validated = validatePlates(next, new Set(objectNames.keys()));
     if (validated.kind !== "ready") return validated;
     const revisionNumber = currentRevision.revisionNumber + 1;

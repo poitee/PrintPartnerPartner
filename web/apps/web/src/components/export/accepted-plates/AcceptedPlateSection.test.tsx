@@ -72,6 +72,7 @@ vi.mock("../../../queries/acceptedPlates", async (importOriginal) => {
     useMoveAcceptedPlateUnitMutation: idleMutation,
     usePinAcceptedPlateUnitMutation: idleMutation,
     useUnplaceAcceptedPlateUnitMutation: idleMutation,
+    useTransferAcceptedPlateUnitMutation: idleMutation,
     useArrangeAcceptedPlatesMutation: idleMutation,
     useRestoreAcceptedPlatesMutation: idleMutation,
   };

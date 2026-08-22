@@ -94,6 +94,7 @@ describe("AcceptedPlateGallery successor revisions", () => {
           onMove={move}
           onPin={() => Promise.resolve()}
           onUnplace={() => Promise.resolve()}
+          onTransfer={() => Promise.resolve()}
           onArrange={() => Promise.resolve()}
           onStaleMove={() => Promise.resolve()}
         />
@@ -123,6 +124,7 @@ describe("AcceptedPlateGallery successor revisions", () => {
         onMove={() => Promise.resolve(true)}
         onPin={() => Promise.resolve()}
         onUnplace={() => Promise.resolve()}
+        onTransfer={() => Promise.resolve()}
         onArrange={onArrange}
         onUndoArrangeAll={onUndoArrangeAll}
         onStaleMove={() => Promise.resolve()}
@@ -134,5 +136,41 @@ describe("AcceptedPlateGallery successor revisions", () => {
     expect(onArrange).toHaveBeenCalledWith("unplaced");
     expect(onArrange).toHaveBeenCalledWith("all");
     expect(onUndoArrangeAll).toHaveBeenCalledOnce();
+  });
+
+  it("moves the selected Required unit onto another Plate", () => {
+    const secondPlateId = `plate_${"e".repeat(32)}`;
+    const secondPrinter = { ...printer, id: "printer-two", name: "Printer Two" };
+    const twoPlates = parseAcceptedPlateWorkspace({
+      ...ready,
+      printers: [printer, secondPrinter],
+      plates: [
+        ready.plates[0],
+        {
+          plate_id: secondPlateId,
+          ordinal: 2,
+          printer: secondPrinter,
+          units: [],
+        },
+      ],
+    });
+    if (twoPlates.kind !== "ready") throw new Error("Expected two-Plate workspace");
+    const onTransfer = vi.fn(() => Promise.resolve());
+    render(
+      <AcceptedPlateGallery
+        workspace={twoPlates}
+        disabled={false}
+        onMove={() => Promise.resolve(true)}
+        onPin={() => Promise.resolve()}
+        onUnplace={() => Promise.resolve()}
+        onTransfer={onTransfer}
+        onArrange={() => Promise.resolve()}
+        onStaleMove={() => Promise.resolve()}
+      />,
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "Move to Plate" }), {
+      target: { value: secondPlateId },
+    });
+    expect(onTransfer).toHaveBeenCalledWith(plateId, firstToken, secondPlateId);
   });
 });

@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import type {
-  AcceptedPlateWorkspace,
-  InitializeAcceptedPlatesRequest,
+import {
+  parseAcceptedPlateId,
+  type AcceptedPlateWorkspace,
+  type InitializeAcceptedPlatesRequest,
 } from "@print-partner/contracts";
 import { isAcceptedPlateStaleError } from "../../../api/endpoints/acceptedPlates";
 import {
@@ -16,6 +17,7 @@ import {
   useMoveAcceptedPlateUnitMutation,
   usePinAcceptedPlateUnitMutation,
   useRestoreAcceptedPlatesMutation,
+  useTransferAcceptedPlateUnitMutation,
   useUnplaceAcceptedPlateUnitMutation,
 } from "../../../queries/acceptedPlates";
 import { settingsPrintersRoute } from "../../../lib/routes";
@@ -57,6 +59,7 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
   const move = useMoveAcceptedPlateUnitMutation(profileId);
   const pin = usePinAcceptedPlateUnitMutation(profileId);
   const unplace = useUnplaceAcceptedPlateUnitMutation(profileId);
+  const transfer = useTransferAcceptedPlateUnitMutation(profileId);
   const arrange = useArrangeAcceptedPlatesMutation(profileId);
   const restore = useRestoreAcceptedPlatesMutation(profileId);
   const revisionWritePending = useAcceptedPlateRevisionPending(profileId);
@@ -137,6 +140,27 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
         return;
       }
       toast.error(error instanceof Error ? error.message : "Could not return this Required unit to unplaced.");
+    }
+  };
+
+  const submitTransfer = async (plateId: string, token: string, targetPlateId: string) => {
+    if (workspace?.kind !== "ready") return;
+    try {
+      await transfer.mutateAsync({
+        plateId,
+        token,
+        input: {
+          expected: workspace.basis,
+          expected_plate_revision_id: workspace.plate_revision_id,
+          target_plate_id: parseAcceptedPlateId(targetPlateId),
+        },
+      });
+    } catch (error) {
+      if (isAcceptedPlateStaleError(error)) {
+        await refreshAfterStaleMove();
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : "Could not move this Required unit to another Plate.");
     }
   };
 
@@ -242,6 +266,7 @@ export default function AcceptedPlateSection({ profileId, enabled }: Props) {
             onMove={submitMove}
             onPin={submitPin}
             onUnplace={submitUnplace}
+            onTransfer={submitTransfer}
             onArrange={submitArrange}
             onUndoArrangeAll={workspace.arrange_undo_revision_id == null ? undefined : submitRestore}
             onStaleMove={refreshAfterStaleMove}

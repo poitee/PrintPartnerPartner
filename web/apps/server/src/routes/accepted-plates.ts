@@ -144,6 +144,21 @@ function parseUnplaceRequest(value: unknown): Readonly<{
   return { expected, expectedPlateRevisionId };
 }
 
+function parseTransferRequest(value: unknown): Readonly<{
+  expected: AcceptedPlanBasis;
+  expectedPlateRevisionId: number;
+  targetPlateId: string;
+}> | null {
+  if (!isRecord(value) || typeof value.target_plate_id !== "string") return null;
+  const expected = parseBasis(value.expected);
+  const expectedPlateRevisionId = positiveInteger(value.expected_plate_revision_id);
+  const targetPlateId = value.target_plate_id.trim();
+  if (!expected || expectedPlateRevisionId == null || !targetPlateId || targetPlateId.length > 200) {
+    return null;
+  }
+  return { expected, expectedPlateRevisionId, targetPlateId };
+}
+
 function parsePinRequest(value: unknown): Readonly<{
   expected: AcceptedPlanBasis;
   expectedPlateRevisionId: number;
@@ -380,6 +395,36 @@ export async function registerAcceptedPlateRoutes(
         expectedPlateRevisionId: body.expectedPlateRevisionId,
         plateId,
         token,
+      });
+      if (result.kind === "moved" || result.kind === "unchanged") {
+        return {
+          plate_revision_id: result.plateRevisionId,
+          plate_revision_number: result.plateRevisionNumber,
+        };
+      }
+      return sendMoveFailure(reply, result);
+    } catch (error) {
+      return sendIntegrityFailure(request, reply, error);
+    }
+  });
+
+  app.post("/plans/:id/plates/:plateId/units/:token/transfer", async (request, reply) => {
+    const id = profileId(request);
+    const params = isRecord(request.params) ? request.params : {};
+    const plateId = typeof params.plateId === "string" ? params.plateId.trim() : "";
+    const token = parseToken(params.token);
+    const body = parseTransferRequest(request.body);
+    if (id == null || !plateId || plateId.length > 200 || !token || !body || body.expected.profileId !== id) {
+      return sendError(reply, 400, "invalid_request", "Request is invalid");
+    }
+    try {
+      const result = dependencies.repo.transferAcceptedPlateUnit({
+        profileId: id,
+        expected: body.expected,
+        expectedPlateRevisionId: body.expectedPlateRevisionId,
+        plateId,
+        token,
+        targetPlateId: body.targetPlateId,
       });
       if (result.kind === "moved" || result.kind === "unchanged") {
         return {

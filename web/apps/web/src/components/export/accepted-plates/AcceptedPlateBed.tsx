@@ -39,6 +39,8 @@ type Props = Readonly<{
   onMove: (plateId: string, token: string, xUm: number, yUm: number) => Promise<boolean | undefined>;
   onPin?: (plateId: string, token: string, pinned: boolean) => Promise<void>;
   onUnplace?: (plateId: string, token: string) => Promise<void>;
+  onTransfer?: (plateId: string, token: string, targetPlateId: string) => Promise<void>;
+  destinationPlates?: readonly AcceptedPlateView[];
   onStaleMove: () => Promise<void>;
 }>;
 
@@ -59,7 +61,17 @@ function displayedUnit(unit: AcceptedPlatePlacedUnit, draft: PositionDraft) {
   return { ...unit, x_um: draft.xUm, y_um: draft.yUm };
 }
 
-export default function AcceptedPlateBed({ plate, revisionId, disabled, onMove, onPin, onUnplace, onStaleMove }: Props) {
+export default function AcceptedPlateBed({
+  plate,
+  revisionId,
+  disabled,
+  onMove,
+  onPin,
+  onUnplace,
+  onTransfer,
+  destinationPlates = [],
+  onStaleMove,
+}: Props) {
   const [selectedToken, setSelectedToken] = useState<RequiredUnitToken | null>(plate.units[0]?.token ?? null);
   const [draft, setDraft] = useState<PositionDraft>({ kind: "idle" });
   const selected = plate.units.find((unit) => unit.token === selectedToken) ?? plate.units[0];
@@ -238,6 +250,26 @@ export default function AcceptedPlateBed({ plate, revisionId, disabled, onMove, 
             >
               Return to unplaced
             </Button>
+          ) : null}
+          {onTransfer && destinationPlates.length > 0 ? (
+            <select
+              aria-label="Move to Plate"
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              disabled={disabled || draft.kind !== "idle"}
+              value=""
+              onChange={(event) => {
+                const targetPlateId = event.target.value;
+                if (!targetPlateId) return;
+                void onTransfer(plate.plate_id, selected.token, targetPlateId);
+              }}
+            >
+              <option value="">Move to Plate</option>
+              {destinationPlates.map((candidate) => (
+                <option key={candidate.plate_id} value={candidate.plate_id}>
+                  Plate {candidate.ordinal} · {candidate.printer.name}
+                </option>
+              ))}
+            </select>
           ) : null}
         </>
       ) : null}

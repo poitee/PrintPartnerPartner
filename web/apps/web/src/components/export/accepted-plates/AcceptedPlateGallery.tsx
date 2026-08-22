@@ -11,6 +11,7 @@ type Props = Readonly<{
   onMove: (plateId: string, token: string, xUm: number, yUm: number) => Promise<boolean | undefined>;
   onPin: (plateId: string, token: string, pinned: boolean) => Promise<void>;
   onUnplace: (plateId: string, token: string) => Promise<void>;
+  onTransfer: (plateId: string, token: string, targetPlateId: string) => Promise<void>;
   onArrange: (mode: "unplaced" | "all") => Promise<void>;
   onUndoArrangeAll?: () => Promise<void>;
   onStaleMove: () => Promise<void>;
@@ -22,6 +23,7 @@ export default function AcceptedPlateGallery({
   onMove,
   onPin,
   onUnplace,
+  onTransfer,
   onArrange,
   onUndoArrangeAll,
   onStaleMove,
@@ -85,6 +87,8 @@ export default function AcceptedPlateGallery({
         onMove={onMove}
         onPin={onPin}
         onUnplace={onUnplace}
+        onTransfer={onTransfer}
+        destinationPlates={workspace.plates.filter((candidate) => candidate.plate_id !== plate.plate_id)}
         onStaleMove={onStaleMove}
       />
       {workspace.unplaced.length > 0 ? (
@@ -92,8 +96,30 @@ export default function AcceptedPlateGallery({
           <p className="text-sm font-medium">Unplaced</p>
           <ul className="space-y-1 text-sm text-muted-foreground">
             {workspace.unplaced.map((unit) => (
-              <li key={unit.token} className="truncate font-mono text-[11px]">
-                {unit.object_name}
+              <li key={unit.token} className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{unit.object_name}</span>
+                {workspace.plates.filter((candidate) => candidate.plate_id !== unit.plate_id).length > 0 ? (
+                  <select
+                    aria-label={`Move ${unit.object_name} to Plate`}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                    disabled={disabled}
+                    value=""
+                    onChange={(event) => {
+                      const targetPlateId = event.target.value;
+                      if (!targetPlateId) return;
+                      void onTransfer(unit.plate_id, unit.token, targetPlateId);
+                    }}
+                  >
+                    <option value="">Move to Plate</option>
+                    {workspace.plates
+                      .filter((candidate) => candidate.plate_id !== unit.plate_id)
+                      .map((candidate) => (
+                        <option key={candidate.plate_id} value={candidate.plate_id}>
+                          Plate {candidate.ordinal} · {candidate.printer.name}
+                        </option>
+                      ))}
+                  </select>
+                ) : null}
               </li>
             ))}
           </ul>

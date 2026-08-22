@@ -8,6 +8,7 @@ import {
   parseMoveAcceptedPlateUnitRequest,
   parsePinAcceptedPlateUnitRequest,
   parseRestoreAcceptedPlatesRequest,
+  parseTransferAcceptedPlateUnitRequest,
 } from "./accepted-plates.js";
 import { JOB_KINDS } from "./index.js";
 
@@ -173,6 +174,20 @@ describe("accepted Plate contracts", () => {
       expected: basis,
       expected_plate_revision_id: 19,
       mode: "overflow",
+    })).toThrow();
+    expect(parseTransferAcceptedPlateUnitRequest({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      target_plate_id: plateId,
+    })).toEqual({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      target_plate_id: plateId,
+    });
+    expect(() => parseTransferAcceptedPlateUnitRequest({
+      expected: basis,
+      expected_plate_revision_id: 19,
+      target_plate_id: "plate-main",
     })).toThrow();
   });
 

@@ -16,6 +16,7 @@ import type {
   ArrangeAcceptedPlatesRequest,
   RestoreAcceptedPlatesRequest,
   UnplaceAcceptedPlateUnitRequest,
+  TransferAcceptedPlateUnitRequest,
 } from "@print-partner/contracts";
 import {
   fetchAcceptedPlateExportJobs,
@@ -26,6 +27,7 @@ import {
   arrangeAcceptedPlates,
   restoreAcceptedPlates,
   unplaceAcceptedPlateUnit,
+  transferAcceptedPlateUnit,
 } from "../api/endpoints/acceptedPlates";
 import { queryKeys } from "./keys";
 
@@ -67,6 +69,12 @@ export type AcceptedPlateUnplaceVariables = Readonly<{
   plateId: string;
   token: string;
   input: UnplaceAcceptedPlateUnitRequest;
+}>;
+
+export type AcceptedPlateTransferVariables = Readonly<{
+  plateId: string;
+  token: string;
+  input: TransferAcceptedPlateUnitRequest;
 }>;
 
 export type AcceptedPlatePinVariables = Readonly<{
@@ -298,6 +306,24 @@ export function useUnplaceAcceptedPlateUnitMutation(profileId: number) {
         queryKeys.acceptedPlateWorkspace(profileId),
         (workspace) => publishAcceptedPlateUnplace(workspace, variables, receipt),
       );
+      await invalidateAcceptedPlateWorkspace(queryClient, profileId);
+    },
+  });
+}
+
+export function useTransferAcceptedPlateUnitMutation(profileId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationKey: acceptedPlateMutationKey(profileId),
+    scope: acceptedPlateMutationScope(profileId),
+    retry: false,
+    mutationFn: (variables: AcceptedPlateTransferVariables) => transferAcceptedPlateUnit(
+      profileId,
+      variables.plateId,
+      variables.token,
+      variables.input,
+    ),
+    onSuccess: async () => {
       await invalidateAcceptedPlateWorkspace(queryClient, profileId);
     },
   });

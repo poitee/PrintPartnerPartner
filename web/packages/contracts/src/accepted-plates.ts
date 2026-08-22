@@ -256,6 +256,14 @@ const unplaceAcceptedPlateUnitRequestSchema = z.strictObject({
 
 export type UnplaceAcceptedPlateUnitRequest = z.infer<typeof unplaceAcceptedPlateUnitRequestSchema>;
 
+const transferAcceptedPlateUnitRequestSchema = z.strictObject({
+  expected: acceptedPlanBasisSchema,
+  expected_plate_revision_id: positiveSafeInteger,
+  target_plate_id: acceptedPlateId,
+});
+
+export type TransferAcceptedPlateUnitRequest = z.infer<typeof transferAcceptedPlateUnitRequestSchema>;
+
 const acceptedPlateMoveReceiptSchema = z.strictObject({
   plate_revision_id: positiveSafeInteger,
   plate_revision_number: positiveSafeInteger,
@@ -491,6 +499,10 @@ export function parseRestoreAcceptedPlatesRequest(value: unknown): RestoreAccept
 
 export function parseUnplaceAcceptedPlateUnitRequest(value: unknown): UnplaceAcceptedPlateUnitRequest {
   return unplaceAcceptedPlateUnitRequestSchema.parse(value);
+}
+
+export function parseTransferAcceptedPlateUnitRequest(value: unknown): TransferAcceptedPlateUnitRequest {
+  return transferAcceptedPlateUnitRequestSchema.parse(value);
 }
 
 export function parseAcceptedPlateMoveReceipt(value: unknown): AcceptedPlateMoveReceipt {

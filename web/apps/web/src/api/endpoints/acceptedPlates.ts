@@ -12,6 +12,7 @@ import {
   parseArrangeAcceptedPlatesRequest,
   parseRestoreAcceptedPlatesRequest,
   parseUnplaceAcceptedPlateUnitRequest,
+  parseTransferAcceptedPlateUnitRequest,
   parseStartAcceptedPlateExportRequest,
   type AcceptedPlateEndpointError,
   type AcceptedPlateExportRecord,
@@ -26,6 +27,7 @@ import {
   type PinAcceptedPlateUnitRequest,
   type RestoreAcceptedPlatesRequest,
   type UnplaceAcceptedPlateUnitRequest,
+  type TransferAcceptedPlateUnitRequest,
   type StartAcceptedPlateExportRequest,
 } from "@print-partner/contracts";
 import {
@@ -102,6 +104,16 @@ const unplaceEndpoint = defineJsonWriteEndpoint({
   path: ({ profileId, plateId, token }: MoveParams) =>
     `/plans/${encodePositiveInteger(profileId)}/plates/${encodePlateId(plateId)}/units/${encodeToken(token)}/unplace`,
   encodeBody: parseUnplaceAcceptedPlateUnitRequest,
+  parseSuccess: parseAcceptedPlateMoveReceipt,
+  parseFailure: parseSafeError,
+});
+
+const transferEndpoint = defineJsonWriteEndpoint({
+  method: "POST",
+  route: "/plans/:profileId/plates/:plateId/units/:token/transfer",
+  path: ({ profileId, plateId, token }: MoveParams) =>
+    `/plans/${encodePositiveInteger(profileId)}/plates/${encodePlateId(plateId)}/units/${encodeToken(token)}/transfer`,
+  encodeBody: parseTransferAcceptedPlateUnitRequest,
   parseSuccess: parseAcceptedPlateMoveReceipt,
   parseFailure: parseSafeError,
 });
@@ -226,6 +238,15 @@ export function unplaceAcceptedPlateUnit(
   input: UnplaceAcceptedPlateUnitRequest,
 ): Promise<AcceptedPlateMoveReceipt> {
   return requestJsonWrite(unplaceEndpoint, { profileId, plateId, token }, input);
+}
+
+export function transferAcceptedPlateUnit(
+  profileId: number,
+  plateId: string,
+  token: string,
+  input: TransferAcceptedPlateUnitRequest,
+): Promise<AcceptedPlateMoveReceipt> {
+  return requestJsonWrite(transferEndpoint, { profileId, plateId, token }, input);
 }
 
 export function arrangeAcceptedPlates(
