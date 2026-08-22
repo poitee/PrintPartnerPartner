@@ -8,7 +8,7 @@ import DevCatalogPage from "./DevCatalogPage";
 describe("DevCatalogPage", () => {
   afterEach(cleanup);
 
-  it("shows Keep/Revise/Merge/Remove inventory and three visual sketches", () => {
+  it("shows Keep/Revise/Remove inventory and three visual sketches", () => {
     render(
       <MemoryRouter>
         <DevCatalogPage />
@@ -27,8 +27,10 @@ describe("DevCatalogPage", () => {
     expect(screen.getByRole("button", { name: "Retry" }).textContent).toBe("Retry");
     expect(screen.getAllByText("Keep").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Revise").length).toBeGreaterThan(0);
-    expect(screen.getByText("Merge").textContent).toBe("Merge");
     expect(screen.getByText("Remove").textContent).toBe("Remove");
+    expect(screen.queryByText("Merge")).toBeNull();
+    expect(screen.getByText("settings/PrintersSettingsCard")).toBeTruthy();
+    expect(screen.getByText(/Global Printers owns setup/)).toBeTruthy();
   });
 
   it("covers empty, loading, error, and disabled primitive states", () => {
