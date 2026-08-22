@@ -67,6 +67,24 @@ describe("accepted Plate contracts", () => {
     ]);
   });
 
+  it("defaults Required-unit completion to incomplete and keeps explicit completed flags", () => {
+    expect(parseAcceptedPlateWorkspace({
+      kind: "setup",
+      basis,
+      expected_plate_revision_id: null,
+      printers: [printer],
+      units: [setupUnit],
+    })).toMatchObject({ kind: "setup", units: [{ token, completed: false }] });
+
+    expect(parseAcceptedPlateWorkspace({
+      kind: "setup",
+      basis,
+      expected_plate_revision_id: null,
+      printers: [printer],
+      units: [{ ...setupUnit, completed: true }],
+    })).toMatchObject({ kind: "setup", units: [{ token, completed: true }] });
+  });
+
   it("parses strict setup and ready workspace variants", () => {
     expect(parseAcceptedPlateWorkspace({
       kind: "setup",
@@ -95,7 +113,35 @@ describe("accepted Plate contracts", () => {
           height_um: 10_000,
         }],
       }],
-    })).toMatchObject({ kind: "ready", plates: [{ plate_id: plateId }], arrange_undo_revision_id: null });
+    })).toMatchObject({ kind: "ready", plates: [{ plate_id: plateId }], arrange_undo_revision_id: null, unassigned: [] });
+
+    const leftover = `ppu_${"e".repeat(32)}`;
+    expect(parseAcceptedPlateWorkspace({
+      kind: "ready",
+      basis,
+      plate_revision_id: 19,
+      plate_revision_number: 2,
+      printers: [printer],
+      plates: [{
+        plate_id: plateId,
+        ordinal: 1,
+        printer,
+        units: [{
+          ...setupUnit,
+          x_um: 4_000,
+          y_um: 5_000,
+          width_um: 30_000,
+          depth_um: 20_000,
+          height_um: 10_000,
+        }],
+      }],
+      unassigned: [{
+        ...setupUnit,
+        token: leftover,
+        object_name: `clip__${leftover}`,
+        filename: "clip.stl",
+      }],
+    })).toMatchObject({ kind: "ready", unassigned: [{ token: leftover, completed: false }] });
   });
 
   it("rejects unknown fields, duplicate tokens, noncontiguous ordinals, and units outside printable bounds", () => {

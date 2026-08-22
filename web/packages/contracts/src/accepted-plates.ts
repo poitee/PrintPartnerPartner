@@ -65,6 +65,7 @@ const acceptedPlateSetupUnitSchema = z.strictObject({
   source_layer: z.string().max(500),
   role: z.string().max(200),
   filament_color_id: z.string().min(1).max(200).nullable(),
+  completed: z.boolean().default(false),
 }).superRefine((value, context) => {
   if (!value.object_name.endsWith(`__${value.token}`)) {
     context.addIssue({ code: "custom", path: ["object_name"], message: "Object name does not match its token" });
@@ -150,6 +151,7 @@ const readyWorkspaceSchema = z.strictObject({
   printers: acceptedPlatePrinterListSchema,
   plates: z.array(acceptedPlateViewSchema).min(1),
   unplaced: z.array(acceptedPlateUnplacedUnitSchema).default([]),
+  unassigned: acceptedPlateSetupUnitListSchema.default([]),
 }).superRefine((value, context) => {
   const plateIds = new Set<string>();
   const ordinals = new Set<number>();
@@ -178,6 +180,12 @@ const readyWorkspaceSchema = z.strictObject({
     if (!plateIds.has(unit.plate_id)) {
       context.addIssue({ code: "custom", path: ["unplaced", index, "plate_id"], message: "Unplaced unit Plate was not found" });
     }
+  }
+  for (const [index, unit] of value.unassigned.entries()) {
+    if (tokens.has(unit.token)) {
+      context.addIssue({ code: "custom", path: ["unassigned", index, "token"], message: "Duplicate Required-unit token" });
+    }
+    tokens.add(unit.token);
   }
   for (let ordinal = 1; ordinal <= value.plates.length; ordinal += 1) {
     if (!ordinals.has(ordinal)) {
