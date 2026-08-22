@@ -15,8 +15,8 @@ status, dependencies, and implementation units.
 | 6. Frontend state ownership | Partial | Query modules exist, but `SourcesPage` and `BuildPage` keep competing Source snapshots. `PlanWorkspaceContext.revision` is a refetch counter, not a Plan revision. |
 | 7. Workflow model | Partial | Accepted Source input provenance exists. A durable Plan draft, an accepted parts Plan revision, an idempotent apply command, and rebase do not exist. |
 | 8. Site structure | Landed | Canonical routes, Global vs Build Production, Builds restore/counts, hybrid catalog, calm/dense density, and IncomingShares on Builds are in code. Optional filename renames (PartsPage/ExportPage) remain. |
-| 9. Production workspace | Partial | Translation-only placement, named-object 3MF export, STL bundle modes, printer observation, and verification exist. Stable Plate identity, saved placement, artifact identity, and safe ambiguous matching do not exist. |
-| 10. End-to-end proof | Missing | Current browser tests use static HTML. The real stack has no browser journey or genuine slicer-derived identity fixture. |
+| 9. Production workspace | Partial | Translation-only placement, named-object 3MF, STL bundles, printer observation, verification, and no first-printer Send fallback exist. Remaining: Arrange unplaced/all undo, printer-job-keyed Spoolman deduction, and confirmation for ambiguous Object matches. |
+| 10. End-to-end proof | Partial | Screenshot capture script targets current Builds/Sources/Plan/Checkoff/Production routes. Catalog and density were proven in a real browser. A genuine slicer-derived Object-name fixture and README PNG recapture still need an installed slicer and representative data. |
 | 11. Platform boundary | Landed | Health reports a deployment capability. Docs name SQLite + local disk + in-process jobs as supported. Redis/BullMQ claims removed. SaaS Postgres and S3 stay experimental. |
 
 Phase 4 has passed local release checks at commit `fbef877`. Public release

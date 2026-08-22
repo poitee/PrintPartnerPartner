@@ -37,6 +37,7 @@ import {
 } from "../ui/card";
 import ObjectProposalRows from "./ObjectProposalRows";
 import PlateApprovalCard from "./PlateApprovalCard";
+import { resolveStickyPrinterId } from "../../lib/resolveStickyPrinterId";
 import {
   sendPlanBindCopy,
 } from "../../lib/printerPlanBind";
@@ -123,13 +124,6 @@ function statusBadgeVariant(
     default:
       return "muted";
   }
-}
-
-/** Resolve sticky pick if still in list; otherwise first printer. Never jumps to Idle. */
-function resolveStickyPrinterId(printers: PrinterMachine[], sticky: string, prev: string): string {
-  if (prev && printers.some((p) => p.id === prev)) return prev;
-  if (sticky && printers.some((p) => p.id === sticky)) return sticky;
-  return printers[0]?.id ?? "";
 }
 
 const SEND_HOST_TYPES = new Set<LiveStripHostType>(["moonraker", "prusalink"]);
@@ -345,8 +339,8 @@ export default function PrinterSendPanel({
       return;
     }
     if (!selectedPrinterId) {
-      toast.error("No linked printer", {
-        description: "Add a Moonraker or PrusaLink host in Settings, then link it to a machine.",
+      toast.error("Choose a printer", {
+        description: "PrintPartner does not pick a printer for you.",
       });
       return;
     }
@@ -591,6 +585,7 @@ export default function PrinterSendPanel({
                   aria-label="Target printer"
                   onChange={(e) => onPrinterChange(e.target.value)}
                 >
+                  <option value="">Choose a printer</option>
                   {linkedPrinters.map((p) => (
                     <option key={p.id} value={p.id}>
                       {printerLabel(p)}
@@ -745,6 +740,7 @@ export default function PrinterSendPanel({
               aria-label="Bambu printer for Connect handoff"
               onChange={(e) => onBambuPrinterChange(e.target.value)}
             >
+              <option value="">Choose a printer</option>
               {bambuPrinters.map((p) => {
                 const integrationId = p.integration_id?.trim() ?? "";
                 const label = statusLabel(hostStatusByIntegration[integrationId]);

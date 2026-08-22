@@ -32,7 +32,7 @@ plan/PlanDraftPanel	Keep	Plan-owned Apply.	web/apps/web/src/components/plan/Plan
 checkoff/PrintVerifyPanel	Keep	Build Checkoff owns verification.	web/apps/web/src/components/checkoff/PrintVerifyPanel.tsx
 checkoff/paper sheet CSS	Keep	Paper tokens stay independent of interactive density.	web/apps/web/src/App.css
 export/accepted-plates/*	Revise	Production owner; Phase 9 still owes Arrange unplaced/all undo and saved XY editor polish.	web/apps/web/src/components/export/accepted-plates
-export/PrinterSendPanel	Revise	Remove first-printer fallback in Phase 9.	web/apps/web/src/components/export/PrinterSendPanel.tsx
+export/PrinterSendPanel	Keep	Removed first-printer fallback; Send stays disabled until the user chooses.	web/apps/web/src/components/export/PrinterSendPanel.tsx
 export/SlicerHandoffPanel	Keep	Download, managed open, local Open with.	web/apps/web/src/components/export/SlicerHandoffPanel.tsx
 share/IncomingSharesCard	Keep	Mounted on Builds; outgoing sharing stays live.	web/apps/web/src/pages/PlansPage.tsx
 settings/PrintersSettingsCard	Merge	Global Printers section owns setup; Settings copy remains until Phase 9 detail view.	web/apps/web/src/components/settings/PrintersSettingsCard.tsx
