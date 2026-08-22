@@ -1,6 +1,6 @@
 # Author manifest on a stack playbook
 
-Maintainer guide: author base and addon manifests that merge on **Build** via shared **choice** ids and **canonical path globs**.
+Maintainer guide: author base and addon manifests that merge on **Sources** via shared **choice** ids and **canonical path globs**.
 
 ## Mental model
 
@@ -26,13 +26,14 @@ Tie the same category id across repos. Each member stores that repo’s **relati
 | Step | Where |
 |------|--------|
 | Directory rules, categories | Per-repo `print-partner.manifest.yaml` (maintainer) |
-| Stack presets, variant picks | **Build** → kit manifest options on base source |
-| STL file inclusion | **Build** → per-source file pickers |
-| Role filament colors | **Build** → Colors by role |
-| Quantities, validation | **Review** |
+| Stack presets, variant picks | **Sources** → kit manifest options on base source |
+| STL file inclusion | **Sources** → per-source file pickers |
+| Role filament colors | **Sources** → Colors by role |
+| Quantities, validation | **Plan** |
 | Printed units, checklist | **Checkoff** |
+| Plates, 3MF, send | **Production** |
 
-Use the sidebar **Build → Review → Checkoff** pipeline for the active plan.
+Use the sidebar **Sources → Plan → Checkoff → Production** pipeline for the active Build.
 
 ## Golden reference manifests
 
@@ -50,7 +51,7 @@ See [cross-source Voron manifests](../examples/cross-source-voron/ldo-2.4-golden
 - [ ] Folder rules use `Folder/**` globs, not per-file explosion
 - [ ] Addon variants declare `excludes` for stock globs
 - [ ] Replacement parts use `replaces` or slot mapping
-- [ ] Review shows no blocking issues on golden profile
+- [ ] Plan shows no blocking issues on golden profile
 - [ ] Sources synced — no drift warnings
 
 ## Publish

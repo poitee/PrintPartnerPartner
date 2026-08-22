@@ -1,10 +1,10 @@
 # Print Partner documentation
 
-Print Partner is a self-hostable **desk workflow** for layered STL kits — sync repos, compose a plan, pack plates, export, and check off prints. This folder holds user guides, examples, and technical references.
+Print Partner is a self-hostable **desk workflow** for layered STL kits — sync repos, compose a Build, pack plates, export, and check off prints. This folder holds user guides, examples, and technical references.
 
-**Desk loop:** **Library** → **Plan** → **Parts** → **Progress** → **Export**
+**Desk loop:** **Library** → **Builds** → **Sources** → **Plan** → **Checkoff** → **Production**
 
-Plan management (create, rename, duplicate, archive) is separate from that pipeline — use header **Create plan** or the sidebar **Plans** page. Utility nav: Plans · Printers · Settings · Help.
+**New Build** asks only for a name, then opens Sources. Opening an existing Build opens Plan. Utility nav: Builds · Production · Printers · Settings.
 
 **MCP attach:** connect Cursor / Grok / Claude to HTTP MCP on the live host. There is no in-app Kit Advisor. See [MCP attach](assistant-mcp.md) and [Kit brain](KIT_ADVISOR.md).
 
@@ -27,13 +27,14 @@ After the app is running, open **Help** in the sidebar for the in-app workflow g
 
 ## Workflow guides
 
-| Step | What you do |
-|------|-------------|
-| **Library** | Register GitHub repos, local folders, or zips; categories; import rules; sync; global STL search; update-available badges |
-| **Plan** | Attach base/add-on sources, pick STL files, set quantities and role filament colors in a saved draft, then review and apply it |
-| **Parts** | Validation summary by role and filament, 3D previews, quantity edits |
-| **Progress** | Print checkoff — per-unit progress, assembled toggles, filters, printable checklist |
-| **Export** | Plate workspace, height bands, slicer links, profile library, STL/3MF packs, printer bind/send |
+| Step | Path | What you do |
+|------|------|-------------|
+| **Library** | `/library` | Register GitHub repos, local folders, or zips; categories; import rules; sync; global STL search; update-available badges |
+| **Builds** | `/builds` | Name a Build, search, filter, archive, and restore |
+| **Sources** | `/sources` | Attach base/add-on sources, pick STL files, set quantities and role filament colors |
+| **Plan** | `/plan` | Review quantities and warnings, save a draft, and Apply so Checkoff and Production use the accepted list |
+| **Checkoff** | `/progress` | Print checkoff — per-unit progress, assembled toggles, filters, printable checklist |
+| **Production** | `/export?profile=` and `/production` | Assign units to Printers, arrange Plates, download revision-bound 3MFs, open a local slicer, send G-code |
 
 **Tips:** **⌘K / Ctrl+K** command palette · collapsible spine · brand theme (light / dark / system)
 
@@ -45,7 +46,7 @@ After the app is running, open **Help** in the sidebar for the in-app workflow g
 ### Examples
 
 - [Golden LDO Voron 2.4 + SB Tap walkthrough](examples/golden-ldo-voron-2.4-sb-tap.md)
-- [Export paths from Parts and Progress](examples/golden-ldo-voron-2.4-export.md)
+- [Export a golden kit bundle](examples/golden-ldo-voron-2.4-export.md)
 - [Cross-source Voron golden stack](examples/cross-source-voron/ldo-2.4-golden-stack.md)
 
 ---
@@ -57,10 +58,10 @@ After the app is running, open **Help** in the sidebar for the in-app workflow g
 | [Architecture](ARCHITECTURE.md) | Monorepo layout, deploy modes, job runner, MCP |
 | [HTTP API](API.md) | `/api/v1` discovery, auth, jobs, exports, MCP |
 | [Deploy reference](../web/DEPLOY.md) | Docker Compose, env vars, SaaS (Postgres + S3 + OAuth), MCP attach |
-| [Spoolman integration](integrations/SPOOLMAN.md) | Filament inventory on Plan; spool weights in Parts |
+| [Spoolman integration](integrations/SPOOLMAN.md) | Filament inventory on Sources; spool weights in Plan and Checkoff |
 | [Printer setup & debugging](integrations/PRINTER_SETUP.md) | Add Moonraker/PrusaLink, link fleet, send G-code, common failures |
 | [Printer API research](integrations/PRINTER_APIS.md) | Klipper / Prusa / Bambu capability ladder and stance |
-| [Printer UX deep dive](integrations/PRINTER_UX.md) | Desk-first screens, Export/Progress binds, phased UI map |
+| [Printer UX deep dive](integrations/PRINTER_UX.md) | Desk-first screens, Production/Checkoff binds, phased UI map |
 | [3MF export validation](3MF_EXPORT_VALIDATION.md) | Slicer import checklist for 3MF packs |
 | [MCP attach](assistant-mcp.md) | HTTP MCP + Cursor / Grok / Claude connect |
 | [Assistant research brief](assistant-research-brief.md) | Prompt/brief for producing domain research packs |

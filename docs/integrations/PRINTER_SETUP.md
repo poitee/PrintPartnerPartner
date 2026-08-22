@@ -1,8 +1,8 @@
 # Printer setup & debugging (desk-first)
 
-How to connect Moonraker / PrusaLink / Bambu (status) hosts, link them to fleet machines, send sliced G-code from Export (Moonraker/PrusaLink), and open Progress verify when a host job finishes. Product UX: [PRINTER_UX.md](PRINTER_UX.md). Vendor APIs: [PRINTER_APIS.md](PRINTER_APIS.md).
+How to connect Moonraker / PrusaLink / Bambu (status) hosts, link them to fleet machines, send sliced G-code from Production (Moonraker/PrusaLink), and open Checkoff verify when a host job finishes. Product UX: [PRINTER_UX.md](PRINTER_UX.md). Vendor APIs: [PRINTER_APIS.md](PRINTER_APIS.md).
 
-**Phases A–F (desk-first self-host):** Settings hosts + fleet bind + status pill; Export **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Progress **live strip** + active **send queue**; **verify-first Progress** on successful job complete (confirm/reject); **Bambu LAN MQTT status** (Phase E); thin **Queue for idle** / Send ready (Phase F); **Bambu Connect handoff** (official `bambu-connect://` URL — no MQTT print-start).
+**Phases A–F (desk-first self-host):** Settings hosts + fleet bind + status pill; Production **Send to printer** + JobTray `printer-upload` (Moonraker/PrusaLink); Checkoff **live strip** + active **send queue**; **verify-first Checkoff** on successful job complete (confirm/reject); **Bambu LAN MQTT status** (Phase E); thin **Queue for idle** / Send ready (Phase F); **Bambu Connect handoff** (official `bambu-connect://` URL — no MQTT print-start).
 
 ---
 
@@ -29,11 +29,11 @@ Secrets are stored with integrations redaction (`****` in list responses). Never
 3. Enable **LAN mode** on the printer (Network settings). Without LAN mode, MQTT `:8883` is typically **connection refused**.
 4. Find the **access code** and **serial** on the printer Network / LAN screen (or Bambu Studio device info). MQTT auth is username `bblp` + access code as password.
 5. **Add host** → **Test connection**. Expect `Connected (LAN MQTT · Idle)` (or Printing / … from `gcode_state`).
-6. Link the host on **Printer fleet** — Progress **live strip** and fleet status pill use the same `GET /api/v1/integrations/:id/status` poll as Moonraker/PrusaLink.
+6. Link the host on **Printer fleet** — Checkoff **live strip** and fleet status pill use the same `GET /api/v1/integrations/:id/status` poll as Moonraker/PrusaLink.
 
-**What works today:** status / progress / ETA / filename via local MQTT TLS (`mqtts://IP:8883`); Export **Open in Bambu Connect** stages a sliced `.3mf` / `.gcode` and hands off via the official `bambu-connect://import-file` URL scheme (desk self-host can launch Connect; Docker users download the staged file or set `BAMBU_CONNECT_HOST_PATH_MAP`).
+**What works today:** status / progress / ETA / filename via local MQTT TLS (`mqtts://IP:8883`); Production **Open in Bambu Connect** stages a sliced `.3mf` / `.gcode` and hands off via the official `bambu-connect://import-file` URL scheme (desk self-host can launch Connect; Docker users download the staged file or set `BAMBU_CONNECT_HOST_PATH_MAP`).
 
-**What does not ship:** reverse-engineered MQTT print-start. Moonraker / PrusaLink keep direct G-code upload on the same Export card.
+**What does not ship:** reverse-engineered MQTT print-start. Moonraker / PrusaLink keep direct G-code upload on the same Production card.
 
 **Docker / path map:** when the API runs in a container, Connect on the host cannot see container paths. Either download from the handoff response, or set `BAMBU_CONNECT_HOST_PATH_MAP=/data=/host/path/to/data` so the Connect URL uses the host mount path. Optional `BAMBU_CONNECT_LAUNCH=0|1` forces skip/force of OS URL launch.
 
@@ -65,34 +65,34 @@ Deleting a host clears `integration_id` / `device_id` on any fleet rows that poi
 ## Send a sliced file
 
 1. Slice in Orca / PrusaSlicer / etc. → `.gcode` or `.bgcode`.
-2. **Export → Send to printer** → pick a linked **Moonraker or PrusaLink** fleet machine (status shows Idle/Busy; picker prefers Idle) → **Upload**, **Upload & start** (blocked while busy), **Queue for idle** (this machine), or **Any matching idle** (same bed size; prefers loaded filament that matches tracked Progress parts).
-3. Optional **Progress verify tracking:** when the active plan has missing Progress units, leave **Track for Progress verify when this print finishes** on and multi-select which missing parts this job covers (defaults to all missing). Incomplete unit indices are stored with the upload.
+2. **Production → Send to printer** → pick a linked **Moonraker or PrusaLink** fleet machine (status shows Idle/Busy; picker prefers Idle) → **Upload**, **Upload & start** (blocked while busy), **Queue for idle** (this machine), or **Any matching idle** (same bed size; prefers loaded filament that matches tracked Checkoff parts).
+3. Optional **Checkoff verify tracking:** when the active Build has missing Checkoff units, leave **Track for Checkoff verify when this print finishes** on and multi-select which missing parts this job covers (defaults to all missing). Incomplete unit indices are stored with the upload.
 4. JobTray shows kind **Send to printer** (`printer-upload`): uploading… → complete / error.
 
 Print Partner does **not** slice. Wrong extension → client toast. Unlinked fleet → card points to Settings. Bambu-linked only → card explains status-only and points to this doc.
 
-## Progress live strip (Phase C)
+## Checkoff live strip (Phase C)
 
-After a fleet row is linked, open **Progress**. Above the search/filters sticky bar you’ll see a banner per linked host:
+After a fleet row is linked, open **Checkoff**. Above the search/filters sticky bar you’ll see a banner per linked host:
 
 - **Idle** — host reachable, no active print
 - **Printing · filename · N% · ETA …** — when the host reports a job (ETA only if the adapter returns `eta_seconds`)
-- **Complete · filename** — successful finish (Phase D queues Progress verify for Moonraker/PrusaLink send mappings)
+- **Complete · filename** — successful finish (Phase D queues Checkoff verify for Moonraker/PrusaLink send mappings)
 - **Offline** / **Error** — host unreachable or adapter error (link back to Settings)
 
-The strip polls status about every 5 seconds while the tab is visible; manual −/+ checkoff still works. **Bambu-linked hosts** appear here as **status only** (no Export send / verify mapping from Bambu yet).
+The strip polls status about every 5 seconds while the tab is visible; manual −/+ checkoff still works. **Bambu-linked hosts** appear here as **status only** (no Production send / verify mapping from Bambu yet).
 
-**Send queue (Phase F):** when Export has **Queue for idle** jobs waiting, Progress shows the same **Send queue** panel (Send ready / Send now / Remove) under the live strip so you can manage the farm without leaving Progress. Empty queue hides the panel.
+**Send queue (Phase F):** when Production has **Queue for idle** jobs waiting, Checkoff shows the same **Send queue** panel (Send ready / Send now / Remove) under the live strip so you can manage the farm without leaving Checkoff. Empty queue hides the panel.
 
-## Verify-first Progress (Phase D)
+## Verify-first Checkoff (Phase D)
 
-1. At send time, map incomplete Progress units (see above) → durable `printer.checkoff_links` record (watching).
-2. Keep **Progress** open (or reopen it) so the live strip can poll + reconcile.
+1. At send time, map incomplete Checkoff units (see above) → durable `printer.checkoff_links` record (watching).
+2. Keep **Checkoff** open (or reopen it) so the live strip can poll + reconcile.
 3. When the host reports **`complete`** for that filename, the link becomes `awaiting_verify` (toast: verify N parts). **Units are not marked printed yet.**
-4. In the **Verify print** panel: **Confirm** patches Progress; **Reject** requires a reason tag (and optional note) and leaves the unit unprinted. Outcomes are stored for failure learning.
+4. In the **Verify print** panel: **Confirm** patches Checkoff; **Reject** requires a reason tag (and optional note) and leaves the unit unprinted. Outcomes are stored for failure learning.
 5. Cancel / error / idle after a partial print → `host_failed` (dismissible). Refresh will not re-queue (`verified` / `dismissed` / `host_failed`).
 
-**Note:** Verify mappings are created from Export send. Because Bambu send is not shipped, Bambu status alone does not create checkoff links.
+**Note:** Verify mappings are created from Production send. Because Bambu send is not shipped, Bambu status alone does not create checkoff links.
 
 **Debug:**
 
@@ -119,7 +119,7 @@ The strip polls status about every 5 seconds while the tab is visible; manual �
 | Upload: Bambu not supported | Status-only adapter | Use Moonraker/PrusaLink or wait for official Connect/Local Server path |
 | Upload & start failed after upload | Host busy / bad filename | File is on host; start separately or free the printer |
 | PrusaLink HTTP 409 | File exists | Adapter sends `Overwrite: ?1`; still fails → rename file |
-| Verify never appears | No mapping / Progress closed / cancel | Enable checkbox + select parts at send; open Progress; confirm host shows Complete not Idle after cancel |
+| Verify never appears | No mapping / Checkoff closed / cancel | Enable checkbox + select parts at send; open Checkoff; confirm host shows Complete not Idle after cancel |
 | Units already checked | Manual −/+ or prior apply | Toast may say units already checked off; link stays `applied` |
 | SaaS cannot reach printer | LAN not reachable | Desk-v1 is self-host; SaaS needs a future site-agent |
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -53,4 +54,35 @@ test("public docs describe Builds, Sources, Plan, Checkoff, and Production", () 
   assert.match(capture, /path: "\/plan"/);
   assert.match(capture, /path: "\/progress"/);
   assert.match(capture, /path: "\/export"/);
+
+  const docsIndex = read("docs/README.md");
+  assert.doesNotMatch(
+    docsIndex,
+    /\*\*Library\*\* → \*\*Plan\*\* → \*\*Parts\*\* → \*\*Progress\*\* → \*\*Export\*\*/,
+    "docs/README still describes the retired Parts/Progress/Export pipeline",
+  );
+  assert.doesNotMatch(docsIndex, /Create plan/, "docs/README still tells users to Create plan");
+  assert.doesNotMatch(docsIndex, /sidebar \*\*Plans\*\*/, "docs/README still points at a Plans page");
+  assert.match(docsIndex, /Sources/);
+  assert.match(docsIndex, /Checkoff/);
+  assert.match(docsIndex, /Production/);
+  assert.match(docsIndex, /New Build/);
+
+  const playbook = read("docs/playbooks/kit-studio-build.md");
+  assert.doesNotMatch(playbook, /Create plan/);
+  assert.doesNotMatch(playbook, /\*\*Parts\*\* —/);
+  assert.match(playbook, /New Build/);
+  assert.match(playbook, /Production/);
+
+  const trackedPlans = spawnSync(
+    "git",
+    ["ls-files", "--", "docs/superpowers", ".superpowers"],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(trackedPlans.status, 0);
+  assert.equal(
+    trackedPlans.stdout.trim(),
+    "",
+    "internal plan trees must not be tracked in git",
+  );
 });

@@ -1,6 +1,6 @@
 # Printer API research (Klipper / Prusa / Bambu)
 
-Research brief for connecting Print Partner to live printers. **Phases A–E** ship Moonraker/PrusaLink `testConnection`, `getStatus` (including `complete`), `uploadFile`, fleet bind, Export send, Progress live strip, **verify-first Progress** (confirm/reject + outcomes), and **Bambu LAN MQTT status** (no default reverse-engineered print-start) — see [PRINTER_SETUP.md](PRINTER_SETUP.md). UX companion: [PRINTER_UX.md](PRINTER_UX.md).
+Research brief for connecting Print Partner to live printers. **Phases A–E** ship Moonraker/PrusaLink `testConnection`, `getStatus` (including `complete`), `uploadFile`, fleet bind, Production send, Checkoff live strip, **verify-first Checkoff** (confirm/reject + outcomes), and **Bambu LAN MQTT status** (no default reverse-engineered print-start) — see [PRINTER_SETUP.md](PRINTER_SETUP.md). UX companion: [PRINTER_UX.md](PRINTER_UX.md).
 
 Print Partner already has the right skeleton: pluggable integrations, working Moonraker + PrusaLink + Bambu (status) adapters, Spoolman, offline fleet presets for 3MF packing.
 
@@ -11,30 +11,30 @@ Print Partner already has the right skeleton: pluggable integrations, working Mo
 ```mermaid
 flowchart LR
   Kit[Kit plan + roles] --> Filament[Filament / Spoolman]
-  Filament --> Export[STL / 3MF export]
+  Filament --> Export[STL / 3MF Production]
   Export --> Slicer[External slicer]
   Slicer --> Printer[Printer by hand]
-  Printer -.->|manual| Checkoff[Progress checkoff]
+  Printer -.->|manual| Checkoff[Checkoff]
 ```
 
-- **Live send-to-printer ships for Moonraker and PrusaLink** (Export upload / start, Progress verify-first). Bambu is status-only over LAN MQTT.
+- **Live send-to-printer ships for Moonraker and PrusaLink** (Production upload / start, Checkoff verify-first). Bambu is status-only over LAN MQTT.
 - **No G-code generation.** Exports are slicer inputs (STL packs, packed 3MF). Materials in 3MF are display colors, not AMS/MMU maps ([3MF_EXPORT_VALIDATION.md](../3MF_EXPORT_VALIDATION.md)).
 - **Spoolman** deducts filament consumption automatically on Checkoff confirm when spool assignments are set on parts. The deduction uses the printer API's consumed-material field and distributes proportionally across assigned spools. This is best-effort and never blocks checkoff.
 - **Self-host** can reach LAN printers (`allowPrivate: true` for Spoolman/Moonraker). **SaaS** generally cannot reach customer LANs without an on-prem agent/tunnel.
 - **Moonraker auth:** untrusted clients must send credentials on HTTP (`Authorization: Bearer <JWT>` or `X-Api-Key: <key>`); WebSocket clients authenticate at connection setup / `server.connection.identify`, not via per-message headers. “Trusted clients” is a separate IP/domain allowlist mode in Moonraker config — not “open LAN by default.” Prefer HTTPS/WSS when credentials leave a trusted LAN; desk-v1 HTTP on a private LAN is still the common Moonraker setup. Store keys via integrations secret redaction; never log JWT/API-key material in errors or diagnostics.
 
-The product gap that dominates every vendor discussion: **Print Partner plans kits; printers consume sliced jobs.** Integration value is highest where we bridge plan → sliced artifact → machine status → Progress checkoff — not where we pretend to be a slicer.
+The product gap that dominates every vendor discussion: **Print Partner plans kits; printers consume sliced jobs.** Integration value is highest where we bridge plan → sliced artifact → machine status → Checkoff — not where we pretend to be a slicer.
 
 ## Capability ladder
 
 | Layer | What users get | Needs from us | Needs from printer API |
 |-------|----------------|---------------|------------------------|
-| L1 Monitor | Live status in Settings / Progress; “printing part X” | Poll or WS adapter; map device ↔ fleet slot | Status + job progress |
+| L1 Monitor | Live status in Settings / Checkoff; “printing part X” | Poll or WS adapter; map device ↔ fleet slot | Status + job progress |
 | L2 Auto-checkoff | When job completes, mark print units done | Durable mapping: `integrationId` + `deviceId` + remote job id + artifact hash; persist and reconcile via poll if WS events were missed | Reliable done/fail events |
 | L3 Push file | Upload already-sliced `.gcode` / `.bgcode` / `.3mf` | Artifact-ref job (not inline bytes); size/timeout limits; upload vs start retry/idempotency (see [PRINTER_UX.md](PRINTER_UX.md) backend seams) | File upload + start |
 | L4 Farm queue | Pick free printer by bed/filament match | Bind fleet presets to live devices; queue | Multi-device list + idle state |
 | L5 AMS/MMU map | Role filament → AMS slot / Spoolman spool | Slot metadata + export mapping | Filament/AMS APIs |
-| L6 Slice-to-send | One-click from Parts | Slicer pipeline or host plugin | Same as L3 after slice |
+| L6 Slice-to-send | One-click from Production | Slicer pipeline or host plugin | Same as L3 after slice |
 
 **Recommended build sequence:** L1 → L3 (upload + optional start) → L2 (auto-checkoff) → L5 (Spoolman/AMS) → L4 farm. Defer L6 unless Print Partner intentionally becomes a slicer orchestrator.
 
@@ -129,7 +129,7 @@ flowchart TB
     Spool[Spoolman integration]
     Int[Integration adapters]
     Exp[STL / 3MF export jobs]
-    Prog[Progress checkoff]
+    Prog[Checkoff]
   end
   subgraph new [New printer layer]
     Live[Live device binding]
@@ -149,7 +149,7 @@ Concrete extension points already in-repo:
 1. Widen `IntegrationAdapter` (`web/apps/server/src/integrations/store.ts`): `getStatus`, `uploadFile`, `startPrint`, optional `subscribe`.
 2. Bind `printer.fleet` entries → `integrationId` + `deviceId`.
 3. New job kinds (e.g. `printer-upload`) next to `export-3mf` / `export-stl-pack`.
-4. Progress: durable “link print unit ↔ host job” for L2 (`integrationId` / `deviceId` / remote job id / artifact hash; poll to reconcile missed WS events).
+4. Checkoff: durable “link print unit ↔ host job” for L2 (`integrationId` / `deviceId` / remote job id / artifact hash; poll to reconcile missed WS events).
 5. Deploy mode: self-host LAN first; SaaS needs a **site agent** (outbound tunnel) — same SSRF rules as Spoolman.
 
 **OctoPrint:** Not in contracts today. Moonraker covers the Klipper-native majority. Add OctoPrint only if demand appears.
@@ -173,7 +173,7 @@ Vendor API *capability* (what the host/API can support). Print Partner ships Moo
 1. **Primary persona:** single Voron/Prusa on a desk, or multi-printer farm?
 2. **Slice boundary:** stay “export → slicer → we upload,” or invest in slice orchestration?
 3. **Bambu appetite:** power-user Developer Mode, or only official Connect/Local Server?
-4. **Success metric for v1:** live status + manual “upload this gcode,” or Progress auto-tick from completed jobs?
+4. **Success metric for v1:** live status + manual “upload this gcode,” or Checkoff auto-tick from completed jobs?
 
 ## Recommended stance when building
 

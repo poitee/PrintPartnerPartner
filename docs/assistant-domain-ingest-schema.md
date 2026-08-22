@@ -179,7 +179,7 @@ stacks:
     default_selections:
       toolhead: stealthburner
       probe: voron_tap
-    notes: Sync Voron-Trident at VTr2 before Update build
+    notes: Sync Voron-Trident at VTr2 before Apply on Plan
 ```
 
 Research-output array form is also accepted:

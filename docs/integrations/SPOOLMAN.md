@@ -1,6 +1,6 @@
 # Spoolman integration
 
-Print Partner can connect to an optional [Spoolman](https://github.com/Donkie/Spoolman) instance so you can pick filaments from your Spoolman catalog on **Build**, optionally override physical spools per part on **Review**, and see **read-only** spool remaining weights in **Review** and **Checkoff**.
+Print Partner can connect to an optional [Spoolman](https://github.com/Donkie/Spoolman) instance so you can pick filaments from your Spoolman catalog on **Sources**, optionally override physical spools per part on **Plan**, and see **read-only** spool remaining weights in **Plan** and **Checkoff**.
 
 **Spoolman is fully optional.** With no integration configured, Print Partner behaves exactly as before: no Spoolman panels, hints, or badges appear anywhere.
 
@@ -10,8 +10,8 @@ Spoolman does not need to run on the same machine as Print Partner. All HTTP cal
 
 | Area | Behavior |
 |------|----------|
-| **Build** | Standard catalog/custom filament picker only; no Spoolman group or spool dropdown |
-| **Review / Checkoff** | No spool badges or per-part spool controls |
+| **Sources** | Standard catalog/custom filament picker only; no Spoolman group or spool dropdown |
+| **Plan / Checkoff** | No spool badges or per-part spool controls |
 | **Settings** | “Optional integrations” section is collapsed by default at the bottom of Settings |
 
 ## Prerequisites
@@ -34,41 +34,41 @@ Print Partner appends `/api/v1` when calling the REST API ([Spoolman REST API v1
 1. Open **Settings → Optional integrations** (expand the collapsed section).
 2. **Add Spoolman** — enter a friendly name and base URL.
 3. Click **Test connection**. You should see a success message (version or status from Spoolman).
-4. Under **Use for filament picker**, select the integration so Spoolman colors appear on **Build**.
+4. Under **Use for filament picker**, select the integration so Spoolman colors appear on **Sources**.
 5. Ensure the integration is **Enabled**.
 
 Filament IDs are stored as `spoolman:{integrationId}:filament:{numericId}` so plans survive restarts.
 
-## Build — role filaments
+## Sources — role filaments
 
-On **Build**, open the role filament picker. Spoolman filaments appear in a **Spoolman** group (vendor, material, color from Spoolman `color_hex`) only after you enable an integration for the picker.
+On **Sources**, open the role filament picker. Spoolman filaments appear in a **Spoolman** group (vendor, material, color from Spoolman `color_hex`) only after you enable an integration for the picker.
 
 Assign colors by role as usual; parts inherit the selected Spoolman filament.
 
 When a Spoolman filament is selected and matching spools exist (remaining weight > 0), a second dropdown appears:
 
-- **Any spool (inventory summary)** — Review/Checkoff show combined remaining weight across all spools for that filament.
-- **Pick a spool** — e.g. `#3 · ~420 g · Shelf A` — parts store `spoolman:{integrationId}:spool:{id}` and Review shows only that spool’s remaining weight.
+- **Any spool (inventory summary)** — Plan/Checkoff show combined remaining weight across all spools for that filament.
+- **Pick a spool** — e.g. `#3 · ~420 g · Shelf A` — parts store `spoolman:{integrationId}:spool:{id}` and Plan shows only that spool’s remaining weight.
 
-Changing the filament clears the spool selection. Re-running **Update build** keeps filament and spool assignments on existing parts.
+Changing the filament clears the spool selection. Re-applying the Plan draft keeps filament and spool assignments on existing parts.
 
-If Spoolman is unreachable, Build still works; a subtle hint appears only in the role filament picker (not on every page).
+If Spoolman is unreachable, Sources still works; a subtle hint appears only in the role filament picker (not on every page).
 
-## Review — per-part spool override (optional)
+## Plan — per-part spool override (optional)
 
 When Spoolman is enabled and a part uses a Spoolman filament with in-stock spools, an inline **Spool** dropdown may appear on that part row (desktop table and mobile cards). Parts without Spoolman filaments show nothing extra.
 
-- **Role default** — matches the spool assigned for that part’s role on Build (or “any spool” if none was picked).
+- **Role default** — matches the spool assigned for that part’s role on Sources (or “any spool” if none was picked).
 - **Any spool (summary)** — clears a part-specific spool so the badge shows combined inventory (only offered when the role has a specific spool).
 - **Pick a spool** — overrides just this part; the remaining-weight badge updates after save.
 
-Spoolman errors during Review do not block quantity changes, include/exclude, or Checkoff.
+Spoolman errors during Plan do not block quantity changes, include/exclude, or Checkoff.
 
-## Review / Checkoff — spool inventory (read-only)
+## Plan / Checkoff — spool inventory (read-only)
 
-When a part uses a Spoolman filament and matching spools exist in Spoolman, Review and Checkoff show a muted badge such as:
+When a part uses a Spoolman filament and matching spools exist in Spoolman, Plan and Checkoff show a muted badge such as:
 
-- `~420 g on spool #3` (single spool, or a selected spool on Build/Review)
+- `~420 g on spool #3` (single spool, or a selected spool on Sources/Plan)
 - `2 spools · ~650 g (#3, #5)` (multiple spools when no specific spool is chosen)
 
 No badge is shown when Spoolman is off, the filament is not from Spoolman, or no in-stock spools match.
@@ -101,8 +101,8 @@ Then use `http://spoolman-host:7912` as the base URL.
 | Test connection fails | URL includes `http://`, correct port, Spoolman running, firewall |
 | Connection refused from Docker | Use LAN IP or `host.docker.internal`, not `localhost` |
 | Empty Spoolman picker | Integration enabled, selected under **Use for filament picker**, Spoolman has filaments |
-| No spool badge in Review | Part must use a Spoolman filament id; spool must have remaining weight > 0 |
-| No spool dropdown on Build | Spoolman filament selected but no spools with remaining weight for that filament in Spoolman |
+| No spool badge in Plan | Part must use a Spoolman filament id; spool must have remaining weight > 0 |
+| No spool dropdown on Sources | Spoolman filament selected but no spools with remaining weight for that filament in Spoolman |
 | Stale UI after upgrade | Hard refresh the browser |
 
 Test from the Print Partner container/host:
@@ -130,10 +130,10 @@ See [API.md](../API.md) for auth and OpenAPI.
 ## Limitations (v1)
 
 - **Automatic consumption** — when you confirm units in Checkoff and the confirmed parts have Spoolman spool assignments, Print Partner reads filament consumed (mm) from the printer API (Moonraker: `print_stats.filament_used`; PrusaLink: `consumed_material`) and calls Spoolman `PUT /spool/:id/use` to deduct weight. This is best—effort: if the printer API is unreachable or the parts have no spool assignment, no deduction occurs and checkoff still succeeds.
-- **No live sync** — no WebSocket or Moonraker push from Spoolman; weights refresh when Review/Checkoff reloads.
+- **No live sync** — no WebSocket or Moonraker push from Spoolman; weights refresh when Plan/Checkoff reloads.
 - Integrations API is `/api/v1` only; core workflow does not require Spoolman.
 
 ## See also
 
 - [Printer API research](PRINTER_APIS.md) — future live printer hosts (Moonraker, PrusaLink, Bambu) and how Spoolman could bridge to them
-- [Printer UX deep dive](PRINTER_UX.md) — Settings / Export / Progress surfaces for live hosts (hosts stay separate from Spoolman inventory)
+- [Printer UX deep dive](PRINTER_UX.md) — Settings / Production / Checkoff surfaces for live hosts (hosts stay separate from Spoolman inventory)

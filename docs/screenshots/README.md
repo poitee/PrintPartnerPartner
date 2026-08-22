@@ -20,7 +20,7 @@ Filenames are stable for README / GitHub Pages embeds. Spine labels and routes:
 - **Checkoff** `/progress`
 - **Production** `/export?profile=` (Build) and `/production` (global)
 
-Optional Progress/Export PNGs (`progress.png`, `export.png`) are captured by the current script and embedded from README and GitHub Pages. Older `advisor.png` / `settings-ai.png` files (if present) are leftovers from the removed in-app Kit Advisor — do not re-link them from README or Pages.
+Checkoff/Production PNGs (`progress.png`, `export.png`) are captured by the current script and embedded from README and GitHub Pages. Older `advisor.png` / `settings-ai.png` files (if present) are leftovers from the removed in-app Kit Advisor — do not re-link them from README or Pages.
 
 The root README embeds **light** PNGs. GitHub Pages uses theme pairs for light/dark.
 
@@ -37,9 +37,9 @@ The root README embeds **light** PNGs. GitHub Pages uses theme pairs for light/d
 
 1. Start the app (`docker compose up --build` or local single-port run on `:8080`).
 2. Add and sync at least one source with STLs.
-3. Create a plan, attach the source, rebuild a draft, pick STL files and quantities, then apply the draft so accepted parts exist.
+3. **New Build**, attach the source on Sources, pick STL files and quantities, then **Apply** on Plan so accepted parts exist.
 
-Optional: pass `--profile-id N` to select a specific plan when multiple exist.
+Optional: pass `--profile-id N` to select a specific Build when multiple exist.
 
 To seed a representative Source, accepted Build, and unbound Printer, then capture both themes:
 
@@ -71,4 +71,4 @@ Optional flags:
 
 **Important:** Do not paste `/library` (or `/plan`, `/parts`, `/progress`, `/plans`, `/settings`) into the address bar on a cold load in Docker single-port mode — some paths are also API routes. Client-side navigation from `/` avoids that.
 
-Three.js renders STL previews client-side; allow a moment for previews to load before capturing Parts.
+Three.js renders STL previews client-side; allow a moment for previews to load before capturing Plan.
