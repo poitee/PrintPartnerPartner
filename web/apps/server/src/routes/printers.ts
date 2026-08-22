@@ -3,6 +3,7 @@ import type { AppRepository } from "../db/repository.js";
 import {
   loadFleet,
   loadPrinterPresets,
+  newMachineFromPreset,
   parsePrinterMachine,
   saveFleet,
 } from "../services/printer-fleet.js";
@@ -13,6 +14,11 @@ type RouteDeps = { repo: AppRepository };
 
 function findFleetPrinter(repo: AppRepository, printerId: string) {
   return loadFleet(repo).find((m) => m.id === printerId) ?? null;
+}
+
+function positiveMm(value: unknown, fallback: number): number {
+  const parsed = Number(value ?? fallback);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 export async function registerPrinterRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
@@ -101,24 +107,39 @@ export async function registerPrinterRoutes(app: FastifyInstance, deps: RouteDep
     const body = request.body as {
       name?: string;
       model?: string;
+      preset_id?: string;
       bed_width_mm?: number;
       bed_depth_mm?: number;
+      bed_height_mm?: number | null;
+      max_filament_slots?: number;
     };
-    if (!body.model?.trim()) {
-      return reply.status(400).send({ detail: "model is required" });
+    const name = body.name?.trim() || "Printer";
+    const presetId = body.preset_id?.trim();
+    let machine;
+    if (presetId) {
+      const preset = loadPrinterPresets().find((row) => row.id === presetId);
+      if (!preset) {
+        return reply.status(400).send({ detail: "Unknown Printer preset" });
+      }
+      machine = newMachineFromPreset(preset, name);
+    } else {
+      if (!body.model?.trim()) {
+        return reply.status(400).send({ detail: "model is required" });
+      }
+      machine = parsePrinterMachine({
+        id: `printer-${crypto.randomUUID().slice(0, 10)}`,
+        name,
+        model: body.model.trim(),
+        bed_width_mm: positiveMm(body.bed_width_mm, 250),
+        bed_depth_mm: positiveMm(body.bed_depth_mm, 210),
+        bed_height_mm: body.bed_height_mm == null ? 250 : positiveMm(body.bed_height_mm, 250),
+        margin_mm: 4,
+        max_filament_slots: Math.max(1, Number(body.max_filament_slots ?? 1) || 1),
+        loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
+        preset_id: null,
+      });
     }
     const fleet = loadFleet(deps.repo);
-    const machine = parsePrinterMachine({
-      id: `printer-${crypto.randomUUID().slice(0, 10)}`,
-      name: body.name ?? "Printer",
-      model: body.model.trim(),
-      bed_width_mm: body.bed_width_mm ?? 250,
-      bed_depth_mm: body.bed_depth_mm ?? 210,
-      bed_height_mm: 250,
-      margin_mm: 4,
-      max_filament_slots: 1,
-      loaded_filaments: [{ slot: 1, filament_color_id: null, label: "" }],
-    });
     fleet.push(machine);
     saveFleet(deps.repo, fleet);
     return machine;

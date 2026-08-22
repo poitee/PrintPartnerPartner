@@ -426,6 +426,7 @@ export type PrinterMachine = {
   enabled?: boolean;
   integration_id?: string | null;
   device_id?: string | null;
+  preset_id?: string | null;
   preferred_slicer?: "orca" | "prusa" | "bambu" | null;
 };
 
@@ -1112,9 +1113,12 @@ export async function savePrinterFleet(
 
 export async function addPrinter(body: {
   name: string;
-  model: string;
-  bed_width_mm: number;
-  bed_depth_mm: number;
+  model?: string;
+  preset_id?: string;
+  bed_width_mm?: number;
+  bed_depth_mm?: number;
+  bed_height_mm?: number | null;
+  max_filament_slots?: number;
 }): Promise<PrinterMachine> {
   return engineFetch<PrinterMachine>("/printers", {
     method: "POST",

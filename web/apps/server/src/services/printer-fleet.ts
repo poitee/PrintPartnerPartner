@@ -74,6 +74,11 @@ export function parsePrinterMachine(data: Record<string, unknown>): PrinterMachi
   } else {
     machine.preferred_slicer = null;
   }
+  if (data.preset_id != null && String(data.preset_id).trim()) {
+    machine.preset_id = String(data.preset_id).trim();
+  } else if (data.preset_id === null) {
+    machine.preset_id = null;
+  }
   return ensureSlots(machine);
 }
 
@@ -140,5 +145,6 @@ export function newMachineFromPreset(preset: PrinterPreset, name?: string): Prin
       filament_color_id: null,
       label: "",
     })),
+    preset_id: preset.id,
   });
 }

@@ -78,6 +78,7 @@ export default function PrintersPage() {
   const engineReady = engineState === "ready";
   const pollMs = usePrinterStatusPollMs();
   const [linked, setLinked] = useState<LinkedPrinter[]>([]);
+  const [planning, setPlanning] = useState<PrinterMachine[]>([]);
   const [statusById, setStatusById] = useState<Record<string, PrinterHostStatus>>({});
   const [checkoffLinks, setCheckoffLinks] = useState<PrinterCheckoffLink[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -94,6 +95,7 @@ export default function PrintersPage() {
   const refreshRoster = useCallback(async () => {
     if (!engineReady) {
       setLinked([]);
+      setPlanning([]);
       setStatusById({});
       setCheckoffLinks([]);
       setLoadError(null);
@@ -109,13 +111,21 @@ export default function PrintersPage() {
       ]);
       const byId = new Map(integrations.map((i) => [i.id, i]));
       const next: LinkedPrinter[] = [];
+      const planningNext: PrinterMachine[] = [];
       for (const machine of fleet) {
         // Skip disabled fleet rows (plan/machine flag) and disabled hosts.
         if (machine.enabled === false) continue;
         const id = machine.integration_id?.trim();
-        if (!id) continue;
+        if (!id) {
+          planningNext.push(machine);
+          continue;
+        }
         const host = byId.get(id);
-        if (!host || host.config.enabled === false) continue;
+        if (!host) {
+          planningNext.push(machine);
+          continue;
+        }
+        if (host.config.enabled === false) continue;
         if (!HOST_TYPES.has(host.type as LiveStripHostType)) continue;
         next.push({
           printer: machine,
@@ -124,12 +134,14 @@ export default function PrintersPage() {
         });
       }
       setLinked(next);
+      setPlanning(planningNext);
       // Keep last successful links on transient failure (avoid flashing "No plan.").
       if (checkoff) setCheckoffLinks(checkoff.links ?? []);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
       setLinked([]);
+      setPlanning([]);
       setCheckoffLinks([]);
     }
   }, [engineReady]);
@@ -204,7 +216,7 @@ export default function PrintersPage() {
         icon={Printer}
         accent
         title="Printers"
-        description="Live status for linked printers. Add and manage them in Settings."
+        description="Live status for connected printers. Planning printers appear here without a connection."
         actions={
           <PageHeaderActions>
             <Button size="sm" variant="outline" asChild>
@@ -224,12 +236,13 @@ export default function PrintersPage() {
             ? "Engine offline — start the print-partner engine to view printers."
             : "Connecting to the engine…"}
         </p>
-      ) : linked.length === 0 ? (
+      ) : linked.length === 0 && planning.length === 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">No linked printers</CardTitle>
+            <CardTitle className="text-base">No printers</CardTitle>
             <CardDescription>
-              Add a Klipper, Prusa, or Bambu printer in Settings to see live status here.
+              Add a Printer in Settings for planning and local 3MF. A connection is optional
+              until you send or read status.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -240,6 +253,40 @@ export default function PrintersPage() {
         </Card>
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {planning.map((printer) => (
+            <li key={printer.id}>
+              <Card className="h-full border-dashed border-border shadow-sm">
+                <CardHeader className="space-y-2 pb-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <CardTitle className="truncate text-[15px] font-semibold leading-snug">
+                        {printer.name}
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        Bed {printer.bed_width_mm}×{printer.bed_depth_mm} mm
+                      </CardDescription>
+                    </div>
+                    <Badge
+                      variant="muted"
+                      className="shrink-0 rounded-full px-2 py-0.5 font-mono text-[10.5px] font-normal"
+                    >
+                      Planning only
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-2 pt-0">
+                  <p className="text-xs text-muted-foreground">
+                    Planning and local 3MF work without a connection.
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button size="sm" variant="outline" asChild>
+                      <Link to={settingsPrintersRoute()}>Add connection</Link>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </li>
+          ))}
           {linked.map(({ printer, host, hostType }) => {
             const status = statusById[host.id];
             const tone = printerLiveStripTone(status?.state);

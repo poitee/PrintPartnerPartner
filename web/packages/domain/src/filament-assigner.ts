@@ -16,5 +16,7 @@ export type PrinterMachine = {
   integration_id?: string | null;
   /** Optional device id within the host (Moonraker uses "default"). */
   device_id?: string | null;
+  /** Optional Printer preset that filled the planning values. */
+  preset_id?: string | null;
   preferred_slicer?: "orca" | "prusa" | "bambu" | null;
 };

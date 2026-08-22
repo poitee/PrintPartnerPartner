@@ -52,7 +52,7 @@ async function addPrinter(app: Awaited<ReturnType<typeof makeApp>>, name: string
   return res.json() as { id: string };
 }
 
-describe("PUT /printers/:id", () => {
+describe("POST /printers", () => {
   it("requires an explicit model for a custom Printer", async () => {
     const app = await makeApp();
     const response = await app.inject({
@@ -64,6 +64,63 @@ describe("PUT /printers/:id", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ detail: "model is required" });
   });
+
+  it("creates a planning Printer from a preset without a connection", async () => {
+    const app = await makeApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/printers",
+      payload: { name: "Shop Voron", preset_id: "preset-voron-250" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      name: "Shop Voron",
+      model: "voron-250",
+      bed_width_mm: 250,
+      bed_depth_mm: 250,
+      bed_height_mm: 250,
+      preset_id: "preset-voron-250",
+    });
+    expect(response.json().integration_id ?? null).toBeNull();
+  });
+
+  it("creates a custom Printer without a connection", async () => {
+    const app = await makeApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/printers",
+      payload: {
+        name: "Wide bed",
+        model: "Wide bed",
+        bed_width_mm: 400,
+        bed_depth_mm: 400,
+        bed_height_mm: 450,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      name: "Wide bed",
+      model: "Wide bed",
+      bed_width_mm: 400,
+      bed_depth_mm: 400,
+      bed_height_mm: 450,
+    });
+    expect(response.json().integration_id ?? null).toBeNull();
+  });
+
+  it("rejects an unknown Printer preset", async () => {
+    const app = await makeApp();
+    const response = await app.inject({
+      method: "POST",
+      url: "/printers",
+      payload: { name: "Ghost", preset_id: "preset-does-not-exist" },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ detail: "Unknown Printer preset" });
+  });
+});
+
+describe("PUT /printers/:id", () => {
 
   it("sets an explicit preferred_slicer override", async () => {
     const app = await makeApp();

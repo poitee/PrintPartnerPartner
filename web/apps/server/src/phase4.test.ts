@@ -57,7 +57,7 @@ describe("printer fleet persistence", () => {
     expect(legacy.integration_id).toBeUndefined();
     expect(legacy.model).toBe("Legacy");
 
-    expect(newMachineFromPreset({
+    const machine = newMachineFromPreset({
       id: "preset-core-one",
       name: "Core One",
       model_slug: "prusa-core-one",
@@ -65,7 +65,12 @@ describe("printer fleet persistence", () => {
       bed_depth_mm: 220,
       bed_height_mm: 270,
       max_filament_slots: 1,
-    }).model).toBe("prusa-core-one");
+    });
+    expect(machine).toMatchObject({
+      model: "prusa-core-one",
+      preset_id: "preset-core-one",
+    });
+    expect(machine.integration_id ?? null).toBeNull();
 
     saveFleet(repo, [
       {
