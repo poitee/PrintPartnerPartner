@@ -23,7 +23,7 @@ const INVENTORY: Array<{ name: string; status: "Keep" | "Revise" | "Merge" | "Re
   { name: "layout/PageHeader, EmptyState, SpineRail", status: "Keep", why: "Shell owners for every section." },
   { name: "plan/PlanDraftPanel", status: "Keep", why: "Plan-owned Apply." },
   { name: "checkoff/PrintVerifyPanel", status: "Keep", why: "Build Checkoff owns verification." },
-  { name: "export/accepted-plates/*", status: "Revise", why: "Production owner; Phase 9 still owes saved XY and Arrange." },
+  { name: "export/accepted-plates/*", status: "Keep", why: "Production owner; saved XY, pin, Arrange, and transfer are in code." },
   { name: "share/IncomingSharesCard", status: "Keep", why: "Mounted on Builds; outgoing sharing stays live." },
   { name: "settings/PrintersSettingsCard", status: "Keep", why: "Global Printers owns setup; Settings keeps a copy plus Library." },
   { name: "PlanTray leftover copy", status: "Revise", why: "Still says plan in places the spine already owns." },
