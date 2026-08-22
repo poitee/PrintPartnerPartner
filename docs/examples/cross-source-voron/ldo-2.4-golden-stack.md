@@ -22,6 +22,6 @@ Do **not** overlay LDO on Voron-2 — LDO repos are near-forks; pick `LDOVoron2`
 
 Shared category ids (`toolhead`, `probe`) let SB/Tap addons merge into either base.
 
-**Build page:** apply a stack preset card on the base source, pick variants, then **Update build**. See [Build playbook](../../playbooks/kit-studio-build.md).
+**Sources page:** apply a stack preset card on the base source, pick variants, then **Apply** on Plan. See [Build playbook](../../playbooks/kit-studio-build.md).
 
 See [README](./README.md) for cross-source replacement and umbilical examples.

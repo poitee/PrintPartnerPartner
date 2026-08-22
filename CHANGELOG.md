@@ -8,6 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Accepted Plate workflow** - accepted Plans now publish immutable Plate
+  revisions with explicit Printer allocation, saved fixed-point placement,
+  deterministic Required-unit 3MF identity, revision-keyed downloads, and
+  local slicer handoff. The Export page uses this state on desktop and mobile.
+
+### Changed
+
+- **Platform boundary** — supported self-host is SQLite, local disk, and
+  in-process jobs. Documentation no longer claims a Redis/BullMQ queue.
+  `GET /health` reports a `deployment` capability object. SaaS Postgres and S3
+  remain experimental.
+
+### Removed
+
+- **Legacy Plate and auto-slice APIs** - removed mutable `print-plan`,
+  `print-groups`, `print-assignments`, `plate-workspace`,
+  `print-plan/prepare-missing`, `pack-preview`, `export-3mf`, `auto-slice`, and
+  `open-plates` routes from flat and `/api/v1` surfaces.
+  Automation must use `export-accepted-plate-3mf` with an observed Plate
+  revision. Schema v28 deletes only persisted `print_plan:<Build id>` layout
+  keys; it does not translate match-key layouts into accepted identity.
+
+## [3.2.0] - 2026-08-20
+
+### Added
+
+- **Verifiable release identity** — one release command now prepares and checks
+  every current version sink. Release images carry the peeled Git commit and
+  tag in runtime health and OCI metadata; GitHub Releases attach the image
+  digest in `release-identity.json`.
 - **Multi-printer 3MF print plan** — Export uses the kit’s enabled fleet machines (Settings → Printer fleet + Export “Printers for this plan”). Parts assign by loaded `filament_color_id`, pack per bed, and write one 3MF per plate (zip / single-offset / single-plate-only modes) plus a `print_plan.json` manifest. Settings slots use the filament catalog picker; Export shows a printer → filament → parts assignment tree and per-printer plate estimates. Preview packing, assignment warnings, and checkbox state honor the same enabled-printer fallback as export. Plate filenames include the printer id so duplicate names cannot overwrite each other. See `docs/3MF_EXPORT_VALIDATION.md`.
 - **Auto-sync missing STLs + background thumbs (GRE-235)** — when a plan is selected (or Parts opens / compose applies) and STLs are missing or thumbs are empty, one coordinated job syncs sources then regenerates thumbnails. Parts shows Spinner + “Syncing STLs…” while running; Sync remains as retry on failure or if files are still gone. Review parts expose `stl_missing` / `thumb_empty` (distinct from checkoff `missing`).
 - **HTTP MCP attach (GRE-225)** — streamable HTTP at `/api/v1/mcp`; `PRINT_PARTNER_API_KEY` required unless `HOST` is loopback; pending proposes are per MCP session; Cursor plugin at `cursor-plugin/print-partner`; tools `get_remaining`, `duplicate_plan`, `archive_plan` (confirm-to-apply). Connect guide: `docs/assistant-mcp.md`.
@@ -36,10 +66,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 
 - **Color editor redesign** — the Build tab's "Colors by part type" section now uses a click-to-open color picker per role: a custom-color (hex) field plus a searchable filament catalog shown as product-thumbnail + name rows. Selected catalog colors show their product photo on the role swatch.
-- **Version alignment** — `PP_VERSION` defaults, Docker/Compose, package metadata, and deployment docs now use `3.1.0`, matching the latest repository release tag so update checks and deployments agree.
+- **Release publication order** — CI validates the annotated tag before
+  publishing, creates the GitHub Release before the immutable version image
+  alias, verifies matching existing artifacts on retry, and advances `latest`
+  only after the release identity passes.
 
 ### Fixed
 
+- **Failed `v3.1.0` publication path** — removed the unsupported GHCR visibility
+  mutation that previously allowed an image push to succeed before GitHub
+  Release creation failed. The disconnected historical tag remains unchanged.
 - **Kit-import setup panel** — the "Share import setup" panel now reliably appears after importing a shared build; the `?profile=` URL sync no longer drops the navigation state, and the import result is also handed off via a sessionStorage stash as a fallback.
 
 ## [3.1.0] - 2026-08-15
@@ -113,7 +149,7 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 - **React Build — STL preview panel** — click a part row to show a larger cached preview via `GET /parts/{id}/preview`.
 - **Community manifest browser** — `GET /manifest-registry` lists approved entries; read-only list in Help.
 - **Desktop CI** — `.github/workflows/desktop.yml` runs pytest, builds the engine on Ubuntu + macOS, and optionally runs the Vite desktop shell build on macOS.
-- **Release workflow** — `release.yml` attaches Qt archives plus `print-partner-engine` Linux/macOS tarballs; optional macOS Tauri bundle (`continue-on-error`). Manual per-OS Tauri builds: [`docs/RELEASE_DESKTOP.md`](docs/RELEASE_DESKTOP.md).
+- **Release workflow** — `release.yml` attaches Qt archives plus `print-partner-engine` Linux/macOS tarballs; optional macOS Tauri bundle (`continue-on-error`). Manual per-OS Tauri builds were documented in `docs/RELEASE_DESKTOP.md` at the time.
 - **Desktop verify script** — `packaging/verify_desktop_build.sh` checks engine binary, optional Tauri bundle, and `/health` for 5s.
 
 ### Changed
@@ -124,7 +160,7 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 
 ### Notes
 
-- Full **`npm run tauri build`** on Windows/Linux remains a **manual release step**; macOS may succeed in CI but is not required. See [`docs/RELEASE_DESKTOP.md`](docs/RELEASE_DESKTOP.md) and [`docs/RELEASE_1.0.0_CHECKLIST.md`](docs/RELEASE_1.0.0_CHECKLIST.md).
+- Full **`npm run tauri build`** on Windows/Linux remains a **manual release step**; macOS may succeed in CI but is not required. The old desktop release documents are retained in Git history.
 
 ## [1.0.0-beta.1] - 2026-05-28
 
@@ -136,12 +172,12 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 - **React Print** — assignment summary table by printer; improved printer dropdown with enabled/other groups.
 - **React Help** — workflow guide loaded from engine; OpenAPI URL shown in Help.
 - **OpenAPI client script** — `apps/desktop/scripts/generate-api-client.sh`.
-- **Legacy Qt docs** — [`docs/LEGACY_QT.md`](docs/LEGACY_QT.md) for `PRINT_PARTNER_USE_QT=1`.
+- **Legacy Qt docs** — `docs/LEGACY_QT.md` covered `PRINT_PARTNER_USE_QT=1` at the time.
 
 ### Changed
 
 - **Version** — `1.0.0-beta.1` toward v1.0 Tauri cutover (~78% Qt parity).
-- **Desktop dev docs** — launcher behavior, catalog/help endpoints, OpenAPI workflow in [`DESKTOP_DEV.md`](docs/DESKTOP_DEV.md).
+- **Desktop dev docs** — launcher behavior, catalog/help endpoints, and the OpenAPI workflow were documented in `docs/DESKTOP_DEV.md` at the time.
 
 ## [0.4.0] - 2026-05-28
 
@@ -155,7 +191,7 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 
 ### Changed
 
-- **License docs** — [PolyForm Noncommercial 1.0.0](LICENSE) with [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md) and [COMMERCIAL.md](COMMERCIAL.md); Help menu entries for overview and full license text.
+- **License docs** — [PolyForm Noncommercial 1.0.0](LICENSE) with [LICENSE-SUMMARY.md](LICENSE-SUMMARY.md) and the former `COMMERCIAL.md`; Help menu entries for overview and full license text.
 - **Workflow guide** — manifest curation and fast recompute documented; duplicate Recompute control removed from layers panel (header + Ctrl+R remain).
 - **GitHub Pages** — static landing at `docs/index.html` deployed via `pages.yml`.
 
@@ -240,3 +276,5 @@ Major release: Tauri + React desktop replaces the legacy Qt UI. Workflow is **So
 [0.2.0]: https://github.com/poitee/PrintPartnerPartner/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/poitee/PrintPartnerPartner/releases/tag/v0.1.0
 [3.1.0]: https://github.com/poitee/PrintPartnerPartner/compare/v3.0.0...v3.1.0
+[Unreleased]: https://github.com/poitee/PrintPartnerPartner/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/poitee/PrintPartnerPartner/releases/tag/v3.2.0

@@ -83,6 +83,10 @@ export async function extractPendingPdfsForSource(
     maxSizeBytes?: number;
     /** Only extract PDFs at or above this size (bytes). */
     minSizeBytes?: number;
+    /** Writable derived-data directory for extracted PDF text. */
+    cacheRoot?: string;
+    /** Read-only cache directories used before immutable Source revisions. */
+    legacyCacheRoots?: readonly string[];
   },
 ): Promise<{ extracted: number; errors: number }> {
   const pending = repo.listSourceDocs(projectId).filter((d) => {
@@ -102,6 +106,8 @@ export async function extractPendingPdfsForSource(
     );
     const result = await extractPdfText(repoRoot, doc.path, {
       perPage: doc.size_bytes >= PDF_BG_EXTRACT_BYTES,
+      cacheRoot: options?.cacheRoot,
+      legacyCacheRoots: options?.legacyCacheRoots,
       onProgress: (cur, total) => {
         options?.onProgress?.(
           `Extracting ${doc.path} page ${cur}/${total}`,

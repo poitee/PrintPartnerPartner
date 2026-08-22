@@ -54,8 +54,7 @@ vi.mock("../context/ProfileContext", () => ({
         name: "Core One plan",
         archived_at: null,
         part_count: 1,
-        remaining_units: 0,
-        total_units: 1,
+        accepted_progress: { kind: "ready" as const, remaining_units: 0, total_units: 1 },
         build_stale: false,
         special_request: null,
       },
@@ -110,9 +109,7 @@ vi.mock("../context/PlanWorkspaceContext", () => ({
     } as unknown as PlanReview,
     loading: false,
     error: null,
-    reload: vi.fn(),
-    revision: 0,
-    loadedRevision: 0,
+    refresh: vi.fn(),
     toggleUnit: vi.fn(),
     toggleAssembled: vi.fn(),
     busyPartId: null,
@@ -181,7 +178,7 @@ vi.mock("../components/SpoolRemainingBadge", () => ({
 vi.mock("../components/pwa/PwaInstallBanner", () => ({
   default: () => null,
 }));
-vi.mock("../components/StaleBuildBanner", () => ({
+vi.mock("../components/PlanFreshnessNotice", () => ({
   default: () => null,
 }));
 vi.mock("../components/PlanSpecialRequestLine", () => ({

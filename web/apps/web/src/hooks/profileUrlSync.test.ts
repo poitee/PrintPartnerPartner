@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   parseProfileParam,
   profileIdFromUrl,
+  searchAfterProfileStamp,
   searchParamsWithProfile,
+  shouldStampProfileOnPath,
 } from "./profileUrlSync";
 
 describe("parseProfileParam", () => {
@@ -53,6 +55,21 @@ describe("searchParamsWithProfile", () => {
     const next = searchParamsWithProfile(prev, null);
     expect(next?.has("profile")).toBe(false);
     expect(next?.get("foo")).toBe("bar");
+  });
+
+  it("does not stamp profile onto global Production or Builds", () => {
+    expect(shouldStampProfileOnPath("/production")).toBe(false);
+    expect(shouldStampProfileOnPath("/builds")).toBe(false);
+    expect(shouldStampProfileOnPath("/plans")).toBe(false);
+    expect(shouldStampProfileOnPath("/plan")).toBe(true);
+    expect(shouldStampProfileOnPath("/sources")).toBe(true);
+  });
+
+  it("stamps the live path so New Build cannot rewind Sources back to Builds", () => {
+    expect(searchAfterProfileStamp("/sources", "", 7)).toBe("?profile=7");
+    expect(searchAfterProfileStamp("/sources", "?profile=7", 7)).toBeUndefined();
+    expect(searchAfterProfileStamp("/production", "", 7)).toBeUndefined();
+    expect(searchAfterProfileStamp("/builds", "", 7)).toBeUndefined();
   });
 
   it("does not loop when user picks a new plan before url catches up", () => {

@@ -403,6 +403,7 @@ export function startProfileSyncWatcher(
     });
     watcher.on("add", (p) => schedule(p, () => handleFile(p)));
     watcher.on("change", (p) => schedule(p, () => handleFile(p)));
+    watcher.once("ready", () => syncRoot(root));
     watcher.on("error", (e: unknown) => {
       const msg = e instanceof Error ? e.message : String(e);
       log.log("warn", `[profile-sync] watcher error: ${msg}`);
@@ -424,22 +425,23 @@ export function startProfileSyncWatcher(
     return null;
   }
 
-  function syncAll(): Promise<void> {
-    for (const root of settings.roots) {
-      for (const dir of Object.values(root.dirs).filter((d): d is string => Boolean(d))) {
-        if (!dir) continue;
-        const dirPath = join(root.baseDir, dir);
-        let entries: string[];
-        try {
-          entries = readdirSync(dirPath)
-            .filter((e) => e.endsWith(".json") || e.endsWith(".ini"))
-            .map((e) => join(dirPath, e));
-        } catch {
-          continue;
-        }
-        for (const f of entries) handleFile(f);
+  function syncRoot(root: SlicerWatchRoot): void {
+    for (const dir of Object.values(root.dirs).filter((d): d is string => Boolean(d))) {
+      const dirPath = join(root.baseDir, dir);
+      let entries: string[];
+      try {
+        entries = readdirSync(dirPath)
+          .filter((e) => e.endsWith(".json") || e.endsWith(".ini"))
+          .map((e) => join(dirPath, e));
+      } catch {
+        continue;
       }
+      for (const filePath of entries) handleFile(filePath);
     }
+  }
+
+  function syncAll(): Promise<void> {
+    for (const root of settings.roots) syncRoot(root);
     return Promise.resolve();
   }
 

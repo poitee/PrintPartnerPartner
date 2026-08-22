@@ -95,14 +95,34 @@ LAYER_RESP=$(request -s -w "\nHTTP:%{http_code}" -X PUT "$BASE/plans/$PLAN_ID/la
 echo "$LAYER_RESP" | body_only
 echo "HTTP:$(echo "$LAYER_RESP" | http_code)"
 
-echo "== 5. POST /jobs/recompute =="
-REC_RESP=$(request -s -w "\nHTTP:%{http_code}" -X POST "$BASE/jobs/recompute" \
+echo "== 5. POST /plans/$PLAN_ID/drafts/recompute =="
+REC_KEY=$(python3 -c "import uuid; print(uuid.uuid4())")
+REC_RESP=$(request -s -w "\nHTTP:%{http_code}" -X POST "$BASE/plans/$PLAN_ID/drafts/recompute" \
   -H 'Content-Type: application/json' \
-  -d "{\"profile_id\": $PLAN_ID, \"apply_manifest\": false}")
-echo "$REC_RESP" | body_only
+  -H "Idempotency-Key: $REC_KEY" \
+  -d '{"apply_manifest": true}')
+echo "$REC_RESP" | body_only | python3 -m json.tool | sed -n '1,40p'
 echo "HTTP:$(echo "$REC_RESP" | http_code)"
-REC_JOB=$(echo "$REC_RESP" | body_only | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
-wait_job "$REC_JOB"
+REC_BODY=$(echo "$REC_RESP" | body_only)
+python3 -c \
+  "import json,sys; ws=json.load(sys.stdin); kind=(ws.get('reconciliation') or {}).get('kind'); kind == 'ready' or sys.exit(f'draft recompute reconciliation is {kind!r}, expected ready')" \
+  <<< "$REC_BODY"
+DRAFT_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin)['draft']['draft_id'])" <<< "$REC_BODY")
+APPLY_BODY=$(python3 -c \
+  "import json,sys; draft=json.load(sys.stdin)['draft']; print(json.dumps({'expected_snapshot_digest': draft['snapshot_digest'], 'expected_lifecycle_version': draft['lifecycle_version'], 'expected_base': draft['base']}))" \
+  <<< "$REC_BODY")
+
+echo "== 5b. POST /plans/$PLAN_ID/drafts/$DRAFT_ID/apply =="
+APPLY_KEY=$(python3 -c "import uuid; print(uuid.uuid4())")
+APPLY_RESP=$(request -s -w "\nHTTP:%{http_code}" -X POST "$BASE/plans/$PLAN_ID/drafts/$DRAFT_ID/apply" \
+  -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $APPLY_KEY" \
+  -d "$APPLY_BODY")
+echo "$APPLY_RESP" | body_only | python3 -m json.tool
+echo "HTTP:$(echo "$APPLY_RESP" | http_code)"
+python3 -c \
+  "import json,sys; receipt=json.load(sys.stdin); receipt.get('revision_digest') or sys.exit('draft apply omitted revision_digest')" \
+  <<< "$(echo "$APPLY_RESP" | body_only)"
 
 echo "== 6. GET /plans/$PLAN_ID/parts =="
 PARTS_RESP=$(request -s -w "\nHTTP:%{http_code}" "$BASE/plans/$PLAN_ID/parts?limit=3")

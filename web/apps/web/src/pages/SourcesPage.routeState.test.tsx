@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import SourcesPage from "./SourcesPage";
@@ -44,20 +45,25 @@ describe("SourcesPage route state", () => {
   afterEach(cleanup);
 
   it("opens and focuses global STL search, then consumes CommandPalette state", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
     render(
-      <MemoryRouter initialEntries={[{ pathname: "/sources", state: { stlSearch: true } }]}>
-        <Routes>
-          <Route
-            path="/sources"
-            element={
-              <>
-                <SourcesPage />
-                <LocationStateProbe />
-              </>
-            }
-          />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[{ pathname: "/library", state: { stlSearch: true } }]}>
+          <Routes>
+            <Route
+              path="/library"
+              element={
+                <>
+                  <SourcesPage />
+                  <LocationStateProbe />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     const search = await screen.findByRole("textbox", {

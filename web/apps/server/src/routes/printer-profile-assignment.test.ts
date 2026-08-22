@@ -38,6 +38,7 @@ async function makeApp(fleet?: PrinterMachine[]) {
 const TEST_PRINTER: PrinterMachine = {
   id: "printer-abc",
   name: "Test Voron",
+  model: "Test Voron",
   bed_width_mm: 350,
   bed_depth_mm: 350,
   bed_height_mm: 350,

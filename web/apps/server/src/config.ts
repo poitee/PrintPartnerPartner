@@ -1,4 +1,11 @@
-import type { AiProviderId, DeployMode, SearchProviderId } from "@print-partner/contracts";
+import type {
+  AiProviderId,
+  DeployMode,
+  RuntimeReleaseIdentity,
+  SearchProviderId,
+} from "@print-partner/contracts";
+import { createRequire } from "node:module";
+import { resolveRuntimeReleaseIdentity } from "./lib/version.js";
 
 export type { DeployMode, AiProviderId, SearchProviderId };
 
@@ -8,7 +15,6 @@ const SEARCH_PROVIDER_IDS: SearchProviderId[] = [
   "brave",
   "exa",
   "duckduckgo",
-  "searxng",
   "none",
 ];
 
@@ -26,6 +32,7 @@ export type ServerConfig = {
   /** Shared slicer exchange volume root (host path). Empty disables managed open. */
   exchangeDir: string;
   version: string;
+  releaseIdentity: RuntimeReleaseIdentity;
   corsOrigin: string | boolean | string[];
   staticDir: string | null;
   databaseUrl: string | null;
@@ -56,7 +63,7 @@ export type ServerConfig = {
   s3Bucket: string | null;
   s3Region: string | null;
   uploadMaxBytes: number;
-  /** Self-host: API key for /api/v1; required for /api/v1/mcp unless HOST is loopback */
+  /** Self-host: API key for versioned routes; required for /api/v1/mcp unless HOST is loopback */
   integrationApiKey: string | null;
   /** When false, skip GitHub / override version checks for app updates */
   updateCheckEnabled: boolean;
@@ -118,14 +125,11 @@ export type ServerConfig = {
    * Env: `SEARCH_API_KEY`, with `BRAVE_API_KEY` / `EXA_API_KEY` as fallbacks.
    */
   searchApiKey: string | null;
-  /**
-   * Base URL for the self-hosted SearXNG instance.
-   * Env: `SEARXNG_URL`. Default: http://localhost:4040.
-   */
-  searxngUrl: string;
 };
 
 const DEFAULT_DATA_DIR = process.env.PRINT_PARTNER_DATA_DIR ?? "./data";
+const require = createRequire(import.meta.url);
+const appPackage = require("../../../package.json") as { version: string };
 
 function parseDeployMode(raw: string | undefined): DeployMode {
   if (raw === "saas") return "saas";
@@ -217,8 +221,18 @@ function aiCredentialsPresent(
   return false;
 }
 
+export function ignoredRedisUrlWarning(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (!env.REDIS_URL?.trim()) return null;
+  return "REDIS_URL is set but ignored. Jobs always run in-process; there is no BullMQ adapter.";
+}
+
 export function loadConfig(): ServerConfig {
   const deployMode = parseDeployMode(process.env.DEPLOY_MODE);
+  const releaseIdentity = resolveRuntimeReleaseIdentity({
+    packageVersion: appPackage.version,
+    deployMode,
+    env: process.env,
+  });
   const port = Number(process.env.PORT ?? 18765);
   const host = process.env.HOST ?? "127.0.0.1";
   const dataDir =
@@ -281,7 +295,8 @@ export function loadConfig(): ServerConfig {
     dataDir,
     trustProxy: process.env.TRUST_PROXY === "1",
     exchangeDir: (process.env.PP_EXCHANGE_DIR ?? "").trim() || "/exchange",
-    version: process.env.PP_VERSION ?? "3.1.0-web",
+    version: releaseIdentity.runtime_version,
+    releaseIdentity,
     corsOrigin: parseCorsOrigin(process.env.ALLOWED_ORIGINS ?? process.env.CORS_ORIGIN),
     staticDir: process.env.STATIC_DIR ?? null,
     databaseUrl: process.env.DATABASE_URL ?? null,
@@ -347,6 +362,5 @@ export function loadConfig(): ServerConfig {
     })(),
     searchProvider: parseSearchProvider(process.env.SEARCH_PROVIDER),
     searchApiKey: resolveSearchApiKey(),
-    searxngUrl: process.env.SEARXNG_URL?.trim() || "http://localhost:4040",
   };
 }

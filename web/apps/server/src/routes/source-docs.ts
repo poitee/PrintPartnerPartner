@@ -17,6 +17,7 @@ import {
 } from "../services/pdf-text-extract.js";
 import { readMarkdownDoc, walkSourceDocs } from "../services/source-docs-scan.js";
 import { indexSourceDocsFromDisk } from "../services/source-docs-index.js";
+import { sourcePdfTextStorage } from "../services/source-workspace.js";
 
 const GITHUB_PAT_KEY = "github_pat";
 
@@ -102,9 +103,10 @@ export async function registerSourceDocsRoutes(
           )
           .send(createReadStream(abs));
       }
-      let cached = readCachedPdfText(row.localPath, docPath);
+      const pdfTextStorage = sourcePdfTextStorage(deps.repo, id, row.localPath);
+      let cached = readCachedPdfText(row.localPath, docPath, pdfTextStorage);
       if (!cached) {
-        const extracted = await extractPdfText(row.localPath, docPath);
+        const extracted = await extractPdfText(row.localPath, docPath, pdfTextStorage);
         if (extracted.status === "ready") {
           cached = { text: extracted.text, chunks: extracted.chunks, hash: extracted.hash };
           deps.repo.updateSourceDocExtract(id, docPath, {

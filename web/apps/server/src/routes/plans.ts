@@ -1,7 +1,10 @@
-import type { FastifyInstance } from "fastify";
-import type { AppRepository } from "../db/repository.js";
-import { buildPlanReview } from "../services/plan-review.js";
-import { applyManifestToProfile } from "../services/manifest-apply.js";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type {
+  AcceptedProfileProgress,
+  AcceptedProfileSummary,
+  AppRepository,
+} from "../db/repository.js";
+import { readAcceptedPlanReview } from "../services/accepted-plan-review.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
 import { buildPlanManifestBuilder } from "../services/plan-manifest-builder.js";
 import { preloadSpoolmanForColorIds, enrichRoleFilamentRows } from "../services/filament-resolve.js";
@@ -10,16 +13,169 @@ import { canonicalRoleOrder, loadRoleFilamentDefaults } from "../services/role-f
 import { resolvePartFilamentHex } from "../services/filament-catalog.js";
 import { resolvePartStl } from "../services/part-paths.js";
 import { normalizePartRole } from "../services/role-filament.js";
+import { AcceptedPlanOperationalIntegrityError } from "../db/accepted-plan-operational.js";
+import { toAcceptedCheckoffView } from "../services/accepted-plan-views.js";
+import { acceptedPlanBasis } from "../db/accepted-plan-progress.js";
+import {
+  filamentAssignmentColumns,
+  resolveFilamentAssignment,
+  type AssignAcceptedFilamentResult,
+  type FilamentAssignment,
+} from "../db/accepted-part-filament.js";
+import {
+  toLegacyProfileSummary,
+  toProfileSummary,
+  type LegacyProgressFailure,
+} from "./plan-summary-presenter.js";
 
-type RouteDeps = { repo: AppRepository; dataDir: string; thumbsDir: string };
+type RouteDeps = { repo: AppRepository; dataDir: string; reposDir: string; thumbsDir: string };
+export type PlanSummaryContract = "accepted" | "legacy-v1";
 
-export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
-  app.get("/plans", async () => ({ profiles: deps.repo.listProfiles() }));
+type PlanRouteOptions = { readonly summaryContract?: PlanSummaryContract };
+
+function presentProfile(summary: AcceptedProfileSummary, contract: PlanSummaryContract) {
+  if (contract === "accepted") return { kind: "ready" as const, profile: toProfileSummary(summary) };
+  return toLegacyProfileSummary(summary);
+}
+
+function sendLegacyFailure(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  operation: string,
+  failure: LegacyProgressFailure,
+  profileId?: number,
+) {
+  if (failure.kind === "integrity_failure") {
+    request.log.error(
+      { operation, ...(profileId == null ? {} : { profileId }), code: failure.code },
+      "Accepted Plan integrity failure",
+    );
+    return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+  }
+  if (failure.kind === "concurrent_update") {
+    request.log.warn(
+      { operation, ...(profileId == null ? {} : { profileId }), reason: "concurrent_update" },
+      "Accepted Plan progress unavailable",
+    );
+    return reply.status(409).send({ detail: "Accepted Plan changed; reload and retry" });
+  }
+  request.log.warn(
+    { operation, ...(profileId == null ? {} : { profileId }), reason: failure.reason },
+    "Accepted Plan progress unavailable",
+  );
+  return reply.status(409).send({ detail: acceptedStateDetail(failure.reason) });
+}
+
+function acceptedStateDetail(reason: "compatibility_dirty" | "uninitialized"): string {
+  return reason === "compatibility_dirty"
+    ? "Accepted Plan requires compatibility repair"
+    : "Accepted Plan operational state is not initialized";
+}
+
+function sendAcceptedFilamentFailure(reply: FastifyReply, failure: AssignAcceptedFilamentResult) {
+  if (failure.kind === "updated") {
+    throw new Error("Accepted filament success cannot be sent as a failure");
+  }
+  if (failure.kind === "accepted_state_unavailable") {
+    return reply.status(409).send({ detail: acceptedStateDetail(failure.reason) });
+  }
+  if (failure.kind === "stale_accepted_plan") {
+    return reply.status(409).send({ detail: "Accepted Plan changed; reload and retry" });
+  }
+  if (failure.kind === "transaction_unavailable") {
+    return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+  }
+  if (failure.kind === "plan_archived") {
+    return reply.status(409).send({ detail: "Archived Plan Progress cannot be changed" });
+  }
+  return reply.status(404).send({ detail: "Part not found" });
+}
+
+function completeRoleAssignment(body: {
+  filament_color_id?: string | null;
+  filament_custom_hex?: string | null;
+  spoolman_spool_id?: string | null;
+}): FilamentAssignment {
+  return resolveFilamentAssignment(
+    { color: { kind: "unset" }, spoolmanSpoolId: null },
+    {
+      colorId: body.filament_color_id ?? null,
+      customHex: body.filament_custom_hex ?? null,
+      spoolmanSpoolId: body.spoolman_spool_id ?? null,
+    },
+  );
+}
+
+function archiveAcceptedPlan(
+  deps: RouteDeps,
+  profile: { readonly id: number; readonly archivedAt: string | null },
+) {
+  if (profile.archivedAt) {
+    return { kind: "already_archived" as const, archivedAt: profile.archivedAt };
+  }
+  const accepted = deps.repo.readAcceptedPlanOperationalSnapshot(profile.id);
+  if (accepted.kind !== "ready") return accepted;
+  return deps.repo.archiveAcceptedPlan({ expected: acceptedPlanBasis(accepted.snapshot) });
+}
+
+export async function registerPlanRoutes(
+  app: FastifyInstance,
+  deps: RouteDeps,
+  options: PlanRouteOptions = {},
+): Promise<void> {
+  const contract = options.summaryContract ?? "accepted";
+
+  app.get("/plans", async (request, reply) => {
+    try {
+      const summaries = deps.repo.listAcceptedProfileSummaries();
+      if (contract === "accepted") {
+        return { profiles: summaries.map(toProfileSummary) };
+      }
+      const projected = summaries.map(toLegacyProfileSummary);
+      const integrity = projected.find(
+        (result) =>
+          result.kind === "unavailable" && result.failure.kind === "integrity_failure",
+      );
+      if (integrity?.kind === "unavailable") {
+        return sendLegacyFailure(request, reply, "list_plans", integrity.failure);
+      }
+      const unavailable = projected.find((result) => result.kind === "unavailable");
+      if (unavailable?.kind === "unavailable") {
+        request.log.warn(
+          { operation: "list_plans", reason: "unavailable" },
+          "Accepted Plan progress unavailable",
+        );
+        return reply.status(409).send({
+          detail: "Accepted Plan progress is unavailable for one or more Plans",
+        });
+      }
+      return {
+        profiles: projected.map((result) => {
+          if (result.kind === "unavailable") {
+            throw new Error("Legacy Plan projection changed after preflight");
+          }
+          return result.profile;
+        }),
+      };
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "list_plans" },
+        "Plan summary collection failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+  });
 
   app.post("/plans", async (request, reply) => {
     try {
       const body = request.body as { name?: string; base_project_id?: number };
-      return deps.repo.createProfile(String(body.name ?? ""), body.base_project_id);
+      const created = deps.repo.createProfile(String(body.name ?? ""), body.base_project_id);
+      const { layers, ...header } = created;
+      const presented = presentProfile({ header, progress: { kind: "empty" } }, contract);
+      if (presented.kind !== "ready") {
+        throw new Error("Empty Plan cannot fail legacy projection");
+      }
+      return { ...presented.profile, layers };
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }
@@ -27,14 +183,30 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    const profile = deps.repo.getProfile(id);
-    if (!profile) return reply.status(404).send({ detail: "Profile not found" });
-    return profile;
+    try {
+      const read = deps.repo.readAcceptedProfileSummary(id);
+      if (read.kind === "missing") {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      const presented = presentProfile(read.summary, contract);
+      if (presented.kind === "unavailable") {
+        return sendLegacyFailure(request, reply, "get_plan", presented.failure, id);
+      }
+      return presented.profile;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "get_plan", profileId: id },
+        "Plan summary read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
   });
 
   app.delete("/plans/:id", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     deps.repo.deleteProfile(id);
     return reply.status(204).send();
   });
@@ -47,66 +219,249 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
       archived?: boolean;
       touch_last_used?: boolean;
     };
+    const archiveAttempted = body.archived === true;
+    if (archiveAttempted && !deps.repo.canMutateAcceptedPlan()) {
+      return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+    }
+    let accepted: AcceptedProfileSummary;
     try {
-      if (!deps.repo.getProfile(id)) {
+      const read = deps.repo.readAcceptedProfileSummary(id);
+      if (read.kind === "missing") {
         return reply.status(404).send({ detail: "Profile not found" });
       }
-      if (body.archived === false) {
-        return reply.status(400).send({
-          detail: "Cannot unarchive; duplicate the archived template instead",
-        });
-      }
-      let profile =
-        typeof body.name === "string" ? deps.repo.renameProfile(id, body.name) : deps.repo.getProfile(id)!;
+      accepted = read.summary;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "update_plan", profileId: id },
+        "Plan summary read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+    const preflight = presentProfile(accepted, contract);
+    if (preflight.kind === "unavailable") {
+      return sendLegacyFailure(request, reply, "update_plan", preflight.failure, id);
+    }
+    try {
+      let header =
+        typeof body.name === "string"
+          ? deps.repo.renameProfile(id, body.name)
+          : accepted.header;
       if (body.special_request !== undefined) {
-        profile = deps.repo.updateProfileSpecialRequest(
+        header = deps.repo.updateProfileSpecialRequest(
           id,
           body.special_request == null ? null : String(body.special_request),
         );
       }
       if (body.archived === true) {
-        profile = deps.repo.archiveProfile(id);
+        const archived = archiveAcceptedPlan(deps, {
+          id,
+          archivedAt: accepted.header.archived_at,
+        });
+        if (archived.kind === "compatibility_dirty" || archived.kind === "uninitialized") {
+          return reply.status(409).send({ detail: acceptedStateDetail(archived.kind) });
+        }
+        if (archived.kind === "accepted_state_unavailable") {
+          return reply.status(409).send({ detail: acceptedStateDetail(archived.reason) });
+        }
+        if (archived.kind === "stale_accepted_plan") {
+          return reply.status(409).send({ detail: "Accepted Plan changed; reload and retry" });
+        }
+        if (archived.kind === "transaction_unavailable") {
+          return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+        }
+        if (archived.kind === "empty" || archived.kind === "remaining") {
+          return reply.status(400).send({ detail: "Archive only when print remaining is 0" });
+        }
+        if (!("archivedAt" in archived)) {
+          return reply.status(500).send({ detail: "Internal Server Error" });
+        }
+        header = { ...header, archived_at: archived.archivedAt };
+      }
+      if (body.archived === false) {
+        header = deps.repo.unarchiveProfile(id);
       }
       if (body.touch_last_used === true) {
-        profile = deps.repo.touchProfileLastUsed(id);
+        header = deps.repo.touchProfileLastUsed(id);
       }
-      return profile;
-    } catch (e) {
-      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+      const presented = presentProfile(
+        { header, progress: accepted.progress },
+        contract,
+      );
+      if (presented.kind === "unavailable") {
+        throw new Error("Captured legacy Plan projection changed after write");
+      }
+      return presented.profile;
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error({ code: error.code, profileId: id }, "Accepted Plan integrity failure");
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      if (!archiveAttempted) {
+        return reply.status(400).send({ detail: error instanceof Error ? error.message : String(error) });
+      }
+      request.log.error({ failure: "unexpected", profileId: id }, "Plan update failed");
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
 
   app.post("/plans/:id/touch", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
+    let accepted: AcceptedProfileSummary;
     try {
-      if (!deps.repo.getProfile(id)) {
+      const read = deps.repo.readAcceptedProfileSummary(id);
+      if (read.kind === "missing") {
         return reply.status(404).send({ detail: "Profile not found" });
       }
-      return deps.repo.touchProfileLastUsed(id);
-    } catch (e) {
-      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+      accepted = read.summary;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "touch_plan", profileId: id },
+        "Plan summary read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+    const preflight = presentProfile(accepted, contract);
+    if (preflight.kind === "unavailable") {
+      return sendLegacyFailure(request, reply, "touch_plan", preflight.failure, id);
+    }
+    try {
+      const header = deps.repo.touchProfileLastUsed(id);
+      const presented = presentProfile({ header, progress: accepted.progress }, contract);
+      if (presented.kind === "unavailable") {
+        throw new Error("Captured legacy Plan projection changed after write");
+      }
+      return presented.profile;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "touch_plan", profileId: id },
+        "Plan touch failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
 
   app.post("/plans/:id/archive", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
+    if (!deps.repo.canMutateAcceptedPlan()) {
+      return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+    }
+    let accepted: AcceptedProfileSummary;
     try {
-      if (!deps.repo.getProfile(id)) {
+      const read = deps.repo.readAcceptedProfileSummary(id);
+      if (read.kind === "missing") {
         return reply.status(404).send({ detail: "Profile not found" });
       }
-      return deps.repo.archiveProfile(id);
-    } catch (e) {
-      return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
+      accepted = read.summary;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "archive_plan", profileId: id },
+        "Plan summary read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+    const preflight = presentProfile(accepted, contract);
+    if (preflight.kind === "unavailable") {
+      return sendLegacyFailure(request, reply, "archive_plan", preflight.failure, id);
+    }
+    try {
+      const archived = archiveAcceptedPlan(deps, {
+        id,
+        archivedAt: accepted.header.archived_at,
+      });
+      if (archived.kind === "compatibility_dirty" || archived.kind === "uninitialized") {
+        return reply.status(409).send({ detail: acceptedStateDetail(archived.kind) });
+      }
+      if (archived.kind === "accepted_state_unavailable") {
+        return reply.status(409).send({ detail: acceptedStateDetail(archived.reason) });
+      }
+      if (archived.kind === "stale_accepted_plan") {
+        return reply.status(409).send({ detail: "Accepted Plan changed; reload and retry" });
+      }
+      if (archived.kind === "transaction_unavailable") {
+        return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
+      }
+      if (archived.kind === "empty" || archived.kind === "remaining") {
+        return reply.status(400).send({ detail: "Archive only when print remaining is 0" });
+      }
+      if (!("archivedAt" in archived)) {
+        return reply.status(500).send({ detail: "Internal Server Error" });
+      }
+      const presented = presentProfile(
+        {
+          header: { ...accepted.header, archived_at: archived.archivedAt },
+          progress: accepted.progress,
+        },
+        contract,
+      );
+      if (presented.kind === "unavailable") {
+        throw new Error("Captured legacy Plan projection changed after write");
+      }
+      return presented.profile;
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error({ code: error.code, profileId: id }, "Accepted Plan integrity failure");
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error({ failure: "unexpected", profileId: id }, "Plan archive failed");
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+  });
+
+  app.post("/plans/:id/unarchive", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    let accepted: AcceptedProfileSummary;
+    try {
+      const read = deps.repo.readAcceptedProfileSummary(id);
+      if (read.kind === "missing") {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      accepted = read.summary;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "unarchive_plan", profileId: id },
+        "Plan summary read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+    const preflight = presentProfile(accepted, contract);
+    if (preflight.kind === "unavailable") {
+      return sendLegacyFailure(request, reply, "unarchive_plan", preflight.failure, id);
+    }
+    try {
+      const header = deps.repo.unarchiveProfile(id);
+      const presented = presentProfile(
+        { header, progress: accepted.progress },
+        contract,
+      );
+      if (presented.kind === "unavailable") {
+        throw new Error("Captured legacy Plan projection changed after write");
+      }
+      return presented.profile;
+    } catch (error) {
+      if (error instanceof Error && error.message === "Profile not found") {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      request.log.error({ failure: "unexpected", profileId: id }, "Plan unarchive failed");
+      return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });
 
   app.post("/plans/:id/duplicate", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const body = request.body as { name?: string; clear_checkoff?: boolean };
+    if (contract === "legacy-v1") {
+      return reply.status(409).send({ detail: "Duplicate this Plan through /api/v2" });
+    }
     try {
-      return deps.repo.duplicateProfile(id, String(body.name ?? ""), {
+      const duplicate = deps.repo.duplicateProfile(id, String(body.name ?? ""), {
         clearCheckoff: Boolean(body.clear_checkoff),
       });
+      const { layers, ...header } = duplicate;
+      const progress: AcceptedProfileProgress =
+        header.part_count === 0
+          ? { kind: "empty" }
+          : { kind: "unavailable", reason: "compatibility_dirty" };
+      return { ...toProfileSummary({ header, progress }), layers };
     } catch (e) {
       return reply.status(400).send({ detail: e instanceof Error ? e.message : String(e) });
     }
@@ -115,7 +470,9 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.delete("/plans/:id/layers/:layerId", async (request, reply) => {
     const profileId = Number((request.params as { id: string }).id);
     const layerId = Number((request.params as { layerId: string }).layerId);
-    if (!deps.repo.getProfile(profileId)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(profileId)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     try {
       deps.repo.removeLayer(layerId);
       return reply.status(204).send();
@@ -128,7 +485,9 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
     const profileId = Number((request.params as { id: string }).id);
     const layerId = Number((request.params as { layerId: string }).layerId);
     const body = request.body as { project_id?: number };
-    if (!deps.repo.getProfile(profileId)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(profileId)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     try {
       deps.repo.replaceLayer(layerId, Number(body.project_id));
       return { profile_id: profileId, layers: deps.repo.getProfileLayers(profileId) };
@@ -139,14 +498,14 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/layers", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     return { profile_id: id, layers: deps.repo.getProfileLayers(id) };
   });
 
   app.put("/plans/:id/layers/base", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const body = request.body as { project_id?: number };
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     try {
       deps.repo.setBaseLayer(id, Number(body.project_id));
       return { profile_id: id, layers: deps.repo.getProfileLayers(id) };
@@ -158,7 +517,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.post("/plans/:id/layers", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const body = request.body as { project_id?: number };
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     try {
       deps.repo.addAddonLayer(id, Number(body.project_id));
       return { profile_id: id, layers: deps.repo.getProfileLayers(id) };
@@ -176,7 +535,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/parts", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const query = request.query as { limit?: string; offset?: string };
     const limit = query.limit ? Number(query.limit) : 10000;
     const offset = query.offset ? Number(query.offset) : 0;
@@ -192,42 +551,49 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/parts-grouped", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const query = (request.query as { query?: string }).query ?? "";
     return deps.repo.getPartsGrouped(id, query);
   });
 
   app.get("/plans/:id/review", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
     const query = request.query as { include_excluded?: string };
     const include_excluded =
       query.include_excluded === "1" ||
       query.include_excluded === "true";
-    const resolveDeps = { repo: deps.repo, dataDir: deps.dataDir };
-    const { parts: reviewParts } = deps.repo.listParts(id, 10000, 0);
-    const ctx = await preloadSpoolmanForColorIds(
-      resolveDeps,
-      reviewParts.map((p) => p.filament_color_id),
-    );
-    return buildPlanReview(deps.repo, id, {
-      includeExcluded: include_excluded,
-      filamentContext: ctx,
-      dataDir: deps.dataDir,
-      thumbsDir: deps.thumbsDir,
-    });
-  });
-
-  app.post("/plans/:id/apply-manifest", async (request, reply) => {
-    const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
-    const body = (request.body as { preserve_included?: boolean } | null) ?? {};
-    const result = applyManifestToProfile(deps.repo, id, body.preserve_included ?? true);
-    return {
-      profile_id: id,
-      applied_rules: result.applied_rules,
-      warnings: result.warnings,
-    };
+    try {
+      const result = await readAcceptedPlanReview({
+        repo: deps.repo,
+        profileId: id,
+        includeExcluded: include_excluded,
+        reposDir: deps.reposDir,
+        thumbsDir: deps.thumbsDir,
+        loadFilamentContext: (colorIds) =>
+          preloadSpoolmanForColorIds({ repo: deps.repo, dataDir: deps.dataDir }, colorIds),
+      });
+      if (result.kind === "not_found") {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      if (result.kind === "accepted_state_unavailable") {
+        const detail =
+          result.reason === "compatibility_dirty"
+            ? "Accepted Plan requires compatibility repair"
+            : "Accepted Plan operational state is not initialized";
+        return reply.status(409).send({ detail });
+      }
+      return result.body;
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error({ code: error.code, profileId: id }, "Accepted Plan integrity failure");
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error(
+        { failure: "unexpected", profileId: id },
+        "Accepted Plan Review failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
   });
 
   app.get("/plans/maintenance", async () => ({ plans_with_warnings: [] }));
@@ -241,7 +607,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.get("/plans/:id/manifest-warnings", async () => ({ warnings: [] }));
   app.get("/plans/:id/role-filaments", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const roles = deps.repo.getRoleFilaments(id);
     await enrichRoleFilamentRows(roles, { repo: deps.repo, dataDir: deps.dataDir });
     return { roles };
@@ -249,7 +615,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.put("/plans/:id/role-filament", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = request.body as {
       role?: string;
       filament_color_id?: string | null;
@@ -259,58 +625,73 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
     };
     const role = String(body.role ?? "").trim();
     if (!role) return reply.status(400).send({ detail: "role is required" });
+    const snapshot = deps.repo.readAcceptedPlanOperationalSnapshot(id);
+    if (snapshot.kind !== "ready") {
+      return reply.status(409).send({
+        detail:
+          snapshot.kind === "empty"
+            ? "Accepted Plan changed; reload and retry"
+            : acceptedStateDetail(snapshot.kind),
+      });
+    }
     const normalizedRole = normalizePartRole(role);
-    const spoolRef =
-      body.spoolman_spool_id !== undefined ? body.spoolman_spool_id : undefined;
-    const partsBeforeUpdate = deps.repo
-      .getProfilePartRows(id)
-      .filter((p) => p.included && normalizePartRole(p.role) === normalizedRole);
-    const updated = deps.repo.bulkSetRoleFilament(
-      id,
-      role,
-      body.filament_color_id ?? null,
-      body.filament_custom_hex ?? null,
-      spoolRef,
-    );
+    const result = deps.repo.assignAcceptedFilament({
+      expected: acceptedPlanBasis(snapshot.snapshot),
+      target: { kind: "role", role: normalizedRole },
+      assignment: completeRoleAssignment(body),
+    });
+    if (result.kind !== "updated") return sendAcceptedFilamentFailure(reply, result);
     const refreshThumbnails = body.refresh_thumbnails !== false;
     let thumbnails_cleared = 0;
     if (refreshThumbnails) {
-      for (const before of partsBeforeUpdate) {
-        const stl = resolvePartStl(deps.repo, before);
+      for (const assigned of result.assigned) {
+        const part = deps.repo.getPartRow(assigned.projectionPartId);
+        if (!part) continue;
+        const stl = resolvePartStl(deps.repo, part);
         if (!stl) continue;
-        const after = deps.repo.getPartRow(before.id);
-        const newHex = after ? resolvePartFilamentHex(after) : null;
         thumbnails_cleared += clearPartThumbnailCacheAtHexes(
           deps.thumbsDir,
           stl,
           normalizedRole,
-          [resolvePartFilamentHex(before), newHex],
+          [
+            resolvePartFilamentHex(filamentAssignmentColumns(assigned.before)),
+            resolvePartFilamentHex(filamentAssignmentColumns(assigned.after)),
+          ],
         );
       }
     }
     const roles = deps.repo.getRoleFilaments(id);
     await enrichRoleFilamentRows(roles, { repo: deps.repo, dataDir: deps.dataDir });
-    return { updated, thumbnails_cleared, roles };
+    return { updated: result.assigned.length, thumbnails_cleared, roles };
   });
 
-  /** Re-apply every saved role color to matching included parts and refresh thumbnails. */
   app.post("/plans/:id/apply-role-colors", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = (request.body ?? {}) as { refresh_thumbnails?: boolean };
     const refreshThumbnails = body.refresh_thumbnails !== false;
+    const snapshot = deps.repo.readAcceptedPlanOperationalSnapshot(id);
+    if (snapshot.kind !== "ready") {
+      return reply.status(409).send({
+        detail:
+          snapshot.kind === "empty"
+            ? "Accepted Plan changed; reload and retry"
+            : acceptedStateDetail(snapshot.kind),
+      });
+    }
     const savedDefaults = loadRoleFilamentDefaults(deps.repo, id);
+    const expected = acceptedPlanBasis(snapshot.snapshot);
     let updated = 0;
     for (const role of canonicalRoleOrder()) {
       const saved = savedDefaults[role];
       if (!saved?.filament_color_id && !saved?.filament_custom_hex) continue;
-      updated += deps.repo.bulkSetRoleFilament(
-        id,
-        role,
-        saved.filament_color_id ?? null,
-        saved.filament_custom_hex ?? null,
-        saved.spoolman_spool_id ?? undefined,
-      );
+      const result = deps.repo.assignAcceptedFilament({
+        expected,
+        target: { kind: "role", role },
+        assignment: completeRoleAssignment(saved),
+      });
+      if (result.kind !== "updated") return sendAcceptedFilamentFailure(reply, result);
+      updated += result.assigned.length;
     }
     const thumbnails_cleared = refreshThumbnails
       ? clearPlanThumbnailCache(deps.repo, deps.thumbsDir, id)
@@ -322,25 +703,56 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/checkoff", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
-    const resolveDeps = { repo: deps.repo, dataDir: deps.dataDir };
-    const { parts: checkoffParts } = deps.repo.listParts(id, 10000, 0);
-    const ctx = await preloadSpoolmanForColorIds(
-      resolveDeps,
-      checkoffParts.map((p) => p.filament_color_id),
-    );
-    return deps.repo.getCheckoff(id, ctx);
+    try {
+      if (!deps.repo.getOwnedProfileIdentity(id)) {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      const accepted = deps.repo.readAcceptedPlanOperationalSnapshot(id);
+      const filamentContext =
+        accepted.kind === "ready"
+          ? await preloadSpoolmanForColorIds(
+              { repo: deps.repo, dataDir: deps.dataDir },
+              accepted.snapshot.parts.map((part) => part.filamentColorId),
+            )
+          : undefined;
+      const view = toAcceptedCheckoffView({
+        profileId: id,
+        accepted,
+        filamentContext,
+      });
+      if (view.kind === "accepted_state_unavailable") {
+        const detail =
+          view.reason === "compatibility_dirty"
+            ? "Accepted Plan requires compatibility repair"
+            : "Accepted Plan operational state is not initialized";
+        return reply.status(409).send({ detail });
+      }
+      return view.body;
+    } catch (error) {
+      if (error instanceof AcceptedPlanOperationalIntegrityError) {
+        request.log.error(
+          { code: error.code, profileId: id },
+          "Accepted Plan integrity failure",
+        );
+        return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
+      }
+      request.log.error(
+        { failure: "unexpected", profileId: id },
+        "Accepted Plan read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
   });
 
   app.get("/plans/:id/kit-manifest", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     return { profile_id: id, kit: loadKitManifest(deps.repo, id) };
   });
 
   app.put("/plans/:id/kit-manifest", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = request.body as { kit?: Record<string, unknown> };
     const kit = saveKitManifest(deps.repo, id, (body.kit ?? {}) as Parameters<typeof saveKitManifest>[2]);
     return { profile_id: id, kit };
@@ -348,7 +760,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/manifest-v2", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const raw = deps.repo.getSetting(`manifest_v2_${id}`);
     if (!raw) {
       return {
@@ -372,19 +784,19 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/plan-manifest-builder", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     return buildPlanManifestBuilder(deps.repo, id);
   });
 
   app.get("/plans/:id/decisions", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     return { decisions: deps.repo.listPlanDecisions(id) };
   });
 
   app.post("/plans/:id/decisions", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = (request.body ?? {}) as {
       kind?: string;
       actor?: string;
@@ -429,14 +841,14 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
 
   app.get("/plans/:id/snapshots", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const { listPlanSnapshots } = await import("../services/plan-snapshots.js");
     return { snapshots: listPlanSnapshots(deps.repo, id) };
   });
 
   app.post("/plans/:id/snapshots", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const body = (request.body ?? {}) as { name?: string; source?: string };
     const { createPlanSnapshot } = await import("../services/plan-snapshots.js");
     try {
@@ -453,7 +865,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.get("/plans/:id/snapshots/:sid", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const sid = Number((request.params as { sid: string }).sid);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const { getPlanSnapshot } = await import("../services/plan-snapshots.js");
     const snap = getPlanSnapshot(deps.repo, sid);
     if (!snap || snap.plan_id !== id) return reply.status(404).send({ detail: "Snapshot not found" });
@@ -463,7 +875,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   app.post("/plans/:id/snapshots/:sid/restore", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
     const sid = Number((request.params as { sid: string }).sid);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const { getPlanSnapshot, restorePlanSnapshotPayload } = await import(
       "../services/plan-snapshots.js"
     );
@@ -494,7 +906,7 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   /** GET /plans/:id/variant-dimensions — read variant_dimensions from the base source manifest. */
   app.get("/plans/:id/variant-dimensions", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) return reply.status(404).send({ detail: "Profile not found" });
     const { getSourceVariantDimensions, getPlanVariantSelection } = await import(
       "../services/variant-dimensions.js"
     );
@@ -509,7 +921,9 @@ export async function registerPlanRoutes(app: FastifyInstance, deps: RouteDeps):
   /** POST /plans/:id/variant-selection — apply variant choice to base source import rules. */
   app.post("/plans/:id/variant-selection", async (request, reply) => {
     const id = Number((request.params as { id: string }).id);
-    if (!deps.repo.getProfile(id)) return reply.status(404).send({ detail: "Profile not found" });
+    if (!deps.repo.getOwnedProfileIdentity(id)) {
+      return reply.status(404).send({ detail: "Profile not found" });
+    }
     const body = (request.body ?? {}) as { selection?: Record<string, string>; source_id?: number };
     const selection = body.selection ?? {};
     const layers = deps.repo.getProfileLayers(id);

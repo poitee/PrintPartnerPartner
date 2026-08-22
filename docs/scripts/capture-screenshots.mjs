@@ -1,18 +1,25 @@
 #!/usr/bin/env node
 /**
- * Capture Print Partner workflow + AI screenshots (light or dark theme).
+ * Capture Print Partner workflow screenshots (light or dark theme).
  *
  * Usage:
  *   node docs/scripts/capture-screenshots.mjs --theme light
  *   node docs/scripts/capture-screenshots.mjs --theme dark
  *   node docs/scripts/capture-screenshots.mjs --url http://localhost:8080 --theme light --profile-id 1
  *
- * Prerequisites: app running (e.g. docker compose up --build), Playwright browsers installed once via:
- *   npx playwright install chromium
+ * Chrome: set PLAYWRIGHT_CHROMIUM_EXECUTABLE, or install Playwright Chromium:
+ *   cd docs/scripts && npm install && npx playwright install chromium
+ *
+ * For representative kit data without a long-lived app, run:
+ *   node web/apps/web/test/browser/capture-fixture-screenshots.mjs
  */
 
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
+import process from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -35,12 +42,41 @@ const outDir = resolve(
   values.out ?? join(repoRoot, "docs/screenshots", theme),
 );
 
+function browserExecutable() {
+  const candidates = [
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/local/bin/google-chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ].filter(Boolean);
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+async function loadChromium() {
+  try {
+    const playwright = await import("playwright");
+    if (playwright.chromium) return playwright.chromium;
+  } catch {
+    // Prefer the web workspace playwright-core + system Chrome.
+  }
+  const require = createRequire(join(repoRoot, "web/package.json"));
+  const core = require("playwright-core");
+  if (!core?.chromium) {
+    throw new Error(
+      "Neither playwright nor playwright-core.chromium is available. Install web workspace deps.",
+    );
+  }
+  return core.chromium;
+}
+
 /**
  * @typedef {{
  *   label: string;
  *   path: string;
  *   file: string;
- *   nav?: "sidebar" | "settings" | "advisor";
+ *   nav?: "sidebar";
  *   waitMs?: number;
  *   ready?: (page: import('playwright').Page) => Promise<void>;
  * }} Capture
@@ -66,115 +102,78 @@ const captures = [
     file: "builds.png",
     nav: "sidebar",
     ready: async (page) => {
-      await page.getByRole("heading", { name: "Builds", level: 2 }).waitFor({
+      await page.getByRole("heading", { name: "Builds", level: 1 }).waitFor({
         state: "visible",
         timeout: 60_000,
       });
+    },
+  },
+  {
+    label: "Sources",
+    path: "/sources",
+    file: "build.png",
+    nav: "sidebar",
+    ready: async (page) => {
+      await page.getByRole("heading", { name: /Sources|Build Sources/i }).first().waitFor({
+        state: "visible",
+        timeout: 60_000,
+      }).catch(async () => {
+        await page.getByRole("heading", { level: 1 }).waitFor({ state: "visible", timeout: 60_000 });
+      });
+    },
+  },
+  {
+    label: "Plan",
+    path: "/plan",
+    file: "review.png",
+    nav: "sidebar",
+    waitMs: 2500,
+    ready: async (page) => {
+      await page.getByRole("heading", { name: "Plan", level: 1 }).waitFor({
+        state: "visible",
+        timeout: 60_000,
+      });
+      await page.getByRole("button", { name: /Increase quantity for /i }).first().waitFor({
+        timeout: 30_000,
+      }).catch(() => {});
       await page
-        .getByText("Active build", { exact: false })
+        .locator(".preview3d-canvas canvas")
         .first()
         .waitFor({
-          state: "visible",
+          state: "attached",
           timeout: 15_000,
         })
         .catch(() => {});
     },
   },
   {
-    label: "Plan",
-    path: "/plan",
-    file: "build.png",
-    nav: "sidebar",
-    ready: async (page) => {
-      await page.getByRole("heading", { name: "Plan", level: 2 }).waitFor({
-        state: "visible",
-        timeout: 60_000,
-      });
-      const manageBuilds = page
-        .locator("details")
-        .filter({ hasText: "Manage builds" })
-        .first();
-      if (await manageBuilds.count()) {
-        const open = await manageBuilds.getAttribute("open");
-        if (!open) {
-          await manageBuilds.locator("summary").click();
-        }
-      }
-      await page.getByText("Manage builds").first().waitFor({
-        state: "visible",
-        timeout: 15_000,
-      });
-    },
-  },
-  {
-    label: "Parts",
-    path: "/parts",
-    file: "review.png",
-    nav: "sidebar",
-    waitMs: 2500,
-    ready: async (page) => {
-      await page.getByRole("heading", { name: "Parts", level: 2 }).waitFor({
-        state: "visible",
-        timeout: 60_000,
-      });
-      await page
-        .locator(".preview3d-canvas canvas")
-        .first()
-        .waitFor({
-          state: "attached",
-          timeout: 30_000,
-        })
-        .catch(() => {});
-    },
-  },
-  {
-    label: "Progress",
+    label: "Checkoff",
     path: "/progress",
     file: "progress.png",
     nav: "sidebar",
     waitMs: 1200,
     ready: async (page) => {
-      await page.getByRole("heading", { name: "Progress", level: 2 }).waitFor({
+      await page.getByRole("heading", { name: /Checkoff|Progress/i, level: 1 }).waitFor({
         state: "visible",
         timeout: 60_000,
       });
+      await page.getByText(".stl", { exact: false }).first().waitFor({ timeout: 15_000 }).catch(() => {});
     },
   },
   {
-    label: "Settings AI",
-    path: "/settings",
-    file: "settings-ai.png",
-    nav: "settings",
-    waitMs: 800,
-    ready: async (page) => {
-      await page.getByRole("heading", { name: "Settings", level: 2 }).waitFor({
-        state: "visible",
-        timeout: 60_000,
-      });
-      const aiCard = page.getByText("AI assistant", { exact: true }).first();
-      await aiCard.waitFor({ state: "visible", timeout: 30_000 });
-      await aiCard.scrollIntoViewIfNeeded();
-      // Prefer framing the AI card; fall back to full viewport if locator fails.
-      const card = page
-        .locator("div")
-        .filter({ has: page.getByText("AI assistant", { exact: true }) })
-        .filter({ hasText: "Kit advisor" })
-        .first();
-      if (await card.count()) {
-        await card.scrollIntoViewIfNeeded();
-      }
-    },
-  },
-  {
-    label: "Kit advisor",
-    path: "/plan",
-    file: "advisor.png",
-    nav: "advisor",
+    label: "Production",
+    path: "/export",
+    file: "export.png",
+    nav: "sidebar",
     waitMs: 1200,
     ready: async (page) => {
-      await page
-        .getByRole("heading", { name: /Kit advisor/i })
-        .waitFor({ state: "visible", timeout: 30_000 });
+      await page.getByRole("heading", { name: /Production/i, level: 1 }).waitFor({
+        state: "visible",
+        timeout: 60_000,
+      });
+      await page.getByRole("heading", { name: "Prepare Plates", level: 2 }).waitFor({
+        timeout: 15_000,
+      }).catch(() => {});
     },
   },
 ];
@@ -191,39 +190,48 @@ async function waitForApp(page) {
     } catch {
       // retry
     }
-    await page.waitForTimeout(2000);
+    await delay(2000);
   }
   throw new Error(`App not healthy at ${baseUrl}/health after 120s`);
 }
 
-async function clickSidebar(page, label) {
-  // Use `aside` (not `aside nav`): workflow stages live in `<nav>`, but Builds /
-  // Settings are sibling links outside that nav.
-  const link = page
-    .locator("aside")
-    .getByRole("link", { name: label, exact: true });
-  await link.waitFor({ state: "visible", timeout: 30_000 });
-  await link.click();
-}
-
-async function openAdvisor(page) {
-  const btn = page.getByRole("button", { name: /kit advisor|Advisor/i }).first();
-  await btn.waitFor({ state: "visible", timeout: 30_000 });
-  const pressed = await btn.getAttribute("aria-pressed");
-  if (pressed !== "true") {
-    await btn.click();
+async function openClientPath(page, path) {
+  const workflow = page.getByRole("navigation", { name: "Workflow stages" });
+  const utility = page.getByRole("navigation", { name: "Utility" });
+  if (path === "/library") {
+    await page.goto(`${baseUrl}/library`, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    return;
   }
-  await page
-    .getByRole("heading", { name: /Kit advisor/i })
-    .waitFor({ state: "visible", timeout: 30_000 });
+  if (path === "/builds") {
+    await utility.getByRole("link", { name: "Builds" }).click();
+    return;
+  }
+  const workflowLabel = {
+    "/sources": "Sources",
+    "/plan": "Plan",
+    "/progress": "Checkoff",
+    "/export": "Production",
+  }[path];
+  if (workflowLabel) {
+    await workflow.getByRole("link", { name: workflowLabel }).click();
+    return;
+  }
+  await page.evaluate((next) => {
+    const url = new URL(next, window.location.origin);
+    window.history.pushState({}, "", `${url.pathname}${url.search}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }, path);
 }
 
 async function main() {
-  const { chromium } = await import("playwright");
-
+  const chromium = await loadChromium();
   await mkdir(outDir, { recursive: true });
 
-  const browser = await chromium.launch({ headless: true });
+  const executablePath = browserExecutable();
+  const browser = await chromium.launch({
+    headless: true,
+    ...(executablePath ? { executablePath } : {}),
+  });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 1,
@@ -243,75 +251,42 @@ async function main() {
 
   const page = await context.newPage();
 
-  console.log(`Waiting for ${baseUrl}/health…`);
+  process.stdout.write(`Waiting for ${baseUrl}/health…\n`);
   await waitForApp(page);
-
-  const health = await page.request.get(`${baseUrl}/health`).then((r) => r.json());
-  const aiCapable = Array.isArray(health?.capabilities)
-    ? health.capabilities.includes("ai_assistant")
-    : false;
 
   const homeUrl = profileId
     ? `${baseUrl}/?profile=${encodeURIComponent(profileId)}`
     : `${baseUrl}/`;
-  console.log(`Loading ${homeUrl} (${theme} theme)…`);
+  process.stdout.write(`Loading ${homeUrl} (${theme} theme)…\n`);
   await page.goto(homeUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
   await page.waitForLoadState("networkidle", { timeout: 60_000 }).catch(() => {});
 
   for (const shot of captures) {
-    if ((shot.nav === "advisor" || shot.nav === "settings") && !aiCapable) {
-      console.warn(
-        `Skipping ${shot.label} — health.capabilities lacks ai_assistant (enable AI in Settings or env)`,
-      );
-      continue;
-    }
-
-    console.log(`Capturing ${shot.label} → ${shot.file}`);
-
-    if (shot.nav === "settings") {
-      await clickSidebar(page, "Settings");
-      await page.waitForURL(
-        (url) => url.pathname.replace(/\/$/, "").endsWith("/settings"),
-        { timeout: 30_000 },
-      );
-    } else if (shot.nav === "advisor") {
-      // Ensure we are on a workflow page so the sheet docks beside content.
-      await clickSidebar(page, "Plan").catch(() => clickSidebar(page, "Library"));
-      await openAdvisor(page);
-    } else {
-      await clickSidebar(page, shot.label);
-      await page.waitForURL(
-        (url) => {
-          const path = url.pathname.replace(/\/$/, "");
-          const expected = shot.path.replace(/\/$/, "");
-          return path === expected || path.endsWith(expected);
-        },
-        { timeout: 30_000 },
-      );
-    }
+    process.stdout.write(`Capturing ${shot.label} → ${shot.file}\n`);
+    await openClientPath(page, shot.path);
+    await page.waitForURL(
+      (url) => {
+        const path = url.pathname.replace(/\/$/, "");
+        const expected = shot.path.replace(/\/$/, "");
+        return path === expected || path.endsWith(expected);
+      },
+      { timeout: 30_000 },
+    );
 
     if (shot.ready) await shot.ready(page);
-    if (shot.waitMs) await page.waitForTimeout(shot.waitMs);
+    if (shot.waitMs) await delay(shot.waitMs);
 
-    if (shot.file === "settings-ai.png") {
-      const aiCard = page.locator("#ai-assistant");
-      await aiCard.waitFor({ state: "visible", timeout: 30_000 });
-      await aiCard.scrollIntoViewIfNeeded();
-      await page.waitForTimeout(300);
-      await aiCard.screenshot({ path: join(outDir, shot.file) });
-    } else {
-      await page.screenshot({
-        path: join(outDir, shot.file),
-        fullPage: false,
-      });
-    }
+    await page.screenshot({
+      path: join(outDir, shot.file),
+      fullPage: false,
+    });
   }
 
   await browser.close();
-  console.log(`Done — screenshots in ${outDir}`);
+  process.stdout.write(`Done — screenshots in ${outDir}\n`);
 }
 
 main().catch((err) => {
-  console.error(err);
+  process.stderr.write(`${err instanceof Error ? err.stack ?? err.message : String(err)}\n`);
   process.exit(1);
 });

@@ -76,17 +76,18 @@ docker compose pull && docker compose up -d
 
 ## First-time app tour
 
-Print Partner follows a five-step desk loop: **Library → Plan → Parts → Progress → Export**.
+Print Partner follows a Build workflow: **Library → Builds → Sources → Plan → Checkoff → Production**.
 
 1. **Library** — Add GitHub repos, local folders, or zip archives. Assign categories, set import rules, and sync STLs.
-2. **Plan** — Create or switch plans (**Create plan** in the header, or **Plans** in the sidebar). Attach sources, pick STL files, set role filament colors, and recompute when the stale banner appears.
-3. **Parts** — Validate totals by role and filament, browse 3D previews, and edit quantities.
-4. **Progress** — Track per-unit print progress (and assembled toggles), print a checklist, or export missing STLs.
-5. **Export** — Plate workspace, height-band packing, slicer links, profile library, STL/3MF packs, and printer bind/send.
+2. **Builds**: Create or switch Builds (**New Build** in the header, or **Builds** in the sidebar). A new Build asks only for a name, then opens Sources.
+3. **Sources** — Attach sources, pick STLs, and set role colors for this Build.
+4. **Plan** — Review quantities and warnings, then **Apply** the saved draft so Checkoff and Production see the accepted requirements.
+5. **Checkoff** — Track per-unit print progress (and assembled toggles), print a checklist, or export missing STLs.
+6. **Production** — Plate workspace, downloads, slicer handoff, and printer send for one Build. Global Production (`/production`) lists jobs across Builds.
 
 Use the **spine** to move between steps. The left rail can be **collapsed** to icons. **Theme** (light, dark, or system) is under Settings → Appearance.
 
-**Tip:** After the first load, always navigate with the spine. Pasting legacy paths like `/sources` or `/build` directly into the address bar on a cold load can hit API routes and show raw JSON instead of the UI.
+**Tip:** After the first load, always navigate with the spine. Pasting API-colliding paths like `/sources` directly into the address bar on a cold load in single-port Docker can hit the API and show raw JSON instead of the UI. Client-side navigation from `/` (Builds) avoids that.
 
 **LAN tip:** From another machine, open `http://<host-lan-ip>:8080`. Set `PRINT_PARTNER_API_KEY` before attaching MCP from a remote agent.
 
@@ -181,9 +182,9 @@ docker compose pull && docker compose up -d
 
 Use a [personal access token](https://github.com/settings/tokens) with `read:packages` scope, or `gh auth token` after `gh auth login`.
 
-Release tags should publish the image as public automatically; if pull still fails on a fresh clone, use option 1 while waiting for the maintainer to fix package visibility.
-
-**Note:** The first release cut after the GHCR visibility workflow was added may still require a one-time manual **Make public** on the GitHub Packages page (`Package settings → Change visibility`) if `docker compose pull` fails before that release runs.
+Package visibility is managed once from the GitHub Packages settings page; the
+release workflow does not change it. If an anonymous pull fails on a fresh
+clone, use option 1 and report the package-access problem to the maintainer.
 
 ### Build fails or container exits immediately
 
@@ -197,7 +198,8 @@ Read the log output from `docker compose logs` (or `docker compose up --build` w
 |------|-------------|
 | Run without Docker (Node 22, hot reload) | [README — Run locally without Docker](../README.md#run-locally-without-docker) — `npm run dev` builds shared packages first |
 | Full env var reference, SaaS, API keys | [`web/DEPLOY.md`](../web/DEPLOY.md) |
-| Architecture and design | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) |
+| Architecture and design | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Backups, metrics, day-two ops | [OPERATIONS.md](OPERATIONS.md) |
 
 ---
 

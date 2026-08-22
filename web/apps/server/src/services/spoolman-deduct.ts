@@ -21,11 +21,31 @@ import { parseSpoolmanSpoolId, useSpoolFilament as deductSpoolFilament } from ".
 import { getLogger } from "./logger.js";
 import type { PrintVerifyDecision } from "@print-partner/contracts";
 
+export function spoolmanDeductionSettingKey(printerJobKey: string): string {
+  return `spoolman.deduction.${printerJobKey}`;
+}
+
+export function spoolmanDeductionAlreadyRecorded(
+  repo: Pick<AppRepository, "getSetting">,
+  printerJobKey: string,
+): boolean {
+  return Boolean(repo.getSetting(spoolmanDeductionSettingKey(printerJobKey))?.trim());
+}
+
+export function recordSpoolmanDeduction(
+  repo: Pick<AppRepository, "setSetting">,
+  printerJobKey: string,
+  result: { deducted_mm: number; at: string },
+): void {
+  repo.setSetting(spoolmanDeductionSettingKey(printerJobKey), JSON.stringify(result));
+}
+
 /**
  * After a verify confirms one or more units, attempt to deduct the
  * consumed filament weight from the relevant Spoolman spools.
  *
  * @param repo                  App repository for settings + part data.
+ * @param printerJobKey         Stable Printer job / checkoff link id for one-time deduction.
  * @param printerIntegrationId  The integration that printed the job.
  * @param profileId             Plan profile whose parts were confirmed.
  * @param confirmedDecisions    The decisions with result === "confirmed".
@@ -33,12 +53,15 @@ import type { PrintVerifyDecision } from "@print-partner/contracts";
  */
 export async function deductSpoolmanFilamentAfterVerify(
   repo: AppRepository,
+  printerJobKey: string,
   printerIntegrationId: string,
   profileId: number,
   confirmedDecisions: PrintVerifyDecision[],
   totalUnitsInLink: number,
 ): Promise<void> {
   if (!confirmedDecisions.length) return;
+  if (!printerJobKey.trim()) return;
+  if (spoolmanDeductionAlreadyRecorded(repo, printerJobKey)) return;
 
   const log = getLogger();
 
@@ -98,6 +121,7 @@ export async function deductSpoolmanFilamentAfterVerify(
     0,
   );
 
+  let deductedMm = 0;
   for (const [spoolRef, unitCount] of spoolUnitCounts) {
     const parsed = parseSpoolmanSpoolId(spoolRef);
     if (!parsed) continue;
@@ -108,9 +132,17 @@ export async function deductSpoolmanFilamentAfterVerify(
 
     try {
       await deductSpoolFilament(spoolmanIntegration.config, parsed.spoolId, deductMm);
+      deductedMm += deductMm;
       log.log("info", `spoolman-deduct: deducted ${Math.round(deductMm)} mm from spool #${parsed.spoolId}`);
     } catch (err) {
       log.log("warn", `spoolman-deduct: failed to deduct from spool #${parsed.spoolId}: ${err}`);
     }
+  }
+
+  if (deductedMm > 0) {
+    recordSpoolmanDeduction(repo, printerJobKey, {
+      deducted_mm: deductedMm,
+      at: new Date().toISOString(),
+    });
   }
 }

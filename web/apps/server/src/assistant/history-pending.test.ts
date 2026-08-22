@@ -6,7 +6,7 @@ import {
   loadAssistantHistory,
   removePendingProposedAction,
 } from "./history.js";
-import { buildSyncThenUpdateAction } from "./sync-then-update.js";
+import { buildSyncAction } from "./sync-action.js";
 import type { AppRepository } from "../db/repository.js";
 import type { AssistantProposedAction } from "@print-partner/contracts";
 
@@ -71,7 +71,7 @@ describe("pending proposed actions in history", () => {
     expect(removePendingProposedAction(repo, "a1")).toBe(true);
     expect(loadAssistantHistory(repo).at(-1)?.proposed_actions).toBeUndefined();
 
-    const follow = buildSyncThenUpdateAction({
+    const follow = buildSyncAction({
       planId: 2,
       projectIds: [9],
       sourceName: "Voron-Trident",
@@ -79,20 +79,18 @@ describe("pending proposed actions in history", () => {
     expect(appendPendingProposedActions(repo, [follow])).toBe(true);
     const pending = loadAssistantHistory(repo).at(-1)?.proposed_actions ?? [];
     expect(pending).toHaveLength(1);
-    expect(pending[0]!.label).toBe("Sync → Update build");
-    expect(pending[0]!.params.workflow).toBe("sync_then_recompute");
-    expect((pending[0]!.params.steps as unknown[]).length).toBe(2);
+    expect(pending[0]!.label).toBe("Sync Voron-Trident");
+    expect(pending[0]!.type).toBe("start_sync");
 
     clearAssistantHistory(repo);
     expect(loadAssistantHistory(repo)).toHaveLength(0);
   });
 });
 
-describe("buildSyncThenUpdateAction", () => {
-  it("builds apply_build_recipe with sync then recompute", () => {
-    const action = buildSyncThenUpdateAction({ planId: 5, sourceName: "Voron-2" });
-    expect(action.type).toBe("apply_build_recipe");
-    const steps = action.params.steps as Array<{ type: string }>;
-    expect(steps.map((s) => s.type)).toEqual(["start_sync", "start_recompute"]);
+describe("buildSyncAction", () => {
+  it("builds a sync action without rebuilding the Plan", () => {
+    const action = buildSyncAction({ planId: 5, sourceName: "Voron-2" });
+    expect(action.type).toBe("start_sync");
+    expect(action.summary).toMatch(/Review plan #5/);
   });
 });

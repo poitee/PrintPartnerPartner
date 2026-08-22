@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "./test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -5,7 +6,6 @@ import { tmpdir } from "node:os";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { loadKitManifest, saveKitManifest } from "./services/kit-manifest-store.js";
 import {
-  applyManifestToProfile,
   loadManifestYaml,
   selectionIncludesPart,
 } from "./services/manifest-apply.js";
@@ -46,7 +46,7 @@ option_groups:
     repo.updateImportRules(source.id, ["STLs/"]);
 
     const plan = repo.createProfile("KitPlan", source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
 
     saveKitManifest(repo, plan.id, {
       selections: { toolhead: "stock", probe: "stock" },
@@ -58,14 +58,24 @@ option_groups:
     expect(Object.keys(builder.merged_option_groups)).toContain("toolhead");
     expect(builder.merged_option_groups.toolhead?.variants?.[0]?.id).toBe("stock");
 
-    applyManifestToProfile(repo, plan.id, true);
-    const parts = repo.listParts(plan.id).parts;
-    expect(parts.every((p) => p.included)).toBe(true);
+    const selected = repo.recomputePlanDraft({
+      profileId: plan.id,
+      actor: "test:user",
+      idempotencyKey: "selected-kit-draft",
+    });
+    if (selected.kind !== "created") throw new Error("selected kit draft was not created");
+    expect(selected.draft.parts.every((part) => part.included)).toBe(true);
 
     saveKitManifest(repo, plan.id, { selections: { toolhead: "stock" } });
-    applyManifestToProfile(repo, plan.id, true);
-    const afterProbeClear = repo.listParts(plan.id).parts;
-    expect(afterProbeClear.some((p) => p.match_key.includes("probe") && p.included)).toBe(false);
+    const cleared = repo.recomputePlanDraft({
+      profileId: plan.id,
+      actor: "test:user",
+      idempotencyKey: "cleared-kit-draft",
+    });
+    if (cleared.kind !== "created") throw new Error("cleared kit draft was not created");
+    expect(
+      cleared.draft.parts.some((part) => part.partKey.includes("probe") && part.included),
+    ).toBe(false);
 
     await ports.db.close();
     rmSync(dir, { recursive: true, force: true });

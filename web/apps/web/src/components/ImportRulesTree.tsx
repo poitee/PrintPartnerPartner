@@ -495,7 +495,7 @@ export default function ImportRulesTree({
     <div className={cn(inline ? "space-y-2" : "import-tree", className)}>
       {!inline && (
         <p className="muted">
-          Check STL files or folders to include. Unchecked paths are ignored on recompute.
+          Check STL files or folders to include. Unchecked paths stay out of the saved Plan draft when you Rebuild.
           {legacyAll && " (Legacy import-all — adjust selection to opt in.)"}
         </p>
       )}

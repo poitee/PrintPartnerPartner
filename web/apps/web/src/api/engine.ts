@@ -1,4 +1,5 @@
 import {
+  DEFAULT_STL_NAMING_PROFILE,
   DATE_FORMAT_DEFAULT,
   DATE_FORMAT_PRESETS,
   formatTimestamp,
@@ -15,9 +16,25 @@ import {
   type JobEvent,
   type JobSnapshot,
   type PartRow,
+  type AcceptedPlanBasisContract,
+  type PlanDraftIdentity,
+  type PlanDraftWorkspace,
+  type PlanDraftPartDecisionContract,
+  type ApplyPlanDraftReceipt,
+  type RequiredUnitDecisionContract,
   type ProfileSummary,
   type SourceSummary,
+  type StlNamingFolderRule,
+  type StlNamingProfile,
+  type StlNamingProfileOverride,
+  type StlNamingRole,
+  type StlNamingRoleId,
   type UnattributedPrint,
+  parsePlanDraftWorkspace,
+  parsePlanDraftIdentity,
+  parseAcceptedPlanBasis,
+  parseAcceptedProgressImportResponse,
+  parseApplyPlanDraftReceipt,
 } from "@print-partner/contracts";
 import {
   pickKitBundleFileWeb,
@@ -26,25 +43,51 @@ import {
   pickZipArchiveFileWeb,
   saveTextFileWeb,
 } from "@/lib/webFilePickers";
+import {
+  getEngineBaseUrl,
+  notifyEngineUnauthorized,
+  resolveEngineUrl,
+} from "./contractRequest";
 
-export type { AppUpdateCheckResponse, HealthResponse, JobEvent, JobSnapshot, PartRow, ProfileSummary, SourceSummary, UnattributedPrint };
-export { DATE_FORMAT_DEFAULT, DATE_FORMAT_PRESETS, formatTimestamp, type DateFormatId };
+export type {
+  AppUpdateCheckResponse,
+  HealthResponse,
+  JobEvent,
+  JobSnapshot,
+  PartRow,
+  PlanDraftIdentity,
+  PlanDraftWorkspace,
+  PlanDraftPartDecisionContract,
+  ApplyPlanDraftReceipt,
+  RequiredUnitDecisionContract,
+  ProfileSummary,
+  SourceSummary,
+  StlNamingFolderRule,
+  StlNamingProfile,
+  StlNamingProfileOverride,
+  StlNamingRole,
+  StlNamingRoleId,
+  UnattributedPrint,
+};
+export {
+  DATE_FORMAT_DEFAULT,
+  DATE_FORMAT_PRESETS,
+  DEFAULT_STL_NAMING_PROFILE,
+  formatTimestamp,
+  type DateFormatId,
+};
+export { setEngineUnauthorizedHandler } from "./contractRequest";
+export {
+  fetchSourceNaming,
+  isSourceNamingNotFoundError,
+  saveSourceNaming,
+  sourceNamingErrorMessage,
+  SourceNamingRequestError,
+  type SourceNamingSettings,
+} from "./endpoints/sourceNaming";
 
 export function formatSyncTime(iso: string): string {
   return formatTimestamp(iso);
-}
-
-const API_BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
-const API_PREFIX = (import.meta.env.VITE_API_PREFIX ?? "").replace(/\/$/, "");
-
-function resolveEngineUrl(path: string): string {
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  const withPrefix = API_PREFIX ? `${API_PREFIX}${normalized}` : normalized;
-  if (API_BASE) return `${API_BASE}${withPrefix}`;
-  if (typeof window !== "undefined") {
-    return `${window.location.origin.replace(/\/$/, "")}${withPrefix}`;
-  }
-  return withPrefix;
 }
 
 export type SourceUpdateCheckSettings = {
@@ -111,6 +154,7 @@ export type PrinterHostStatus = {
 export type PrinterCheckoffUnit = {
   part_id: number;
   unit_index: number;
+  object_name?: string;
 };
 
 export type PrinterHostOutcome = "unknown" | "success" | "failed" | "cancelled";
@@ -180,6 +224,8 @@ export type PrinterCheckoffLink = {
   filename: string;
   remote_path?: string;
   upload_job_id?: string;
+  /** Immutable Plate revision this job was bound to. */
+  plate_revision_id?: number;
   units: PrinterCheckoffUnit[];
   /** Parsed object names that did not map — visible on Progress, never in confirm set. */
   unlabeled_names?: string[];
@@ -224,6 +270,7 @@ export type PrinterSendQueueItem = {
   start: boolean;
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
+  plate_revision_id?: number;
   state: PrinterSendQueueState;
   created_at: string;
   updated_at: string;
@@ -369,6 +416,7 @@ export type ManifestSummary = {
 export type PrinterMachine = {
   id: string;
   name: string;
+  model: string;
   bed_width_mm: number;
   bed_depth_mm: number;
   bed_height_mm: number | null;
@@ -382,6 +430,7 @@ export type PrinterMachine = {
   enabled?: boolean;
   integration_id?: string | null;
   device_id?: string | null;
+  preset_id?: string | null;
   preferred_slicer?: "orca" | "prusa" | "bambu" | null;
 };
 
@@ -394,61 +443,6 @@ export type PrinterPreset = {
   bed_depth_mm: number;
   bed_height_mm: number | null;
   max_filament_slots: number;
-};
-
-export type PlateFootprint = {
-  match_key: string;
-  unit: number;
-  filename: string;
-  x_mm: number;
-  y_mm: number;
-  width_mm: number;
-  depth_mm: number;
-  height_mm: number;
-  group_key?: string;
-  /** Height band classification ("flat" | "short" | "medium" | "tall" | "very-tall") attached by the packer core; absent for parts whose STL failed to load. */
-  height_band?: string;
-};
-
-export type PlatePreview = {
-  index: number;
-  group_label: string;
-  items: PlateFootprint[];
-};
-
-export type PrinterBedPreview = {
-  printer_id: string;
-  bed_width_mm: number;
-  bed_depth_mm: number;
-  margin_mm: number;
-  plates: PlatePreview[];
-};
-
-export type PlateWorkspace = {
-  profile_id: number;
-  plan: PrintPlan;
-  printers: PrinterMachine[];
-  groups: PrintGroup[];
-  preview: PrinterBedPreview[];
-  unassigned_group_count: number;
-  plate_count: number;
-  warnings: string[];
-};
-
-export type PrintGroup = {
-  group_key: string;
-  filament_key: string;
-  filament_label: string;
-  filament_hex: string | null;
-  repo: string;
-  folder: string;
-  part_count: number;
-  parts?: string[];
-  label: string;
-  printer_id: string | null;
-  suggested_printer_id?: string | null;
-  suggested_printer_name: string | null;
-  warning: string | null;
 };
 
 export type RoleFilamentRow = {
@@ -466,24 +460,6 @@ export type SpoolmanSpoolRow = {
   filament_id: number;
   remaining_weight: number | null;
   location?: string | null;
-};
-
-/** Active strategy for grouping parts into plates. "location" (default) buckets by filament + source repo/folder; "height_band" buckets by classifyHeightBand(part height). */
-export type GroupingStrategy = "location" | "height_band";
-
-export type PrintPlan = {
-  enabled_printer_ids: string[];
-  group_assignments?: Record<string, string>;
-  grouping_strategy?: GroupingStrategy;
-  plate_layout?: {
-    spacing_mm: number;
-    pool: Array<{ match_key: string; unit: number }>;
-    printers: Array<{
-      printer_id: string;
-      plates: Array<Array<{ match_key: string; unit: number }>>;
-      unassigned: Array<{ match_key: string; unit: number }>;
-    }>;
-  } | null;
 };
 
 /** @deprecated Use ReviewPart — checkoff data is merged into plan review. */
@@ -513,53 +489,6 @@ export type CustomFilament = {
   created_at: string;
 };
 
-export type Export3mfOptions = {
-  profile_id: number;
-  layout_mode?: string;
-  spacing_mm?: number;
-  missing_only?: boolean;
-  enabled_printer_ids?: string[];
-};
-
-export type AutoSliceOptions = {
-  profile_id: number;
-  spacing_mm?: number;
-  missing_only?: boolean;
-  enabled_printer_ids?: string[];
-  /** Per-plate slice timeout handed to the sidecar (seconds). */
-  timeout_s?: number;
-};
-
-/** One plate's outcome in an auto-slice job result. */
-export type AutoSlicePlate = {
-  printer_id: string;
-  printer_name: string;
-  plate_index: number;
-  slicer: "orca" | "prusa" | "bambu";
-  status: "ok" | "error";
-  gcode_path: string | null;
-  thumbnail_path: string | null;
-  error: string | null;
-  error_code: string | null;
-  /** Slicer CLI stderr for a failed slice — the actual cause of the failure. */
-  stderr: string | null;
-  /** Slicer CLI exit code when the sidecar reported one. */
-  exit_code: number | null;
-  settings_keys: string[];
-  download_url: string | null;
-  thumbnail_url: string | null;
-};
-
-export type AutoSliceJobResultBody = {
-  profile_id: number;
-  ok: boolean;
-  plate_count: number;
-  attempted_count: number;
-  failed_count: number;
-  plates: AutoSlicePlate[];
-  warnings: string[];
-};
-
 /**
  * STL pack folder grouping:
  * - `color_dir` (default): `role/<directory>/file.stl` — keep source directories.
@@ -574,13 +503,7 @@ export type ExportStlPackOptions = {
 };
 
 export async function engineBaseUrl(): Promise<string> {
-  return API_BASE;
-}
-
-let unauthorizedHandler: (() => void) | null = null;
-
-export function setEngineUnauthorizedHandler(fn: (() => void) | null): void {
-  unauthorizedHandler = fn;
+  return getEngineBaseUrl();
 }
 
 export type AuthUser = {
@@ -601,10 +524,11 @@ export type IncomingShare = {
   created_at: string;
 };
 
-class EngineHttpError extends Error {
+export class EngineHttpError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly body: unknown = null,
   ) {
     super(message);
     this.name = "EngineHttpError";
@@ -616,9 +540,14 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(resolveEngineUrl(path), { ...init, headers, credentials: "include" });
+  const res = await fetch(resolveEngineUrl(path), {
+    ...init,
+    headers,
+    credentials: "include",
+    cache: "no-store",
+  });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     throw new Error(`Engine ${path} failed: 401`);
   }
   if (!res.ok) {
@@ -626,6 +555,7 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new EngineHttpError(
       detail?.detail ?? `Engine ${path} failed: ${res.status}`,
       res.status,
+      detail,
     );
   }
   if (res.status === 204) {
@@ -645,9 +575,12 @@ async function engineFetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function engineFetchText(path: string): Promise<string> {
-  const res = await fetch(resolveEngineUrl(path), { credentials: "include" });
+  const res = await fetch(resolveEngineUrl(path), {
+    cache: "no-store",
+    credentials: "include",
+  });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     throw new Error(`Engine ${path} failed: 401`);
   }
   if (!res.ok) {
@@ -858,6 +791,13 @@ export async function updateProfile(
 
 export async function archiveProfile(profileId: number): Promise<ProfileSummary> {
   return engineFetch(`/plans/${profileId}/archive`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function unarchiveProfile(profileId: number): Promise<ProfileSummary> {
+  return engineFetch(`/plans/${profileId}/unarchive`, {
     method: "POST",
     body: JSON.stringify({}),
   });
@@ -1173,23 +1113,6 @@ export async function startExportKitBundle(
   return body.job_id;
 }
 
-export async function fetchPrintGroups(profileId: number): Promise<PrintGroup[]> {
-  const body = await engineFetch<{ groups: PrintGroup[] }>(
-    `/plans/${profileId}/print-groups`,
-  );
-  return body.groups;
-}
-
-export async function savePrintAssignments(
-  profileId: number,
-  assignments: Record<string, string>,
-): Promise<{ plan: PrintPlan; groups: PrintGroup[] }> {
-  return engineFetch(`/plans/${profileId}/print-assignments`, {
-    method: "PUT",
-    body: JSON.stringify({ assignments }),
-  });
-}
-
 export async function savePrinterFleet(
   printers: PrinterMachine[],
 ): Promise<PrinterMachine[]> {
@@ -1202,8 +1125,12 @@ export async function savePrinterFleet(
 
 export async function addPrinter(body: {
   name: string;
-  bed_width_mm: number;
-  bed_depth_mm: number;
+  model?: string;
+  preset_id?: string;
+  bed_width_mm?: number;
+  bed_depth_mm?: number;
+  bed_height_mm?: number | null;
+  max_filament_slots?: number;
 }): Promise<PrinterMachine> {
   return engineFetch<PrinterMachine>("/printers", {
     method: "POST",
@@ -1266,9 +1193,7 @@ export async function addProfileAddonLayer(
 export async function patchPart(
   partId: number,
   fields: {
-    included?: boolean;
     filament_color_id?: string;
-    quantity_override?: number;
     spoolman_spool_id?: string | null;
   },
 ): Promise<PartRow> {
@@ -1279,10 +1204,8 @@ export async function patchPart(
 }
 
 /**
- * Absolute URL for a server-served asset path returned by a job result (e.g.
- * an auto-slice plate's `thumbnail_url`, "/exports/<key>"). Unlike
- * {@link downloadExport} this does not trigger a download — it is the value to
- * put in an `<img src>`.
+ * Absolute URL for a server-served asset path returned by a job result.
+ * Unlike {@link downloadExport}, this returns a value suitable for `<img src>`.
  */
 export function engineAssetUrl(path: string): string {
   return /^https?:\/\//i.test(path) ? path : resolveEngineUrl(path);
@@ -1439,6 +1362,7 @@ export async function enqueuePrinterSend(options: {
   match?: PrinterSendQueueMatch;
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
+  plate_revision_id?: number;
 }): Promise<{ item: PrinterSendQueueItem }> {
   const form = new FormData();
   form.append("file", options.file);
@@ -1451,6 +1375,9 @@ export async function enqueuePrinterSend(options: {
   if (options.profile_id != null) {
     form.append("profile_id", String(options.profile_id));
   }
+  if (options.plate_revision_id != null) {
+    form.append("plate_revision_id", String(options.plate_revision_id));
+  }
   if (options.checkoff_units && options.checkoff_units.length > 0) {
     form.append("checkoff_units", JSON.stringify(options.checkoff_units));
   }
@@ -1460,7 +1387,7 @@ export async function enqueuePrinterSend(options: {
     credentials: "include",
   });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     throw new Error("Queue failed: 401");
   }
   if (!res.ok) {
@@ -1560,7 +1487,7 @@ export async function startBambuConnectHandoff(options: {
     credentials: "include",
   });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     throw new Error("Bambu Connect handoff failed: 401");
   }
   if (!res.ok) {
@@ -1587,6 +1514,7 @@ export async function startPrinterUpload(options: {
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
   unlabeled_names?: string[];
+  plate_revision_id?: number;
 }): Promise<string> {
   const form = new FormData();
   form.append("file", options.file);
@@ -1594,6 +1522,9 @@ export async function startPrinterUpload(options: {
   form.append("start", options.start ? "1" : "0");
   if (options.profile_id != null) {
     form.append("profile_id", String(options.profile_id));
+  }
+  if (options.plate_revision_id != null) {
+    form.append("plate_revision_id", String(options.plate_revision_id));
   }
   if (options.checkoff_units && options.checkoff_units.length > 0) {
     form.append("checkoff_units", JSON.stringify(options.checkoff_units));
@@ -1607,7 +1538,7 @@ export async function startPrinterUpload(options: {
     credentials: "include",
   });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     throw new Error("Printer upload failed: 401");
   }
   if (!res.ok) {
@@ -1820,30 +1751,10 @@ export async function generateManifestDraft(sourceId: number): Promise<{
   return engineFetch(`/sources/${sourceId}/manifest-draft`, { method: "POST" });
 }
 
-/**
- * URL for a part thumbnail. The optional `hex` and `cacheVersion` are appended
- * only as cache-busting query params (the server keys cached PNGs by the part's
- * stored filament color, not the query string). This makes a color change — or
- * a manual "Regenerate thumbnails" bump — produce a distinct URL so the browser
- * does not serve a stale cached image.
- */
-export async function partThumbnailUrl(
-  partId: number,
-  opts?: { hex?: string | null; cacheVersion?: number },
-): Promise<string> {
-  const base = resolveEngineUrl(`/parts/${partId}/thumbnail`);
-  const params = new URLSearchParams();
-  if (opts?.hex) params.set("hex", opts.hex);
-  if (opts?.cacheVersion) params.set("v", String(opts.cacheVersion));
-  const qs = params.toString();
-  return qs ? `${base}?${qs}` : base;
+export async function partThumbnailUrl(partId: number): Promise<string> {
+  return resolveEngineUrl(`/parts/${partId}/thumbnail`);
 }
 
-/**
- * Clear cached thumbnail/preview PNGs for every part in a plan so they
- * regenerate from the current filament colors. Returns how many cached files
- * were removed on the server.
- */
 export async function regeneratePlanThumbnails(
   profileId: number,
 ): Promise<{ cleared: number }> {
@@ -1852,12 +1763,48 @@ export async function regeneratePlanThumbnails(
   });
 }
 
-/** Upload a client-rendered PNG thumbnail after Preview3D renders (optional cache). */
-export async function uploadPartThumbnail(partId: number, pngBlob: Blob): Promise<void> {
+const ACCEPTED_MEDIA_BASIS_PATTERN = /^[0-9a-f]{64}$/;
+const ACCEPTED_RENDER_HEX_PATTERN = /^#[0-9a-f]{6}$/i;
+
+export type AcceptedPartMediaMetadata = {
+  readonly basis: string;
+  readonly renderHex: string | null;
+};
+
+export function acceptedPartMediaMetadata(response: Response): AcceptedPartMediaMetadata {
+  const etag = response.headers.get("ETag") ?? "";
+  const match = /^"([0-9a-f]{64})"$/.exec(etag);
+  if (!match) throw new Error("Response is missing a strong accepted media ETag");
+  const basis = match[1];
+  if (!basis) throw new Error("Response is missing an accepted media basis");
+  const rawHex = response.headers.get("X-Accepted-Render-Hex")?.trim() ?? "";
+  return {
+    basis,
+    renderHex: ACCEPTED_RENDER_HEX_PATTERN.test(rawHex) ? rawHex.toLowerCase() : null,
+  };
+}
+
+export function acceptedPartMediaRevalidationHeaders(basis: string | null): HeadersInit {
+  if (basis == null) return {};
+  if (!ACCEPTED_MEDIA_BASIS_PATTERN.test(basis)) {
+    throw new Error("Invalid accepted media basis");
+  }
+  return { "If-None-Match": `"${basis}"` };
+}
+
+export async function uploadPartThumbnail(
+  partId: number,
+  pngBlob: Blob,
+  meshBasis: string,
+): Promise<void> {
+  if (!ACCEPTED_MEDIA_BASIS_PATTERN.test(meshBasis)) {
+    throw new Error("Invalid accepted media basis");
+  }
   const form = new FormData();
   form.append("file", pngBlob, "thumbnail.png");
   const res = await fetch(resolveEngineUrl(`/parts/${partId}/thumbnail`), {
     method: "POST",
+    headers: { "If-Match": `"${meshBasis}"` },
     body: form,
   });
   if (!res.ok) {
@@ -1886,12 +1833,10 @@ function encodeStlRelativePath(relativePath: string): string {
     .join("/");
 }
 
-/** Mesh bytes for an STL under a synced source (before plan recompute). */
 export async function sourceStlMeshUrl(sourceId: number, relativePath: string): Promise<string> {
   return resolveEngineUrl(`/sources/${sourceId}/stl/${encodeStlRelativePath(relativePath)}/mesh`);
 }
 
-/** PNG preview for an STL under a synced source (before plan recompute). */
 export async function sourceStlPreviewUrl(sourceId: number, relativePath: string): Promise<string> {
   return resolveEngineUrl(`/sources/${sourceId}/stl/${encodeStlRelativePath(relativePath)}/preview`);
 }
@@ -1939,74 +1884,34 @@ export async function testDiscordNotify(): Promise<{ ok: boolean; error?: string
   });
 }
 
-export type StlNamingRoleId = "primary" | "accent" | "clear" | "opaque";
-
-export type StlNamingRole = {
-  id: StlNamingRoleId;
-  label: string;
-  markers: string[];
-};
-
-export type StlNamingFolderRule = {
-  path_contains: string;
-  role_id: StlNamingRoleId;
-  functional_class?: "functional" | "cosmetic";
-};
-
-export type StlNamingProfile = {
-  roles: StlNamingRole[];
-  quantity: {
-    regex: string;
-    default: number;
-  };
-  slug: {
-    strip_markers: boolean;
-    strip_quantity: boolean;
-  };
-  folder_rules: StlNamingFolderRule[];
-  export_role_order: StlNamingRoleId[];
-};
-
 export type StlNamingPreviewResult = {
   role: StlNamingRoleId;
   quantity: number;
   part_slug: string;
 };
 
-export type SourceNamingSettings = {
-  use_defaults: boolean;
-  override: Partial<StlNamingProfile>;
-  effective: StlNamingProfile;
-};
-
-export const DEFAULT_STL_NAMING_PROFILE: StlNamingProfile = {
-  roles: [
-    { id: "primary", label: "Primary", markers: [] },
-    { id: "accent", label: "Accent", markers: ["[a]"] },
-    { id: "clear", label: "Clear", markers: ["[c]"] },
-    { id: "opaque", label: "Opaque", markers: ["[o]"] },
-  ],
-  quantity: {
-    regex: String.raw`[ _]x([0-9]+)\.stl$`,
-    default: 1,
-  },
-  slug: {
-    strip_markers: true,
-    strip_quantity: true,
-  },
-  folder_rules: [],
-  export_role_order: ["primary", "accent", "clear", "opaque"],
-};
-
 export const DEFAULT_QUANTITY_REGEX = DEFAULT_STL_NAMING_PROFILE.quantity.regex;
 
 export function mergeStlNamingProfiles(
   base: StlNamingProfile,
-  override: Partial<StlNamingProfile> | undefined,
+  override: StlNamingProfileOverride | undefined,
 ): StlNamingProfile {
   if (!override) return base;
+  const rolesById = new Map(base.roles.map((role) => [role.id, structuredClone(role)]));
+  for (const roleOverride of override.roles ?? []) {
+    const current = rolesById.get(roleOverride.id) ?? {
+      id: roleOverride.id,
+      label: roleOverride.id,
+      markers: [],
+    };
+    rolesById.set(roleOverride.id, {
+      id: roleOverride.id,
+      label: roleOverride.label ?? current.label,
+      markers: roleOverride.markers ?? current.markers,
+    });
+  }
   return {
-    roles: override.roles ?? base.roles,
+    roles: [...rolesById.values()],
     quantity: override.quantity ? { ...base.quantity, ...override.quantity } : base.quantity,
     slug: override.slug ? { ...base.slug, ...override.slug } : base.slug,
     folder_rules: override.folder_rules ?? base.folder_rules,
@@ -2033,20 +1938,6 @@ export async function previewStlNaming(body: {
 }): Promise<StlNamingPreviewResult> {
   return engineFetch<StlNamingPreviewResult>("/settings/stl-naming/preview", {
     method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-export async function fetchSourceNaming(sourceId: number): Promise<SourceNamingSettings> {
-  return engineFetch<SourceNamingSettings>(`/sources/${sourceId}/naming`);
-}
-
-export async function saveSourceNaming(
-  sourceId: number,
-  body: { use_defaults: boolean; override: Partial<StlNamingProfile> },
-): Promise<SourceNamingSettings> {
-  return engineFetch<SourceNamingSettings>(`/sources/${sourceId}/naming`, {
-    method: "PUT",
     body: JSON.stringify(body),
   });
 }
@@ -2227,18 +2118,116 @@ export async function fetchManifestWarnings(
   return body.warnings;
 }
 
-export async function startRecompute(
+export async function listPlanDrafts(profileId: number): Promise<PlanDraftIdentity[]> {
+  const body = await engineFetch<{ drafts: PlanDraftIdentity[] }>(`/plans/${profileId}/drafts`);
+  return body.drafts;
+}
+
+export async function fetchPlanDraftWorkspace(
   profileId: number,
-  options?: { apply_manifest?: boolean },
-): Promise<string> {
-  const body = await engineFetch<{ job_id: string }>("/jobs/recompute", {
+  draftId: number,
+): Promise<PlanDraftWorkspace> {
+  return parsePlanDraftWorkspace(await engineFetch(`/plans/${profileId}/drafts/${draftId}`));
+}
+
+export async function recomputePlanDraft(profileId: number): Promise<PlanDraftWorkspace> {
+  return parsePlanDraftWorkspace(await engineFetch(`/plans/${profileId}/drafts/recompute`, {
     method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ apply_manifest: true }),
+  }));
+}
+
+export async function editPlanDraftParts(input: {
+  profileId: number;
+  draftId: number;
+  expectedSnapshotDigest: string;
+  decisions: PlanDraftPartDecisionContract[];
+}): Promise<PlanDraftWorkspace> {
+  return parsePlanDraftWorkspace(await engineFetch(
+    `/plans/${input.profileId}/drafts/${input.draftId}/parts`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        expected_snapshot_digest: input.expectedSnapshotDigest,
+        decisions: input.decisions,
+      }),
+    },
+  ));
+}
+
+export async function reconcilePlanDraft(input: {
+  profileId: number;
+  draftId: number;
+  expectedSnapshotDigest: string;
+  decisions: RequiredUnitDecisionContract[];
+}): Promise<PlanDraftWorkspace> {
+  return parsePlanDraftWorkspace(await engineFetch(
+    `/plans/${input.profileId}/drafts/${input.draftId}/reconciliation`,
+    {
+      method: "PUT",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({
+        expected_snapshot_digest: input.expectedSnapshotDigest,
+        decisions: input.decisions,
+      }),
+    },
+  ));
+}
+
+export async function applyPlanDraft(workspace: PlanDraftWorkspace): Promise<ApplyPlanDraftReceipt> {
+  return parseApplyPlanDraftReceipt(await engineFetch(`/plans/${workspace.profile_id}/drafts/${workspace.draft.draft_id}/apply`, {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
     body: JSON.stringify({
-      profile_id: profileId,
-      apply_manifest: options?.apply_manifest ?? false,
+      expected_snapshot_digest: workspace.draft.snapshot_digest,
+      expected_lifecycle_version: workspace.draft.lifecycle_version,
+      expected_base: workspace.draft.base,
     }),
-  });
-  return body.job_id;
+  }));
+}
+
+export async function abandonPlanDraft(
+  profileId: number,
+  draft: PlanDraftIdentity,
+): Promise<PlanDraftIdentity> {
+  return parsePlanDraftIdentity(await engineFetch(
+    `/plans/${profileId}/drafts/${draft.draft_id}/abandon`,
+    {
+      method: "POST",
+      body: JSON.stringify({ expected_lifecycle_version: draft.lifecycle_version }),
+    },
+  ));
+}
+
+export async function rebasePlanDraft(
+  profileId: number,
+  draft: PlanDraftIdentity,
+): Promise<PlanDraftWorkspace> {
+  return parsePlanDraftWorkspace(await engineFetch(
+    `/plans/${profileId}/drafts/${draft.draft_id}/rebase`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({
+        expected_source_lifecycle_version: draft.lifecycle_version,
+        expected_source_snapshot_digest: draft.snapshot_digest,
+      }),
+    },
+  ));
+}
+
+export async function importAcceptedPrintedCounts(input: {
+  profileId: number;
+  expected: AcceptedPlanBasisContract;
+  rows: Array<{ part_id: number; printed_count: number }>;
+}): Promise<{ updated_parts: number }> {
+  return parseAcceptedProgressImportResponse(await engineFetch(
+    `/plans/${input.profileId}/progress/import`, {
+    method: "POST",
+    body: JSON.stringify({ expected: input.expected, rows: input.rows }),
+    },
+  ));
 }
 
 export type PlanReviewIssue = {
@@ -2291,6 +2280,7 @@ export type PlanReviewPartGroup = {
 
 export type PlanReview = {
   profile_id: number;
+  accepted_basis: AcceptedPlanBasisContract | null;
   plan_name: string;
   layers: PlanReviewLayer[];
   totals: PlanReviewTotals;
@@ -2305,7 +2295,12 @@ export async function fetchPlanReview(
 ): Promise<PlanReview> {
   const qs =
     options?.includeExcluded === true ? "?include_excluded=true" : "";
-  return engineFetch<PlanReview>(`/plans/${profileId}/review${qs}`);
+  const review = await engineFetch<PlanReview>(`/plans/${profileId}/review${qs}`);
+  return {
+    ...review,
+    accepted_basis:
+      review.accepted_basis == null ? null : parseAcceptedPlanBasis(review.accepted_basis),
+  };
 }
 
 export type KitBundleUnmatchedSource = {
@@ -2368,23 +2363,6 @@ export async function saveDateFormatSetting(format: DateFormatId): Promise<{ for
   });
 }
 
-export type AutoRecomputeSettings = {
-  enabled: boolean;
-};
-
-export async function fetchAutoRecomputeSettings(): Promise<AutoRecomputeSettings> {
-  return engineFetch<AutoRecomputeSettings>("/settings/auto-recompute");
-}
-
-export async function saveAutoRecomputeSettings(
-  enabled: boolean,
-): Promise<AutoRecomputeSettings> {
-  return engineFetch<AutoRecomputeSettings>("/settings/auto-recompute", {
-    method: "PUT",
-    body: JSON.stringify({ enabled }),
-  });
-}
-
 export async function startCheckSourceUpdates(): Promise<string> {
   const body = await engineFetch<{ job_id: string }>("/jobs/check-source-updates", {
     method: "POST",
@@ -2396,10 +2374,6 @@ export async function startCheckSourceUpdates(): Promise<string> {
 export async function fetchPrinterPresets(): Promise<PrinterPreset[]> {
   const body = await engineFetch<{ presets: PrinterPreset[] }>("/printer-presets");
   return body.presets;
-}
-
-export async function fetchPlateWorkspace(profileId: number): Promise<PlateWorkspace> {
-  return engineFetch<PlateWorkspace>(`/plans/${profileId}/plate-workspace`);
 }
 
 export async function startExportStlPack(
@@ -2598,27 +2572,6 @@ export async function fetchProfileLibrary(): Promise<ProfileLibraryRow[]> {
   return body.profiles;
 }
 
-export async function fetchPrintPlan(profileId: number): Promise<PrintPlan> {
-  const body = await engineFetch<{ plan: PrintPlan }>(
-    `/plans/${profileId}/print-plan`,
-  );
-  return body.plan;
-}
-
-export async function savePrintPlan(
-  profileId: number,
-  plan: Partial<PrintPlan>,
-): Promise<PrintPlan> {
-  const body = await engineFetch<{ plan: PrintPlan }>(
-    `/plans/${profileId}/print-plan`,
-    {
-      method: "PUT",
-      body: JSON.stringify(plan),
-    },
-  );
-  return body.plan;
-}
-
 export async function fetchRoleFilaments(profileId: number): Promise<RoleFilamentRow[]> {
   const body = await engineFetch<{ roles: RoleFilamentRow[] }>(
     `/plans/${profileId}/role-filaments`,
@@ -2659,16 +2612,6 @@ export async function fetchSpoolmanSpools(integrationId: string): Promise<Spoolm
     `/integrations/${encodeURIComponent(integrationId)}/spoolman/spools`,
   );
   return body.spools;
-}
-
-export async function prepareMissingPrintPlan(profileId: number): Promise<{
-  copy_count: number;
-  plan: PrintPlan;
-}> {
-  return engineFetch(`/plans/${profileId}/print-plan/prepare-missing`, {
-    method: "POST",
-    body: "{}",
-  });
 }
 
 export async function fetchCheckoff(profileId: number): Promise<{
@@ -2735,55 +2678,6 @@ export async function saveBuildTrackingSettings(
   });
 }
 
-export async function startExport3mf(options: Export3mfOptions): Promise<string> {
-  const body = await engineFetch<{ job_id: string }>("/jobs/export-3mf", {
-    method: "POST",
-    body: JSON.stringify(options),
-  });
-  return body.job_id;
-}
-
-export type SlicerOpenPlatesResult = {
-  gui_url: string;
-  inbox_dir: string;
-  staged: Array<{ filename: string; dest: string }>;
-  download_paths: string[];
-  object_count: number;
-  warnings: string[];
-  local_app: { scheme_attempt: string | null; note: string };
-};
-
-export async function openPlatesInSlicer(
-  instanceId: string,
-  options: Export3mfOptions,
-): Promise<SlicerOpenPlatesResult> {
-  return engineFetch<SlicerOpenPlatesResult>(
-    `/slicer-instances/${encodeURIComponent(instanceId)}/open-plates`,
-    {
-      method: "POST",
-      body: JSON.stringify(options),
-    },
-  );
-}
-
-export async function fetchSlicerExchangeStatus(): Promise<{
-  configured: boolean;
-  exchange_dir: string;
-  ready: boolean;
-  detail: string | null;
-}> {
-  return engineFetch("/slicer-handoff/exchange-status");
-}
-
-/** Export plates and slice each one on the sidecar matching its printer's slicer. */
-export async function startAutoSlice(options: AutoSliceOptions): Promise<string> {
-  const body = await engineFetch<{ job_id: string }>("/jobs/auto-slice", {
-    method: "POST",
-    body: JSON.stringify(options),
-  });
-  return body.job_id;
-}
-
 export async function startExportChecklistHtml(profileId: number): Promise<string> {
   const body = await engineFetch<{ job_id: string }>(
     "/jobs/export-checklist-html",
@@ -2793,16 +2687,6 @@ export async function startExportChecklistHtml(profileId: number): Promise<strin
     },
   );
   return body.job_id;
-}
-
-export async function applyManifest(
-  profileId: number,
-  preserveIncluded = true,
-): Promise<{ applied_rules: number; warnings: ManifestWarning[] }> {
-  return engineFetch(`/plans/${profileId}/apply-manifest`, {
-    method: "POST",
-    body: JSON.stringify({ preserve_included: preserveIncluded }),
-  });
 }
 
 export async function fetchManifestV2(profileId: number): Promise<ManifestV2> {
@@ -3209,7 +3093,7 @@ export async function streamAssistantChat(
     signal,
   });
   if (res.status === 401) {
-    unauthorizedHandler?.();
+    notifyEngineUnauthorized();
     handlers.onError("Authentication required");
     return;
   }

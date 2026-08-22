@@ -13,6 +13,7 @@ import {
 import { mergeAssembledIntoReview, mergeProgressIntoReview } from "../lib/reviewParts";
 import { queryKeys } from "./keys";
 import { invalidateProfiles } from "./profiles";
+import { invalidateRoleFilaments } from "./roleFilaments";
 
 export function usePlanReviewQuery(
   profileId: number | null,
@@ -36,6 +37,19 @@ export function invalidatePlanReview(
   });
 }
 
+function invalidateOtherPlanReviewVariants(
+  qc: ReturnType<typeof useQueryClient>,
+  profileId: number,
+  includeExcluded: boolean,
+) {
+  return qc.invalidateQueries({
+    predicate: (query) =>
+      query.queryKey[0] === "planReview" &&
+      query.queryKey[1] === profileId &&
+      query.queryKey[2] !== includeExcluded,
+  });
+}
+
 export function usePatchPartMutation(profileId: number | null) {
   const qc = useQueryClient();
   return useMutation({
@@ -50,6 +64,7 @@ export function usePatchPartMutation(profileId: number | null) {
       if (profileId != null) {
         void invalidatePlanReview(qc, profileId);
         void invalidateProfiles(qc);
+        void invalidateRoleFilaments(qc, profileId);
       }
     },
   });
@@ -105,21 +120,29 @@ export function usePatchPartProgressMutation(
       }
     },
     onSuccess: (progress, { partId }, ctx) => {
-      if (profileId == null || !ctx?.key) return;
-      const current = qc.getQueryData<PlanReview>(ctx.key);
-      if (current) {
-        qc.setQueryData(
-          ctx.key,
-          mergeProgressIntoReview(current, partId, {
-            printed_count: progress.printed_count,
-            print_units: progress.print_units,
-            // Server is authoritative about which units are still assembled
-            // after a print toggle (un-printing clears the flag).
-            assembled_units: progress.assembled_units,
-            missing: progress.missing,
-          }),
-        );
+      if (profileId == null) return;
+      if (ctx?.key) {
+        const current = qc.getQueryData<PlanReview>(ctx.key);
+        if (current) {
+          qc.setQueryData(
+            ctx.key,
+            mergeProgressIntoReview(current, partId, {
+              printed_count: progress.printed_count,
+              print_units: progress.print_units,
+              // Server is authoritative about which units are still assembled
+              // after a print toggle (un-printing clears the flag).
+              assembled_units: progress.assembled_units,
+              missing: progress.missing,
+            }),
+          );
+        }
+      } else {
+        void qc.invalidateQueries({
+          queryKey: optimisticReviewCacheKey(profileId, includeExcluded),
+        });
       }
+      void invalidateOtherPlanReviewVariants(qc, profileId, includeExcluded);
+      void invalidateProfiles(qc);
     },
   });
 }
@@ -172,16 +195,23 @@ export function usePatchPartAssembledMutation(
       }
     },
     onSuccess: (progress, { partId }, ctx) => {
-      if (profileId == null || !ctx?.key) return;
-      const current = qc.getQueryData<PlanReview>(ctx.key);
-      if (current) {
-        qc.setQueryData(
-          ctx.key,
-          mergeAssembledIntoReview(current, partId, {
-            assembled_units: progress.assembled_units,
-          }),
-        );
+      if (profileId == null) return;
+      if (ctx?.key) {
+        const current = qc.getQueryData<PlanReview>(ctx.key);
+        if (current) {
+          qc.setQueryData(
+            ctx.key,
+            mergeAssembledIntoReview(current, partId, {
+              assembled_units: progress.assembled_units,
+            }),
+          );
+        }
+      } else {
+        void qc.invalidateQueries({
+          queryKey: optimisticReviewCacheKey(profileId, includeExcluded),
+        });
       }
+      void invalidateOtherPlanReviewVariants(qc, profileId, includeExcluded);
     },
   });
 }

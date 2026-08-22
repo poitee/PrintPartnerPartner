@@ -3,11 +3,24 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } fro
 import type { AssistantActionType, AssistantProposedAction, PrinterHostStatus } from "@print-partner/contracts";
 import { isAssistantUiAction } from "@print-partner/contracts";
 import { listStlRelativePaths, safeRepoPath } from "@print-partner/domain";
-import type { AppRepository } from "../db/repository.js";
+import type { AcceptedProfileProgress, AppRepository } from "../db/repository.js";
+import {
+  AcceptedPlanOperationalIntegrityError,
+  type ReadAcceptedPlanOperationalSnapshotResult,
+} from "../db/accepted-plan-operational.js";
+import {
+  acceptedPlanBasis,
+  acceptedProgressSummary,
+  type AcceptedPlanBasis,
+} from "../db/accepted-plan-progress.js";
 import type { IntegrationPort } from "../integrations/store.js";
 import { loadKitCatalog } from "../services/kit-catalog.js";
 import { loadKitManifest, saveKitManifest } from "../services/kit-manifest-store.js";
-import { buildPlanReview } from "../services/plan-review.js";
+import {
+  readAcceptedPlanReview,
+  summarizeAcceptedPlanReview,
+} from "../services/accepted-plan-review.js";
+import { preloadSpoolmanForColorIds } from "../services/filament-resolve.js";
 import { applyStackPresetToProfile, resolveStackPresetId } from "../services/stack-preset.js";
 import {
   conflictsForStack,
@@ -40,14 +53,116 @@ import {
   restorePlanSnapshotPayload,
 } from "../services/plan-snapshots.js";
 import { comparePlans } from "../services/plan-compare.js";
-import { logAppliedAction } from "../services/plan-decisions.js";
-import { buildSyncThenUpdateAction } from "./sync-then-update.js";
+import { appendPlanDecision, logAppliedAction } from "../services/plan-decisions.js";
+import { buildSyncAction } from "./sync-action.js";
 import {
   decisionFingerprint,
   isDismissedFingerprint,
 } from "./preferences-digest.js";
+import { getLogger } from "../services/logger.js";
 
 const GITHUB_PAT_KEY = "github_pat";
+const SHA256_DIGEST_PATTERN = /^[0-9a-f]{64}$/;
+
+type PrintStatsAcceptedProgress =
+  | {
+      readonly kind: "ready";
+      readonly total_units: number;
+      readonly remaining_units: number;
+    }
+  | { readonly kind: "empty" }
+  | {
+      readonly kind: "unavailable";
+      readonly reason:
+        | "compatibility_dirty"
+        | "uninitialized"
+        | "integrity"
+        | "concurrent_update";
+    };
+
+function printStatsAcceptedProgress(
+  progress: AcceptedProfileProgress,
+): PrintStatsAcceptedProgress {
+  switch (progress.kind) {
+    case "ready":
+      return {
+        kind: "ready",
+        total_units: progress.totalUnits,
+        remaining_units: progress.remainingUnits,
+      };
+    case "empty":
+      return { kind: "empty" };
+    case "unavailable":
+      return { kind: "unavailable", reason: progress.reason };
+    case "integrity_failure":
+      return { kind: "unavailable", reason: "integrity" };
+    case "concurrent_update":
+      return { kind: "unavailable", reason: "concurrent_update" };
+  }
+}
+
+function parseAcceptedPlanBasis(value: unknown): AcceptedPlanBasis | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  const profileId = row.profileId;
+  const planVersion = row.planVersion;
+  const revisionId = row.revisionId;
+  const revisionDigest = row.revisionDigest;
+  const requiredUnitMappingDigest = row.requiredUnitMappingDigest;
+  if (
+    typeof profileId !== "number" ||
+    !Number.isSafeInteger(profileId) ||
+    profileId <= 0 ||
+    typeof planVersion !== "number" ||
+    !Number.isSafeInteger(planVersion) ||
+    planVersion <= 0 ||
+    typeof revisionId !== "number" ||
+    !Number.isSafeInteger(revisionId) ||
+    revisionId <= 0 ||
+    typeof revisionDigest !== "string" ||
+    !SHA256_DIGEST_PATTERN.test(revisionDigest) ||
+    typeof requiredUnitMappingDigest !== "string" ||
+    !SHA256_DIGEST_PATTERN.test(requiredUnitMappingDigest)
+  ) {
+    return null;
+  }
+  return {
+    profileId,
+    planVersion,
+    revisionId,
+    revisionDigest,
+    requiredUnitMappingDigest,
+  };
+}
+
+function readAcceptedPlanForAssistant(
+  repo: AppRepository,
+  profileId: number,
+):
+  | {
+      readonly kind: "read";
+      readonly identity: { readonly id: number; readonly name: string; readonly archivedAt: string | null };
+      readonly accepted: ReadAcceptedPlanOperationalSnapshotResult;
+    }
+  | { readonly kind: "missing" }
+  | { readonly kind: "failure"; readonly detail: string } {
+  try {
+    const identity = repo.getOwnedProfileIdentity(profileId);
+    if (!identity) return { kind: "missing" };
+    return {
+      kind: "read",
+      identity,
+      accepted: repo.readAcceptedPlanOperationalSnapshot(profileId),
+    };
+  } catch (error) {
+    return {
+      kind: "failure",
+      detail: error instanceof AcceptedPlanOperationalIntegrityError
+        ? "Accepted Plan data is inconsistent"
+        : "Internal Server Error",
+    };
+  }
+}
 
 export type AssistantToolSpec = {
   name: string;
@@ -253,19 +368,6 @@ export const ASSISTANT_TOOL_SPECS: AssistantToolSpec[] = [
     tier: "mutate",
   },
   {
-    name: "start_recompute",
-    description: "PROPOSE starting a recompute job for the plan. Requires user confirmation.",
-    input_schema: {
-      type: "object",
-      properties: {
-        plan_id: { type: "number" },
-        apply_manifest: { type: "boolean" },
-      },
-      required: ["plan_id"],
-    },
-    tier: "mutate",
-  },
-  {
     name: "start_sync",
     description:
       "PROPOSE syncing one or more Sources (GitHub/local trees). After tag/branch changes, propose this instead of narrating “please sync”. Requires user confirmation via Apply.",
@@ -398,21 +500,6 @@ export const ASSISTANT_TOOL_SPECS: AssistantToolSpec[] = [
       },
     },
     tier: "read",
-  },
-  {
-    name: "propose_sync_and_update",
-    description:
-      "PROPOSE a single Sync → Update build workflow card (start_sync then start_recompute). Prefer after tag/branch changes instead of narrating two separate steps. Requires user confirmation.",
-    input_schema: {
-      type: "object",
-      properties: {
-        plan_id: { type: "number" },
-        source_name: { type: "string" },
-        source_id: { type: "number" },
-        project_ids: { type: "array", items: { type: "number" } },
-      },
-    },
-    tier: "mutate",
   },
   {
     name: "get_plan_decisions",
@@ -744,7 +831,7 @@ export const ASSISTANT_TOOL_SPECS: AssistantToolSpec[] = [
   {
     name: "get_print_stats",
     description:
-      "Recent print activity and plan completion rates. Returns plates sent to printers in the last N hours (default 8h / overnight), how many completed vs failed, the completion rate, filament consumed in grams, a per-printer breakdown of the same figures, and per-plan remaining unit counts. Pass hours to control the lookback window.",
+      "Recent print activity and accepted Plan progress. Returns plates sent in the last N hours, completed and failed counts, completion rate, filament consumed, and a per-printer breakdown. active_plans is either an available collection or unavailable when collection loading fails. Each available Plan has plan_id, plan_name, part_count, and accepted_progress. accepted_progress is ready with total_units and remaining_units, empty when nothing has been applied, or unavailable with reason compatibility_dirty, uninitialized, integrity, or concurrent_update. Per-Plan unavailable states remain inside an available collection. Pass hours to control the lookback window.",
     input_schema: {
       type: "object",
       properties: {
@@ -763,6 +850,7 @@ export type ToolContext = {
   activePlanId?: number | null;
   useOtherBuildsAsExamples?: boolean;
   dataDir?: string | null;
+  thumbsDir?: string | null;
   /** When set and configured, guide ingest may run a structured LLM refinement pass. */
   assistant?: AssistantPort | null;
   /**
@@ -782,10 +870,15 @@ function asInt(raw: unknown): number | null {
   return null;
 }
 
-function resolvePlanId(input: Record<string, unknown>, ctx: ToolContext): number | null {
+function resolvePlanId(
+  input: Record<string, unknown>,
+  ctx: ToolContext,
+  validateRequested = true,
+): number | null {
   const requested = asInt(input.plan_id);
-  // Models sometimes invent plan ids; only trust input when the plan actually exists.
-  if (requested != null && ctx.repo.getProfile(requested)) return requested;
+  if (requested != null && (!validateRequested || ctx.repo.getOwnedProfileIdentity(requested))) {
+    return requested;
+  }
   return ctx.activePlanId != null ? ctx.activePlanId : null;
 }
 
@@ -992,7 +1085,7 @@ async function resolveRepoTreeSummary(
 }
 
 function planSnapshotJson(repo: AppRepository, planId: number): Record<string, unknown> {
-  const profile = repo.getProfile(planId);
+  const profile = repo.getProfileHeader(planId);
   if (!profile) return { error: "Plan not found" };
   const layers = repo.getProfileLayers(planId);
   const kit = loadKitManifest(repo, planId);
@@ -1106,7 +1199,7 @@ export async function invokeAssistantTool(
       }
 
       case "list_plans": {
-        const plans = ctx.repo.listProfiles().map((p) => ({
+        const plans = ctx.repo.listProfileHeaders().map((p) => ({
           id: p.id,
           name: p.name,
           part_count: p.part_count,
@@ -1122,19 +1215,30 @@ export async function invokeAssistantTool(
       }
 
       case "get_remaining": {
-        const planId = resolvePlanId(input, ctx);
+        const planId = resolvePlanId(input, ctx, false);
         if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
-        const profile = ctx.repo.getProfile(planId);
-        if (!profile) return { content: JSON.stringify({ error: "Plan not found" }) };
-        const checkoff = ctx.repo.getCheckoff(planId);
-        let totalUnits = 0;
-        let printedUnits = 0;
-        for (const part of checkoff.parts) {
-          const qty = Math.max(1, part.quantity_effective);
-          totalUnits += qty;
-          printedUnits += Math.min(qty, part.printed_count ?? 0);
+        const read = readAcceptedPlanForAssistant(ctx.repo, planId);
+        if (read.kind === "missing") {
+          return { content: JSON.stringify({ error: "Plan not found" }) };
         }
-        const remainingUnits = Math.max(0, totalUnits - printedUnits);
+        if (read.kind === "failure") {
+          return { content: JSON.stringify({ error: read.detail }) };
+        }
+        const accepted = read.accepted;
+        if (accepted.kind === "compatibility_dirty") {
+          return { content: JSON.stringify({ error: "Accepted Plan requires compatibility repair" }) };
+        }
+        if (accepted.kind === "uninitialized") {
+          return { content: JSON.stringify({ error: "Accepted Plan operational state is not initialized" }) };
+        }
+        const parts = accepted.kind === "ready"
+          ? accepted.snapshot.parts.filter((part) => part.included)
+          : [];
+        const { totalUnits, remainingUnits } = accepted.kind === "ready"
+          ? acceptedProgressSummary(accepted.snapshot)
+          : { totalUnits: 0, remainingUnits: 0 };
+        const printedUnits = totalUnits - remainingUnits;
+        const profile = accepted.kind === "ready" ? accepted.snapshot.profile : read.identity;
         const percent =
           totalUnits === 0
             ? 0
@@ -1143,47 +1247,74 @@ export async function invokeAssistantTool(
           content: JSON.stringify({
             plan_id: planId,
             plan_name: profile.name,
-            archived_at: profile.archived_at ?? null,
-            summary: checkoff.summary,
+            archived_at: profile.archivedAt,
+            summary: `${parts.filter((part) => part.units.every((unit) => unit.completed)).length}/${parts.length} parts fully printed · ${printedUnits}/${totalUnits} units`,
             printed_units: printedUnits,
             total_units: totalUnits,
             remaining_units: remainingUnits,
             percent,
-            can_archive: totalUnits > 0 && remainingUnits === 0 && !profile.archived_at,
-            part_count: checkoff.parts.length,
+            can_archive: totalUnits > 0 && remainingUnits === 0 && !profile.archivedAt,
+            part_count: parts.length,
           }),
         };
       }
 
       case "get_plan_review": {
-        const planId = resolvePlanId(input, ctx);
+        let planId = resolvePlanId(input, ctx, false);
         if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
-        if (!ctx.repo.getProfile(planId)) {
+        let result;
+        try {
+          const read = (profileId: number) => {
+            const dataDir = ctx.dataDir?.trim() || null;
+            return readAcceptedPlanReview({
+              repo: ctx.repo,
+              profileId,
+              includeExcluded: false,
+              reposDir: ctx.repo.reposDir,
+              thumbsDir: ctx.thumbsDir?.trim() || null,
+              loadFilamentContext: dataDir
+                ? (colorIds) =>
+                    preloadSpoolmanForColorIds({ repo: ctx.repo, dataDir }, colorIds)
+                : undefined,
+            });
+          };
+          result = await read(planId);
+          const requested = asInt(input.plan_id);
+          if (
+            result.kind === "not_found" &&
+            requested != null &&
+            ctx.activePlanId != null &&
+            ctx.activePlanId !== requested
+          ) {
+            planId = ctx.activePlanId;
+            result = await read(planId);
+          }
+        } catch (error) {
+          return {
+            content: JSON.stringify({
+              error:
+                error instanceof AcceptedPlanOperationalIntegrityError
+                  ? "Accepted Plan data is inconsistent"
+                  : "Internal Server Error",
+            }),
+          };
+        }
+        if (result.kind === "not_found") {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
-        const review = buildPlanReview(ctx.repo, planId);
-        const blockers = review.issues.filter((i) => i.severity === "blocker");
-        const warnings = review.issues.filter((i) => i.severity === "warning");
+        if (result.kind === "accepted_state_unavailable") {
+          return {
+            content: JSON.stringify({
+              error:
+                result.reason === "compatibility_dirty"
+                  ? "Accepted Plan requires compatibility repair"
+                  : "Accepted Plan operational state is not initialized",
+            }),
+          };
+        }
+        const review = result.body;
         return {
-          content: JSON.stringify({
-            plan_id: review.profile_id,
-            plan_name: review.plan_name,
-            has_blockers: review.has_blockers,
-            blocker_count: blockers.length,
-            warning_count: warnings.length,
-            issue_codes: [...new Set(review.issues.map((i) => i.code))],
-            sample_issues: review.issues.slice(0, 8).map((i) => ({
-              severity: i.severity,
-              code: i.code,
-              message: i.message,
-            })),
-            totals: review.totals,
-            layers: review.layers.map((l) => ({
-              type: l.layer_type,
-              source: l.project_name,
-              synced: l.synced,
-            })),
-          }),
+          content: JSON.stringify(summarizeAcceptedPlanReview(review)),
         };
       }
 
@@ -1299,7 +1430,7 @@ export async function invokeAssistantTool(
         if (planId == null || !rawPresetId) {
           return { content: JSON.stringify({ error: "plan_id and preset_id required" }) };
         }
-        if (!ctx.repo.getProfile(planId)) {
+        if (!ctx.repo.getOwnedProfileIdentity(planId)) {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
         const catalog = loadKitCatalog() as Record<string, unknown>;
@@ -1376,7 +1507,7 @@ export async function invokeAssistantTool(
         if (planId == null || !sourceName) {
           return { content: JSON.stringify({ error: "plan_id and source_name required" }) };
         }
-        if (!ctx.repo.getProfile(planId)) {
+        if (!ctx.repo.getOwnedProfileIdentity(planId)) {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
         const source = sourceByName(ctx.repo, sourceName);
@@ -1410,7 +1541,7 @@ export async function invokeAssistantTool(
           `Set base to ${canonicalBase}${refLabel}`,
           `Set the base layer to “${canonicalBase}”${refLabel}.${
             needsSyncNote
-              ? " After Apply, Sync this source so STLs match the tag/branch, then Update build."
+              ? " After Apply, Sync this Source, then review the Plan before rebuilding."
               : " May invalidate addon assumptions."
           }`,
           {
@@ -1458,7 +1589,7 @@ export async function invokeAssistantTool(
         if (planId == null || !sourceName) {
           return { content: JSON.stringify({ error: "plan_id and source_name required" }) };
         }
-        if (!ctx.repo.getProfile(planId)) {
+        if (!ctx.repo.getOwnedProfileIdentity(planId)) {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
         const source = sourceByName(ctx.repo, sourceName);
@@ -1554,18 +1685,6 @@ export async function invokeAssistantTool(
         );
       }
 
-      case "start_recompute": {
-        const planId = resolvePlanId(input, ctx);
-        if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
-        return proposeChecked(ctx, 
-          "start_recompute",
-          planId,
-          "Update / recompute build",
-          `Start a recompute job for plan ${planId}.`,
-          { apply_manifest: input.apply_manifest === true },
-        );
-      }
-
       case "start_sync": {
         const planId = resolvePlanId(input, ctx) ?? 0;
         const projectIds: number[] = [];
@@ -1606,7 +1725,7 @@ export async function invokeAssistantTool(
       case "search_plan_parts": {
         const planId = resolvePlanId(input, ctx);
         if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
-        if (!ctx.repo.getProfile(planId)) {
+        if (!ctx.repo.getOwnedProfileIdentity(planId)) {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
         const query = typeof input.query === "string" ? input.query.trim() : "";
@@ -1790,56 +1909,6 @@ export async function invokeAssistantTool(
             ...(planId > 0 ? { plan_id: planId } : {}),
           },
         );
-      }
-
-      case "propose_sync_and_update": {
-        const planId = resolvePlanId(input, ctx);
-        if (planId == null) return { content: JSON.stringify({ error: "plan_id required" }) };
-        if (!ctx.repo.getProfile(planId)) {
-          return { content: JSON.stringify({ error: "Plan not found" }) };
-        }
-        const projectIds: number[] = [];
-        if (Array.isArray(input.project_ids)) {
-          for (const raw of input.project_ids) {
-            const id = typeof raw === "number" ? raw : Number(raw);
-            if (Number.isFinite(id) && id > 0) projectIds.push(id);
-          }
-        }
-        const byId = asInt(input.source_id);
-        if (byId != null && byId > 0) projectIds.push(byId);
-        const sourceName =
-          typeof input.source_name === "string" ? input.source_name.trim() : "";
-        if (sourceName) {
-          const src = sourceByName(ctx.repo, sourceName);
-          if (!src) {
-            return { content: sourceNotFoundError(ctx.repo, sourceName, "Use list_sources.") };
-          }
-          projectIds.push(src.id);
-        }
-        const action = buildSyncThenUpdateAction({
-          planId,
-          projectIds: [...new Set(projectIds)],
-          sourceName: sourceName || null,
-        });
-        if (isDismissedFingerprint(ctx.repo, planId, action.type, action.params ?? {})) {
-          return {
-            content: JSON.stringify({
-              error: "user_dismissed",
-              detail:
-                "User dismissed this Sync → Update workflow on this plan. Ask before re-proposing.",
-              fingerprint: decisionFingerprint(action.type, action.params ?? {}),
-              action_type: action.type,
-            }),
-          };
-        }
-        return {
-          proposedAction: action,
-          content: JSON.stringify({
-            status: "proposed",
-            note: "Not applied yet — user must confirm via Apply in the UI.",
-            action,
-          }),
-        };
       }
 
       case "get_plan_decisions": {
@@ -2435,23 +2504,27 @@ export async function invokeAssistantTool(
       }
 
       case "archive_plan": {
-        const planId = resolvePlanId(input, ctx);
+        const planId = resolvePlanId(input, ctx, false);
         if (planId == null) {
           return { content: JSON.stringify({ error: "plan_id required" }) };
         }
-        const profile = ctx.repo.getProfile(planId);
-        if (!profile) {
+        const read = readAcceptedPlanForAssistant(ctx.repo, planId);
+        if (read.kind === "missing") {
           return { content: JSON.stringify({ error: "Plan not found" }) };
         }
-        const checkoff = ctx.repo.getCheckoff(planId);
-        let totalUnits = 0;
-        let printedUnits = 0;
-        for (const part of checkoff.parts) {
-          const qty = Math.max(1, part.quantity_effective);
-          totalUnits += qty;
-          printedUnits += Math.min(qty, part.printed_count ?? 0);
+        if (read.kind === "failure") {
+          return { content: JSON.stringify({ error: read.detail }) };
         }
-        const remainingUnits = Math.max(0, totalUnits - printedUnits);
+        const accepted = read.accepted;
+        if (accepted.kind === "compatibility_dirty") {
+          return { content: JSON.stringify({ error: "Accepted Plan requires compatibility repair" }) };
+        }
+        if (accepted.kind === "uninitialized") {
+          return { content: JSON.stringify({ error: "Accepted Plan operational state is not initialized" }) };
+        }
+        const { totalUnits, remainingUnits } = accepted.kind === "ready"
+          ? acceptedProgressSummary(accepted.snapshot)
+          : { totalUnits: 0, remainingUnits: 0 };
         if (totalUnits <= 0 || remainingUnits > 0) {
           return {
             content: JSON.stringify({
@@ -2464,6 +2537,7 @@ export async function invokeAssistantTool(
         }
         const rationale =
           typeof input.rationale === "string" ? input.rationale.trim() : "";
+        const profile = accepted.kind === "ready" ? accepted.snapshot.profile : read.identity;
         return proposeChecked(
           ctx,
           "archive_plan",
@@ -2471,7 +2545,9 @@ export async function invokeAssistantTool(
           `Archive “${profile.name}”`,
           rationale ||
             `Archive plan ${planId} as a reusable template (remaining = 0).`,
-          {},
+          accepted.kind === "ready"
+            ? { accepted_basis: acceptedPlanBasis(accepted.snapshot) }
+            : {},
         );
       }
 
@@ -2593,16 +2669,38 @@ export async function invokeAssistantTool(
           "../services/farm-filament.js"
         );
 
-        // per-plan remaining units
-        const planSummaries = ctx.repo
-          .listProfiles()
-          .filter((p) => !p.archived_at)
-          .map((p) => ({
-            plan_id: p.id,
-            plan_name: p.name,
-            remaining_units: p.remaining_units,
-            part_count: p.part_count,
-          }));
+        let activePlans:
+          | {
+              readonly kind: "available";
+              readonly plans: readonly {
+                readonly plan_id: number;
+                readonly plan_name: string;
+                readonly part_count: number;
+                readonly accepted_progress: PrintStatsAcceptedProgress;
+              }[];
+            }
+          | { readonly kind: "unavailable" };
+        try {
+          activePlans = {
+            kind: "available",
+            plans: ctx.repo
+              .listAcceptedProfileSummaries()
+              .filter(({ header }) => !header.archived_at)
+              .map(({ header, progress }) => ({
+                plan_id: header.id,
+                plan_name: header.name,
+                part_count: header.part_count,
+                accepted_progress: printStatsAcceptedProgress(progress),
+              })),
+          };
+        } catch {
+          activePlans = { kind: "unavailable" };
+          getLogger().log(
+            "error",
+            "[assistant] Plan progress collection unavailable",
+            { failure: "unexpected", operation: "get_print_stats" },
+          );
+        }
 
         return {
           content: JSON.stringify({
@@ -2617,7 +2715,7 @@ export async function invokeAssistantTool(
             completion_rate: completionRate(completed, failed),
             filament_consumed_g: filamentG,
             by_printer: printStatsByPrinter(recentJobs),
-            active_plans: planSummaries,
+            active_plans: activePlans,
           }),
         };
       }
@@ -2661,7 +2759,13 @@ function mergeConfirmedSuggestedExcludes(
 export async function applyAssistantAction(
   action: AssistantProposedAction,
   deps: ApplyActionDeps,
-): Promise<{ ok: boolean; detail?: string; job_id?: string; result?: Record<string, unknown> }> {
+): Promise<{
+  ok: boolean;
+  status?: number;
+  detail?: string;
+  job_id?: string;
+  result?: Record<string, unknown>;
+}> {
   if (isAssistantUiAction(action.type)) {
     return {
       ok: false,
@@ -2669,19 +2773,33 @@ export async function applyAssistantAction(
     };
   }
 
+  if (action.type === "archive_plan" && !deps.repo.canMutateAcceptedPlan()) {
+    return { ok: false, status: 503, detail: "Accepted Plan update is unavailable" };
+  }
+
   const planId = action.plan_id;
+  let archiveIdentity: ReturnType<AppRepository["getOwnedProfileIdentity"]> = null;
   const skipPlanCheck =
     action.type === "propose_source_mapping" ||
     action.type === "start_sync" ||
     action.type === "propose_add_source" ||
     action.type === "import_guide_notes";
-  if (!skipPlanCheck && !deps.repo.getProfile(planId)) {
+  if (!skipPlanCheck && action.type === "archive_plan") {
+    try {
+      archiveIdentity = deps.repo.getOwnedProfileIdentity(planId);
+      if (!archiveIdentity) {
+        return { ok: false, detail: "Plan not found" };
+      }
+    } catch {
+      return { ok: false, status: 500, detail: "Internal Server Error" };
+    }
+  } else if (!skipPlanCheck && !deps.repo.getOwnedProfileIdentity(planId)) {
     return { ok: false, detail: "Plan not found" };
   }
   if (
     action.type === "propose_source_mapping" &&
     planId > 0 &&
-    !deps.repo.getProfile(planId)
+    !deps.repo.getOwnedProfileIdentity(planId)
   ) {
     return { ok: false, detail: "Plan not found" };
   }
@@ -2714,7 +2832,7 @@ export async function applyAssistantAction(
             ...(excludeMerged ? { exclude: excludeMerged } : {}),
             ...(result.needs_sync
               ? {
-                  follow_up_action: buildSyncThenUpdateAction({
+                  follow_up_action: buildSyncAction({
                     planId,
                     projectIds: deps.repo
                       .listSources()
@@ -2760,7 +2878,7 @@ export async function applyAssistantAction(
             branch: refreshed.branch,
             ...(refChanged
               ? {
-                  follow_up_action: buildSyncThenUpdateAction({
+                  follow_up_action: buildSyncAction({
                     planId,
                     projectIds: [refreshed.id],
                     sourceName,
@@ -2790,7 +2908,7 @@ export async function applyAssistantAction(
             needs_sync: true,
             source_name: sourceName,
             message: `Ref updated. Sync “${sourceName}” before using STLs from this release.`,
-            follow_up_action: buildSyncThenUpdateAction({
+            follow_up_action: buildSyncAction({
               planId: planId > 0 ? planId : 0,
               projectIds: [source.id],
               sourceName,
@@ -2846,15 +2964,10 @@ export async function applyAssistantAction(
         break;
       }
       case "start_recompute": {
-        const job_id = await deps.jobs.start(
-          "recompute",
-          {
-            profile_id: planId,
-            apply_manifest: action.params.apply_manifest === true,
-          },
-          deps.tenantId,
-        );
-        outcome = { ok: true, job_id };
+        outcome = {
+          ok: false,
+          detail: "Open the Plan page to review changes and rebuild the plan.",
+        };
         break;
       }
       case "start_sync": {
@@ -2930,6 +3043,12 @@ export async function applyAssistantAction(
             }>)
           : [];
         if (!steps.length) return { ok: false, detail: "Recipe has no steps" };
+        if (steps.some((step) => step.type === "start_recompute")) {
+          return {
+            ok: false,
+            detail: "Open the Plan page to review changes and rebuild the plan.",
+          };
+        }
         const stepResults: unknown[] = [];
         let needsSync = false;
         let syncSource: string | undefined;
@@ -2961,35 +3080,6 @@ export async function applyAssistantAction(
               typeof (applied.result as { source_name?: unknown }).source_name === "string"
                 ? String((applied.result as { source_name: string }).source_name)
                 : syncSource;
-          }
-          // Sync → Update build: wait for sync job before enqueueing recompute.
-          if (
-            step.type === "start_sync" &&
-            applied.job_id &&
-            steps.some((s) => s.type === "start_recompute")
-          ) {
-            try {
-              const terminal = await deps.jobs.waitForTerminal(
-                applied.job_id,
-                180_000,
-                deps.tenantId ?? "default",
-              );
-              if (terminal.status !== "done") {
-                return {
-                  ok: false,
-                  detail:
-                    terminal.error ??
-                    `Sync job ${terminal.status} before Update build could start`,
-                  result: { completed_steps: stepResults, sync_status: terminal.status },
-                };
-              }
-            } catch (e) {
-              return {
-                ok: false,
-                detail: e instanceof Error ? e.message : String(e),
-                result: { completed_steps: stepResults },
-              };
-            }
           }
         }
         outcome = {
@@ -3078,9 +3168,8 @@ export async function applyAssistantAction(
           local_path,
         });
         const needsSync = source_kind !== "local" || !created.local_path;
-        // Chain Sync → Update as a follow-up card when a real plan is in context
-        // (same pattern as set_base / set_source_git_ref).
-        const canFollowUp = needsSync && planId > 0 && Boolean(deps.repo.getProfile(planId));
+        const canFollowUp =
+          needsSync && planId > 0 && Boolean(deps.repo.getOwnedProfileIdentity(planId));
         outcome = {
           ok: true,
           result: {
@@ -3091,7 +3180,7 @@ export async function applyAssistantAction(
               "After Sync, use propose_source_mapping / set_base or add_addon / set_source_git_ref as needed. Then detect_build_decisions to surface variant/mod choices.",
             ...(canFollowUp
               ? {
-                  follow_up_action: buildSyncThenUpdateAction({
+                  follow_up_action: buildSyncAction({
                     planId,
                     projectIds: [created.id],
                     sourceName: created.name,
@@ -3156,13 +3245,56 @@ export async function applyAssistantAction(
         break;
       }
       case "archive_plan": {
-        const archived = deps.repo.archiveProfile(planId);
+        const basis = parseAcceptedPlanBasis(action.params?.accepted_basis);
+        if (!basis) return { ok: false, detail: "Accepted Plan basis is missing" };
+        if (basis.profileId !== planId) {
+          return { ok: false, detail: "Accepted Plan basis does not match action Plan" };
+        }
+        let archived;
+        try {
+          archived = deps.repo.archiveAcceptedPlan({ expected: basis });
+        } catch (error) {
+          return {
+            ok: false,
+            status: 500,
+            detail: error instanceof AcceptedPlanOperationalIntegrityError
+              ? "Accepted Plan data is inconsistent"
+              : "Internal Server Error",
+          };
+        }
+        if (archived.kind === "remaining" || archived.kind === "empty") {
+          return { ok: false, detail: "Archive only when print remaining is 0" };
+        }
+        if (archived.kind === "accepted_state_unavailable") {
+          return {
+            ok: false,
+            detail: archived.reason === "compatibility_dirty"
+              ? "Accepted Plan requires compatibility repair"
+              : "Accepted Plan operational state is not initialized",
+          };
+        }
+        if (archived.kind === "stale_accepted_plan") {
+          return { ok: false, detail: "Accepted Plan changed; reload and retry" };
+        }
+        if (archived.kind === "transaction_unavailable") {
+          return {
+            ok: false,
+            status: 503,
+            detail: "Accepted Plan update is unavailable",
+          };
+        }
+        if (archived.kind !== "archived" && archived.kind !== "already_archived") {
+          return { ok: false, detail: "Accepted Plan archive failed" };
+        }
+        if (!archiveIdentity) {
+          return { ok: false, status: 500, detail: "Internal Server Error" };
+        }
         outcome = {
           ok: true,
           result: {
-            plan_id: archived.id,
-            name: archived.name,
-            archived_at: archived.archived_at,
+            plan_id: archiveIdentity.id,
+            name: archiveIdentity.name,
+            archived_at: archived.archivedAt,
           },
         };
         break;
@@ -3173,13 +3305,38 @@ export async function applyAssistantAction(
 
     if (outcome.ok && planId > 0) {
       try {
-        logAppliedAction(deps.repo, action, outcome.result ?? null);
+        if (action.type === "archive_plan" && archiveIdentity) {
+          appendPlanDecision(deps.repo, {
+            planId,
+            actor: "assistant",
+            kind: "applied_action",
+            actionType: action.type,
+            params: action.params ?? {},
+            label: action.label,
+            summary: action.summary,
+            result: outcome.result ?? null,
+          });
+        } else {
+          logAppliedAction(deps.repo, action, outcome.result ?? null);
+        }
       } catch {
         /* decision log is best-effort */
       }
     }
     return outcome;
-  } catch (e) {
-    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  } catch (error) {
+    if (action.type !== "archive_plan") {
+      return {
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+    return {
+      ok: false,
+      status: 500,
+      detail: error instanceof AcceptedPlanOperationalIntegrityError
+        ? "Accepted Plan data is inconsistent"
+        : "Internal Server Error",
+    };
   }
 }

@@ -140,6 +140,63 @@
   --shadow-card: var(--shadow-md);
 }
 
+/*
+  Density tokens — one GRE-234 family, two spacings.
+  Calm: Sources, Plan, Checkoff, Builds, Settings.
+  Dense: Production (global and Build) and Printers.
+  Paper Checkoff tokens above stay independent of these.
+*/
+:root,
+[data-density="calm"] {
+  --density-page-pad: 0.75rem;
+  --density-card-pad: 1rem;
+  --density-row-gap: 1rem;
+}
+
+@media (min-width: 640px) {
+  :root,
+  [data-density="calm"] {
+    --density-page-pad: 1.25rem;
+  }
+}
+
+[data-density="dense"] {
+  --density-page-pad: 0.5rem;
+  --density-card-pad: 0.625rem;
+  --density-row-gap: 0.5rem;
+}
+
+@media (min-width: 640px) {
+  [data-density="dense"] {
+    --density-page-pad: 0.75rem;
+  }
+}
+
+/* Catalog-only Production console sketch. Workshop and hybrid keep GRE-234. */
+[data-sketch="console"] {
+  --background: hsl(210 16% 8%);
+  --foreground: hsl(200 14% 94%);
+  --card: hsl(210 14% 12%);
+  --card-foreground: hsl(200 14% 94%);
+  --popover: hsl(210 14% 12%);
+  --popover-foreground: hsl(200 14% 94%);
+  --primary: hsl(192 58% 42%);
+  --primary-foreground: hsl(210 20% 8%);
+  --accent-brand: hsl(192 58% 42%);
+  --accent-brand-foreground: hsl(210 20% 8%);
+  --secondary: hsl(210 12% 16%);
+  --secondary-foreground: hsl(200 14% 94%);
+  --muted: hsl(210 12% 14%);
+  --muted-foreground: hsl(200 8% 64%);
+  --accent: hsl(210 12% 16%);
+  --accent-foreground: hsl(200 14% 94%);
+  --border: hsl(210 12% 20%);
+  --input: hsl(210 12% 16%);
+  --ring: hsl(192 58% 42%);
+  --surface-sunken: hsl(210 16% 6%);
+  --media-bg: hsl(210 16% 5%);
+}
+
 /* Fonts + radii are emitted as real custom properties (used by var() in CSS). */
 @theme {
   --font-sans: "Source Sans 3", system-ui, sans-serif;
@@ -264,7 +321,8 @@
   }
 
   .section-card {
-    @apply rounded-lg border border-border bg-card p-4;
+    @apply rounded-lg border border-border bg-card;
+    padding: var(--density-card-pad, 1rem);
     box-shadow: var(--shadow-sm);
     background: var(--gradient-surface);
   }
@@ -280,7 +338,7 @@
   }
 
   .source-card__body {
-    @apply p-4;
+    padding: var(--density-card-pad, 1rem);
   }
 
   .drawer-panel {

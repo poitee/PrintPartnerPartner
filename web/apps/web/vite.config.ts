@@ -59,7 +59,7 @@ const SPA_EXACT_PATHS = new Set(["/settings", "/help", "/parts"]);
  * Exact SPA paths that also expose a same-path API (GET `/plans` list).
  * Bypass only browser document navigations so API fetches still proxy.
  */
-const SPA_EXACT_PATHS_WITH_API = new Set(["/plans"]);
+const SPA_EXACT_PATHS_WITH_API = new Set(["/plans", "/printers"]);
 
 function isDocumentNavigation(req: IncomingMessage): boolean {
   const mode = req.headers["sec-fetch-mode"];

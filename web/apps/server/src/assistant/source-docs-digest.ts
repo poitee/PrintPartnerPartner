@@ -1,6 +1,7 @@
 import type { AppRepository } from "../db/repository.js";
 import { fetchGithubReadme } from "../services/github-readme.js";
 import { readCachedPdfText } from "../services/pdf-text-extract.js";
+import { sourcePdfTextStorage } from "../services/source-workspace.js";
 import {
   keywordFilterScore,
   readMarkdownDoc,
@@ -207,13 +208,20 @@ export async function gatherSourceDocsForAssistant(options: {
   const pdfPending = docList.filter(
     (d) => d.kind === "pdf" && (d.extract_status === "pending" || d.extract_status === "error"),
   ).length;
+  const pdfTextStorage = source.local_path
+    ? sourcePdfTextStorage(options.repo, options.sourceId, source.local_path)
+    : null;
 
   for (const doc of docList) {
     if (budget < 400) break;
     let text = "";
     if (source.local_path) {
       if (doc.kind === "pdf") {
-        const cached = readCachedPdfText(source.local_path, doc.path);
+        const cached = readCachedPdfText(
+          source.local_path,
+          doc.path,
+          pdfTextStorage ?? {},
+        );
         if (cached) {
           const chunks = cached.chunks.length
             ? cached.chunks

@@ -1,24 +1,34 @@
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import { rmSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
-import { DATE_FORMAT_DEFAULT, type DateFormatId, type JobSnapshot } from "@print-partner/contracts";
+import {
+  DATE_FORMAT_DEFAULT,
+  JOB_KINDS,
+  parseAcceptedPlateId,
+  parseDirectExportJobResult,
+  parseStartDirectExportRequest,
+  type AcceptedPlateExportJobResult,
+  type DateFormatId,
+  type JobSnapshot,
+  type JobKind,
+  type StartAcceptedPlateExportRequest,
+  type StartDirectExportRequest,
+} from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import { exportDownloadKey, tenantExportDirectory } from "../lib/secure-path.js";
 import { syncProjectById } from "./sources.js";
 import {
-  exportProfileStlPack,
   exportStlPackJobMessage,
+  materializeAcceptedStlBundle,
   type StlPackGroupBy,
 } from "../services/export-stl-pack.js";
-import { zipDirectoryToFile } from "../services/zip-dir.js";
-import { exportProfileHtml } from "../services/export-html.js";
-import { exportKitBundle } from "../services/export-kit.js";
+import { materializeAcceptedChecklistHtml } from "../services/export-html.js";
+import { buildKitBundleData, writeKitBundleData } from "../services/export-kit.js";
 import { checkAllSourceUpdates } from "../services/source-update-check.js";
-import { runExport3mfJob } from "../services/export-3mf-job.js";
-import { runPackPreviewJob } from "../services/plate-workspace.js";
 import { dispatchWebhooks } from "../services/webhook-store.js";
 import { getRequestTenantId, tenantStorage } from "../middleware/tenant-context.js";
 import { extractPendingPdfsForSource } from "../services/source-docs-index.js";
+import { sourcePdfTextStorage } from "../services/source-workspace.js";
 import { parseCheckoffUnits, parseUnlabeledNames } from "../services/printer-checkoff.js";
 import { sendProblem } from "../lib/api-error.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
@@ -27,7 +37,21 @@ import { loadFleet } from "../services/printer-fleet.js";
 import { parsePrinterUploadMultipart } from "../services/printer-upload-multipart.js";
 import { runPrinterUploadJob } from "../services/printer-upload-job.js";
 import { reconcileSendQueueJobResult } from "../services/printer-send-queue.js";
-import { runAutoSliceJob, autoSliceJobMessage } from "../services/auto-slice-job.js";
+import { getLogger } from "../services/logger.js";
+import {
+  ACCEPTED_PLATE_EXPORT_LIMITS,
+  materializeAcceptedPlateExport,
+  type MaterializeAcceptedPlateExportResult,
+} from "../services/accepted-plate-export-delivery.js";
+import {
+  materializeDirectExport3mf,
+  type MaterializeDirectExport3mfResult,
+} from "../services/accepted-direct-export-3mf.js";
+import {
+  AcceptedOperationalExportPublicError,
+  acceptedOperationalExportPublicError,
+  captureAcceptedOperationalExport,
+} from "../services/accepted-operational-export.js";
 
 export type JobHandler = (
   jobId: string,
@@ -58,6 +82,75 @@ export const COMPLETED_JOB_MAX = 1_000;
 export const COMPLETED_JOB_GLOBAL_MAX = 10_000;
 export const COMPLETED_JOB_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const EMPTY_TENANT_JOB_BUCKET = Symbol("empty-tenant-job-bucket");
+const STARTABLE_JOB_KINDS = new Set<string>(JOB_KINDS);
+
+const ACCEPTED_PLATE_EXPORT_ERRORS = {
+  plate_revision_changed: "Plate layout changed. Refresh and export again.",
+  accepted_state: "Accepted Plan state is unavailable. Refresh the Plan.",
+  artifact: "A verified accepted artifact is unavailable.",
+  limit: "Accepted Plate export exceeds the configured limit.",
+  transaction: "Accepted Plate export is temporarily unavailable.",
+  output: "The stored export for this Plate revision failed integrity verification.",
+  unexpected: "Accepted Plate export failed.",
+} as const;
+
+class AcceptedPlateExportPublicError extends Error {}
+
+function positiveSafeInteger(value: unknown): number | null {
+  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function acceptedPlateExportError(result: Exclude<
+  MaterializeAcceptedPlateExportResult,
+  { readonly kind: "materialized" }
+>): string {
+  switch (result.kind) {
+    case "plate_revision_changed":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.plate_revision_changed;
+    case "empty_plan":
+    case "plates_not_published":
+    case "stale_accepted_plan":
+    case "accepted_state_unavailable":
+    case "profile_not_found":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.accepted_state;
+    case "artifact_unavailable":
+    case "invalid_stl":
+    case "artifact_geometry_mismatch":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.artifact;
+    case "limit_exceeded":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.limit;
+    case "transaction_unavailable":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.transaction;
+    case "output_conflict":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.output;
+  }
+}
+
+function directExportError(result: Exclude<
+  MaterializeDirectExport3mfResult,
+  { readonly kind: "materialized" }
+>): string {
+  switch (result.kind) {
+    case "empty_plan":
+    case "accepted_state_unavailable":
+    case "profile_not_found":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.accepted_state;
+    case "unknown_token":
+      return "A selected Required unit is not on this Plan.";
+    case "artifact_unavailable":
+    case "invalid_stl":
+    case "artifact_geometry_mismatch":
+      return ACCEPTED_PLATE_EXPORT_ERRORS.artifact;
+    case "limit_exceeded":
+      return "Direct export exceeds the configured limit.";
+    case "output_failure":
+      return "Direct export could not be published safely.";
+  }
+}
 
 export type JobRunnerOptions = {
   completedJobMax?: number;
@@ -204,7 +297,8 @@ export class InProcessJobRunner {
         "export-stl-pack",
         "export-checklist-html",
         "export-kit-bundle",
-        "export-3mf",
+        "export-accepted-plate-3mf",
+        "export-direct-3mf",
       ]);
       if (event.status === "done" && EXPORT_KINDS.has(event.kind)) {
         const meta = this.jobMeta.get(jobId);
@@ -220,10 +314,13 @@ export class InProcessJobRunner {
   }
 
   async start(
-    kind: string,
+    kind: JobKind,
     payload: Record<string, unknown>,
     tenantId = "default",
   ): Promise<string> {
+    if (!STARTABLE_JOB_KINDS.has(kind)) {
+      throw new Error(`Unsupported job kind: ${kind}`);
+    }
     this.pruneCompletedJobs();
     const jobId = crypto.randomUUID();
     const snap: JobSnapshot = {
@@ -304,7 +401,7 @@ export class InProcessJobRunner {
     return key ? `/exports/${key}` : null;
   }
 
-  private async runJob(jobId: string, kind: string, payload: Record<string, unknown>): Promise<void> {
+  private async runJob(jobId: string, kind: JobKind, payload: Record<string, unknown>): Promise<void> {
     const tenantId = String(payload._tenant_id ?? "default");
     await tenantStorage.run(tenantId, async () => {
       this.emit(jobId, { status: "running", message: "Running…", progress: 10 });
@@ -312,8 +409,6 @@ export class InProcessJobRunner {
         let result: Record<string, unknown>;
         if (kind === "sync") {
           result = await this.runSync(jobId, payload);
-        } else if (kind === "recompute") {
-          result = await this.runRecompute(payload);
         } else if (kind === "import-scan") {
           const projectId = Number(payload.project_id);
           result = await syncProjectById(this.repo, this.deps.reposDir, projectId, undefined, {
@@ -332,25 +427,22 @@ export class InProcessJobRunner {
           result = await this.runExportChecklistHtml(payload);
         } else if (kind === "export-kit-bundle") {
           result = await this.runExportKitBundle(payload);
-        } else if (kind === "export-3mf") {
-          result = await this.runExport3mf(payload);
-        } else if (kind === "pack-preview") {
-          result = await this.runPackPreview(payload);
+        } else if (kind === "export-accepted-plate-3mf") {
+          result = await this.runAcceptedPlateExport(payload);
+        } else if (kind === "export-direct-3mf") {
+          result = await this.runDirectExport3mf(payload);
         } else if (kind === "printer-upload") {
           result = await this.runPrinterUpload(jobId, payload);
-        } else if (kind === "auto-slice") {
-          result = await this.runAutoSlice(jobId, payload);
         } else {
-          result = { stub: true, kind, payload };
+          const unsupported: never = kind;
+          throw new Error(`Unsupported job kind: ${unsupported}`);
         }
         const doneMessage =
           kind === "export-stl-pack"
             ? exportStlPackJobMessage(result)
             : kind === "printer-upload" && typeof result.message === "string"
               ? result.message
-              : kind === "auto-slice"
-                ? autoSliceJobMessage(result)
-                : kind === "sync" && Number(result.failed ?? 0) > 0
+              : kind === "sync" && Number(result.failed ?? 0) > 0
               ? `Synced ${result.synced ?? 0}, ${result.failed} failed — check Settings → GitHub PAT if rate-limited`
               : "Complete";
         this.emit(jobId, {
@@ -472,126 +564,302 @@ export class InProcessJobRunner {
     const row = this.repo.getProjectRow(projectId);
     if (!row?.localPath) throw new Error("Source has no local path");
     this.emit(jobId, { message: "Extracting PDF text…", progress: 15 });
+    const pdfTextStorage = sourcePdfTextStorage(this.repo, projectId, row.localPath);
     const result = await extractPendingPdfsForSource(this.repo, projectId, row.localPath, {
+      ...pdfTextStorage,
       onProgress: (msg, progress) => this.emit(jobId, { message: msg, progress }),
     });
     return { project_id: projectId, ...result };
   }
 
-  private async runRecompute(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const profileId = Number(payload.profile_id);
-    const apply_manifest = Boolean(payload.apply_manifest);
-    return this.repo.recomputeProfile(profileId, { apply_manifest });
+  private acceptedOperationalExportFailure(
+    error: unknown,
+    operation: "accepted_stl_export" | "accepted_checklist_export" | "accepted_kit_progress_export",
+    profileId: number,
+    revisionId?: number,
+  ): never {
+    if (error instanceof AcceptedOperationalExportPublicError) throw error;
+    getLogger().log("error", "Accepted operational export failed unexpectedly", {
+      operation,
+      failure: "unexpected",
+      profileId,
+      ...(revisionId == null ? {} : { revisionId }),
+    });
+    throw new AcceptedOperationalExportPublicError("unexpected");
   }
 
   private async runExportStlPack(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const profileId = Number(payload.profile_id);
-    const missingOnly = Boolean(payload.missing_only);
-    const groupBy: StlPackGroupBy = payload.group_by === "color" ? "color" : "color_dir";
-    const { name, parts, completedByMatchKey } = this.repo.buildMergePartsForProfile(profileId);
-    const naming = this.repo.getGlobalNaming();
-    const { rootPath, fileCounts, warnings } = exportProfileStlPack(name, parts, this.getExportsDir(), {
-      missingOnly,
-      completedByMatchKey: missingOnly ? completedByMatchKey : undefined,
-      roleOrder: naming.export_role_order,
-      groupBy,
-    });
-    const fileTotal = Object.values(fileCounts).reduce((a, b) => a + b, 0);
-
-    let downloadUrl: string | null = null;
-    if (fileTotal > 0) {
-      const zipPath = join(dirname(rootPath), `${basename(rootPath)}.zip`);
-      try {
-        zipDirectoryToFile(rootPath, zipPath);
-        downloadUrl = this.downloadUrlForPath(zipPath);
-      } catch {
-        downloadUrl = null;
+    let revisionId: number | undefined;
+    try {
+      const missingOnly = Boolean(payload.missing_only);
+      const groupBy: StlPackGroupBy = payload.group_by === "color" ? "color" : "color_dir";
+      const capture = captureAcceptedOperationalExport({ repository: this.repo, profileId });
+      if (capture.kind !== "ready" && capture.kind !== "empty") {
+        throw acceptedOperationalExportPublicError(capture);
       }
+      revisionId = capture.kind === "ready" ? capture.export.basis.revisionId : undefined;
+      const naming = this.repo.getGlobalNaming();
+      const materialized = await materializeAcceptedStlBundle({
+        capture,
+        reposDir: this.deps.reposDir,
+        tenantExportsDir: this.getExportsDir(),
+        selection: missingOnly ? "missing" : "all",
+        groupBy,
+        roleOrder: naming.export_role_order,
+      });
+      if (materialized.kind === "limit_exceeded") {
+        throw new AcceptedOperationalExportPublicError("export_limit_exceeded");
+      }
+      if (materialized.kind === "output_failure") {
+        throw new AcceptedOperationalExportPublicError("export_output_failure");
+      }
+      const fileTotal = Object.values(materialized.fileCounts).reduce((a, b) => a + b, 0);
+      const warnings = materialized.warnings.map(
+        (warning) =>
+          `A verified accepted STL is unavailable: ${warning.relativePath} (${warning.sourceLayer}).`,
+      );
+      return {
+        root_path: materialized.rootPath,
+        download_url: materialized.bundlePath
+          ? this.downloadUrlForPath(materialized.bundlePath)
+          : null,
+        file_counts: materialized.fileCounts,
+        zip_counts: materialized.fileCounts,
+        warnings,
+        missing_only: missingOnly,
+        file_total: fileTotal,
+        ...(materialized.basis
+          ? {
+              plan_version: materialized.basis.planVersion,
+              revision_id: materialized.basis.revisionId,
+            }
+          : {}),
+      };
+    } catch (error) {
+      return this.acceptedOperationalExportFailure(
+        error,
+        "accepted_stl_export",
+        profileId,
+        revisionId,
+      );
     }
-
-    return {
-      root_path: rootPath,
-      download_url: downloadUrl,
-      file_counts: fileCounts,
-      zip_counts: fileCounts,
-      warnings,
-      missing_only: missingOnly,
-      file_total: fileTotal,
-    };
   }
 
   private async runExportChecklistHtml(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const profileId = Number(payload.profile_id);
-    const { name, orderNumber, parts, completedByMatchKey } =
-      this.repo.buildMergePartsForProfile(profileId);
-    const thumbsDir = join(this.deps.dataDir, "thumbs");
-    const dateFormat = (this.repo.getSetting("date_format") as DateFormatId | null) ?? DATE_FORMAT_DEFAULT;
-    const { path, partCount, thumbCount } = exportProfileHtml(
-      name,
-      orderNumber,
-      parts,
-      this.getExportsDir(),
-      profileId,
-      completedByMatchKey,
-      thumbsDir,
-      dateFormat,
-    );
-    return {
-      path,
-      download_url: this.downloadUrlForPath(path),
-      part_count: partCount,
-      thumb_count: thumbCount,
-    };
+    let revisionId: number | undefined;
+    try {
+      const capture = captureAcceptedOperationalExport({ repository: this.repo, profileId });
+      if (capture.kind !== "ready" && capture.kind !== "empty") {
+        throw acceptedOperationalExportPublicError(capture);
+      }
+      revisionId = capture.kind === "ready" ? capture.export.basis.revisionId : undefined;
+      const dateFormat = (this.repo.getSetting("date_format") as DateFormatId | null) ?? DATE_FORMAT_DEFAULT;
+      const materialized = materializeAcceptedChecklistHtml({
+        capture,
+        tenantExportsDir: this.getExportsDir(),
+        thumbsDir: join(this.deps.dataDir, "thumbs"),
+        dateFormat,
+        generatedAt: new Date().toISOString(),
+      });
+      if (materialized.kind === "output_failure") {
+        throw new AcceptedOperationalExportPublicError("export_output_failure");
+      }
+      return {
+        path: materialized.path,
+        download_url: this.downloadUrlForPath(materialized.path),
+        part_count: materialized.partCount,
+        thumb_count: materialized.thumbCount,
+        ...(materialized.basis
+          ? {
+              plan_version: materialized.basis.planVersion,
+              revision_id: materialized.basis.revisionId,
+            }
+          : {}),
+      };
+    } catch (error) {
+      return this.acceptedOperationalExportFailure(
+        error,
+        "accepted_checklist_export",
+        profileId,
+        revisionId,
+      );
+    }
   }
 
   private async runExportKitBundle(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     const profileId = Number(payload.profile_id);
     const includePrintProgress = Boolean(payload.include_print_progress);
-    const path = exportKitBundle(this.repo, profileId, this.getExportsDir(), includePrintProgress);
-    return {
-      path,
-      download_url: this.downloadUrlForPath(path),
-      profile_id: profileId,
-    };
+    let revisionId: number | undefined;
+    try {
+      const accepted = includePrintProgress
+        ? captureAcceptedOperationalExport({ repository: this.repo, profileId })
+        : null;
+      if (accepted && accepted.kind !== "ready" && accepted.kind !== "empty") {
+        throw acceptedOperationalExportPublicError(accepted);
+      }
+      revisionId = accepted?.kind === "ready" ? accepted.export.basis.revisionId : undefined;
+      const recipe = this.repo.readEditableKitRecipe(profileId);
+      const data = buildKitBundleData({
+        mode: accepted
+          ? {
+              kind: "accepted_progress",
+              recipe,
+              accepted: accepted.kind === "ready" ? accepted.export : null,
+            }
+          : { kind: "editable", recipe },
+        exportedAt: new Date().toISOString(),
+      });
+      let path: string;
+      try {
+        path = writeKitBundleData({
+          data,
+          profileId: recipe.profile.id,
+          profileName: recipe.profile.name,
+          exportsDir: this.getExportsDir(),
+        });
+      } catch {
+        throw new AcceptedOperationalExportPublicError("export_output_failure");
+      }
+      return {
+        path,
+        download_url: this.downloadUrlForPath(path),
+        profile_id: profileId,
+        ...(accepted?.kind === "ready"
+          ? {
+              plan_version: accepted.export.basis.planVersion,
+              revision_id: accepted.export.basis.revisionId,
+            }
+          : {}),
+      };
+    } catch (error) {
+      return this.acceptedOperationalExportFailure(
+        error,
+        "accepted_kit_progress_export",
+        profileId,
+        revisionId,
+      );
+    }
   }
 
-  private async runExport3mf(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    // Yield once more so concurrent health checks / requests can run before STL packing.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    const profileId = Number(payload.profile_id);
-    const result = runExport3mfJob(this.repo, profileId, this.getExportsDir(), {
-      layout_mode: String(payload.layout_mode ?? "per_plate"),
-      spacing_mm: Number(payload.spacing_mm ?? 4),
-      missing_only: Boolean(payload.missing_only),
-      enabled_printer_ids: Array.isArray(payload.enabled_printer_ids)
-        ? (payload.enabled_printer_ids as string[])
-        : undefined,
-    });
-    return {
-      primary_path: result.primary_path,
-      download_url: this.downloadUrlForPath(result.primary_path),
-      paths: result.paths.map((p) => ({
-        path: p,
-        download_url: this.downloadUrlForPath(p),
-      })),
-      object_count: result.object_count,
-      plate_count: result.plate_count,
-      warnings: result.warnings,
-      printer_summaries: result.printer_summaries,
+  private async runAcceptedPlateExport(
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const profileId = positiveSafeInteger(payload.profile_id);
+    const expectedPlateRevisionId = positiveSafeInteger(payload.expected_plate_revision_id);
+    const unexpectedFailure = (): never => {
+      getLogger().log(
+        "error",
+        "Accepted Plate export failed unexpectedly",
+        {
+          operation: "accepted_plate_export",
+          failure: "unexpected",
+          profileId,
+          expectedPlateRevisionId,
+        },
+      );
+      throw new Error(ACCEPTED_PLATE_EXPORT_ERRORS.unexpected);
     };
+    try {
+      if (profileId == null || expectedPlateRevisionId == null) {
+        throw new Error(ACCEPTED_PLATE_EXPORT_ERRORS.unexpected);
+      }
+      const materialized = await materializeAcceptedPlateExport({
+        repository: this.repo,
+        reposDir: this.deps.reposDir,
+        tenantExportsDir: this.getExportsDir(),
+        limits: ACCEPTED_PLATE_EXPORT_LIMITS,
+      }, { profileId, expectedPlateRevisionId });
+      if (materialized.kind !== "materialized") {
+        throw new AcceptedPlateExportPublicError(acceptedPlateExportError(materialized));
+      }
+      const downloadUrl = (path: string): string => {
+        const url = this.downloadUrlForPath(path);
+        if (!url) throw new Error(ACCEPTED_PLATE_EXPORT_ERRORS.unexpected);
+        return url;
+      };
+      const plates = materialized.plates.map((plate) => ({
+        plate_id: parseAcceptedPlateId(plate.plateId),
+        ordinal: plate.ordinal,
+        filename: plate.filename,
+        download_url: downloadUrl(plate.absolutePath),
+      }));
+      const solePlate = plates.length === 1 ? plates[0] : undefined;
+      const result: AcceptedPlateExportJobResult = {
+        format: "accepted-plate-export-job-v1",
+        profile_id: profileId,
+        basis: {
+          profile_id: materialized.basis.profileId,
+          plan_version: materialized.basis.planVersion,
+          plan_revision_id: materialized.basis.revisionId,
+          plan_revision_digest: materialized.basis.revisionDigest,
+          required_unit_mapping_digest: materialized.basis.requiredUnitMappingDigest,
+        },
+        plate_revision_id: materialized.plateRevisionId,
+        plate_revision_number: materialized.plateRevisionNumber,
+        layout_digest: materialized.layoutDigest,
+        download_url: solePlate?.download_url ?? downloadUrl(materialized.bundle.absolutePath),
+        manifest_download_url: downloadUrl(materialized.manifest.absolutePath),
+        bundle_download_url: downloadUrl(materialized.bundle.absolutePath),
+        plates,
+      };
+      return result;
+    } catch (error) {
+      if (error instanceof AcceptedPlateExportPublicError) {
+        throw error;
+      }
+      return unexpectedFailure();
+    }
   }
 
-  private async runPackPreview(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const profileId = Number(payload.profile_id);
-    return runPackPreviewJob(this.repo, profileId, {
-      enabled_printer_ids: Array.isArray(payload.enabled_printer_ids)
-        ? (payload.enabled_printer_ids as string[])
-        : undefined,
-      assignments: payload.assignments as Record<string, string> | undefined,
-      auto_assign: Boolean(payload.auto_assign),
-      spacing_mm: payload.spacing_mm != null ? Number(payload.spacing_mm) : undefined,
-      grouping_strategy: payload.grouping_strategy === "height_band" ? "height_band" : undefined,
-    });
+  private async runDirectExport3mf(
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const unexpectedFailure = (): never => {
+      getLogger().log("error", "Direct export failed unexpectedly", {
+        operation: "direct_export_3mf",
+        failure: "unexpected",
+        profileId: payload.profile_id,
+      });
+      throw new Error("Direct export failed.");
+    };
+    try {
+      const command = parseStartDirectExportRequest({
+        profile_id: payload.profile_id,
+        tokens: payload.tokens,
+      });
+      const materialized = await materializeDirectExport3mf({
+        repository: this.repo,
+        reposDir: this.deps.reposDir,
+        tenantExportsDir: this.getExportsDir(),
+      }, {
+        profileId: command.profile_id,
+        tokens: command.tokens,
+      });
+      if (materialized.kind !== "materialized") {
+        throw new AcceptedPlateExportPublicError(directExportError(materialized));
+      }
+      const downloadUrl = this.downloadUrlForPath(materialized.absolutePath);
+      if (!downloadUrl) throw new Error("Direct export failed.");
+      return parseDirectExportJobResult({
+        format: "direct-export-3mf-job-v1",
+        profile_id: command.profile_id,
+        basis: {
+          profile_id: materialized.basis.profileId,
+          plan_version: materialized.basis.planVersion,
+          plan_revision_id: materialized.basis.revisionId,
+          plan_revision_digest: materialized.basis.revisionDigest,
+          required_unit_mapping_digest: materialized.basis.requiredUnitMappingDigest,
+        },
+        download_url: downloadUrl,
+        filename: materialized.filename,
+        tokens: materialized.tokens,
+      });
+    } catch (error) {
+      if (error instanceof AcceptedPlateExportPublicError) throw error;
+      return unexpectedFailure();
+    }
   }
 
   private async runPrinterUpload(
@@ -604,6 +872,13 @@ export class InProcessJobRunner {
         ? profileRaw
         : typeof profileRaw === "string" && profileRaw.trim()
           ? Number(profileRaw)
+          : undefined;
+    const plateRevisionRaw = payload.plate_revision_id;
+    const plateRevisionId =
+      typeof plateRevisionRaw === "number"
+        ? plateRevisionRaw
+        : typeof plateRevisionRaw === "string" && plateRevisionRaw.trim()
+          ? Number(plateRevisionRaw)
           : undefined;
     return runPrinterUploadJob(
       this.repo,
@@ -625,6 +900,12 @@ export class InProcessJobRunner {
           return names.length ? names : undefined;
         })(),
         upload_job_id: jobId,
+        plate_revision_id:
+          typeof plateRevisionId === "number" &&
+          Number.isInteger(plateRevisionId) &&
+          plateRevisionId > 0
+            ? plateRevisionId
+            : undefined,
       },
       (patch) => this.emit(jobId, patch),
     );
@@ -669,56 +950,6 @@ export class InProcessJobRunner {
     });
   }
 
-  private async runAutoSlice(
-    jobId: string,
-    payload: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    const profileId = Number(payload.profile_id);
-    const result = await runAutoSliceJob(
-      this.repo,
-      this.getExportsDir(),
-      {
-        profile_id: profileId,
-        layout_mode: typeof payload.layout_mode === "string" ? payload.layout_mode : "per_plate",
-        spacing_mm: payload.spacing_mm != null ? Number(payload.spacing_mm) : undefined,
-        missing_only: Boolean(payload.missing_only),
-        enabled_printer_ids: Array.isArray(payload.enabled_printer_ids)
-          ? (payload.enabled_printer_ids as string[])
-          : undefined,
-        timeout_s: payload.timeout_s != null ? Number(payload.timeout_s) : undefined,
-      },
-      (patch) => this.emit(jobId, patch),
-    );
-    return {
-      profile_id: profileId,
-      ok: result.ok,
-      plate_count: result.plate_count,
-      attempted_count: result.attempted_count,
-      failed_count: result.failed_count,
-      gcode_paths: result.gcode_paths.map((p) => ({
-        path: p,
-        download_url: this.downloadUrlForPath(p),
-      })),
-      plates: result.plates.map((pl) => ({
-        printer_id: pl.printer_id,
-        printer_name: pl.printer_name,
-        plate_index: pl.plate_index,
-        slicer: pl.slicer,
-        status: pl.status,
-        gcode_path: pl.gcode_path,
-        thumbnail_path: pl.thumbnail_path,
-        error: pl.error,
-        error_code: pl.error_code,
-        stderr: pl.stderr,
-        exit_code: pl.exit_code,
-        settings_keys: pl.settings_keys,
-        download_url: pl.gcode_path ? this.downloadUrlForPath(pl.gcode_path) : null,
-        thumbnail_url: pl.thumbnail_path ? this.downloadUrlForPath(pl.thumbnail_path) : null,
-      })),
-      warnings: result.warnings,
-    };
-  }
-
   async cancel(jobId: string, tenantId: string): Promise<boolean> {
     if (!this.isOwnedBy(jobId, tenantId)) return false;
     const snap = this.jobs.get(jobId);
@@ -744,22 +975,6 @@ export async function registerJobRoutes(
   app.post("/jobs/sync", limited, async (request) => {
     const body = (request.body ?? {}) as Record<string, unknown>;
     const job_id = await jobs.start("sync", body, request.tenantId);
-    return { job_id };
-  });
-
-  app.post("/jobs/recompute", limited, async (request, reply) => {
-    const body = request.body as { profile_id?: number; apply_manifest?: boolean };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
-      return sendProblem(reply, 404, "Not Found", "Profile not found");
-    }
-    const job_id = await jobs.start(
-      "recompute",
-      {
-        profile_id: body.profile_id,
-        apply_manifest: body.apply_manifest ?? false,
-      },
-      request.tenantId,
-    );
     return { job_id };
   });
 
@@ -790,7 +1005,7 @@ export async function registerJobRoutes(
       missing_only?: boolean;
       group_by?: string;
     };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     const job_id = await jobs.start(
@@ -807,7 +1022,7 @@ export async function registerJobRoutes(
 
   app.post("/jobs/export-checklist-html", async (request, reply) => {
     const body = request.body as { profile_id?: number };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     const job_id = await jobs.start(
@@ -820,7 +1035,7 @@ export async function registerJobRoutes(
 
   app.post("/jobs/export-kit-bundle", limited, async (request, reply) => {
     const body = request.body as { profile_id?: number; include_print_progress?: boolean };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
+    if (!body.profile_id || !jobs.getRepo().getOwnedProfileIdentity(body.profile_id)) {
       return sendProblem(reply, 404, "Not Found", "Profile not found");
     }
     const job_id = await jobs.start(
@@ -834,83 +1049,46 @@ export async function registerJobRoutes(
     return { job_id };
   });
 
-  app.post("/jobs/export-3mf", limited, async (request, reply) => {
-    const body = request.body as {
-      profile_id?: number;
-      layout_mode?: string;
-      spacing_mm?: number;
-      missing_only?: boolean;
-      enabled_printer_ids?: string[];
-    };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
-      return sendProblem(reply, 404, "Not Found", "Profile not found");
+  app.post("/jobs/export-accepted-plate-3mf", limited, async (request, reply) => {
+    if (!isRecord(request.body)) {
+      return reply.status(400).send({
+        detail: "profile_id and expected_plate_revision_id are required",
+        code: "invalid_request",
+      });
     }
-    const job_id = await jobs.start(
-      "export-3mf",
-      {
-        profile_id: body.profile_id,
-        layout_mode: body.layout_mode ?? "per_plate",
-        spacing_mm: body.spacing_mm ?? 4,
-        missing_only: body.missing_only ?? false,
-        enabled_printer_ids: body.enabled_printer_ids,
-      },
-      request.tenantId,
-    );
+    const profileId = positiveSafeInteger(request.body.profile_id);
+    const expectedPlateRevisionId = positiveSafeInteger(request.body.expected_plate_revision_id);
+    if (profileId == null || expectedPlateRevisionId == null) {
+      return reply.status(400).send({
+        detail: "profile_id and expected_plate_revision_id must be positive integers",
+        code: "invalid_request",
+      });
+    }
+    if (!jobs.getRepo().getOwnedProfileIdentity(profileId)) {
+      return reply.status(404).send({ detail: "Profile not found", code: "profile_not_found" });
+    }
+    const payload: StartAcceptedPlateExportRequest = {
+      profile_id: profileId,
+      expected_plate_revision_id: expectedPlateRevisionId,
+    };
+    const job_id = await jobs.start("export-accepted-plate-3mf", payload, request.tenantId);
     return { job_id };
   });
 
-  app.post("/jobs/auto-slice", limited, async (request, reply) => {
-    const body = request.body as {
-      profile_id?: number;
-      spacing_mm?: number;
-      missing_only?: boolean;
-      enabled_printer_ids?: string[];
-      timeout_s?: number;
-    };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
-      return sendProblem(reply, 404, "Not Found", "Profile not found");
+  app.post("/jobs/export-direct-3mf", limited, async (request, reply) => {
+    let payload: StartDirectExportRequest;
+    try {
+      payload = parseStartDirectExportRequest(request.body);
+    } catch {
+      return reply.status(400).send({
+        detail: "profile_id and tokens are required",
+        code: "invalid_request",
+      });
     }
-    const job_id = await jobs.start(
-      "auto-slice",
-      {
-        profile_id: body.profile_id,
-        // Auto-slice always exports one 3MF per plate; a zip would be
-        // unsliceable by the sidecar.
-        layout_mode: "per_plate",
-        spacing_mm: body.spacing_mm ?? 4,
-        missing_only: body.missing_only ?? false,
-        enabled_printer_ids: body.enabled_printer_ids,
-        timeout_s: body.timeout_s,
-      },
-      request.tenantId,
-    );
-    return { job_id };
-  });
-
-  app.post("/jobs/pack-preview", async (request, reply) => {
-    const body = request.body as {
-      profile_id?: number;
-      enabled_printer_ids?: string[];
-      assignments?: Record<string, string>;
-      auto_assign?: boolean;
-      spacing_mm?: number;
-      grouping_strategy?: string;
-    };
-    if (!body.profile_id || !jobs.getRepo().getProfile(body.profile_id)) {
-      return sendProblem(reply, 404, "Not Found", "Profile not found");
+    if (!jobs.getRepo().getOwnedProfileIdentity(payload.profile_id)) {
+      return reply.status(404).send({ detail: "Profile not found", code: "profile_not_found" });
     }
-    const job_id = await jobs.start(
-      "pack-preview",
-      {
-        profile_id: body.profile_id,
-        enabled_printer_ids: body.enabled_printer_ids,
-        assignments: body.assignments,
-        auto_assign: body.auto_assign ?? false,
-        spacing_mm: body.spacing_mm,
-        grouping_strategy: body.grouping_strategy,
-      },
-      request.tenantId,
-    );
+    const job_id = await jobs.start("export-direct-3mf", payload, request.tenantId);
     return { job_id };
   });
 
@@ -939,6 +1117,7 @@ export async function registerJobRoutes(
           filename: baseName,
           artifact_path,
           profile_id: profileId,
+          plate_revision_id: plateRevisionId,
           checkoff_units_raw: checkoffUnitsRaw,
           unlabeled_names_raw: unlabeledNamesRaw,
         } = parsed.value;
@@ -956,7 +1135,7 @@ export async function registerJobRoutes(
             "Pick a plan to bind this send (profile_id required)",
           );
         }
-        if (!jobs.getRepo().getProfile(profileId)) {
+        if (!jobs.getRepo().getOwnedProfileIdentity(profileId)) {
           return sendProblem(reply, 404, "Not Found", "Profile not found");
         }
 
@@ -1019,6 +1198,7 @@ export async function registerJobRoutes(
             profile_id: profileId,
             checkoff_units,
             unlabeled_names,
+            plate_revision_id: plateRevisionId,
           },
           request.tenantId,
         );

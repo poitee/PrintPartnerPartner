@@ -2,8 +2,9 @@ import { useId, useRef, useState } from "react";
 import { FileSpreadsheet, HardDrive, Upload } from "lucide-react";
 import { toast } from "sonner";
 import type { SourceSummary } from "@print-partner/contracts";
-import type { PlanReview } from "../../api/engine";
+import { importAcceptedPrintedCounts, type PlanReview } from "../../api/engine";
 import { useEngineHealth } from "../../hooks/useEngineHealth";
+import { usePlanWorkspace } from "../../context/PlanWorkspaceContext";
 import {
   applyPartsManifest,
   buildPartsManifestRows,
@@ -58,6 +59,7 @@ async function rowsFromFile(file: File): Promise<{
 
 export default function PartsManifestTransfer({ review, sources, onApplied }: Props) {
   const { health } = useEngineHealth();
+  const { draftWorkspace, editActivePlanDraft } = usePlanWorkspace();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileInputId = useId();
   const [busy, setBusy] = useState(false);
@@ -143,6 +145,15 @@ export default function PartsManifestTransfer({ review, sources, onApplied }: Pr
         applyQuantity: true,
         applyIncluded,
         applyPrintedProgress: applyPrinted,
+        draftWorkspace,
+        applyDraftDecisions: editActivePlanDraft,
+        applyAcceptedProgress: async (expected, progressRows) => {
+          await importAcceptedPrintedCounts({
+            profileId: review.profile_id,
+            expected,
+            rows: progressRows,
+          });
+        },
       });
       setLastErrors(result.errors);
       if (result.updated > 0) {
@@ -269,7 +280,7 @@ export default function PartsManifestTransfer({ review, sources, onApplied }: Pr
                   checked={applyIncluded}
                   onChange={(e) => setApplyIncluded(e.target.checked)}
                 />
-                Apply included flag
+                Propose included flag
               </label>
               <label className="flex items-center gap-2">
                 <input
@@ -277,7 +288,7 @@ export default function PartsManifestTransfer({ review, sources, onApplied }: Pr
                   checked={applyPrinted}
                   onChange={(e) => setApplyPrinted(e.target.checked)}
                 />
-                Apply printed counts
+                Apply printed counts to accepted Checkoff (run separately)
               </label>
             </div>
             <div className="flex flex-wrap gap-2">

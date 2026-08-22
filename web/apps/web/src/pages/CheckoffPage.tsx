@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/sortable";
 import { ClipboardCheck, CheckSquare, Printer } from "lucide-react";
 import { toast } from "sonner";
-import StaleBuildBanner from "../components/StaleBuildBanner";
+import PlanFreshnessNotice from "../components/PlanFreshnessNotice";
 import PageHeader from "../components/layout/PageHeader";
 import PageHeaderActions from "../components/layout/PageHeaderActions";
 import RouteBreadcrumbs from "../components/layout/RouteBreadcrumbs";
@@ -49,7 +49,6 @@ import {
   fetchPrinterCheckoffLinks,
   fetchPlanPhaseManifest,
   claimUnattributedPrint,
-  startRecompute,
   fetchPrinterQueueSuggestions,
   type PrinterCheckoffLink,
   type PlanPhaseManifestResponse,
@@ -58,7 +57,7 @@ import {
   type UnattributedPrint,
 } from "../api/engine";
 import { useBuildTrackingSettingsQuery } from "../queries/buildTracking";
-import { exportRoute, partsRoute, planRoute } from "../lib/routes";
+import { buildSourcesRoute, planRoute, prepareMissingPartsRoute } from "../lib/routes";
 import { groupCheckoffParts } from "../lib/checkoffGroups";
 import {
   checkoffUnitTotals,
@@ -92,7 +91,6 @@ import { flattenReviewParts } from "../lib/reviewParts";
 import { useProfileSelection } from "../context/ProfileContext";
 import { usePlanWorkspace } from "../context/PlanWorkspaceContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
-import { useJobRunner } from "../hooks/useJobRunner";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { cn } from "../lib/utils";
 import { waitForSheetThumbnails } from "../lib/waitForSheetThumbnails";
@@ -206,14 +204,11 @@ export default function CheckoffPage() {
     review,
     loading,
     error: workspaceError,
-    reload,
-    revision,
-    loadedRevision,
+    refresh,
     toggleUnit,
     toggleAssembled,
     busyPartId,
   } = usePlanWorkspace();
-  const recomputeJob = useJobRunner("recompute");
   const isMobileLayout = useMediaQuery("(max-width: 767px)");
   const {
     data: buildTrackingSettings,
@@ -223,8 +218,8 @@ export default function CheckoffPage() {
 
   // Re-fetch when the service worker flushes its offline checkoff queue
   useSyncComplete(useCallback(() => {
-    if (selectedProfileId != null) void reload(selectedProfileId);
-  }, [reload, selectedProfileId]));
+    if (selectedProfileId != null) void refresh();
+  }, [refresh, selectedProfileId]));
   const persistedUi = useMemo(() => loadPersistedCheckoffUi(), []);
   const [filter, setFilter] = useState<CheckoffFilterMode>(persistedUi.filter);
   const [search, setSearch] = useState("");
@@ -375,13 +370,6 @@ export default function CheckoffPage() {
   }, []);
 
   useEffect(() => {
-    if (!health?.ok || selectedProfileId == null) return;
-    if (review?.profile_id !== selectedProfileId || loadedRevision < revision) {
-      void reload(selectedProfileId);
-    }
-  }, [health?.ok, selectedProfileId, revision, loadedRevision, reload, review?.profile_id]);
-
-  useEffect(() => {
     if (!health?.ok) return;
     void refreshUnattributedPrints();
   }, [health?.ok, refreshUnattributedPrints]);
@@ -475,25 +463,10 @@ export default function CheckoffPage() {
   const planName =
     profiles.find((p) => p.id === selectedProfileId)?.name ??
     review?.plan_name ??
-    "Progress";
+    "Checkoff";
   const specialRequest =
     profiles.find((p) => p.id === selectedProfileId)?.special_request ?? null;
-  const buildStale = profiles.find((p) => p.id === selectedProfileId)?.build_stale ?? false;
-
-  const onUpdateBuild = () => {
-    if (selectedProfileId == null) return;
-    void recomputeJob.runJob(
-      () => startRecompute(selectedProfileId, { apply_manifest: true }),
-      (snap) => {
-        if (snap.status === "error") {
-          toast.error(snap.message || "Update failed");
-          return;
-        }
-        void reload(selectedProfileId);
-      },
-      { profileId: selectedProfileId },
-    );
-  };
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId);
 
   const includedParts = useMemo(() => {
     if (!review) return [];
@@ -798,8 +771,8 @@ export default function CheckoffPage() {
       return (
         <EmptyState
           icon={ClipboardCheck}
-          title="No plan selected"
-          description="Pick a plan to track remaining print work."
+          title="No Build selected"
+          description="Pick a Build to track remaining print work."
           action={{
             label: "Open Plan",
             onClick: () => navigate(planRoute(null)),
@@ -812,7 +785,7 @@ export default function CheckoffPage() {
         <EmptyState
           icon={ClipboardCheck}
           title="No parts yet"
-          description="Pick a plan, then track remaining on Progress."
+          description="Pick a Build, then track remaining on Checkoff."
           action={{
             label: "Open Plan",
             onClick: () => navigate(planRoute(selectedProfileId)),
@@ -854,7 +827,7 @@ export default function CheckoffPage() {
               aria-atomic={engineState === "loading" ? "true" : undefined}
             >
               {engineState === "offline"
-                ? "Engine offline — start the print-partner engine to use Progress."
+                ? "Engine offline — start the print-partner engine to use Checkoff."
                 : "Connecting to the engine…"}
             </p>
           </CardContent>
@@ -892,13 +865,13 @@ export default function CheckoffPage() {
         <Card className="no-print border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-destructive" role="alert">
-              Could not load Progress: {workspaceError}
+              Could not load Checkoff: {workspaceError}
             </p>
             <Button
               size="sm"
               variant="secondary"
               onClick={() => {
-                if (selectedProfileId != null) void reload(selectedProfileId);
+                if (selectedProfileId != null) void refresh();
               }}
             >
               Retry
@@ -914,16 +887,16 @@ export default function CheckoffPage() {
       <div className="space-y-4">
         <RouteBreadcrumbs
           items={[
+            { label: "Sources", to: buildSourcesRoute(selectedProfileId) },
             { label: "Plan", to: planRoute(selectedProfileId) },
-            { label: "Parts", to: partsRoute(selectedProfileId) },
-            { label: "Progress" },
+            { label: "Checkoff" },
           ]}
         />
         <PageHeader
           icon={CheckSquare}
           accent
           eyebrow={progressEyebrow}
-          title="Progress"
+          title="Checkoff"
           description={progressDescription}
         />
         {stateContent}
@@ -936,16 +909,16 @@ export default function CheckoffPage() {
       <div className="no-print space-y-4">
         <RouteBreadcrumbs
           items={[
+            { label: "Sources", to: buildSourcesRoute(selectedProfileId) },
             { label: "Plan", to: planRoute(selectedProfileId) },
-            { label: "Parts", to: partsRoute(selectedProfileId) },
-            { label: "Progress" },
+            { label: "Checkoff" },
           ]}
         />
         <PageHeader
           icon={CheckSquare}
           accent
           eyebrow={progressEyebrow}
-          title="Progress"
+          title="Checkoff"
           description={progressDescription}
           actions={
             <PageHeaderActions>
@@ -959,7 +932,7 @@ export default function CheckoffPage() {
                 Print sheet
               </Button>
               <Button className="min-h-10 w-full sm:w-auto" asChild>
-                <Link to={exportRoute(selectedProfileId)}>Export hub</Link>
+                <Link to={prepareMissingPartsRoute(selectedProfileId)}>Production</Link>
               </Button>
             </PageHeaderActions>
           }
@@ -971,11 +944,12 @@ export default function CheckoffPage() {
 
         <PlanSpecialRequestLine note={specialRequest} />
 
-        <StaleBuildBanner
-          stale={buildStale}
-          busy={recomputeJob.busy}
-          onUpdate={onUpdateBuild}
-        />
+        {selectedProfile && (
+          <PlanFreshnessNotice
+            freshness={selectedProfile.freshness}
+            action={{ kind: "review", href: buildSourcesRoute(selectedProfileId) }}
+          />
+        )}
 
         {includedParts.length > 0 && (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-4">
@@ -1053,7 +1027,7 @@ export default function CheckoffPage() {
             suppressIntegrationIds={suppressIntegrationIds}
             onQueueChange={setVerifyQueue}
             onVerified={() => {
-              if (selectedProfileId != null) void reload(selectedProfileId);
+              if (selectedProfileId != null) void refresh();
             }}
           />
           <Suspense fallback={null}>
@@ -1119,7 +1093,7 @@ export default function CheckoffPage() {
           )}
           {reviewBackgroundError && (
             <p className="text-sm text-destructive" role="alert">
-              Could not refresh Progress: {reviewBackgroundError}
+              Could not refresh Checkoff: {reviewBackgroundError}
             </p>
           )}
           {auxiliaryError && (
@@ -1295,10 +1269,10 @@ export default function CheckoffPage() {
       {review && (
         <div className="no-print flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
-            <Link to={partsRoute(selectedProfileId)}>Back to Parts</Link>
+            <Link to={planRoute(selectedProfileId)}>Back to Plan</Link>
           </Button>
           <Button className="min-h-10 w-full sm:w-auto" variant="ghost" asChild>
-            <Link to={exportRoute(selectedProfileId)}>Open Export hub</Link>
+            <Link to={prepareMissingPartsRoute(selectedProfileId)}>Prepare missing parts</Link>
           </Button>
         </div>
       )}

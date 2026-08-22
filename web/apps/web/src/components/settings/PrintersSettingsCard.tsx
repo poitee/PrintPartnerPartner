@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Printer } from "lucide-react";
 import {
+  addPrinter,
   createIntegration,
   deleteIntegration,
   deletePrinter,
@@ -51,6 +52,8 @@ import {
 
 type Props = {
   engineReady: boolean;
+  /** Called after a successful fleet reload so live rosters can catch up. */
+  onFleetChange?: () => void;
 };
 
 type HostType = "moonraker" | "prusalink" | "bambu";
@@ -82,30 +85,7 @@ const SLICER_OVERRIDE_LABELS: Record<SlicerOverride, string> = {
   bambu: "BambuStudio",
 };
 
-function machineFromPreset(
-  preset: PrinterPreset,
-  name: string,
-  integrationId: string,
-  deviceId: string,
-): PrinterMachine {
-  const slots = Math.max(1, Math.min(4, preset.max_filament_slots || 1));
-  return {
-    id: `printer-${crypto.randomUUID().slice(0, 10)}`,
-    name,
-    bed_width_mm: preset.bed_width_mm,
-    bed_depth_mm: preset.bed_depth_mm,
-    bed_height_mm: preset.bed_height_mm,
-    margin_mm: 4,
-    max_filament_slots: slots,
-    loaded_filaments: Array.from({ length: slots }, (_, i) => ({
-      slot: i + 1,
-      filament_color_id: null,
-      label: "",
-    })),
-    integration_id: integrationId,
-    device_id: deviceId,
-  };
-}
+const CUSTOM_PRESET_ID = "custom";
 
 function statusPillLabel(status: PrinterHostStatus | null | undefined): string {
   if (!status) return "…";
@@ -145,11 +125,172 @@ function pickDefaultPresetId(presets: PrinterPreset[], hostType: HostType): stri
   return presets[0]?.id ?? "";
 }
 
+function ConnectionFields({
+  hostType,
+  setHostType,
+  newUrl,
+  setNewUrl,
+  apiKey,
+  setApiKey,
+  username,
+  setUsername,
+  password,
+  setPassword,
+  bambuHost,
+  setBambuHost,
+  accessCode,
+  setAccessCode,
+  serial,
+  setSerial,
+  disabled,
+  inputClass,
+}: {
+  hostType: HostType;
+  setHostType: (value: HostType) => void;
+  newUrl: string;
+  setNewUrl: (value: string) => void;
+  apiKey: string;
+  setApiKey: (value: string) => void;
+  username: string;
+  setUsername: (value: string) => void;
+  password: string;
+  setPassword: (value: string) => void;
+  bambuHost: string;
+  setBambuHost: (value: string) => void;
+  accessCode: string;
+  setAccessCode: (value: string) => void;
+  serial: string;
+  setSerial: (value: string) => void;
+  disabled: boolean;
+  inputClass: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <label className="block text-sm">
+        <span className="mb-1 block text-muted-foreground">Type</span>
+        <Select
+          value={hostType}
+          onValueChange={(v) => setHostType(v as HostType)}
+          disabled={disabled}
+        >
+          <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-md">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="moonraker">Klipper (Moonraker)</SelectItem>
+            <SelectItem value="prusalink">Prusa (PrusaLink)</SelectItem>
+            <SelectItem value="bambu">Bambu (LAN + Connect)</SelectItem>
+          </SelectContent>
+        </Select>
+      </label>
+      {hostType === "bambu" ? (
+        <>
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted-foreground">Printer IP / hostname</span>
+            <input
+              className={inputClass}
+              value={bambuHost}
+              onChange={(e) => setBambuHost(e.target.value)}
+              placeholder="192.168.1.60"
+              disabled={disabled}
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted-foreground">LAN access code</span>
+            <input
+              className={inputClass}
+              type="password"
+              autoComplete="off"
+              value={accessCode}
+              onChange={(e) => setAccessCode(e.target.value)}
+              placeholder="From printer Network / LAN"
+              disabled={disabled}
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted-foreground">Serial / device id</span>
+            <input
+              className={inputClass}
+              value={serial}
+              onChange={(e) => setSerial(e.target.value)}
+              placeholder="Device SN from printer or Bambu Studio"
+              disabled={disabled}
+            />
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Status over LAN. Export opens Bambu Connect — it never starts a print from there.
+          </p>
+        </>
+      ) : (
+        <>
+          <label className="block text-sm">
+            <span className="mb-1 block text-muted-foreground">Base URL</span>
+            <input
+              className={inputClass}
+              value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)}
+              placeholder={
+                hostType === "moonraker"
+                  ? "http://192.168.1.40:7125"
+                  : "http://192.168.1.50"
+              }
+              disabled={disabled}
+            />
+          </label>
+          {hostType === "moonraker" ? (
+            <label className="block text-sm">
+              <span className="mb-1 block text-muted-foreground">
+                API key (optional for trusted clients)
+              </span>
+              <input
+                className={inputClass}
+                type="password"
+                autoComplete="off"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Moonraker API key or JWT"
+                disabled={disabled}
+              />
+            </label>
+          ) : (
+            <>
+              <label className="block text-sm">
+                <span className="mb-1 block text-muted-foreground">Digest username</span>
+                <input
+                  className={inputClass}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="often blank on Buddy"
+                  disabled={disabled}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-muted-foreground">
+                  Digest password (printer API key)
+                </span>
+                <input
+                  className={inputClass}
+                  type="password"
+                  autoComplete="off"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="From printer Settings → Network"
+                  disabled={disabled}
+                />
+              </label>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /**
- * Unified Printers settings: one Add printer submit creates the host integration
- * and a linked fleet row (schema stays printer.fleet vs integrations).
+ * Printers settings: create a planning Printer from a preset or Custom bed,
+ * then optionally attach a host connection later.
  */
-export default function PrintersSettingsCard({ engineReady }: Props) {
+export default function PrintersSettingsCard({ engineReady, onFleetChange }: Props) {
   const [printers, setPrinters] = useState<PrinterMachine[]>([]);
   const [presets, setPresets] = useState<PrinterPreset[]>([]);
   const [hosts, setHosts] = useState<IntegrationSummary[]>([]);
@@ -176,6 +317,17 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
   const [accessCode, setAccessCode] = useState("");
   const [serial, setSerial] = useState("");
   const [presetId, setPresetId] = useState("");
+  const [customWidth, setCustomWidth] = useState("250");
+  const [customDepth, setCustomDepth] = useState("250");
+  const [customHeight, setCustomHeight] = useState("250");
+  const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [editingSizeId, setEditingSizeId] = useState<string | null>(null);
+  const [sizeDraft, setSizeDraft] = useState({
+    model: "",
+    width: "",
+    depth: "",
+    height: "",
+  });
   const [pollSeconds, setPollSeconds] = useState<PrinterStatusPollSeconds>(() =>
     readPrinterStatusPollSeconds(),
   );
@@ -243,10 +395,11 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
       setProfiles(profileList);
       setCatalog(filamentCatalog);
       void refreshStatuses(fleet);
+      onFleetChange?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     }
-  }, [engineReady, refreshStatuses]);
+  }, [engineReady, onFleetChange, refreshStatuses]);
 
   useEffect(() => {
     void refresh();
@@ -272,79 +425,118 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
   const presetsRef = useRef(presets);
   presetsRef.current = presets;
 
-  // Bed-size preset resets only when hostType changes — not when fleet refresh
-  // replaces the presets array with a new reference.
-  useEffect(() => {
-    const rows = presetsRef.current;
-    if (!rows.length) return;
-    setPresetId(pickDefaultPresetId(rows, hostType));
-  }, [hostType]);
-
   // Seed a default once presets first arrive (without resetting later refreshes).
   useEffect(() => {
     if (!presets.length) return;
     setPresetId((prev) => prev || pickDefaultPresetId(presets, hostType));
   }, [presets, hostType]);
 
+  const createHost = async (
+    name: string,
+  ): Promise<{ created: IntegrationSummary; deviceId: string }> => {
+    if (hostType === "bambu") {
+      const host = bambuHost.trim();
+      const access_code = accessCode.trim();
+      const deviceSerial = serial.trim();
+      if (!host || !access_code || !deviceSerial) {
+        throw new Error("Enter printer IP, LAN access code, and serial.");
+      }
+      const created = await createIntegration({
+        type: "bambu",
+        name,
+        config: {
+          host,
+          access_code,
+          serial: deviceSerial,
+          enabled: true,
+        },
+      });
+      setAccessCode("");
+      setSerial("");
+      return { created, deviceId: deviceSerial };
+    }
+    const base_url = newUrl.trim();
+    if (!base_url) {
+      throw new Error("Enter the printer base URL.");
+    }
+    const config: Record<string, unknown> = { base_url, enabled: true };
+    if (hostType === "moonraker") {
+      if (apiKey.trim()) config.api_key = apiKey.trim();
+    } else {
+      config.username = username.trim();
+      if (password.trim()) config.password = password.trim();
+    }
+    const created = await createIntegration({ type: hostType, name, config });
+    setApiKey("");
+    setUsername("");
+    setPassword("");
+    return { created, deviceId: "default" };
+  };
+
   const onAddPrinter = async () => {
     const name = newName.trim();
     if (!name) return;
-    const preset = presets.find((p) => p.id === presetId);
-    if (!preset) {
+    const isCustom = presetId === CUSTOM_PRESET_ID;
+    if (!isCustom && !presets.some((p) => p.id === presetId)) {
       setLoadError("Choose a bed size preset.");
+      return;
+    }
+    const width = Number(customWidth);
+    const depth = Number(customDepth);
+    const height = Number(customHeight);
+    if (isCustom && (!(width > 0) || !(depth > 0) || !(height > 0))) {
+      setLoadError("Enter custom bed width, depth, and height.");
       return;
     }
     setBusy(true);
     setMessage(null);
     setLoadError(null);
     try {
-      let created: IntegrationSummary;
-      let deviceId = "default";
-      if (hostType === "bambu") {
-        const host = bambuHost.trim();
-        const access_code = accessCode.trim();
-        const deviceSerial = serial.trim();
-        if (!host || !access_code || !deviceSerial) return;
-        created = await createIntegration({
-          type: "bambu",
-          name,
-          config: {
-            host,
-            access_code,
-            serial: deviceSerial,
-            enabled: true,
-          },
-        });
-        deviceId = deviceSerial;
-        setAccessCode("");
-        setSerial("");
-      } else {
-        const base_url = newUrl.trim();
-        if (!base_url) return;
-        const config: Record<string, unknown> = { base_url, enabled: true };
-        if (hostType === "moonraker") {
-          if (apiKey.trim()) config.api_key = apiKey.trim();
-        } else {
-          config.username = username.trim();
-          if (password.trim()) config.password = password.trim();
-        }
-        created = await createIntegration({ type: hostType, name, config });
-        setApiKey("");
-        setUsername("");
-        setPassword("");
-      }
-
-      const machine = machineFromPreset(preset, name, created.id, deviceId);
-      const next = await savePrinterFleet([...printers, machine]);
-      setPrinters(next);
-      setHosts((prev) => [...prev, created]);
-      void refreshStatuses(next);
+      const created = await addPrinter(
+        isCustom
+          ? {
+              name,
+              model: name,
+              bed_width_mm: width,
+              bed_depth_mm: depth,
+              bed_height_mm: height,
+            }
+          : { name, preset_id: presetId },
+      );
+      setPrinters((prev) => [...prev, created]);
       setNewName("");
       setMessage(
-        hostType === "bambu"
-          ? `${name} added. Status on Printers; use Bambu Connect from Export (never Start print).`
-          : `${name} added. Send and Start print from Export when Idle.`,
+        `${name} added for planning and local 3MF. Add a connection later to send jobs and read status.`,
       );
+      await refresh();
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onAttachConnection = async (printer: PrinterMachine) => {
+    setBusy(true);
+    setMessage(null);
+    setLoadError(null);
+    try {
+      const { created, deviceId } = await createHost(printer.name);
+      const next = printers.map((p) =>
+        p.id === printer.id
+          ? { ...p, integration_id: created.id, device_id: deviceId }
+          : p,
+      );
+      const saved = await savePrinterFleet(next);
+      setPrinters(saved);
+      setHosts((prev) => [...prev, created]);
+      setConnectingId(null);
+      setMessage(
+        hostType === "bambu"
+          ? `Connection added to ${printer.name}. Status on Printers; use Bambu Connect from Production (never Start print).`
+          : `Connection added to ${printer.name}. Send and Start print from Production when Idle.`,
+      );
+      void refreshStatuses(saved);
       await refresh();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -436,6 +628,55 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
     }
   };
 
+  const onStartEditSize = (printer: PrinterMachine) => {
+    setEditingSizeId(printer.id);
+    setSizeDraft({
+      model: printer.model,
+      width: String(printer.bed_width_mm),
+      depth: String(printer.bed_depth_mm),
+      height: printer.bed_height_mm != null ? String(printer.bed_height_mm) : "",
+    });
+  };
+
+  const onSaveSize = async (printer: PrinterMachine) => {
+    const model = sizeDraft.model.trim();
+    const width = Number(sizeDraft.width);
+    const depth = Number(sizeDraft.depth);
+    const height = Number(sizeDraft.height);
+    if (!model) {
+      setLoadError("Model is required.");
+      return;
+    }
+    if (!(width > 0) || !(depth > 0) || !(height > 0)) {
+      setLoadError("Enter custom bed width, depth, and height.");
+      return;
+    }
+    setBusy(true);
+    setLoadError(null);
+    try {
+      const next = printers.map((p) =>
+        p.id === printer.id
+          ? {
+              ...p,
+              model,
+              bed_width_mm: width,
+              bed_depth_mm: depth,
+              bed_height_mm: height,
+            }
+          : p,
+      );
+      const saved = await savePrinterFleet(next);
+      setPrinters(saved);
+      setEditingSizeId(null);
+      onFleetChange?.();
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : String(e));
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onSlotColorChange = async (
     printerId: string,
     slot: number,
@@ -463,6 +704,7 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
     try {
       const saved = await savePrinterFleet(next);
       setPrinters(saved);
+      onFleetChange?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
       await refresh();
@@ -481,6 +723,7 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
     try {
       const updated = await updatePrinterSlicer(printer.id, next);
       setPrinters((prev) => prev.map((p) => (p.id === printer.id ? updated : p)));
+      onFleetChange?.();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
       await refresh();
@@ -489,17 +732,20 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
     }
   };
 
+  const customReady =
+    Number(customWidth) > 0 && Number(customDepth) > 0 && Number(customHeight) > 0;
   const canAdd =
     engineReady &&
     !busy &&
     Boolean(newName.trim()) &&
-    Boolean(presetId) &&
-    (hostType === "bambu"
+    (presetId === CUSTOM_PRESET_ID ? customReady : Boolean(presetId));
+  const connectionReady =
+    hostType === "bambu"
       ? Boolean(bambuHost.trim()) &&
         Boolean(accessCode.trim()) &&
         Boolean(serial.trim())
       : Boolean(newUrl.trim()) &&
-        (hostType === "moonraker" || Boolean(password.trim())));
+        (hostType === "moonraker" || Boolean(password.trim()));
 
   const inputClass =
     "rounded-md border border-input bg-background px-2 py-1.5 text-sm w-full";
@@ -534,8 +780,8 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
           <div>
             <CardTitle level={3} className="text-base">Printers</CardTitle>
             <CardDescription>
-              Add a Klipper, Prusa, or Bambu printer once — connection and bed size together.
-              Live status on the Printers page; Send from Export for Klipper and Prusa.
+              Create a Printer from a bed preset or Custom size. Planning and local 3MF
+              work without a connection. Add a host later for status, sending, and job tracking.
             </CardDescription>
           </div>
         </div>
@@ -573,23 +819,9 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
 
         <div className="space-y-2 rounded-md border border-border p-3">
           <p className="text-sm font-medium">Add printer</p>
-          <label className="block text-sm">
-            <span className="mb-1 block text-muted-foreground">Type</span>
-            <Select
-              value={hostType}
-              onValueChange={(v) => setHostType(v as HostType)}
-              disabled={!engineReady || busy}
-            >
-              <SelectTrigger className="min-h-10 w-full max-w-none sm:max-w-md">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="moonraker">Klipper (Moonraker)</SelectItem>
-                <SelectItem value="prusalink">Prusa (PrusaLink)</SelectItem>
-                <SelectItem value="bambu">Bambu (LAN + Connect)</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
+          <p className="text-xs text-muted-foreground">
+            A connection is optional. Add it later when you want live status or sending.
+          </p>
           <label className="block text-sm">
             <span className="mb-1 block text-muted-foreground">Name</span>
             <input
@@ -600,111 +832,6 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
               disabled={!engineReady || busy}
             />
           </label>
-
-          {hostType === "bambu" ? (
-            <>
-              <label className="block text-sm">
-                <span className="mb-1 block text-muted-foreground">
-                  Printer IP / hostname
-                </span>
-                <input
-                  className={inputClass}
-                  value={bambuHost}
-                  onChange={(e) => setBambuHost(e.target.value)}
-                  placeholder="192.168.1.60"
-                  disabled={!engineReady || busy}
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-muted-foreground">LAN access code</span>
-                <input
-                  className={inputClass}
-                  type="password"
-                  autoComplete="off"
-                  value={accessCode}
-                  onChange={(e) => setAccessCode(e.target.value)}
-                  placeholder="From printer Network / LAN"
-                  disabled={!engineReady || busy}
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="mb-1 block text-muted-foreground">
-                  Serial / device id
-                </span>
-                <input
-                  className={inputClass}
-                  value={serial}
-                  onChange={(e) => setSerial(e.target.value)}
-                  placeholder="Device SN from printer or Bambu Studio"
-                  disabled={!engineReady || busy}
-                />
-              </label>
-              <p className="text-xs text-muted-foreground">
-                Status over LAN. Export opens Bambu Connect — it never starts a print from
-                there.
-              </p>
-            </>
-          ) : (
-            <>
-              <label className="block text-sm">
-                <span className="mb-1 block text-muted-foreground">Base URL</span>
-                <input
-                  className={inputClass}
-                  value={newUrl}
-                  onChange={(e) => setNewUrl(e.target.value)}
-                  placeholder={
-                    hostType === "moonraker"
-                      ? "http://192.168.1.40:7125"
-                      : "http://192.168.1.50"
-                  }
-                  disabled={!engineReady || busy}
-                />
-              </label>
-              {hostType === "moonraker" ? (
-                <label className="block text-sm">
-                  <span className="mb-1 block text-muted-foreground">
-                    API key (optional for trusted clients)
-                  </span>
-                  <input
-                    className={inputClass}
-                    type="password"
-                    autoComplete="off"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="Moonraker API key or JWT"
-                    disabled={!engineReady || busy}
-                  />
-                </label>
-              ) : (
-                <>
-                  <label className="block text-sm">
-                    <span className="mb-1 block text-muted-foreground">Digest username</span>
-                    <input
-                      className={inputClass}
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      placeholder="often blank on Buddy"
-                      disabled={!engineReady || busy}
-                    />
-                  </label>
-                  <label className="block text-sm">
-                    <span className="mb-1 block text-muted-foreground">
-                      Digest password (printer API key)
-                    </span>
-                    <input
-                      className={inputClass}
-                      type="password"
-                      autoComplete="off"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="From printer Settings → Network"
-                      disabled={!engineReady || busy}
-                    />
-                  </label>
-                </>
-              )}
-            </>
-          )}
 
           <label className="block text-sm">
             <span className="mb-1 block text-muted-foreground">
@@ -724,9 +851,45 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
                     {p.name} ({p.bed_width_mm}×{p.bed_depth_mm} mm)
                   </SelectItem>
                 ))}
+                <SelectItem value={CUSTOM_PRESET_ID}>Custom</SelectItem>
               </SelectContent>
             </Select>
           </label>
+
+          {presetId === CUSTOM_PRESET_ID && (
+            <div className="grid gap-2 sm:grid-cols-3">
+              <label className="block text-sm">
+                <span className="mb-1 block text-muted-foreground">Width (mm)</span>
+                <input
+                  className={inputClass}
+                  inputMode="numeric"
+                  value={customWidth}
+                  onChange={(e) => setCustomWidth(e.target.value)}
+                  disabled={!engineReady || busy}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-muted-foreground">Depth (mm)</span>
+                <input
+                  className={inputClass}
+                  inputMode="numeric"
+                  value={customDepth}
+                  onChange={(e) => setCustomDepth(e.target.value)}
+                  disabled={!engineReady || busy}
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-muted-foreground">Height (mm)</span>
+                <input
+                  className={inputClass}
+                  inputMode="numeric"
+                  value={customHeight}
+                  onChange={(e) => setCustomHeight(e.target.value)}
+                  disabled={!engineReady || busy}
+                />
+              </label>
+            </div>
+          )}
 
           <Button className="min-h-10" disabled={!canAdd} onClick={() => void onAddPrinter()}>
             Add printer
@@ -836,7 +999,7 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
                     Remove
                   </Button>
                   <label className="flex items-center gap-2 text-sm">
-                    <span className="text-xs text-muted-foreground">Slicer:</span>
+                    <span className="text-xs text-muted-foreground">Preferred slicer:</span>
                     <Select
                       value={printer.preferred_slicer ?? "auto"}
                       onValueChange={(v) =>
@@ -858,6 +1021,10 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
                     </Select>
                   </label>
                 </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Accepted Plate export does not choose slicer profiles.
+                </p>
 
                 {printer.loaded_filaments.length > 0 && (
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -914,37 +1081,180 @@ export default function PrintersSettingsCard({ engineReady }: Props) {
         {orphanPrinters.length > 0 && (
           <div className="space-y-2">
             <p className="text-sm font-medium text-muted-foreground">
-              Unlinked bed profiles
+              Planning printers
             </p>
             <ul className="space-y-2">
-              {orphanPrinters.map((printer) => (
-                <li
-                  key={printer.id}
-                  className="flex flex-col gap-2 rounded-md border border-dashed border-border px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{printer.name}</p>
-                    <p className="text-xs text-muted-foreground tabular">
-                      Bed {printer.bed_width_mm}×{printer.bed_depth_mm} mm · not linked
-                    </p>
-                  </div>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => void onRemove(printer)}
+              {orphanPrinters.map((printer) => {
+                const attaching = connectingId === printer.id;
+                return (
+                  <li
+                    key={printer.id}
+                    className="flex flex-col gap-2 rounded-md border border-dashed border-border px-3 py-2.5"
                   >
-                    Remove
-                  </Button>
-                </li>
-              ))}
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{printer.name}</p>
+                        <p className="text-xs text-muted-foreground tabular">
+                          Bed {printer.bed_width_mm}×{printer.bed_depth_mm} mm · planning only
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {!attaching && editingSizeId !== printer.id && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => onStartEditSize(printer)}
+                          >
+                            Edit size
+                          </Button>
+                        )}
+                        {!attaching && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => setConnectingId(printer.id)}
+                          >
+                            Add connection
+                          </Button>
+                        )}
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => void onRemove(printer)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                    {editingSizeId === printer.id && (
+                      <div className="space-y-2 border-t border-border pt-2">
+                        <label className="block text-sm">
+                          <span className="mb-1 block text-muted-foreground">Model</span>
+                          <input
+                            className={inputClass}
+                            value={sizeDraft.model}
+                            onChange={(e) =>
+                              setSizeDraft((prev) => ({ ...prev, model: e.target.value }))
+                            }
+                            disabled={!engineReady || busy}
+                            aria-label="Model"
+                          />
+                        </label>
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          <label className="block text-sm">
+                            <span className="mb-1 block text-muted-foreground">Width (mm)</span>
+                            <input
+                              className={inputClass}
+                              inputMode="numeric"
+                              value={sizeDraft.width}
+                              onChange={(e) =>
+                                setSizeDraft((prev) => ({ ...prev, width: e.target.value }))
+                              }
+                              disabled={!engineReady || busy}
+                              aria-label="Width (mm)"
+                            />
+                          </label>
+                          <label className="block text-sm">
+                            <span className="mb-1 block text-muted-foreground">Depth (mm)</span>
+                            <input
+                              className={inputClass}
+                              inputMode="numeric"
+                              value={sizeDraft.depth}
+                              onChange={(e) =>
+                                setSizeDraft((prev) => ({ ...prev, depth: e.target.value }))
+                              }
+                              disabled={!engineReady || busy}
+                              aria-label="Depth (mm)"
+                            />
+                          </label>
+                          <label className="block text-sm">
+                            <span className="mb-1 block text-muted-foreground">Height (mm)</span>
+                            <input
+                              className={inputClass}
+                              inputMode="numeric"
+                              value={sizeDraft.height}
+                              onChange={(e) =>
+                                setSizeDraft((prev) => ({ ...prev, height: e.target.value }))
+                              }
+                              disabled={!engineReady || busy}
+                              aria-label="Height (mm)"
+                            />
+                          </label>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => void onSaveSize(printer)}
+                          >
+                            Save size
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => setEditingSizeId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {attaching && (
+                      <div className="space-y-2 border-t border-border pt-2">
+                        <ConnectionFields
+                          hostType={hostType}
+                          setHostType={setHostType}
+                          newUrl={newUrl}
+                          setNewUrl={setNewUrl}
+                          apiKey={apiKey}
+                          setApiKey={setApiKey}
+                          username={username}
+                          setUsername={setUsername}
+                          password={password}
+                          setPassword={setPassword}
+                          bambuHost={bambuHost}
+                          setBambuHost={setBambuHost}
+                          accessCode={accessCode}
+                          setAccessCode={setAccessCode}
+                          serial={serial}
+                          setSerial={setSerial}
+                          disabled={!engineReady || busy}
+                          inputClass={inputClass}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            disabled={!connectionReady || busy}
+                            onClick={() => void onAttachConnection(printer)}
+                          >
+                            Save connection
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => setConnectingId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
 
         {!linkedPrinters.length && !orphanPrinters.length && engineReady && (
           <p className="text-sm text-muted-foreground">
-            No printers yet. Add one above to enable status, Export Send, and 3MF packing.
+            No printers yet. Add one above to plan Plates and export 3MF. A connection is
+            optional until you send or read status.
           </p>
         )}
       </CardContent>

@@ -1,20 +1,18 @@
 import type { PlanReview, ProfileSummary } from "../api/engine";
 import {
-  exportRoute,
-  libraryRoute,
-  partsRoute,
+  buildSourcesRoute,
   planRoute,
+  productionRoute,
   progressRoute,
 } from "./routes";
 
-export type WorkflowStageId = "library" | "plan" | "parts" | "progress" | "export";
+export type WorkflowStageId = "sources" | "plan" | "checkoff" | "production";
 
-/** Stages that participate in the spine progress fill (not Export). */
+/** Stages that participate in the spine progress fill (not Production). */
 export const SPINE_FILL_STAGE_IDS: ReadonlySet<WorkflowStageId> = new Set([
-  "library",
+  "sources",
   "plan",
-  "parts",
-  "progress",
+  "checkoff",
 ]);
 
 export type WorkflowStage = {
@@ -69,17 +67,15 @@ function printedProgress(review: PlanReview | null | undefined): {
   };
 }
 
-/** Build always-visible workflow stages (plus Export hub) with live plan meta. */
+/** Build destinations: Sources, Plan, Checkoff, Production. */
 export function buildWorkflowStages(input: WorkflowStageInput): WorkflowStage[] {
   const {
-    sourcesCount,
     profiles,
     selectedProfileId,
     attachedSourceCount,
     review,
   } = input;
   const selected = profiles.find((p) => p.id === selectedProfileId);
-  const hasSources = sourcesCount > 0;
   const hasPlan = profiles.length > 0;
   const buildStale = selected?.build_stale ?? false;
   const partCount = selected?.part_count ?? review?.totals.included_parts ?? 0;
@@ -89,9 +85,9 @@ export function buildWorkflowStages(input: WorkflowStageInput): WorkflowStage[] 
     review?.layers?.filter((l) => l.project_id != null).length ?? 0;
   const attached =
     attachedSourceCount ?? (layersAttached > 0 ? layersAttached : null);
-  const exportMetaCount = progress.partCount || partCount;
+  const productionMetaCount = progress.partCount || partCount;
 
-  const planMeta =
+  const sourcesMeta =
     attached != null && attached > 0
       ? `${attached} source${attached === 1 ? "" : "s"}`
       : hasPlan
@@ -100,42 +96,33 @@ export function buildWorkflowStages(input: WorkflowStageInput): WorkflowStage[] 
           : "—"
         : "";
 
-  const partsWarn =
+  const planWarn =
     buildStale ||
     (review?.has_blockers ?? false) ||
     (progress.warnCount > 0 && hasParts);
 
   return [
     {
-      id: "library",
-      label: "Library",
-      to: libraryRoute(),
-      meta: hasSources ? String(sourcesCount) : "0",
-      warn: !hasSources,
-      done: hasSources,
-      dim: !hasSources,
-    },
-    {
-      id: "plan",
-      label: "Plan",
-      to: planRoute(selectedProfileId),
-      meta: planMeta,
+      id: "sources",
+      label: "Sources",
+      to: buildSourcesRoute(selectedProfileId),
+      meta: sourcesMeta,
       warn: hasPlan && (buildStale || !hasParts),
       done: hasPlan && hasParts && !buildStale,
       dim: !hasPlan,
     },
     {
-      id: "parts",
-      label: "Parts",
-      to: partsRoute(selectedProfileId),
+      id: "plan",
+      label: "Plan",
+      to: planRoute(selectedProfileId),
       meta: hasParts ? String(progress.partCount || partCount) : "",
-      warn: partsWarn && hasParts,
+      warn: planWarn && hasParts,
       done: hasParts && !buildStale && !(review?.has_blockers ?? false),
       dim: !hasParts,
     },
     {
-      id: "progress",
-      label: "Progress",
+      id: "checkoff",
+      label: "Checkoff",
       to: progressRoute(selectedProfileId),
       meta: hasParts ? `${progress.pct}%` : "",
       warn: false,
@@ -143,10 +130,10 @@ export function buildWorkflowStages(input: WorkflowStageInput): WorkflowStage[] 
       dim: !hasParts || progress.pct === 0,
     },
     {
-      id: "export",
-      label: "Export",
-      to: exportRoute(selectedProfileId),
-      meta: hasParts ? String(exportMetaCount) : "",
+      id: "production",
+      label: "Production",
+      to: productionRoute(selectedProfileId),
+      meta: hasParts ? String(productionMetaCount) : "",
       warn: false,
       done: hasParts,
       dim: !hasParts,
@@ -154,7 +141,7 @@ export function buildWorkflowStages(input: WorkflowStageInput): WorkflowStage[] 
   ];
 }
 
-/** Index of the furthest completed / active stage for spine fill (Library→Progress only). */
+/** Index of the furthest completed / active stage for spine fill (Sources→Checkoff). */
 export function spineFillIndex(stages: WorkflowStage[], activeId: WorkflowStageId | null): number {
   const fillStages = stages.filter((s) => SPINE_FILL_STAGE_IDS.has(s.id));
   const fillActive =
@@ -170,17 +157,16 @@ export function spineFillIndex(stages: WorkflowStage[], activeId: WorkflowStageI
   return Math.max(0, lastDone);
 }
 
-/** How many leading stages participate in the spine track (before Export). */
+/** How many leading stages participate in the spine track (before Production). */
 export function spineFillStageCount(stages: WorkflowStage[]): number {
   return stages.filter((s) => SPINE_FILL_STAGE_IDS.has(s.id)).length;
 }
 
 export function stageIdFromPath(pathname: string): WorkflowStageId | null {
-  if (pathname === "/library" || pathname === "/sources") return "library";
-  if (pathname === "/plan" || pathname === "/build") return "plan";
-  if (pathname === "/parts" || pathname === "/review") return "parts";
-  if (pathname === "/progress" || pathname === "/checkoff") return "progress";
-  if (pathname === "/export") return "export";
+  if (pathname === "/sources" || pathname === "/build") return "sources";
+  if (pathname === "/plan" || pathname === "/parts" || pathname === "/review") return "plan";
+  if (pathname === "/progress" || pathname === "/checkoff") return "checkoff";
+  if (pathname === "/export") return "production";
   return null;
 }
 

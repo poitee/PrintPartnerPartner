@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "./test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -7,12 +8,30 @@ import { AppRepository } from "./db/repository.js";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { matchKeyMatches } from "./services/manifest-apply.js";
-import { exportKitBundle, loadKitBundleBytes, parseKitBundleBuffer, KIT_FORMAT } from "./services/export-kit.js";
+import {
+  buildKitBundleData,
+  loadKitBundleBytes,
+  parseKitBundleBuffer,
+  writeKitBundleData,
+  KIT_FORMAT,
+} from "./services/export-kit.js";
 import { loadKitManifest, saveKitManifest } from "./services/kit-manifest-store.js";
 import { setRequestTenantId } from "./middleware/tenant-context.js";
 import { SaasS3StoragePort } from "./adapters/saas/storage-s3.js";
 import { fetchPrintablesMetadata } from "./services/source-adapters.js";
-import { buildPlanReview } from "./services/plan-review.js";
+
+function exportEditableKitBundle(repo: AppRepository, profileId: number, exportsDir: string): string {
+  const recipe = repo.readEditableKitRecipe(profileId);
+  return writeKitBundleData({
+    data: buildKitBundleData({
+      mode: { kind: "editable", recipe },
+      exportedAt: new Date().toISOString(),
+    }),
+    profileId: recipe.profile.id,
+    profileName: recipe.profile.name,
+    exportsDir,
+  });
+}
 
 describe("Phase 5", () => {
   it("matchKeyMatches supports globs", () => {
@@ -20,7 +39,7 @@ describe("Phase 5", () => {
     expect(matchKeyMatches("bracket.stl", "parts/bracket.stl")).toBe(true);
   });
 
-  it("apply-manifest after recompute sets requirement", () => {
+  it("draft recompute sets the proposed manifest requirement", () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-mf-"));
     const sqlite = new SqliteDatabase(dir);
     sqlite.connect();
@@ -36,7 +55,7 @@ describe("Phase 5", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["parts/"]);
     const plan = repo.createProfile("Plan", source.id);
-    repo.recomputeProfile(plan.id, { apply_manifest: true });
+    acceptPlanForTest(repo, plan.id);
     const { parts } = repo.listParts(plan.id, 100, 0);
     expect(parts[0]?.requirement).toBe("required");
     sqlite.close();
@@ -56,8 +75,8 @@ describe("Phase 5", () => {
     repo.updateImportRules(source.id, ["p/"]);
     const plan = repo.createProfile("KitPlan", source.id);
     saveKitManifest(repo, plan.id, { selections: { toolhead: "stealthburner" }, include: ["p/"] });
-    repo.recomputeProfile(plan.id);
-    const bundlePath = exportKitBundle(repo, plan.id, join(dir, "exports"), false);
+    acceptPlanForTest(repo, plan.id);
+    const bundlePath = exportEditableKitBundle(repo, plan.id, join(dir, "exports"));
     const data = loadKitBundleBytes(bundlePath);
     expect(data.format).toBe(KIT_FORMAT);
     // Simulate a recipient who has the repo but different local import rules.
@@ -101,9 +120,9 @@ describe("Phase 5", () => {
       selections: { toolhead: "stealthburner", probe: "tap" },
       choice_tree: [{ id: "toolhead", label: "Toolhead" }],
     });
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
 
-    const data = loadKitBundleBytes(exportKitBundle(repo, plan.id, join(dir, "exports"), false));
+    const data = loadKitBundleBytes(exportEditableKitBundle(repo, plan.id, join(dir, "exports")));
     expect(data.sources).toBeTruthy();
     const exportedSource = (data.sources as Array<Record<string, unknown>>)[0];
     expect(exportedSource?.manifest_community_slug).toBe("ldo-2.4-sb-tap");
@@ -166,24 +185,9 @@ describe("Phase 5", () => {
     const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
     const source = repo.createSource({ name: "R", url: "https://github.com/a/b" });
     const plan = repo.createProfile("KitPlan", source.id);
-    const bundlePath = exportKitBundle(repo, plan.id, join(dir, "exports"), false);
+    const bundlePath = exportEditableKitBundle(repo, plan.id, join(dir, "exports"));
     const data = parseKitBundleBuffer(readFileSync(bundlePath), bundlePath);
     expect(data.format).toBe(KIT_FORMAT);
-    sqlite.close();
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("plan review reports unsynced blocker", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-rev-"));
-    const sqlite = new SqliteDatabase(dir);
-    sqlite.connect();
-    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
-    const source = repo.createSource({ name: "Offline", url: "https://github.com/a/b" });
-    const plan = repo.createProfile("Review", source.id);
-    repo.setBaseLayer(plan.id, source.id);
-    const review = buildPlanReview(repo, plan.id);
-    expect(review.has_blockers).toBe(true);
-    expect(review.issues.some((i) => i.code === "unsynced_source")).toBe(true);
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -231,11 +235,18 @@ describe("Phase 5", () => {
       ok: boolean;
       deploy_mode: string;
       db: { driver: string; support_status: string };
+      deployment: { database: string; artifact_store: string; job_runner: string; support_status: string };
     };
     expect(body.ok).toBe(true);
     expect(body.deploy_mode).toBe("saas");
     expect(body.db).toMatchObject({
       driver: "sqlite",
+      support_status: "supported",
+    });
+    expect(body.deployment).toMatchObject({
+      database: "sqlite",
+      artifact_store: "local_disk",
+      job_runner: "in_process",
       support_status: "supported",
     });
 

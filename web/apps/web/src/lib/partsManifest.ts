@@ -7,13 +7,19 @@
  *   part_id, included, notes
  *
  * Import matches rows to plan parts by part_id → match_key → relative_path →
- * file_name (unique only). Applies quantity_override (and optionally included /
- * printed progress) via existing PATCH APIs — no new write endpoints.
+ * file_name (unique only). Quantity and inclusion become saved Plan draft edits.
  */
 
-import type { ReviewPart, SourceSummary } from "@print-partner/contracts";
-import type { PlanReview } from "../api/engine";
-import { patchPart, patchPartProgress } from "../api/engine";
+import type {
+  AcceptedPlanBasisContract,
+  ReviewPart,
+  SourceSummary,
+} from "@print-partner/contracts";
+import type {
+  PlanDraftPartDecisionContract,
+  PlanDraftWorkspace,
+  PlanReview,
+} from "../api/engine";
 
 /** Stable column keys — keep in sync with PARTS_MANIFEST_HEADERS. */
 export const PARTS_MANIFEST_HEADERS = [
@@ -52,6 +58,14 @@ export type ManifestApplyOptions = {
   applyQuantity?: boolean;
   applyIncluded?: boolean;
   applyPrintedProgress?: boolean;
+  draftWorkspace?: PlanDraftWorkspace | null;
+  applyDraftDecisions?: (
+    decisions: PlanDraftPartDecisionContract[],
+  ) => Promise<PlanDraftWorkspace>;
+  applyAcceptedProgress?: (
+    expected: AcceptedPlanBasisContract,
+    rows: Array<{ part_id: number; printed_count: number }>,
+  ) => Promise<void>;
 };
 
 export type ManifestApplyResult = {
@@ -338,23 +352,6 @@ function parseBool(raw: string): boolean | null {
   return null;
 }
 
-async function syncPrintedCount(part: ReviewPart, target: number): Promise<void> {
-  const qty = Math.max(1, part.quantity_effective);
-  const desired = Math.max(0, Math.min(qty, Math.floor(target)));
-  const units = [...part.print_units];
-  while (units.length < qty) units.push(false);
-  for (let i = 0; i < qty; i++) {
-    const want = i < desired;
-    if (Boolean(units[i]) !== want) {
-      await patchPartProgress(part.id, i, want);
-      units[i] = want;
-    }
-  }
-  part.print_units = units.slice(0, qty);
-  part.printed_count = desired;
-}
-
-/** Apply validated manifest rows to the current plan via existing part PATCH APIs. */
 export async function applyPartsManifest(
   rows: PartsManifestRow[],
   review: PlanReview,
@@ -365,67 +362,161 @@ export async function applyPartsManifest(
   const applyPrintedProgress = options.applyPrintedProgress === true;
   const parts = review.part_groups.flatMap((g) => g.parts);
   const errors: ManifestParseIssue[] = [];
-  let updated = 0;
-  let skipped = 0;
-
+  const matched: Array<{ row: PartsManifestRow; rowNum: number; part: ReviewPart }> = [];
+  const matchedPartIds = new Set<number>();
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
-    const rowNum = i + 2; // 1-based data row after header
+    const rowNum = i + 2;
     const { part, error } = findPart(row, parts);
     if (!part) {
       errors.push({ row: rowNum, message: error || "Unmatched row" });
-      skipped++;
       continue;
     }
-
-    let changed = false;
-    try {
-      if (applyQuantity && row.quantity.trim() !== "") {
-        const qty = Number(row.quantity);
-        if (!Number.isFinite(qty) || qty < 1) {
-          errors.push({ row: rowNum, message: `Invalid quantity "${row.quantity}"` });
-          skipped++;
-          continue;
-        }
-        const next = Math.max(1, Math.floor(qty));
-        if (next !== part.quantity_effective) {
-          await patchPart(part.id, { quantity_override: next });
-          part.quantity_effective = next;
-          part.quantity_override = next;
-          changed = true;
-        }
-      }
-
-      if (applyIncluded && row.included.trim() !== "") {
-        const flag = parseBool(row.included);
-        if (flag == null) {
-          errors.push({ row: rowNum, message: `Invalid included "${row.included}"` });
-        } else if (flag !== part.included) {
-          await patchPart(part.id, { included: flag });
-          part.included = flag;
-          changed = true;
-        }
-      }
-
-      if (applyPrintedProgress && row.printed_count.trim() !== "") {
-        const printed = Number(row.printed_count);
-        if (!Number.isFinite(printed) || printed < 0) {
-          errors.push({ row: rowNum, message: `Invalid printed_count "${row.printed_count}"` });
-        } else {
-          await syncPrintedCount(part, printed);
-          changed = true;
-        }
-      }
-
-      if (changed) updated++;
-      else skipped++;
-    } catch (e) {
-      errors.push({
-        row: rowNum,
-        message: e instanceof Error ? e.message : String(e),
-      });
-      skipped++;
+    if (matchedPartIds.has(part.id)) {
+      errors.push({ row: rowNum, message: `Duplicate target ${part.filename}` });
+      continue;
     }
+    matchedPartIds.add(part.id);
+    matched.push({ row, rowNum, part });
+    if (applyQuantity && row.quantity.trim() !== "") {
+      const quantity = Number(row.quantity);
+      if (!Number.isFinite(quantity) || quantity < 1 || quantity > 10_000) {
+        errors.push({ row: rowNum, message: `Invalid quantity "${row.quantity}"` });
+      }
+    }
+    if (applyIncluded && row.included.trim() !== "" && parseBool(row.included) == null) {
+      errors.push({ row: rowNum, message: `Invalid included "${row.included}"` });
+    }
+    if (applyPrintedProgress && row.printed_count.trim() !== "") {
+      const printed = Number(row.printed_count);
+      if (!Number.isSafeInteger(printed) || printed < 0 || printed > part.quantity_effective) {
+        errors.push({ row: rowNum, message: `Invalid printed_count "${row.printed_count}"` });
+      }
+    }
+  }
+  if (errors.length > 0) return { updated: 0, skipped: rows.length, errors };
+
+  const workspace = options.draftWorkspace;
+  const draftPartsByKey = new Map<string, Array<PlanDraftWorkspace["parts"][number]>>();
+  for (const part of workspace?.parts ?? []) {
+    const matches = draftPartsByKey.get(part.part_key) ?? [];
+    matches.push(part);
+    draftPartsByKey.set(part.part_key, matches);
+  }
+  const currentPlanningPart = (part: ReviewPart) => {
+    const matches = draftPartsByKey.get(part.match_key) ?? [];
+    return matches.length === 1 ? matches[0]! : part;
+  };
+  const quantityChanges = matched.flatMap(({ row, rowNum, part }) => {
+    if (!applyQuantity || row.quantity.trim() === "") return [];
+    const value = Math.floor(Number(row.quantity));
+    return value === currentPlanningPart(part).quantity_effective
+      ? []
+      : [{ rowNum, part, value }];
+  });
+  const inclusionChanges = matched.flatMap(({ row, rowNum, part }) => {
+    if (!applyIncluded || row.included.trim() === "") return [];
+    const value = parseBool(row.included)!;
+    return value === currentPlanningPart(part).included ? [] : [{ rowNum, part, value }];
+  });
+  const progressRows = matched.flatMap(({ row, rowNum, part }) => {
+    if (!applyPrintedProgress || row.printed_count.trim() === "") return [];
+    const printedCount = Number(row.printed_count);
+    return printedCount === part.printed_count
+      ? []
+      : [{ rowNum, part_id: part.id, printed_count: printedCount }];
+  });
+  const planningChanges = quantityChanges.length + inclusionChanges.length;
+  if (planningChanges > 0 && progressRows.length > 0) {
+    return {
+      updated: 0,
+      skipped: rows.length,
+      errors: [{
+        row: 0,
+        message: "Quantity/inclusion and printed counts must be imported separately",
+      }],
+    };
+  }
+
+  const applyDraftDecisions = options.applyDraftDecisions;
+  if (planningChanges > 0 && (!workspace || !applyDraftDecisions)) {
+    return {
+      updated: 0,
+      skipped: rows.length,
+      errors: [{ row: 0, message: "Rebuild the Plan to create a saved draft before importing" }],
+    };
+  }
+
+  const draftPartIdsByKey = new Map<string, number[]>();
+  for (const part of workspace?.parts ?? []) {
+    const ids = draftPartIdsByKey.get(part.part_key) ?? [];
+    ids.push(part.draft_part_id);
+    draftPartIdsByKey.set(part.part_key, ids);
+  }
+  const quantityGroups = new Map<number, number[]>();
+  const inclusionGroups = new Map<boolean, number[]>();
+  const changedRows = new Set<number>();
+  for (const { rowNum, part, value } of quantityChanges) {
+    const draftPartIds = draftPartIdsByKey.get(part.match_key) ?? [];
+    if (draftPartIds.length !== 1) {
+      errors.push({ row: rowNum, message: `Saved draft does not have one match for ${part.filename}` });
+      continue;
+    }
+    const group = quantityGroups.get(value) ?? [];
+    group.push(draftPartIds[0]!);
+    quantityGroups.set(value, group);
+    changedRows.add(rowNum);
+  }
+  for (const { rowNum, part, value } of inclusionChanges) {
+    const draftPartIds = draftPartIdsByKey.get(part.match_key) ?? [];
+    if (draftPartIds.length !== 1) {
+      errors.push({ row: rowNum, message: `Saved draft does not have one match for ${part.filename}` });
+      continue;
+    }
+    const group = inclusionGroups.get(value) ?? [];
+    group.push(draftPartIds[0]!);
+    inclusionGroups.set(value, group);
+    changedRows.add(rowNum);
+  }
+  if (errors.length > 0) return { updated: 0, skipped: rows.length, errors };
+
+  const decisions: PlanDraftPartDecisionContract[] = [];
+  for (const [value, draftPartIds] of quantityGroups) {
+    decisions.push({
+      kind: "set_quantity_override",
+      draft_part_ids: draftPartIds,
+      value,
+    });
+  }
+  for (const [value, draftPartIds] of inclusionGroups) {
+    decisions.push({
+      kind: "set_included",
+      draft_part_ids: draftPartIds,
+      value,
+    });
+  }
+  if (decisions.length > 0) await applyDraftDecisions!(decisions);
+
+  if (progressRows.length > 0) {
+    if (!review.accepted_basis || !options.applyAcceptedProgress) {
+      return {
+        updated: 0,
+        skipped: rows.length,
+        errors: [{ row: 0, message: "Reload the accepted Plan before importing printed counts" }],
+      };
+    }
+    await options.applyAcceptedProgress(
+      review.accepted_basis,
+      progressRows.map(({ part_id, printed_count }) => ({ part_id, printed_count })),
+    );
+    for (const row of progressRows) changedRows.add(row.rowNum);
+  }
+
+  let updated = 0;
+  let skipped = 0;
+  for (const { rowNum } of matched) {
+    if (changedRows.has(rowNum)) updated++;
+    else skipped++;
   }
 
   return { updated, skipped, errors };

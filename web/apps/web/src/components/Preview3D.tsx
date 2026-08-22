@@ -15,6 +15,7 @@ import {
   CSS2DRenderer,
 } from "three/examples/jsm/renderers/CSS2DRenderer.js";
 import {
+  acceptedPartMediaMetadata,
   partMeshUrl,
   partPreviewUrl,
   sourceStlMeshUrl,
@@ -181,6 +182,19 @@ function previewUrlWithColor(url: string, meshColor: string): string {
   return `${url}${sep}hex=${encodeURIComponent(hex)}`;
 }
 
+function normalizedRenderHex(value: string): string | null {
+  const hex = value.trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(hex) ? hex : null;
+}
+
+function optionalAcceptedPartMediaMetadata(response: Response) {
+  try {
+    return acceptedPartMediaMetadata(response);
+  } catch {
+    return null;
+  }
+}
+
 export default function Preview3D({
   partId,
   sourceId = null,
@@ -325,6 +339,8 @@ export default function Preview3D({
           await showPngFallback(response.status);
           return;
         }
+        const acceptedMedia =
+          target.kind === "part" ? optionalAcceptedPartMediaMetadata(response) : null;
 
         const buffer = await response.arrayBuffer();
         if (cancelled) return;
@@ -418,12 +434,19 @@ export default function Preview3D({
         animate();
 
         setMode("mesh");
-        if (target.kind === "part") {
+        if (
+          target.kind === "part" &&
+          acceptedMedia?.renderHex != null &&
+          normalizedRenderHex(resolvedColor) === acceptedMedia.renderHex
+        ) {
           const partIdForThumb = target.partId;
+          const meshBasis = acceptedMedia.basis;
           setTimeout(() => {
             if (cancelled || !renderer) return;
             renderer.domElement.toBlob((blob) => {
-              if (blob) void uploadPartThumbnail(partIdForThumb, blob).catch(() => {});
+              if (blob) {
+                void uploadPartThumbnail(partIdForThumb, blob, meshBasis).catch(() => {});
+              }
             }, "image/png");
           }, 900);
         }
@@ -457,7 +480,7 @@ export default function Preview3D({
         if (!response.ok) return;
         setPngSrc(url);
       } catch {
-        /* keep previous png */
+        return;
       }
     };
 

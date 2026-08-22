@@ -4,7 +4,15 @@ import type { AppRepository } from "../db/repository.js";
 import {
   DATE_FORMAT_DEFAULT,
   DATE_FORMAT_PRESETS,
+  SourceNamingContractError,
+  invalidSourceNaming,
+  invalidSourceNamingState,
+  parseSourceNamingPutInput,
+  parseSourceNamingResponse,
+  sourceNamingConflict,
+  sourceNotFound,
   type DateFormatId,
+  type SourceNamingPutInput,
   validateDiscordWebhookUrl,
 } from "@print-partner/contracts";
 import { checkAppUpdate, resetAppUpdateCheckCache } from "../services/app-update-check.js";
@@ -12,10 +20,7 @@ import {
   DEFAULT_NAMING_PROFILE,
   mergeNamingProfiles,
   namingProfileFromDict,
-  parseSourceNamingMetadata,
   previewParse,
-  resolveNamingProfile,
-  parseProjectMetadata,
 } from "@print-partner/domain";
 import { trimmedString } from "../lib/secure-path.js";
 import { loadFilamentCatalog } from "../services/filament-catalog.js";
@@ -33,6 +38,14 @@ import { WORKFLOW_GUIDE } from "./workflow-guide.js";
 import { sendDiscordNotification } from "../services/discord-notify.js";
 
 type RouteDeps = { repo: AppRepository; dataDir: string; config?: ServerConfig };
+
+function sourceIdFromParams(params: unknown): number | null {
+  if (typeof params !== "object" || params === null || !("id" in params)) return null;
+  const value = params.id;
+  if (typeof value !== "string" || !/^\d+$/.test(value)) return null;
+  const sourceId = Number(value);
+  return Number.isSafeInteger(sourceId) && sourceId > 0 ? sourceId : null;
+}
 
 export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.get("/settings/update-check", async (request) => {
@@ -130,16 +143,6 @@ export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDe
   app.get("/settings/source-update-check", async () => ({
     interval_hours: Number(deps.repo.getSetting("source_update_check_hours", "24")),
   }));
-
-  app.get("/settings/auto-recompute", async () => ({
-    enabled: deps.repo.getSetting("auto_recompute", "1") !== "0",
-  }));
-
-  app.put("/settings/auto-recompute", async (request) => {
-    const body = request.body as { enabled?: boolean };
-    deps.repo.setSetting("auto_recompute", body.enabled === false ? "0" : "1");
-    return { enabled: body.enabled !== false };
-  });
 
   app.get("/settings/build-tracking", async () => ({
     assembly_tracking: deps.repo.getSetting("build_tracking_assembly", "0") !== "0",
@@ -270,18 +273,63 @@ export async function registerSettingsRoutes(app: FastifyInstance, deps: RouteDe
 
 export async function registerSourceNamingRoutes(app: FastifyInstance, deps: RouteDeps): Promise<void> {
   app.get("/sources/:id/naming", async (request, reply) => {
-    const id = Number((request.params as { id: string }).id);
-    const row = deps.repo.getProjectRow(id);
-    if (!row) return reply.status(404).send({ detail: "Source not found" });
-    const globalProfile = deps.repo.getGlobalNaming();
-    const metadata = parseProjectMetadata(row.metadataJson);
-    const { useDefaults, override } = parseSourceNamingMetadata(metadata);
-    const effective = resolveNamingProfile(globalProfile, metadata);
-    return {
-      use_defaults: useDefaults,
-      override,
-      effective: effective.toDict(),
-    };
+    const sourceId = sourceIdFromParams(request.params);
+    if (sourceId === null) {
+      return reply.status(400).send(invalidSourceNaming("Source id must be a positive integer"));
+    }
+    const result = deps.repo.getSourceNaming(sourceId);
+    switch (result.kind) {
+      case "found":
+        try {
+          return parseSourceNamingResponse(result.settings);
+        } catch {
+          return reply.status(500).send(invalidSourceNamingState());
+        }
+      case "source_not_found":
+        return reply.status(404).send(sourceNotFound());
+      case "invalid_state":
+        return reply.status(500).send(invalidSourceNamingState());
+      default: {
+        const exhaustive: never = result;
+        return exhaustive;
+      }
+    }
+  });
+
+  app.put("/sources/:id/naming", async (request, reply) => {
+    const sourceId = sourceIdFromParams(request.params);
+    if (sourceId === null) {
+      return reply.status(400).send(invalidSourceNaming("Source id must be a positive integer"));
+    }
+    let input: SourceNamingPutInput;
+    try {
+      input = parseSourceNamingPutInput(request.body);
+    } catch (error) {
+      if (!(error instanceof SourceNamingContractError)) throw error;
+      return reply.status(400).send(invalidSourceNaming(error.message));
+    }
+    const result = deps.repo.saveSourceNaming(
+      sourceId,
+      input.use_defaults
+        ? { kind: "use_defaults" }
+        : { kind: "override", profile: input.override },
+    );
+    switch (result.kind) {
+      case "saved":
+        try {
+          return parseSourceNamingResponse(result.settings);
+        } catch {
+          return reply.status(500).send(invalidSourceNamingState());
+        }
+      case "source_not_found":
+        return reply.status(404).send(sourceNotFound());
+      case "conflict":
+        return reply.status(409).send(sourceNamingConflict());
+      default: {
+        const exhaustive: never = result;
+        return exhaustive;
+      }
+    }
   });
 }
 

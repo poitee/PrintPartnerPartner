@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 
 SCRIPT = Path(__file__).with_name("workflow-smoke.sh")
+RELEASE_WORKFLOW = Path(__file__).parents[2] / ".github" / "workflows" / "release.yml"
 
 
 class SmokeHandler(BaseHTTPRequestHandler):
@@ -34,12 +35,15 @@ class SmokeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(encoded)
 
+    def _read_json(self) -> object:
+        length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(length) if length else b"{}"
+        return json.loads(raw or b"{}")
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/health":
             self._send({"ok": True})
-        elif path == "/jobs/recompute-job":
-            self._send({"status": "done", "result": {"part_count": self.parts}})
         elif path == "/jobs/export-job":
             self._send({"status": "done", "result": {"file_total": self.exports}})
         elif path == "/plans/1/parts":
@@ -62,8 +66,42 @@ class SmokeHandler(BaseHTTPRequestHandler):
             self._send({"id": 1, "stl_count": 1})
         elif path == "/plans":
             self._send({"id": 1})
-        elif path == "/jobs/recompute":
-            self._send({"job_id": "recompute-job"})
+        elif path == "/plans/1/drafts/recompute":
+            payload = self._read_json()
+            if payload.get("apply_manifest") is not True or not self.headers.get("Idempotency-Key"):
+                self._send({"detail": "Request is invalid", "code": "invalid_request"}, 400)
+                return
+            self._send({
+                "profile_id": 1,
+                "draft": {
+                    "draft_id": 1,
+                    "state": "open",
+                    "lifecycle_version": 0,
+                    "snapshot_digest": "a" * 64,
+                    "base": {"revision_id": None, "plan_version": 0},
+                },
+                "reconciliation": {"kind": "ready"},
+            })
+        elif path == "/plans/1/drafts/1/apply":
+            payload = self._read_json()
+            if (
+                not self.headers.get("Idempotency-Key")
+                or payload.get("expected_snapshot_digest") != "a" * 64
+                or payload.get("expected_lifecycle_version") != 0
+                or payload.get("expected_base") != {"revision_id": None, "plan_version": 0}
+            ):
+                self._send({"detail": "Request is invalid", "code": "invalid_request"}, 400)
+                return
+            self._send({
+                "profile_id": 1,
+                "draft_id": 1,
+                "revision_id": 1,
+                "plan_version": 1,
+                "draft_lifecycle_version": 1,
+                "revision_digest": "b" * 64,
+                "required_unit_mapping_digest": "c" * 64,
+                "applied_at": "2026-08-22T00:00:00Z",
+            })
         elif path == "/jobs/export-stl-pack":
             self._send({"job_id": "export-job"})
         else:
@@ -125,6 +163,45 @@ class WorkflowSmokeTests(unittest.TestCase):
     def test_rejects_non_success_asset_response(self) -> None:
         result = self.run_smoke(asset_status=500)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class ReleaseWorkflowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = RELEASE_WORKFLOW.read_text()
+
+    def test_peels_annotated_tag_before_any_image_publish(self) -> None:
+        peel = self.workflow.index('git rev-parse "refs/tags/${TAG}^{}"')
+        publish = self.workflow.index("Build and push candidate image")
+        self.assertIn("fetch-depth: 0", self.workflow)
+        self.assertLess(peel, publish)
+
+    def test_does_not_mutate_package_visibility(self) -> None:
+        self.assertNotIn("visibility", self.workflow.lower())
+        self.assertNotIn("/packages/container/", self.workflow)
+
+    def test_release_precedes_create_or_verify_version_alias(self) -> None:
+        release = self.workflow.index("Create or verify GitHub Release")
+        version_alias = self.workflow.index("Create or verify immutable version alias")
+        latest = self.workflow.index("Advance latest convenience alias")
+        self.assertLess(release, version_alias)
+        self.assertLess(version_alias, latest)
+        self.assertIn('test "$existing" = "$DIGEST"', self.workflow)
+        self.assertIn("group: release-publication", self.workflow)
+        self.assertIn('latest_release="$(gh release view', self.workflow)
+
+    def test_attaches_and_verifies_release_identity_asset(self) -> None:
+        self.assertIn("render-asset", self.workflow)
+        self.assertIn("release-identity.json", self.workflow)
+        self.assertIn("cmp --silent", self.workflow)
+
+    def test_verifies_index_and_platform_descriptor_annotations(self) -> None:
+        self.assertIn("index:org.opencontainers.image.revision", self.workflow)
+        self.assertIn(
+            "manifest-descriptor:org.opencontainers.image.revision", self.workflow
+        )
+        self.assertIn("all(.manifests[] | select(", self.workflow)
+        self.assertIn(".platform.architecture == \"arm64\"", self.workflow)
 
 
 if __name__ == "__main__":

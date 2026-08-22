@@ -6,9 +6,6 @@ import type {
 } from "@print-partner/contracts";
 import type { AppRepository } from "../db/repository.js";
 import {
-  applyCheckoffUnits,
-  confirmsRespectProgressPrefix,
-  mergeResolvedUnits,
   pendingCheckoffUnits,
   unitKey,
 } from "./printer-checkoff.js";
@@ -17,9 +14,10 @@ import {
   updatePrinterCheckoffLink,
 } from "./printer-checkoff-store.js";
 import {
-  appendPrintOutcomes,
   isPrintRejectReason,
 } from "./printer-outcomes-store.js";
+import { acceptedPlanBasis, type AcceptedUnitDecision } from "../db/accepted-plan-progress.js";
+import { parseRequiredUnitToken } from "./required-units.js";
 
 export type VerifyPrinterCheckoffResult = {
   link: PrinterCheckoffLink;
@@ -86,17 +84,14 @@ function parseDecisions(
   return out;
 }
 
-/**
- * Apply user verify/reject decisions for an awaiting_verify link.
- * Confirms mark Progress units; rejects leave units unprinted and log reasons.
- * Claim, Progress apply, units_marked, and outcomes run in one transaction so a
- * failed apply cannot leave the link resolved with unmarked units.
- */
 export function verifyPrinterCheckoff(
   repo: AppRepository,
   linkId: string,
   rawDecisions: unknown,
 ): VerifyPrinterCheckoffResult | { error: string; status: number } {
+  if (!repo.canMutateAcceptedPlan()) {
+    return { error: "Accepted Plan update is unavailable", status: 503 };
+  }
   const link = getPrinterCheckoffLink(repo, linkId);
   if (!link) return { error: "Checkoff link not found", status: 404 };
   if (link.state !== "awaiting_verify") {
@@ -118,125 +113,83 @@ export function verifyPrinterCheckoff(
     }
   }
 
-  const toConfirm = decisions.filter((d) => d.result === "confirmed");
-  const toReject = decisions.filter((d) => d.result === "rejected");
-
-  if (toConfirm.length) {
-    const partRows = repo.getProfilePartRows(link.profile_id);
-    for (const part of partRows) {
-      repo.ensureProgressForPart(part);
+  const accepted = repo.readAcceptedPlanOperationalSnapshot(link.profile_id);
+  if (accepted.kind !== "ready") {
+    if (accepted.kind === "empty") {
+      return { error: "Accepted Plan has no required units", status: 409 };
     }
-    const unitsById = repo.printUnitsByPartId(link.profile_id);
-    const byPart = new Map<number, number[]>();
-    for (const d of toConfirm) {
-      const list = byPart.get(d.part_id) ?? [];
-      list.push(d.unit_index);
-      byPart.set(d.part_id, list);
-    }
-    for (const [partId, indices] of byPart) {
-      const part = partRows.find((p) => p.id === partId);
-      if (!part) {
-        return { error: `Part ${partId} not found on plan`, status: 400 };
-      }
-      const qty = Math.max(1, part.quantityEffective);
-      const flags = unitsById.get(partId) ?? Array.from({ length: qty }, () => false);
-      if (!confirmsRespectProgressPrefix(flags, indices)) {
-        return {
-          error:
-            "Confirm must include lower incomplete units first (Progress fills from the left)",
-          status: 400,
-        };
-      }
-    }
+    return {
+      error: accepted.kind === "compatibility_dirty"
+        ? "Accepted Plan requires compatibility repair"
+        : "Accepted Plan operational state is not initialized",
+      status: 409,
+    };
   }
-
-  const resolved = mergeResolvedUnits(link.resolved_units, decisions);
-  const nextPending = link.units.filter(
-    (u) => !resolved.some((r) => r.part_id === u.part_id && r.unit_index === u.unit_index),
+  const byCoordinate = new Map<string, (typeof accepted.snapshot.parts)[number]["units"][number]>(
+    accepted.snapshot.parts.flatMap((part) =>
+      part.units.map((unit) => [`${part.projectionPartId}:${unit.unitIndex}`, unit] as const),
+    ),
   );
-  const fullyDone = nextPending.length === 0;
-
-  try {
-    return repo.transaction(() => {
-      const claimed = updatePrinterCheckoffLink(
-        repo,
-        link.id,
-        {
-          resolved_units: resolved,
-          state: fullyDone ? "verified" : "awaiting_verify",
-          applied_at: fullyDone ? new Date().toISOString() : link.applied_at,
-        },
-        { requireState: "awaiting_verify" },
-      );
-      if (!claimed) {
-        throw Object.assign(new Error("Link changed concurrently"), { status: 409 as const });
-      }
-
-      let unitsConfirmed = 0;
-      if (toConfirm.length) {
-        unitsConfirmed = applyCheckoffUnits(
-          repo,
-          link.profile_id,
-          toConfirm.map((d) => ({ part_id: d.part_id, unit_index: d.unit_index })),
-        );
-        const unitsById = repo.printUnitsByPartId(link.profile_id);
-        for (const d of toConfirm) {
-          const flags = unitsById.get(d.part_id);
-          if (!flags?.[d.unit_index]) {
-            throw Object.assign(new Error("Failed to apply confirmed Progress units"), {
-              status: 500 as const,
-            });
-          }
-        }
-        updatePrinterCheckoffLink(repo, link.id, {
-          units_marked: (link.units_marked ?? 0) + unitsConfirmed,
-        });
-      }
-
-      const partRows = repo.getProfilePartRows(link.profile_id);
-      const byId = new Map(partRows.map((p) => [p.id, p]));
-      const outcomes = appendPrintOutcomes(
-        repo,
-        decisions.map((d) => {
-          const part = byId.get(d.part_id);
-          return {
-            profile_id: link.profile_id,
-            part_id: d.part_id,
-            unit_index: d.unit_index,
-            result: d.result,
-            reason: d.reason,
-            note: d.note,
-            host_integration_id: link.integration_id,
-            filename: link.filename,
-            match_key: part?.matchKey || undefined,
-            role: part?.role || undefined,
-            filament_display: undefined,
-            link_id: link.id,
-          };
-        }),
-      );
-
-      const updated = getPrinterCheckoffLink(repo, link.id) ?? claimed;
-      return {
-        link: updated,
-        units_confirmed: unitsConfirmed,
-        units_rejected: toReject.length,
-        outcomes,
-      };
-    });
-  } catch (err) {
-    const status =
-      err && typeof err === "object" && "status" in err && typeof (err as { status: unknown }).status === "number"
-        ? (err as { status: number }).status
-        : null;
-    if (status === 409 || status === 500) {
-      return {
-        error: err instanceof Error ? err.message : String(err),
-        status,
-      };
-    }
-    throw err;
+  if (link.units.some((unit) => !byCoordinate.has(unitKey(unit.part_id, unit.unit_index)))) {
+    return { error: "Legacy Checkoff link no longer maps to the accepted Plan", status: 409 };
   }
+  const tokenDecisions: AcceptedUnitDecision[] = decisions.map((decision) => {
+    const unit = byCoordinate.get(unitKey(decision.part_id, decision.unit_index));
+    if (!unit) throw new Error("Accepted Checkoff decision mapping failed");
+    const token = parseRequiredUnitToken(unit.token);
+    return decision.result === "rejected"
+      ? {
+          token,
+          result: "rejected",
+          reason: decision.reason!,
+          ...(decision.note ? { note: decision.note } : {}),
+        }
+      : {
+          token,
+          result: "confirmed",
+          ...(decision.note ? { note: decision.note } : {}),
+        };
+  });
+  const result = repo.verifyAcceptedPrint({
+    expected: acceptedPlanBasis(accepted.snapshot),
+    linkId: link.id,
+    expectedLink: link,
+    decisions: tokenDecisions,
+  });
+  if (result.kind === "verified") {
+    return {
+      link: result.link,
+      units_confirmed: result.unitsConfirmed,
+      units_rejected: result.unitsRejected,
+      outcomes: [...result.outcomes],
+    };
+  }
+  if (result.kind === "link_not_found") return { error: "Checkoff link not found", status: 404 };
+  if (result.kind === "link_changed") return { error: "Link changed concurrently", status: 409 };
+  if (result.kind === "not_awaiting_verify") {
+    return { error: "Link is not awaiting verify", status: 409 };
+  }
+  if (result.kind === "accepted_state_unavailable") {
+    return {
+      error: result.reason === "compatibility_dirty"
+        ? "Accepted Plan requires compatibility repair"
+        : "Accepted Plan operational state is not initialized",
+      status: 409,
+    };
+  }
+  if (result.kind === "stale_accepted_plan") {
+    return { error: "Accepted Plan changed; reload and retry", status: 409 };
+  }
+  if (result.kind === "transaction_unavailable") {
+    return { error: "Accepted Plan update is unavailable", status: 503 };
+  }
+  if (result.kind === "plan_archived") {
+    return { error: "Archived Plan Progress cannot be changed", status: 409 };
+  }
+  return {
+    error: "Confirm must include lower incomplete units first (Progress fills from the left)",
+    status: 400,
+  };
 }
 
 export function dismissHostFailedLink(

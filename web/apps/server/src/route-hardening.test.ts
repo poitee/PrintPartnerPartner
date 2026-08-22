@@ -210,9 +210,17 @@ describe("path traversal hardening", () => {
     expect(existsSync(join(dir, "sources", String(sourceId), "files", "parts", "a.stl"))).toBe(
       true,
     );
-    const body = res.json() as { stl_count?: number; suggested_import_rules?: string[] };
+    const body = res.json() as {
+      stl_count?: number;
+      suggested_import_rules?: string[];
+      current_source_revision_id?: number;
+      local_path?: string;
+    };
     expect(body.stl_count).toBe(2);
     expect(body.suggested_import_rules).toEqual(["parts/"]);
+    expect(body.current_source_revision_id).toEqual(expect.any(Number));
+    expect(body.local_path).toContain(`/repos/${sourceId}/revisions/`);
+    expect(existsSync(join(body.local_path!, "parts", "a.stl"))).toBe(true);
 
     await app.close();
     ports.db.close();

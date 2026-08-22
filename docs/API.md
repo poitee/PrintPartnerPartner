@@ -1,6 +1,6 @@
 # Print Partner HTTP API
 
-Self-host Docker serves the API on **http://localhost:8080**. The SPA continues to use flat routes (`/plans`, `/jobs`, …); automation and third-party tools should use the versioned namespace **`/api/v1`**.
+Self-host Docker serves the API on **http://localhost:8080**. The SPA uses flat routes such as `/plans` and `/jobs`. Automation and third-party tools use the versioned namespaces. Use `/api/v2` for the accepted Plan summary contract. Use `/api/v1` for other versioned routes.
 
 ## Discovery
 
@@ -8,8 +8,10 @@ Self-host Docker serves the API on **http://localhost:8080**. The SPA continues 
 |----------|-------------|
 | `GET /health` | Liveness, deploy mode, `api_version`, `capabilities` |
 | `GET /api/v1` | API index: OpenAPI URL, docs, health |
-| `GET /api/v1/openapi.json` | OpenAPI 3.1 spec (alias: `GET /openapi.json` → redirect) |
+| `GET /api/v1/openapi.json` | OpenAPI 3.1 document generated from Fastify routes that declare schema metadata (alias: `GET /openapi.json` → redirect). It is not a complete contract for every operational route. |
 | `GET /api/v1/docs` | Swagger UI (dev / when `OPENAPI_UI=1`) |
+| `GET /api/v2` | Plan API index |
+| `GET /api/v2/openapi.json` | OpenAPI 3.1 alias. Only v2 Plan paths are registered. |
 
 ### Capabilities (health)
 
@@ -17,14 +19,14 @@ Self-host Docker serves the API on **http://localhost:8080**. The SPA continues 
 {
   "ok": true,
   "api_version": "v1",
-  "capabilities": ["kit_planning", "jobs_ws", "fleet_presets", "integrations_api"]
+  "capabilities": ["kit_planning", "accepted_plate_revisions", "accepted_plate_export", "jobs_ws", "fleet_presets", "integrations_api"]
 }
 ```
 
 ## Authentication (self-host)
 
 When `PRINT_PARTNER_API_KEY` (or its `INTEGRATION_API_KEY` alias) is set,
-`/api/v1/*` requires a valid credential. Settings-created `ppk_…` keys are
+`/api/v1/*` and `/api/v2/*` require a valid credential. Settings-created `ppk_…` keys are
 accepted alongside the configured key:
 
 - `Authorization: Bearer <key>`, or
@@ -36,8 +38,8 @@ peer is loopback can access the API without a key when authentication and proxy
 trust are both disabled and no forwarding headers are present. Browser-supplied
 `Origin`, `Referer`, and `Sec-Fetch-*` headers never grant access.
 
-Exempt paths: `/health`, `/api/v1`, `/api/v1/openapi.json`, and
-`/api/v1/docs`. Dotted API paths are not treated as static assets.
+Exempt paths include `/health`, both version indexes, both OpenAPI JSON paths,
+and `/api/v1/docs`. Dotted API paths are not treated as static assets.
 
 Supplying an invalid bearer or custom API key always returns `401`, including
 from loopback. API keys currently have full authority; there is no role or scope
@@ -63,6 +65,59 @@ Flat routes (`/plans`, …) remain available for direct single-user SPA use.
 
 JSON errors use `{ "detail": "message" }` (optional `title`, `status`).
 
+## Plan summaries
+
+Flat Plan routes and `/api/v2/plans` return the accepted `ProfileSummary` contract. The `accepted_progress` field has one of these forms:
+
+```json
+{ "kind": "ready", "total_units": 12, "remaining_units": 3 }
+{ "kind": "empty" }
+{ "kind": "unavailable", "reason": "uninitialized" }
+```
+
+The unavailable reasons are `compatibility_dirty`, `uninitialized`, `integrity`, and `concurrent_update`. An unavailable Plan remains in a successful list response.
+
+`/api/v1/plans` returns the legacy numeric fields `total_units` and `remaining_units` only when accepted Progress is ready or empty. A v1 list fails as one response when any Plan cannot supply accepted numeric totals. Integrity failures take precedence over other unavailable states.
+
+`POST /api/v1/plans/:id/duplicate` returns `409` before writing:
+
+```json
+{ "detail": "Duplicate this Plan through /api/v2" }
+```
+
+## Accepted Plates
+
+The first-party flat routes and `/api/v2` expose the same accepted Plate
+workspace:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/plans/:id/plates` | Read setup, ready, or blocked accepted Plate state |
+| `POST` | `/plans/:id/plates/initialize` | Publish a complete explicit Printer allocation against an accepted Plan basis |
+| `PATCH` | `/plans/:id/plates/:plateId/units/:token` | Move one Required unit using the expected Plate revision |
+
+Accepted Plate mutations carry the complete accepted Plan basis and the
+expected Plate revision. The server does not translate legacy match keys,
+choose a Printer, rotate a mesh, or silently retry against a newer revision.
+
+Accepted 3MF delivery uses the existing job transport:
+
+```http
+POST /api/v1/jobs/export-accepted-plate-3mf
+Content-Type: application/json
+
+{ "profile_id": 1, "expected_plate_revision_id": 17 }
+```
+
+The result contains tenant-scoped download URLs for the deterministic manifest,
+bundle, and Plate files. It does not contain server filesystem paths.
+
+This release intentionally removes the legacy `print-plan`, `print-groups`,
+`print-assignments`, `plate-workspace`, `print-plan/prepare-missing`,
+`pack-preview`, `export-3mf`, `auto-slice`, and `open-plates` routes from flat
+and `/api/v1` registrations. These paths now return the framework's normal 404.
+There is no match-key translator or 410 compatibility handler.
+
 ## Slicer / export poll flow
 
 Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
@@ -84,6 +139,35 @@ Typical automation (PrusaSlicer plugin, Orca script, folder watcher):
      - `"color_dir"` — `role/<source directory>/file.stl` (keeps directories).
      - `"color"` — `role/file.stl` (flattens all directories into one folder per
        color/role; same-named files are de-duplicated with a directory prefix).
+
+   STL bundle and checklist jobs read exactly one accepted Plan snapshot. The
+   exported Parts, quantities, roles, unit completion, artifact identity, and
+   thumbnail identity all come from that snapshot. Working Build edits do not
+   affect these jobs until **Apply plan changes** succeeds.
+
+   Start checklist and kit jobs through the same transport:
+
+   ```http
+   POST /api/v1/jobs/export-checklist-html
+   { "profile_id": 1 }
+
+   POST /api/v1/jobs/export-kit-bundle
+   { "profile_id": 1, "include_print_progress": true }
+   ```
+
+   A kit job without `include_print_progress: true` remains an editable export
+   of current working Parts. An explicit Progress export writes the complete
+   accepted `parts` array and each Part's adjacent `print_units` from one
+   accepted snapshot. The same rule applies to
+   `POST /plans/:id/shares`.
+
+   A successful non-empty accepted export can add `plan_version` and
+   `revision_id` to the existing job result. If accepted state is unavailable,
+   the job fails with this fixed message:
+
+   ```text
+   Accepted Plan state is unavailable. Apply or repair the Plan, then export again.
+   ```
 
    Response: `{ "job_id": "…" }`
 
@@ -126,7 +210,9 @@ Settings → Printers uses these same-origin routes (not under `/api/v1`):
 | `GET` | `/printers/:id/profile-assignment` | Assigned machine + slot filaments, compatible processes, last synced |
 | `PUT` | `/printers/:id/profile-assignment` | Save `{ profile_source, machine_profile_id, filament_slots }` |
 
-`profile_source` is `assigned` (use pinned profiles for auto-slice) or `auto_match` (name-based heuristic). When `assigned`, auto-slice fails clearly if machine or slot filaments are missing.
+`profile_source` is `assigned` or `auto_match`. These fields retain imported
+profile preferences for slicer setup and future integrations. Accepted Plate
+export and handoff do not choose machine, process, or filament profiles.
 
 The Export **Profile library** panel was removed; sync status and assignments live on Settings → Printers.
 
@@ -161,9 +247,12 @@ Containers must carry label `printpartner.slicer_instance_id=<instance id>`. Saa
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/slicer-handoff/exchange-status` | Whether `PP_EXCHANGE_DIR` is writable |
-| `POST` | `/slicer-instances/:id/open-plates` | Export plates, stage into exchange inbox, return `gui_url` + staged paths |
+| `POST` | `/slicer-instances/:id/open-accepted-plates` | Stage one requested accepted Plate revision into the exchange inbox |
 
-Body: `{ profile_id, layout_mode?, missing_only?, enabled_printer_ids? }`. Does not change 3MF object names. Managed open requires a writable exchange dir; otherwise use Download via `/jobs/export-3mf`.
+Body: `{ profile_id, expected_plate_revision_id }`. The handoff uses the same
+verified files as accepted export and returns only relative or tenant-scoped
+locations. Managed open requires a writable exchange directory; otherwise use
+the accepted Plate download.
 
 ## Integrations (v1 only)
 
@@ -200,7 +289,7 @@ Body: `{ profile_id, layout_mode?, missing_only?, enabled_printer_ids? }`. Does 
 
 `GET /filaments/catalog` includes `spoolman_colors` when `default_spoolman_integration_id` is set (Settings) or when `?spoolman_integration_id=` is passed. User guide: [integrations/SPOOLMAN.md](integrations/SPOOLMAN.md).
 
-Moonraker and PrusaLink support test, status, upload, and Progress verify-first checkoff. Bambu supports LAN MQTT status plus **Connect URL handoff** (not MQTT print-start). Setup: [integrations/PRINTER_SETUP.md](integrations/PRINTER_SETUP.md). Research: [integrations/PRINTER_APIS.md](integrations/PRINTER_APIS.md).
+Moonraker and PrusaLink support test, status, upload, and Checkoff verify-first. Bambu supports LAN MQTT status plus **Connect URL handoff** (not MQTT print-start). Setup: [integrations/PRINTER_SETUP.md](integrations/PRINTER_SETUP.md).
 
 **MCP attach (preferred):** streamable HTTP at `/api/v1/mcp` with `PRINT_PARTNER_API_KEY`. There is **no in-app Kit Advisor** and **no Settings → AI**. Guide: [assistant-mcp.md](assistant-mcp.md), [KIT_ADVISOR.md](KIT_ADVISOR.md).
 
@@ -243,11 +332,13 @@ docker compose up --build
 curl http://localhost:8080/health
 curl http://localhost:8080/api/v1
 curl -H "Authorization: Bearer $PRINT_PARTNER_API_KEY" http://localhost:8080/api/v1/plans
+curl -H "Authorization: Bearer $PRINT_PARTNER_API_KEY" http://localhost:8080/api/v2/plans
 ```
 
 ## Route layout
 
-- **Flat** — SPA compatibility: `/plans`, `/jobs`, `/exports`, `/ws/jobs/:id`, …
-- **`/api/v1`** — Same kit-planning routes plus integrations, webhooks, job list, plan artifacts
+- **Flat** — SPA routes, including the accepted Plan summary contract at `/plans`
+- **`/api/v1`** — Legacy numeric Plan summaries plus integrations, webhooks, the job list, and Plan artifacts
+- **`/api/v2`** — Plan routes with the accepted `ProfileSummary` contract
 
-Both mounts share the same handlers; responses are identical for shared paths.
+Flat and v2 Plan responses use the same contract. V1 Plan responses use the legacy presenter described above.

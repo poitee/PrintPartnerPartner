@@ -20,6 +20,7 @@ function machine(
   partial: Partial<PrinterMachine> & Pick<PrinterMachine, "id" | "name">,
 ): PrinterMachine {
   return {
+    model: partial.model ?? partial.name,
     bed_width_mm: 250,
     bed_depth_mm: 250,
     bed_height_mm: 250,

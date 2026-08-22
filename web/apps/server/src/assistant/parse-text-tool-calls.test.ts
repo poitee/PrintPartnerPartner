@@ -16,11 +16,11 @@ describe("parseTextEmbeddedToolCalls", () => {
     expect(calls[0]!.input.source_id).toBe("-1");
   });
 
-  it("recovers invented call [\"recompute_build\"] as start_recompute", () => {
+  it("does not recover invented recompute calls outside Plan", () => {
     const content =
       'After applying, run `call ["recompute_build"]` with no arguments to regenerate the parts list.';
     const calls = parseTextEmbeddedToolCalls(content);
-    expect(calls.some((c) => c.name === "start_recompute")).toBe(true);
+    expect(calls).toHaveLength(0);
     expect(stripEmbeddedToolCallJson(content)).not.toMatch(/recompute_build/);
   });
 

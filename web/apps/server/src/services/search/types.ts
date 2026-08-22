@@ -27,7 +27,7 @@ export type WebSearchResult = {
   setup_hint?: string;
   error?: string;
   /** Which HTTP backend actually returned hits (native falls back to duckduckgo). */
-  http_backend?: "brave" | "exa" | "duckduckgo" | "searxng";
+  http_backend?: "brave" | "exa" | "duckduckgo";
 };
 
 export type SearchSetupOption = {
@@ -52,7 +52,6 @@ export const ALL_SEARCH_PROVIDER_IDS: SearchProviderId[] = [
   "brave",
   "exa",
   "duckduckgo",
-  "searxng",
   "none",
 ];
 

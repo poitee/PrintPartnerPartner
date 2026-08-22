@@ -3,6 +3,7 @@ import type { ServerConfig } from "../config.js";
 import type { AppPorts } from "../ports/index.js";
 import { pingBundle } from "../db/database.js";
 import type { SaasDbStore } from "../adapters/saas/index.js";
+import { deploymentCapability } from "../lib/deployment-capability.js";
 import { getVersionInfo, getBuildSemver } from "../lib/version.js";
 
 export async function registerHealthRoutes(
@@ -35,8 +36,9 @@ export async function registerHealthRoutes(
     return {
       ok: dbOk,
       version: config.version,
-      semver: getBuildSemver(),
-      build: getVersionInfo(),
+      semver: getBuildSemver(config.releaseIdentity),
+      build: getVersionInfo(config.releaseIdentity),
+      release: config.releaseIdentity,
       deploy_mode: config.deployMode,
       multi_user: config.multiUser,
       data_dir: config.dataDir,
@@ -44,6 +46,8 @@ export async function registerHealthRoutes(
       api_version: "v1",
       capabilities: [
         "kit_planning",
+        "accepted_plate_revisions",
+        "accepted_plate_export",
         "jobs_ws",
         "fleet_presets",
         "integrations_api",
@@ -63,6 +67,11 @@ export async function registerHealthRoutes(
         support_status:
           saasDb.bundle?.driver === "postgres" ? "experimental" : "supported",
       },
+      deployment: deploymentCapability({
+        databaseDriver: saasDb.bundle?.driver === "postgres" ? "postgres" : "sqlite",
+        s3Bucket: config.s3Bucket,
+        multiUser: config.multiUser,
+      }),
       google_drive: {
         client_id: config.googleClientId,
       },

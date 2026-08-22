@@ -1,3 +1,4 @@
+import { acceptPlanForTest } from "../test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -5,6 +6,31 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SqliteDatabase, getDb } from "./client.js";
 import { AppRepository } from "./repository.js";
+import { acceptedPlanBasis } from "./accepted-plan-progress.js";
+import { parseRequiredUnitToken } from "../services/required-units.js";
+
+function assembledForPart(dataDir: string, partId: number) {
+  const database = new Database(join(dataDir, "print-partner.db"), { readonly: true });
+  try {
+    const rows = database
+      .prepare("SELECT assembled FROM print_progress WHERE part_id = ? ORDER BY unit_index")
+      .all(partId) as { assembled: number }[];
+    const quantity = database
+      .prepare("SELECT quantity_effective FROM parts WHERE id = ?")
+      .pluck()
+      .get(partId) as number;
+    const assembledUnits = Array.from(
+      { length: Math.max(1, quantity) },
+      (_, index) => rows[index]?.assembled === 1,
+    );
+    return {
+      assembled_count: assembledUnits.filter(Boolean).length,
+      assembled_units: assembledUnits,
+    };
+  } finally {
+    database.close();
+  }
+}
 
 /**
  * Migration coverage for print_progress.assembled (assembly tracking).
@@ -30,10 +56,13 @@ describe("print_progress.assembled migration", () => {
       repo.updateSource(source.id, { local_path: repoPath });
       repo.updateImportRules(source.id, ["x/"]);
       const plan = repo.createProfile("Plan", source.id);
-      await repo.recomputeProfile(plan.id);
-      const partId = repo.getCheckoff(plan.id).parts[0].id;
-      repo.patchPartProgress(partId, 0, true);
-      repo.patchPartAssembled(partId, 0, true);
+      await acceptPlanForTest(repo, plan.id);
+      const partId = repo.listParts(plan.id).parts[0]!.id;
+      const populated = new Database(join(dir, "print-partner.db"));
+      populated
+        .prepare("UPDATE print_progress SET completed = 1, assembled = 1 WHERE part_id = ?")
+        .run(partId);
+      populated.close();
       first.close();
 
       // 2. Rewind to the pre-assembled schema, so the next connect() sees exactly
@@ -91,43 +120,39 @@ describe("print_progress.assembled migration", () => {
       repo.updateSource(source.id, { local_path: repoPath });
       repo.updateImportRules(source.id, ["x/"]);
       const plan = repo.createProfile("Plan", source.id);
-      await repo.recomputeProfile(plan.id);
+      await acceptPlanForTest(repo, plan.id);
 
-      const partId = repo.getCheckoff(plan.id).parts[0].id;
+      const partId = repo.listParts(plan.id).parts[0]!.id;
+      const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
+      if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+      const expected = acceptedPlanBasis(accepted.snapshot);
+      const token = parseRequiredUnitToken(accepted.snapshot.parts[0]!.units[0]!.token);
 
-      // New rows default to false via the read accessor.
-      expect(repo.getPartAssembled(partId)).toMatchObject({ assembled_count: 0, assembled_units: [false] });
+      expect(assembledForPart(dir, partId)).toMatchObject({
+        assembled_count: 0,
+        assembled_units: [false],
+      });
 
       // Write accessor is gated on the unit being printed first.
-      repo.patchPartAssembled(partId, 0, true);
-      expect(repo.getPartAssembled(partId).assembled_units).toEqual([false]);
+      repo.setAcceptedUnitAssembly({ expected, token, assembled: true });
+      expect(assembledForPart(dir, partId).assembled_units).toEqual([false]);
 
-      repo.patchPartProgress(partId, 0, true);
-      repo.patchPartAssembled(partId, 0, true);
-      expect(repo.getPartAssembled(partId)).toMatchObject({ assembled_count: 1, assembled_units: [true] });
+      repo.setAcceptedUnitCompletion({ expected, token, completed: true });
+      repo.setAcceptedUnitAssembly({ expected, token, assembled: true });
+      expect(assembledForPart(dir, partId)).toMatchObject({
+        assembled_count: 1,
+        assembled_units: [true],
+      });
 
       // The flag persists across a reconnect (it is really on disk, not in memory).
       sqlite.close();
       const reopened = new SqliteDatabase(dir);
       reopened.connect();
-      const repo2 = new AppRepository(getDb(reopened), undefined, reopened.reposDir);
-      expect(repo2.getPartAssembled(partId).assembled_units).toEqual([true]);
+      expect(assembledForPart(dir, partId).assembled_units).toEqual([true]);
       reopened.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("rejects an out-of-range unit index on the write accessor", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-mig-rng-"));
-    const sqlite = new SqliteDatabase(dir);
-    try {
-      sqlite.connect();
-      const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
-      expect(() => repo.patchPartAssembled(999999, 0, true)).toThrow(/not found/i);
-    } finally {
-      sqlite.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
 });

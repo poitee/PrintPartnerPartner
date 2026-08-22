@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
-import type { AppRepository } from "../db/repository.js";
+import type { AcceptedProfileProgress, AppRepository } from "../db/repository.js";
 import { loadFleet } from "../services/printer-fleet.js";
 import type { IntegrationPort } from "../integrations/store.js";
 import {
   extractApiKey,
   type ApiKeyValidator,
 } from "../middleware/api-key.js";
+import { getLogger } from "../services/logger.js";
 
 export type MetricsDeps = {
   repo: AppRepository;
@@ -182,18 +183,39 @@ export async function registerMetricsRoutes(
       lines.push(`filament_consumed_g ${filamentConsumedTotal}`);
       lines.push("");
 
-      // parts_remaining per active plan
+      lines.push(
+        "# HELP plan_progress_collection_available Whether accepted Plan progress was collected",
+        "# TYPE plan_progress_collection_available gauge",
+      );
       try {
-        const profiles = repo.listProfiles().filter((p) => !p.archived_at);
+        const profiles = repo
+          .listAcceptedProfileSummaries()
+          .filter(({ header }) => !header.archived_at);
+        lines.push("plan_progress_collection_available 1", "");
+        lines.push("# HELP plan_progress_state Accepted Progress state per active plan");
+        lines.push("# TYPE plan_progress_state gauge");
+        for (const { header, progress } of profiles) {
+          const planLabel = `plan_id="${header.id}",plan_name="${escapeLabel(header.name)}"`;
+          lines.push(
+            `plan_progress_state{${planLabel},state="${acceptedProgressMetricState(progress)}"} 1`,
+          );
+        }
+        lines.push("");
         lines.push("# HELP parts_remaining Remaining print units per active plan");
         lines.push("# TYPE parts_remaining gauge");
-        for (const p of profiles) {
-          const planLabel = `plan_id="${p.id}",plan_name="${escapeLabel(p.name)}"`;
-          lines.push(`parts_remaining{${planLabel}} ${p.remaining_units}`);
+        for (const { header, progress } of profiles) {
+          if (progress.kind !== "ready") continue;
+          const planLabel = `plan_id="${header.id}",plan_name="${escapeLabel(header.name)}"`;
+          lines.push(`parts_remaining{${planLabel}} ${progress.remainingUnits}`);
         }
         lines.push("");
       } catch {
-        // skip
+        lines.push("plan_progress_collection_available 0", "");
+        getLogger().log(
+          "error",
+          "[metrics] Accepted Plan progress collection unavailable",
+          { failure: "unexpected", operation: "metrics_plan_progress" },
+        );
       }
 
       // printers_idle / printers_printing from fleet + live integration status
@@ -241,4 +263,28 @@ function escape(s: string): string {
 
 function escapeLabel(s: string): string {
   return escape(s);
+}
+
+type AcceptedProgressMetricState =
+  | "ready"
+  | "empty"
+  | "compatibility_dirty"
+  | "uninitialized"
+  | "integrity"
+  | "concurrent_update";
+
+function acceptedProgressMetricState(
+  progress: AcceptedProfileProgress,
+): AcceptedProgressMetricState {
+  switch (progress.kind) {
+    case "ready":
+    case "empty":
+      return progress.kind;
+    case "unavailable":
+      return progress.reason;
+    case "integrity_failure":
+      return "integrity";
+    case "concurrent_update":
+      return "concurrent_update";
+  }
 }

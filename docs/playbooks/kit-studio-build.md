@@ -1,17 +1,17 @@
 # Plan playbook — stack presets and variants
 
-End-user guide: sync sources, create a plan, apply a stack preset, and pick variants on **Plan**.
+End-user guide: sync sources, create a Build, apply a stack preset, and pick variants on **Sources**.
 
 ## 1. Sync sources
 
-On **Library**, import [repos.txt](../examples/repos.txt) or add repos manually. Sync each GitHub source and verify STLs appear when you expand the import tree on Plan.
+On **Library**, add the source repositories. Sync each GitHub source and verify STLs appear when you expand the import tree on Sources.
 
-## 2. Create a plan
+## 2. Create a Build
 
-Create or select a plan:
+Create or select a Build:
 
-- Header **Create plan** button or plan picker
-- **Plans** page in the spine utility nav (legacy `/builds` redirects)
+- Header **New Build** button (asks only for a name, then opens Sources)
+- **Builds** page in the spine utility nav
 
 Name it something recognizable (e.g. "My Voron 2.4 SB Tap").
 
@@ -19,9 +19,9 @@ Name it something recognizable (e.g. "My Voron 2.4 SB Tap").
 
 Author per-repo manifests so stack presets and variant picks work. See [author-manifest-on-stack.md](./author-manifest-on-stack.md). Rules persist as path globs in each repo’s `print-partner.manifest.yaml`.
 
-## 4. Plan page
+## 4. Sources page
 
-Open **Plan** for your active plan.
+Open **Sources** for your active Build.
 
 ### Attach sources
 
@@ -45,27 +45,27 @@ Expand each source card, check files or folders to include, and use the **STL pr
 
 ### Role filament colors
 
-Set a color per role (primary, accent, clear, opaque) in **Colors by role**. Previews on Plan, Parts, and Progress update when you change a color.
+Set a color per role (primary, accent, clear, opaque) in **Colors by role**. Previews on Sources, Plan, and Checkoff update when you change a color.
 
-### Recompute
+### Review and apply the plan
 
-Click **Update** / recompute when the stale banner appears (or enable auto-recompute for stale plans in Settings). This refreshes Parts and Progress from your file picks.
+Click **Rebuild draft** after changing sources. File and quantity changes remain proposed while you review the draft on **Plan**. Click **Apply** to update the accepted Plan and Required units.
 
-## 5. Parts, Progress, Export
+## 5. Plan, Checkoff, Production
 
-- **Parts** — validation summary, quantity edits.
-- **Progress** — per-unit progress, printable checklist, **Export missing STLs**.
-- **Export** — plate workspace, STL/3MF packs, slicer links, printer bind/send.
-- **Share plan** on Plan — export a `.print-partner-kit` zip (plan config, not STLs).
+- **Plan** — quantities, warnings, apply the draft.
+- **Checkoff** — per-unit progress, printable checklist.
+- **Production** — plate workspace, STL/3MF packs, slicer links, printer bind/send.
+- **Share** on Sources — export a `.print-partner-kit` zip (plan config, not STLs).
 
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
 | Preset grayed / error | Sync missing repos on Library |
-| Empty variant choices | Recompute; check manifest rules in repo YAML |
+| Empty variant choices | Rebuild the draft; check manifest rules in repo YAML |
 | Wrong variants | Check per-repo manifests; shared choice ids must match |
-| Stale Parts list | Recompute on Plan |
+| Stale Plan list | Review and apply the saved draft on Plan |
 | Colors not in previews | Change role color again or use Advanced → Regenerate thumbnails |
 
 See [golden LDO 2.4 example](../examples/golden-ldo-voron-2.4-sb-tap.md).

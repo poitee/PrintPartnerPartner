@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig, validateProductionConfig } from "./config.js";
+import { loadConfig, ignoredRedisUrlWarning, validateProductionConfig } from "./config.js";
 
 describe("loadConfig", () => {
   it("enables proxy trust only when explicitly configured", () => {
@@ -20,6 +20,13 @@ describe("loadConfig", () => {
     const config = loadConfig();
     expect(config.deployMode).toBe("self-host");
     if (prev !== undefined) process.env.DEPLOY_MODE = prev;
+  });
+
+  it("warns that REDIS_URL does not start a queue", () => {
+    expect(ignoredRedisUrlWarning({} as NodeJS.ProcessEnv)).toBeNull();
+    expect(ignoredRedisUrlWarning({ REDIS_URL: "redis://localhost:6379" } as NodeJS.ProcessEnv)).toContain(
+      "ignored",
+    );
   });
 
   it("fails closed for production Postgres unless the experimental gate is explicit", () => {

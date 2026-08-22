@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { BuildRecipe, PlanDecision, PlanSnapshotSummary } from "@print-partner/contracts";
 import {
   createPlanSnapshotApi,
-  fetchPlanDecisions,
-  fetchPlanRecipe,
-  fetchPlanSnapshots,
   restorePlanSnapshotApi,
 } from "../../api/engine";
-import { usePlanRevisionBump, usePlanWorkspace } from "../../context/PlanWorkspaceContext";
+import { invalidatePlanStructure } from "../../queries/planLayers";
+import {
+  invalidatePlanRecipe,
+  usePlanRecipeQuery,
+} from "../../queries/planRecipe";
+import { invalidateSources } from "../../queries/sources";
 import { Button } from "../ui/button";
 
 type Props = {
@@ -17,45 +19,18 @@ type Props = {
 
 /** Timeline of decisions + build recipe + snapshots for the active plan. */
 export default function BuildRecipePanel({ profileId }: Props) {
-  const bump = usePlanRevisionBump();
-  const { revision } = usePlanWorkspace();
-  const [recipe, setRecipe] = useState<BuildRecipe | null>(null);
-  const [decisions, setDecisions] = useState<PlanDecision[]>([]);
-  const [snapshots, setSnapshots] = useState<PlanSnapshotSummary[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+  const recipeQuery = usePlanRecipeQuery(profileId);
+  const recipe = recipeQuery.data?.recipe ?? null;
+  const decisions = recipeQuery.data?.decisions ?? [];
+  const snapshots = recipeQuery.data?.snapshots ?? [];
+  const loading = recipeQuery.isFetching;
+  const loadError = recipeQuery.error
+    ? recipeQuery.error instanceof Error
+      ? recipeQuery.error.message
+      : String(recipeQuery.error)
+    : null;
   const [busy, setBusy] = useState(false);
-
-  const reload = useCallback(async (signal?: { cancelled: () => boolean }) => {
-    setLoading(true);
-    try {
-      const [r, d, s] = await Promise.all([
-        fetchPlanRecipe(profileId),
-        fetchPlanDecisions(profileId),
-        fetchPlanSnapshots(profileId),
-      ]);
-      if (signal?.cancelled()) return;
-      setRecipe(r);
-      setDecisions(d.decisions ?? []);
-      setSnapshots(s.snapshots ?? []);
-    } catch (e) {
-      if (!signal?.cancelled()) {
-        toast.error(e instanceof Error ? e.message : "Failed to load recipe");
-      }
-    } finally {
-      if (!signal?.cancelled()) setLoading(false);
-    }
-  }, [profileId]);
-
-  useEffect(() => {
-    setRecipe(null);
-    setDecisions([]);
-    setSnapshots([]);
-    let cancelled = false;
-    void reload({ cancelled: () => cancelled });
-    return () => {
-      cancelled = true;
-    };
-  }, [reload, revision]);
 
   const copyRecipe = async () => {
     if (!recipe?.markdown) return;
@@ -72,7 +47,7 @@ export default function BuildRecipePanel({ profileId }: Props) {
     try {
       await createPlanSnapshotApi(profileId, { name: `Manual ${new Date().toISOString().slice(0, 16)}` });
       toast.success("Snapshot saved");
-      await reload();
+      await invalidatePlanRecipe(queryClient, profileId);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Snapshot failed");
     } finally {
@@ -89,11 +64,13 @@ export default function BuildRecipePanel({ profileId }: Props) {
       const result = await restorePlanSnapshotApi(profileId, sid);
       toast.success(
         result.needs_sync
-          ? "Restored — Sync sources whose refs changed, then Update build."
+          ? "Restored. Sync sources whose refs changed, then rebuild the Plan."
           : "Snapshot restored",
       );
-      await bump();
-      await reload();
+      await Promise.all([
+        invalidatePlanStructure(queryClient, profileId),
+        invalidateSources(queryClient),
+      ]);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Restore failed");
     } finally {
@@ -114,11 +91,13 @@ export default function BuildRecipePanel({ profileId }: Props) {
           <Button type="button" size="sm" variant="outline" disabled={busy || loading} onClick={() => void onCreateSnapshot()}>
             Save snapshot
           </Button>
-          <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => void reload()}>
+          <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => void recipeQuery.refetch()}>
             Refresh
           </Button>
         </div>
       </div>
+
+      {loadError ? <p className="text-xs text-destructive">{loadError}</p> : null}
 
       {loading && !recipe ? (
         <p className="text-xs text-muted-foreground">Loading…</p>

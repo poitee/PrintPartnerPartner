@@ -119,4 +119,29 @@ describe("printer-upload job failure reconcile", () => {
     expect(item.state).toBe("error");
     expect(item.error).toMatch(/upload boom/);
   });
+
+  it("forwards plate_revision_id into the Printer upload job", async () => {
+    runPrinterUploadJobMock.mockReset();
+    runPrinterUploadJobMock.mockResolvedValue({
+      printer_id: "p1",
+      message: "Uploaded plate.gcode",
+    });
+    const jobId = await runner.start("printer-upload", {
+      printer_id: "p1",
+      artifact_path: join(dataDir, "plate.gcode"),
+      filename: "plate.gcode",
+      start: false,
+      profile_id: 7,
+      checkoff_units: [{ part_id: 11, unit_index: 0 }],
+      plate_revision_id: 19,
+    });
+    await waitFor(() => runPrinterUploadJobMock.mock.calls.length > 0);
+    expect(runPrinterUploadJobMock.mock.calls[0]?.[1]).toMatchObject({
+      printer_id: "p1",
+      filename: "plate.gcode",
+      profile_id: 7,
+      plate_revision_id: 19,
+    });
+    expect(jobId).toBeTruthy();
+  });
 });

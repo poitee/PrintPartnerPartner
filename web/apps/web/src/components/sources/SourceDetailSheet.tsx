@@ -9,12 +9,15 @@ import {
   fetchSourceNotes,
   fetchSourceNaming,
   fetchStlNaming,
+  isSourceNamingNotFoundError,
   mergeStlNamingProfiles,
   saveImportRules,
   saveSourceNaming,
+  sourceNamingErrorMessage,
   type SourceNote,
   type SourceSummary,
   type StlNamingProfile,
+  type StlNamingProfileOverride,
 } from "../../api/engine";
 import { StlNamingEditorEmbedded } from "../settings/StlNamingEditor";
 import ImportRulesTree from "../ImportRulesTree";
@@ -39,6 +42,8 @@ import {
 } from "../ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { UNCategorized_FILTER } from "./sourceLabels";
+import { invalidateProfiles } from "../../queries/profiles";
+import { queryClient } from "../../queries/queryClient";
 
 type DetailTab = "docs" | "rules" | "naming";
 type DocsSubTab = "synced" | "notes";
@@ -57,11 +62,6 @@ type Props = {
   onSaveRules: () => void;
   runImportScan: (sourceId: number) => void;
 };
-
-function isEngineNotFoundError(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message : String(error);
-  return msg.includes("404");
-}
 
 export default function SourceDetailSheet({
   source,
@@ -94,7 +94,7 @@ export default function SourceDetailSheet({
   const [useDefaults, setUseDefaults] = useState(true);
   const [overrideDraft, setOverrideDraft] = useState<StlNamingProfile>(DEFAULT_STL_NAMING_PROFILE);
   const [savedUseDefaults, setSavedUseDefaults] = useState(true);
-  const [savedOverride, setSavedOverride] = useState<Partial<StlNamingProfile>>({});
+  const [savedOverride, setSavedOverride] = useState<StlNamingProfileOverride>({});
   const [namingLoadError, setNamingLoadError] = useState<string | null>(null);
   const [namingApiMissing, setNamingApiMissing] = useState(false);
   const [namingSaving, setNamingSaving] = useState(false);
@@ -126,11 +126,11 @@ export default function SourceDetailSheet({
       setSavedOverride(sourceNaming.override);
       setOverrideDraft(mergeStlNamingProfiles(global, sourceNaming.override));
     } catch (e) {
-      if (isEngineNotFoundError(e)) {
+      if (isSourceNamingNotFoundError(e)) {
         setNamingApiMissing(true);
-        setNamingLoadError("Unable to load naming overrides — this feature isn't available right now.");
+        setNamingLoadError("Unable to load naming overrides because this Source no longer exists.");
       } else {
-        setNamingLoadError(e instanceof Error ? e.message : String(e));
+        setNamingLoadError(sourceNamingErrorMessage(e));
       }
     }
   }, []);
@@ -222,25 +222,19 @@ export default function SourceDetailSheet({
     setNamingLoadError(null);
     setNamingNote(null);
     try {
-      const overridePayload = useDefaults
-        ? {}
-        : {
-            roles: overrideDraft.roles,
-            quantity: overrideDraft.quantity,
-            slug: overrideDraft.slug,
-            folder_rules: overrideDraft.folder_rules,
-            export_role_order: overrideDraft.export_role_order,
-          };
-      const saved = await saveSourceNaming(source.id, {
-        use_defaults: useDefaults,
-        override: overridePayload,
-      });
+      const saved = await saveSourceNaming(
+        source.id,
+        useDefaults
+          ? { use_defaults: true }
+          : { use_defaults: false, override: overrideDraft },
+      );
       setSavedUseDefaults(saved.use_defaults);
       setSavedOverride(saved.override);
       setOverrideDraft(mergeStlNamingProfiles(globalNaming, saved.override));
+      await invalidateProfiles(queryClient);
       setNamingNote("Naming rules saved.");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = sourceNamingErrorMessage(e);
       setNamingLoadError(msg);
       toast.error(msg);
     } finally {
@@ -487,7 +481,7 @@ export default function SourceDetailSheet({
               <div className="space-y-4 py-1">
                 <p className="text-sm text-muted-foreground">
                   Override how STL paths are parsed for this source. Changes apply on the next{" "}
-                  <strong>Update build</strong> for plans using this source.
+                  <strong>Rebuild the Plan</strong> after reviewing this source change.
                 </p>
                 {namingLoadError && <p className="text-sm text-destructive">{namingLoadError}</p>}
                 {namingNote && <p className="text-sm text-muted-foreground">{namingNote}</p>}

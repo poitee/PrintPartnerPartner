@@ -27,14 +27,6 @@ export function parseTextEmbeddedToolCalls(content: string): AssistantToolCallRe
     });
   };
 
-  // llama-style invented syntax: call ["recompute_build"] / `call ["recompute_build"]`
-  if (
-    /call\s*\[\s*["']recompute_build["']\s*\]/i.test(content) ||
-    /\brecompute_build\b/i.test(content)
-  ) {
-    push("start_recompute", {});
-  }
-
   const patterns = [
     // {"name":"get_source_docs","parameters":{...}}
     /\{\s*"name"\s*:\s*"([a-z0-9_]+)"\s*,\s*"parameters"\s*:\s*(\{[\s\S]*?\})\s*\}/gi,
@@ -62,11 +54,6 @@ export function parseTextEmbeddedToolCalls(content: string): AssistantToolCallRe
           input = parsed as Record<string, unknown>;
         }
       } catch {
-        continue;
-      }
-      // Map invented names onto real tools
-      if (name === "recompute_build" || name === "update_build") {
-        push("start_recompute", input);
         continue;
       }
       push(name, input);

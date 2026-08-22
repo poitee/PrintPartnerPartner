@@ -10,6 +10,7 @@
  * Reject clears the chosen file so the user can re-slice without dispatching.
  */
 
+import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Clock, Printer, XCircle } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -56,7 +57,9 @@ export default function PlateApprovalCard({
   onReject,
   className,
 }: Props) {
+  const [confirmUnlabeled, setConfirmUnlabeled] = useState(false);
   const hasWarnings = unmatchedNames.length > 0;
+  const canApprove = !hasWarnings || confirmUnlabeled;
   const plateLabel =
     plateTotal > 1 ? `Plate ${plateIndex} of ${plateTotal}` : `Plate ${plateIndex}`;
 
@@ -112,7 +115,7 @@ export default function PlateApprovalCard({
           <div className="rounded-md border border-warning/30 bg-warning/10 p-2">
             <p className="mb-1 flex items-center gap-1 text-[11.5px] font-medium text-warning">
               <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
-              Unmatched objects — will not appear on Progress
+              Unmatched objects — confirm before sending
             </p>
             <ul className="space-y-0.5 pl-4">
               {unmatchedNames.map((name) => (
@@ -121,6 +124,17 @@ export default function PlateApprovalCard({
                 </li>
               ))}
             </ul>
+            <label className="mt-2 flex items-start gap-2 text-[11.5px] text-foreground">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={confirmUnlabeled}
+                onChange={(event) => setConfirmUnlabeled(event.target.checked)}
+              />
+              <span>
+                These unlabeled names are ambiguous and must not complete Progress units.
+              </span>
+            </label>
           </div>
         )}
 
@@ -129,7 +143,7 @@ export default function PlateApprovalCard({
           <Button
             size="sm"
             variant="default"
-            disabled={busy}
+            disabled={busy || !canApprove}
             loading={busy}
             onClick={onApprove}
             className="gap-1.5"

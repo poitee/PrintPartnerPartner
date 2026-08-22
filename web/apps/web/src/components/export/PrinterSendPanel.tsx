@@ -25,7 +25,7 @@ import {
 } from "../../lib/proposeCheckoffFromObjects";
 import { printerHostTypeLabel, type LiveStripHostType } from "../../lib/printerLiveStrip";
 import { usePrinterStatusPollMs } from "../../hooks/usePrinterStatusPollMs";
-import { settingsPrintersRoute } from "../../lib/routes";
+import { printersSetupRoute } from "../../lib/routes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -37,6 +37,7 @@ import {
 } from "../ui/card";
 import ObjectProposalRows from "./ObjectProposalRows";
 import PlateApprovalCard from "./PlateApprovalCard";
+import { resolveStickyPrinterId } from "../../lib/resolveStickyPrinterId";
 import {
   sendPlanBindCopy,
 } from "../../lib/printerPlanBind";
@@ -51,6 +52,8 @@ type Props = {
   /** Active spine plan name for quiet “For [Plan].” bind line. */
   planName?: string | null;
   engineReady: boolean;
+  /** Immutable Plate revision this send should stay bound to. */
+  plateRevisionId?: number | null;
 };
 
 function readStickyId(key: string): string {
@@ -125,13 +128,6 @@ function statusBadgeVariant(
   }
 }
 
-/** Resolve sticky pick if still in list; otherwise first printer. Never jumps to Idle. */
-function resolveStickyPrinterId(printers: PrinterMachine[], sticky: string, prev: string): string {
-  if (prev && printers.some((p) => p.id === prev)) return prev;
-  if (sticky && printers.some((p) => p.id === sticky)) return sticky;
-  return printers[0]?.id ?? "";
-}
-
 const SEND_HOST_TYPES = new Set<LiveStripHostType>(["moonraker", "prusalink"]);
 
 /**
@@ -146,6 +142,7 @@ export default function PrinterSendPanel({
   profileId,
   planName = null,
   engineReady,
+  plateRevisionId = null,
 }: Props) {
   const printerUploadJob = useJobRunner("printer-upload");
   const pollMs = usePrinterStatusPollMs();
@@ -345,8 +342,8 @@ export default function PrinterSendPanel({
       return;
     }
     if (!selectedPrinterId) {
-      toast.error("No linked printer", {
-        description: "Add a Moonraker or PrusaLink host in Settings, then link it to a machine.",
+      toast.error("Choose a printer", {
+        description: "PrintPartner does not pick a printer for you.",
       });
       return;
     }
@@ -380,6 +377,7 @@ export default function PrinterSendPanel({
           profile_id: profileId,
           checkoff_units: units,
           unlabeled_names: unlabeled,
+          plate_revision_id: plateRevisionId ?? undefined,
         }),
       (snap) => {
         if (snap.status === "error") {
@@ -591,6 +589,7 @@ export default function PrinterSendPanel({
                   aria-label="Target printer"
                   onChange={(e) => onPrinterChange(e.target.value)}
                 >
+                  <option value="">Choose a printer</option>
                   {linkedPrinters.map((p) => (
                     <option key={p.id} value={p.id}>
                       {printerLabel(p)}
@@ -703,11 +702,11 @@ export default function PrinterSendPanel({
           ) : (
             <div className="flex flex-col gap-2">
               <p className="text-[12.5px] leading-relaxed text-muted-foreground">
-                No linked printers yet. Add a Klipper or Prusa printer in Settings to Send
+                No linked printers yet. Add a Klipper or Prusa printer to Send
                 and Start print.
               </p>
               <Button size="sm" variant="outline" asChild className="w-fit">
-                <Link to={settingsPrintersRoute()}>Add printers in Settings</Link>
+                <Link to={printersSetupRoute()}>Add printers</Link>
               </Button>
               {!hasBambuLinked ? (
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -745,6 +744,7 @@ export default function PrinterSendPanel({
               aria-label="Bambu printer for Connect handoff"
               onChange={(e) => onBambuPrinterChange(e.target.value)}
             >
+              <option value="">Choose a printer</option>
               {bambuPrinters.map((p) => {
                 const integrationId = p.integration_id?.trim() ?? "";
                 const label = statusLabel(hostStatusByIntegration[integrationId]);

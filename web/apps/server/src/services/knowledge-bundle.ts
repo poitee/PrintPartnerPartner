@@ -41,7 +41,7 @@ export function buildKnowledgeBundle(
   if (!source) throw new Error("Source not found");
   const notes = repo.listSourceNotes(sourceId).map((n) => {
     const profile =
-      n.profile_id != null ? repo.getProfile(n.profile_id) : null;
+      n.profile_id != null ? repo.getOwnedProfileIdentity(n.profile_id) : null;
     return {
       title: n.title,
       body_markdown: n.body_markdown,
@@ -139,7 +139,7 @@ export function importKnowledgeBundle(
   for (const note of bundle.notes) {
     let profileId: number | null = null;
     if (note.profile_name) {
-      const match = repo.listProfiles().find((p) => p.name === note.profile_name);
+      const match = repo.listProfileHeaders().find((p) => p.name === note.profile_name);
       profileId = match?.id ?? null;
     }
     repo.createSourceNote({

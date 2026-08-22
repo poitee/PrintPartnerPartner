@@ -32,3 +32,15 @@ Do Not Push/
 
 # Git worktrees (local isolation)
 .worktrees/
+
+# Internal planning docs — keep local or in a private archive, never ship on GitHub
+docs/superpowers/
+.superpowers/
+docs/assistant-research-brief.md
+docs/assistant-domain-ingest-schema.md
+docs/research/
+docs/integrations/PRINTER_UX.md
+docs/integrations/PRINTER_APIS.md
+DATABASE_OPTIMIZATION.md
+CONTEXT.md
+.audit/

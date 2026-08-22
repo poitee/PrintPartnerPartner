@@ -1,3 +1,6 @@
+import Database from "better-sqlite3";
+import { acceptPlanForTest, editAcceptedPartsForTest } from "./test/accept-plan.js";
+import { acceptedPlanBasis } from "./db/accepted-plan-progress.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -24,7 +27,7 @@ describe("Build persistence and STL preview", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("persists import rules, part patches, and serves mesh over HTTP", async () => {
+  it("persists import rules and Part patches without serving an unaccepted mesh", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-build-"));
     process.env.PRINT_PARTNER_DATA_DIR = dir;
     const config = loadConfig();
@@ -40,23 +43,36 @@ describe("Build persistence and STL preview", () => {
     repo.updateImportRules(source.id, ["parts/"]);
 
     const plan = repo.createProfile("PersistPlan", source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
     const parts = repo.listParts(plan.id).parts;
     expect(parts.length).toBe(1);
-    const partId = parts[0]!.id;
-
-    repo.bulkSetRoleFilament(plan.id, "primary", "pla-black", null);
-    repo.patchPart(partId, { included: false, quantity_override: 3 });
-
+    const priorPartId = parts[0]!.id;
+    const partId = editAcceptedPartsForTest(repo, plan.id, [{
+      projectionPartId: priorPartId,
+      included: false,
+      quantityOverride: 3,
+    }]).get(priorPartId)!;
     const reloaded = repo.listParts(plan.id).parts[0]!;
     expect(reloaded.included).toBe(false);
     expect(reloaded.quantity_effective).toBe(3);
 
-    repo.recomputeProfile(plan.id);
     const afterRecompute = repo.listParts(plan.id).parts[0]!;
     expect(afterRecompute.included).toBe(false);
     expect(afterRecompute.quantity_effective).toBe(3);
-    expect(afterRecompute.filament_color_id).toBe("pla-black");
+
+    const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
+    if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+    expect(
+      repo.assignAcceptedFilament({
+        expected: acceptedPlanBasis(accepted.snapshot),
+        target: { kind: "part", projectionPartId: partId },
+        assignment: { color: { kind: "catalog", colorId: "pla-black" }, spoolmanSpoolId: null },
+      }).kind,
+    ).toBe("updated");
+    expect(repo.getPartRow(partId)?.filamentColorId).toBe("pla-black");
+    const dirty = new Database(join(dir, "print-partner.db"));
+    dirty.prepare("UPDATE parts SET notes = 'dirty' WHERE id = ?").run(partId);
+    dirty.close();
 
     const partRow = repo.getPartRow(partId)!;
     expect(resolvePartStl(repo, partRow)).toContain("bracket.stl");
@@ -89,9 +105,8 @@ describe("Build persistence and STL preview", () => {
     expect(kitGetBody.kit?.selections?.head).toBe("sb");
 
     const meshRes = await app.inject({ method: "GET", url: `/parts/${partId}/mesh` });
-    expect(meshRes.statusCode).toBe(200);
-    expect(meshRes.headers["content-type"]).toContain("model/stl");
-    expect(meshRes.rawPayload.length).toBeGreaterThan(0);
+    expect(meshRes.statusCode).toBe(409);
+    expect(meshRes.json()).toEqual({ detail: "Accepted Plan requires compatibility repair" });
 
     const narrowRules = await app.inject({
       method: "PUT",
@@ -100,7 +115,7 @@ describe("Build persistence and STL preview", () => {
     });
     expect(narrowRules.statusCode).toBe(200);
 
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
 
     const partsRes = await app.inject({ method: "GET", url: `/plans/${plan.id}/parts` });
     expect(partsRes.statusCode).toBe(200);

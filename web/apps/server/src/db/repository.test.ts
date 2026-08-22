@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { getDb, SqliteDatabase, type DrizzleDb } from "./client.js";
 import { AppRepository } from "./repository.js";
 import * as schema from "./schema.js";
+import { eq } from "drizzle-orm";
 
 function withRepo(fn: (repo: AppRepository, db: DrizzleDb) => void) {
   const dir = mkdtempSync(join(tmpdir(), "pp-db-"));
@@ -49,34 +50,18 @@ describe("AppRepository", () => {
       expect(plan.name).toBe("My Plan");
       expect(plan.archived_at).toBeNull();
       expect(plan.last_used_at).toBeTruthy();
-      expect(plan.remaining_units).toBe(0);
-      expect(plan.total_units).toBe(0);
-      expect(repo.listProfiles()).toHaveLength(1);
-    });
-  });
-
-  it("rejects archive when remaining units are not zero", () => {
-    withRepo((repo, db) => {
-      const plan = repo.createProfile("In progress");
-      const part = insertIncludedPart(db, plan.id);
-      expect(repo.getProfile(plan.id)?.remaining_units).toBe(1);
-      expect(repo.getProfile(plan.id)?.total_units).toBe(1);
-      expect(() => repo.archiveProfile(plan.id)).toThrow(/remaining/i);
-      repo.patchPartProgress(part.id, 0, true);
-      expect(repo.getProfile(plan.id)?.remaining_units).toBe(0);
-      const archived = repo.archiveProfile(plan.id);
-      expect(archived.archived_at).toBeTruthy();
-      expect(repo.listProfiles().find((p) => p.id === plan.id)?.archived_at).toBeTruthy();
-      expect(() => repo.unarchiveProfile(plan.id)).toThrow(/unarchive/i);
+      expect(repo.listProfileHeaders()).toHaveLength(1);
     });
   });
 
   it("touches last_used_at and duplicates as a fresh non-archived spine plan", () => {
     withRepo((repo, db) => {
       const plan = repo.createProfile("Template");
-      const part = insertIncludedPart(db, plan.id);
-      repo.patchPartProgress(part.id, 0, true);
-      repo.archiveProfile(plan.id);
+      insertIncludedPart(db, plan.id);
+      db.update(schema.buildProfiles)
+        .set({ archivedAt: "2026-08-21T17:00:00.000Z" })
+        .where(eq(schema.buildProfiles.id, plan.id))
+        .run();
       const touched = repo.touchProfileLastUsed(plan.id);
       expect(touched.last_used_at).toBeTruthy();
 
@@ -84,6 +69,24 @@ describe("AppRepository", () => {
       expect(copy.archived_at).toBeNull();
       expect(copy.last_used_at).toBeTruthy();
       expect(copy.name).toBe("Next customer");
+    });
+  });
+
+  it("restores an archived Build in place without duplicating it", () => {
+    withRepo((repo, db) => {
+      const plan = repo.createProfile("Finished kit");
+      insertIncludedPart(db, plan.id);
+      db.update(schema.buildProfiles)
+        .set({ archivedAt: "2026-08-21T17:00:00.000Z" })
+        .where(eq(schema.buildProfiles.id, plan.id))
+        .run();
+
+      const restored = repo.unarchiveProfile(plan.id);
+      expect(restored.id).toBe(plan.id);
+      expect(restored.name).toBe("Finished kit");
+      expect(restored.archived_at).toBeNull();
+      expect(repo.listProfileHeaders()).toHaveLength(1);
+      expect(repo.unarchiveProfile(plan.id).archived_at).toBeNull();
     });
   });
 
@@ -97,7 +100,7 @@ describe("AppRepository", () => {
         "contact customer before printing",
       );
       expect(updated.special_request).toBe("contact customer before printing");
-      expect(repo.getProfile(plan.id)?.special_request).toBe(
+      expect(repo.getProfileHeader(plan.id)?.special_request).toBe(
         "contact customer before printing",
       );
 

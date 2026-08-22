@@ -49,7 +49,10 @@ export function parseCheckoffUnits(raw: unknown): PrinterCheckoffUnit[] {
     const key = `${partId}:${unitIndex}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ part_id: partId, unit_index: unitIndex });
+    const unit: PrinterCheckoffUnit = { part_id: partId, unit_index: unitIndex };
+    const objectName = typeof row.object_name === "string" ? row.object_name.trim() : "";
+    if (objectName) unit.object_name = objectName.slice(0, 200);
+    out.push(unit);
   }
   return out;
 }
@@ -141,76 +144,6 @@ export function decideCheckoffReconcile(
   }
 
   return { action: "noop" };
-}
-
-/**
- * Apply incomplete mapped units for selected parts (used by verify confirm).
- * Progress uses fill-from-left semantics: confirming index N marks 0..N.
- * Only applies when every incomplete slot ≤ max confirmed index is also
- * confirmed in this batch (or already printed) — never silently ticks
- * unconfirmed units.
- */
-export function applyCheckoffUnits(
-  repo: AppRepository,
-  profileId: number,
-  units: PrinterCheckoffUnit[],
-): number {
-  const partRows = repo.getProfilePartRows(profileId);
-  const byId = new Map(partRows.map((p) => [p.id, p]));
-  for (const part of partRows) {
-    repo.ensureProgressForPart(part);
-  }
-  const unitsById = repo.printUnitsByPartId(profileId);
-
-  const byPart = new Map<number, number[]>();
-  for (const u of units) {
-    const list = byPart.get(u.part_id) ?? [];
-    list.push(u.unit_index);
-    byPart.set(u.part_id, list);
-  }
-
-  let marked = 0;
-  for (const [partId, indices] of byPart) {
-    const part = byId.get(partId);
-    if (!part) continue;
-    const qty = Math.max(1, part.quantityEffective);
-    const flags = unitsById.get(partId) ?? Array.from({ length: qty }, () => false);
-    const confirmed = new Set(
-      indices.filter((i) => i >= 0 && i < qty && !flags[i]),
-    );
-    if (!confirmed.size) continue;
-    const maxIndex = Math.max(...confirmed);
-    let canApply = true;
-    for (let i = 0; i <= maxIndex; i += 1) {
-      if (!flags[i] && !confirmed.has(i)) {
-        canApply = false;
-        break;
-      }
-    }
-    if (!canApply) continue;
-    const before = flags.filter(Boolean).length;
-    try {
-      const after = repo.patchPartProgress(partId, maxIndex, true);
-      marked += Math.max(0, after.printed_count - before);
-    } catch {
-      /* skip bad part */
-    }
-  }
-  return marked;
-}
-
-/** True when confirming these indices would not mark any non-confirmed unit. */
-export function confirmsRespectProgressPrefix(
-  flags: boolean[],
-  confirmIndices: number[],
-): boolean {
-  const confirmed = new Set(confirmIndices.filter((i) => i >= 0 && i < flags.length));
-  if (!confirmed.size) return true;
-  const maxIndex = Math.max(...confirmed);
-  for (let i = 0; i <= maxIndex; i += 1) {
-    if (!flags[i] && !confirmed.has(i)) return false;
-  }
-  return true;
 }
 
 /**

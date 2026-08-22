@@ -1,8 +1,8 @@
 # Kit catalog — single source of truth for base printers and addon categories.
 # Used by Plan Kit Configurator and maintainer tooling.
 #
-# LDO-Extras: local-only — add as a folder source (repos.txt uses url "None").
-# See docs/examples/repos.txt and golden-ldo-voron-2.4-sb-tap.md.
+# LDO-Extras: local-only — add as a folder source.
+# See docs/examples/golden-ldo-voron-2.4-sb-tap.md.
 version: 1
 
 bases:
@@ -145,7 +145,7 @@ addon_categories:
     rule: pick_one
     replaces_slot: z_drives
     sources:
-      # Local folder only — not in repos.txt GitHub import.
+      # Local folder only — not a GitHub import.
       - name: LDO-Extras
         variant_id: ldo_z_drives
         compatible_bases: [ldo_voron_2.4, leviathan]

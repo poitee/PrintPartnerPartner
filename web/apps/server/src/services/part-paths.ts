@@ -48,6 +48,18 @@ export function buildProfileStlIndex(repo: AppRepository, profileId: number): Pr
   const fallbackRoots: string[] = [];
   const seen = new Set<string>();
 
+  const acceptedRoots = repo.getAcceptedProfileStlRoots(profileId);
+  if (acceptedRoots) {
+    for (const accepted of acceptedRoots) {
+      byLayer.set(accepted.sourceLayer, accepted.rootPath);
+      if (!seen.has(accepted.rootPath)) {
+        seen.add(accepted.rootPath);
+        fallbackRoots.push(accepted.rootPath);
+      }
+    }
+    return { byLayer, fallbackRoots };
+  }
+
   for (const layer of repo.getProfileLayers(profileId)) {
     if (!layer.project_id) continue;
     const proj = repo.getProjectRow(layer.project_id);

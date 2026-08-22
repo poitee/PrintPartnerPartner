@@ -43,11 +43,22 @@ describe("proposeCheckoffFromObjects", () => {
       parts,
     );
     expect(result.units).toEqual([
-      { part_id: 1, unit_index: 0 },
-      { part_id: 2, unit_index: 0 },
+      { part_id: 1, unit_index: 0, object_name: "bracket_01.stl" },
+      { part_id: 2, unit_index: 0, object_name: "spacer_01.stl" },
     ]);
     expect(result.unmatchedNames).toEqual(["unknown_part"]);
     expect(result.matches.every((m) => m.match === "export_name")).toBe(true);
+  });
+
+  it("persists the Object-name mapping used for each proposed unit", () => {
+    const parts = [
+      part({ id: 1, filename: "bracket.stl", quantity_effective: 2, print_units: [false, false] }),
+    ];
+    const result = proposeCheckoffFromObjects(["bracket_01.stl", "bracket_02"], parts);
+    expect(result.units).toEqual([
+      { part_id: 1, unit_index: 0, object_name: "bracket_01.stl" },
+      { part_id: 1, unit_index: 1, object_name: "bracket_02" },
+    ]);
   });
 
   it("applies 5+3 by stem when labels share a stem", () => {
@@ -82,6 +93,28 @@ describe("proposeCheckoffFromObjects", () => {
     expect(result.units.filter((u) => u.part_id === 10)).toHaveLength(5);
     expect(result.units.filter((u) => u.part_id === 11)).toHaveLength(3);
     expect(result.unmatchedNames).toEqual([]);
+  });
+
+  it("does not silently map a duplicate basename from two Sources", () => {
+    const parts = [
+      part({
+        id: 1,
+        filename: "kit-a/bracket.stl",
+        quantity_effective: 1,
+        print_units: [false],
+      }),
+      part({
+        id: 2,
+        filename: "kit-b/bracket.stl",
+        quantity_effective: 1,
+        print_units: [false],
+      }),
+    ];
+    const result = proposeCheckoffFromObjects(["bracket_01", "bracket.stl"], parts);
+    expect(result.units).toEqual([]);
+    expect(result.unmatchedNames).toEqual(["bracket_01", "bracket.stl"]);
+    const rows = buildObjectPreviewRows(result, parts);
+    expect(rows.every((row) => row.kind === "unlabeled")).toBe(true);
   });
 
   it("does not propose past already-printed units", () => {

@@ -131,7 +131,7 @@ export function removePendingProposedAction(
 
 /**
  * Attach additional pending Apply cards to the most recent assistant history turn
- * (e.g. post-Apply Sync → Update build workflow).
+ * (for example, a post-Apply Source sync).
  */
 export function appendPendingProposedActions(
   repo: AppRepository,
@@ -363,4 +363,3 @@ export function feedbackExcerptKey(excerpt: string | null | undefined): string {
   }
   return `ex${h}`;
 }
-

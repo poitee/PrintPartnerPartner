@@ -13,6 +13,8 @@ const previewRuntime = vi.hoisted(() => ({
       };
     };
   } | null,
+  fetchWithRetry: vi.fn(),
+  uploadPartThumbnail: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("three", async (importOriginal) => {
@@ -20,6 +22,10 @@ vi.mock("three", async (importOriginal) => {
 
   class TestWebGLRenderer {
     domElement = document.createElement("canvas");
+
+    constructor() {
+      this.domElement.toBlob = (callback) => callback(new Blob(["png"], { type: "image/png" }));
+    }
 
     setPixelRatio() {}
     setSize() {}
@@ -46,19 +52,37 @@ endfacet
 endsolid test`;
 
 vi.mock("../lib/fetchWithRetry", () => ({
-  fetchWithRetry: vi.fn(async () => new Response(STL, { status: 200 })),
+  fetchWithRetry: previewRuntime.fetchWithRetry,
 }));
 vi.mock("../api/engine", () => ({
+  acceptedPartMediaMetadata: (response: Response) => {
+    const match = /^"([0-9a-f]{64})"$/.exec(response.headers.get("ETag") ?? "");
+    if (!match?.[1]) throw new Error("Response is missing a strong accepted media ETag");
+    return {
+      basis: match[1],
+      renderHex: response.headers.get("X-Accepted-Render-Hex"),
+    };
+  },
   partMeshUrl: (partId: number) => `/parts/${partId}/mesh`,
   partPreviewUrl: (partId: number) => `/parts/${partId}/preview`,
   sourceStlMeshUrl: () => "/source/mesh",
   sourceStlPreviewUrl: () => "/source/preview",
-  uploadPartThumbnail: vi.fn().mockResolvedValue(undefined),
+  uploadPartThumbnail: previewRuntime.uploadPartThumbnail,
 }));
 
 describe("Preview3D accessibility", () => {
   beforeEach(() => {
     previewRuntime.camera = null;
+    previewRuntime.fetchWithRetry.mockReset().mockResolvedValue(
+      new Response(STL, {
+        status: 200,
+        headers: {
+          ETag: `"${"a".repeat(64)}"`,
+          "X-Accepted-Render-Hex": "#112233",
+        },
+      }),
+    );
+    previewRuntime.uploadPartThumbnail.mockClear();
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -140,5 +164,45 @@ describe("Preview3D accessibility", () => {
       .clone()
       .distanceTo({ x: 0, y: 0, z: 0 });
     expect(maximumDistance).toBeCloseTo(8, 5);
+  });
+
+  it("does not upload a render whose display tint differs from the accepted color", async () => {
+    render(<Preview3D partId={7} filename="gantry.stl" meshColor="#445566" />);
+
+    await screen.findByRole("application");
+    await new Promise((resolve) => setTimeout(resolve, 950));
+
+    expect(previewRuntime.uploadPartThumbnail).not.toHaveBeenCalled();
+  });
+
+  it("uploads a matching accepted-color render with its mesh basis", async () => {
+    render(<Preview3D partId={7} filename="gantry.stl" meshColor="#112233" />);
+
+    await screen.findByRole("application");
+    await new Promise((resolve) => setTimeout(resolve, 950));
+
+    expect(previewRuntime.uploadPartThumbnail).toHaveBeenCalledWith(
+      7,
+      expect.any(Blob),
+      "a".repeat(64),
+    );
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["weak", `W/"${"a".repeat(64)}"`],
+  ])("renders a Part mesh with a %s ETag without uploading", async (_label, etag) => {
+    previewRuntime.fetchWithRetry.mockResolvedValueOnce(
+      new Response(STL, {
+        status: 200,
+        headers: etag ? { ETag: etag, "X-Accepted-Render-Hex": "#112233" } : {},
+      }),
+    );
+
+    render(<Preview3D partId={7} filename="gantry.stl" meshColor="#112233" />);
+
+    await screen.findByRole("application");
+    await new Promise((resolve) => setTimeout(resolve, 950));
+    expect(previewRuntime.uploadPartThumbnail).not.toHaveBeenCalled();
   });
 });

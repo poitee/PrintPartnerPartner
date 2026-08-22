@@ -2,6 +2,14 @@ import type { FastifyInstance } from "fastify";
 import type { AppRepository } from "../db/repository.js";
 import type { AuthStore } from "../services/auth-store.js";
 import type { ServerConfig } from "../config.js";
+import {
+  AcceptedOperationalExportPublicError,
+  acceptedOperationalExportHttpStatus,
+  acceptedOperationalExportPublicError,
+  captureAcceptedOperationalExport,
+} from "../services/accepted-operational-export.js";
+import { buildKitBundleData } from "../services/export-kit.js";
+import { getLogger } from "../services/logger.js";
 
 export function registerShareRoutes(
   app: FastifyInstance,
@@ -20,19 +28,56 @@ export function registerShareRoutes(
     }
     const planId = Number((request.params as { id: string }).id);
     if (!Number.isFinite(planId)) return reply.status(400).send({ detail: "Invalid plan id" });
-    const profile = repo.getProfile(planId);
+    const profile = repo.getOwnedProfileIdentity(planId);
     if (!profile) return reply.status(404).send({ detail: "Plan not found" });
 
     const body = request.body as {
       recipient_email?: string | null;
       include_print_progress?: boolean;
     };
-    const bundle = repo.buildKitBundle(planId, body.include_print_progress ?? false);
+    const includePrintProgress = body.include_print_progress ?? false;
+    let bundleData: Record<string, unknown>;
+    let revisionId: number | undefined;
+    try {
+      const accepted = includePrintProgress
+        ? captureAcceptedOperationalExport({ repository: repo, profileId: planId })
+        : null;
+      if (accepted && accepted.kind !== "ready" && accepted.kind !== "empty") {
+        throw acceptedOperationalExportPublicError(accepted);
+      }
+      revisionId = accepted?.kind === "ready" ? accepted.export.basis.revisionId : undefined;
+      const recipe = repo.readEditableKitRecipe(planId);
+      bundleData = buildKitBundleData({
+        mode: accepted
+          ? {
+              kind: "accepted_progress",
+              recipe,
+              accepted: accepted.kind === "ready" ? accepted.export : null,
+            }
+          : { kind: "editable", recipe },
+        exportedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      const publicError = error instanceof AcceptedOperationalExportPublicError
+        ? error
+        : new AcceptedOperationalExportPublicError("unexpected");
+      if (!(error instanceof AcceptedOperationalExportPublicError)) {
+        getLogger().log("error", "Accepted operational share export failed unexpectedly", {
+          operation: "accepted_share_progress_export",
+          failure: "unexpected",
+          profileId: planId,
+          ...(revisionId == null ? {} : { revisionId }),
+        });
+      }
+      return reply
+        .status(acceptedOperationalExportHttpStatus(publicError))
+        .send({ detail: publicError.message });
+    }
     const share = authStore.createPlanShare({
       fromUserId: request.sessionUser.user_id,
       planId,
       planName: profile.name,
-      bundleJson: JSON.stringify(bundle.data),
+      bundleJson: JSON.stringify(bundleData),
       recipientEmail: body.recipient_email ?? null,
     });
     return {

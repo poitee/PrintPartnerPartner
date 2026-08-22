@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import AppLayout from "./AppLayout";
@@ -55,6 +55,7 @@ describe("application shell accessibility", () => {
   });
 
   afterEach(() => {
+    cleanup();
     document.documentElement.style.removeProperty("--app-sidebar-width");
     document.documentElement.style.removeProperty("--mobile-stage-height");
   });
@@ -80,5 +81,32 @@ describe("application shell accessibility", () => {
     expect(skipLink.getAttribute("href")).toBe("#main-content");
     expect(skipLink.classList.contains("skip-link")).toBe(true);
     expect(main.id).toBe("main-content");
+  });
+
+  it("uses dense spacing on Production and calm spacing on Plan", () => {
+    const { unmount } = render(
+      <MemoryRouter initialEntries={["/export"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="export" element={<h1>Production</h1>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("main").getAttribute("data-density")).toBe("dense");
+    unmount();
+
+    render(
+      <MemoryRouter initialEntries={["/plan"]}>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route path="plan" element={<h1>Plan</h1>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("main").getAttribute("data-density")).toBe("calm");
   });
 });

@@ -1,4 +1,5 @@
 import { safeOutboundFetch } from "../lib/outbound-url.js";
+import type { AcceptedProfileProgress } from "../db/repository.js";
 import { getLogger } from "./logger.js";
 
 export type DiscordNotifyEvent =
@@ -291,8 +292,17 @@ export type FarmDigestData = {
   platesOvernight: number;
   windowHours: number;
   printers: Array<{ name: string; state: string; active_job?: string | null }>;
-  activePlans: Array<{ plan_name: string; remaining_units: number }>;
+  activePlans: FarmDigestPlanCollection;
 };
+
+export type FarmDigestPlan = {
+  readonly plan_name: string;
+  readonly progress: AcceptedProfileProgress;
+};
+
+export type FarmDigestPlanCollection =
+  | { readonly kind: "available"; readonly plans: readonly FarmDigestPlan[] }
+  | { readonly kind: "unavailable" };
 
 function buildDigestDescription(d: FarmDigestData): string {
   const lines: string[] = [];
@@ -314,18 +324,39 @@ function buildDigestDescription(d: FarmDigestData): string {
     }
   }
 
-  if (d.activePlans.length > 0) {
+  if (d.activePlans.kind === "unavailable") {
     lines.push("");
     lines.push("**Plans:**");
-    for (const plan of d.activePlans.slice(0, 5)) {
-      lines.push(`• ${plan.plan_name}: **${plan.remaining_units}** units remaining`);
+    lines.push("Plan progress unavailable");
+  } else if (d.activePlans.plans.length > 0) {
+    lines.push("");
+    lines.push("**Plans:**");
+    for (const plan of d.activePlans.plans.slice(0, 5)) {
+      lines.push(`• ${plan.plan_name}: ${farmDigestProgressText(plan.progress)}`);
     }
-    if (d.activePlans.length > 5) {
-      lines.push(`_…and ${d.activePlans.length - 5} more_`);
+    if (d.activePlans.plans.length > 5) {
+      lines.push(`_…and ${d.activePlans.plans.length - 5} more_`);
     }
   }
 
   return lines.join("\n");
+}
+
+function farmDigestProgressText(
+  progress: AcceptedProfileProgress,
+): string {
+  switch (progress.kind) {
+    case "ready":
+      return progress.totalUnits === 0
+        ? "No required units"
+        : `**${progress.remainingUnits}** units remaining`;
+    case "empty":
+      return "Not applied";
+    case "unavailable":
+    case "integrity_failure":
+    case "concurrent_update":
+      return "Progress unavailable";
+  }
 }
 
 export async function sendFarmDigest(

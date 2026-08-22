@@ -5,6 +5,7 @@ import multipart from "@fastify/multipart";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import type { ServerConfig } from "./config.js";
+import { ignoredRedisUrlWarning } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { createSaasPorts } from "./adapters/saas/index.js";
 import type { AppPorts } from "./ports/index.js";
@@ -20,6 +21,9 @@ import { registerLoggingRoutes } from "./routes/logging.js";
 import { registerApiKeyManagementRoutes } from "./routes/api-key-management.js";
 import { registerMetricsRoutes } from "./routes/metrics.js";
 import { registerApiV1Plugin, registerOpenApi, registerOpenApiJsonRoutes } from "./routes/api-v1.js";
+import { registerApiV2PlanPlugin } from "./routes/api-v2.js";
+import { registerAcceptedPlateRoutes } from "./routes/accepted-plates.js";
+import { registerPlanDraftRoutes } from "./routes/plan-drafts.js";
 import { registerAuthRoutes, registerTenantMiddleware } from "./routes/auth.js";
 import {
   createAdminPreHandler,
@@ -146,6 +150,17 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
     setRequestTenantId(request.tenantId ?? "default");
   });
 
+  app.addHook("onSend", async (_request, reply, payload) => {
+    const contentType = String(reply.getHeader("content-type") ?? "");
+    if (
+      contentType.includes("application/json") &&
+      reply.getHeader("cache-control") == null
+    ) {
+      void reply.header("Cache-Control", "no-store");
+    }
+    return payload;
+  });
+
   if (config.staticDir && existsSync(config.staticDir)) {
     app.addHook("preHandler", async (request, reply) => {
       if (
@@ -187,7 +202,12 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
       authStore,
     };
 
-    await registerCoreRoutes(app, coreDeps);
+    await registerCoreRoutes(app, coreDeps, { planSummaryContract: "accepted" });
+    await registerPlanDraftRoutes(app, { repo: repository });
+    await registerAcceptedPlateRoutes(app, {
+      repo: repository,
+      reposDir: coreDeps.reposDir,
+    });
 
     // Start background source watcher
     const { startSourceWatcher } = await import("./services/source-watcher.js");
@@ -249,6 +269,12 @@ export async function buildApp(config: ServerConfig, ports: RuntimePorts) {
         await registerApiV1Plugin(v1, coreDeps, validateRequestApiKey);
       },
       { prefix: "/api/v1" },
+    );
+    await app.register(
+      async (v2) => {
+        await registerApiV2PlanPlugin(v2, coreDeps);
+      },
+      { prefix: "/api/v2" },
     );
 
     app.post(
@@ -352,6 +378,10 @@ export async function startServer(config: ServerConfig) {
 
   try {
     await app.listen({ host: config.host, port: config.port });
+    const redisWarning = ignoredRedisUrlWarning();
+    if (redisWarning) {
+      app.log.warn(redisWarning);
+    }
     return { app, ports };
   } catch (err) {
     await ports.db.close();

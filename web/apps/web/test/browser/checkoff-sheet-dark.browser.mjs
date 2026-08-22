@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import process from "node:process";
 import { URL } from "node:url";
 import { chromium } from "playwright-core";
 import { createServer } from "vite";
+import { browserExecutable } from "./browserExecutable.mjs";
 
-const executablePath =
-  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ?? "/usr/local/bin/google-chrome";
+const executablePath = browserExecutable();
 
 const server = await createServer({
   server: {

@@ -1,5 +1,9 @@
 /** Shared API types between web client and server. */
 
+export * from "./source-naming.js";
+export * from "./accepted-plates.js";
+export * from "./plan-drafts.js";
+
 export type DeployMode = "self-host" | "saas";
 
 /** Global preference controlling how timestamps (e.g. "Generated …", "Last synced …") are displayed. */
@@ -80,6 +84,7 @@ export function formatTimestamp(
 
 export type ApiError = {
   detail: string;
+  code?: string;
   title?: string;
   status?: number;
   type?: string;
@@ -112,16 +117,15 @@ export function validateDiscordWebhookUrl(url: string): string | null {
 
 export const JOB_KINDS = [
   "sync",
-  "recompute",
   "import-scan",
+  "extract-source-docs",
   "check-source-updates",
   "export-stl-pack",
   "export-checklist-html",
   "export-kit-bundle",
-  "export-3mf",
-  "pack-preview",
+  "export-accepted-plate-3mf",
+  "export-direct-3mf",
   "printer-upload",
-  "auto-slice",
 ] as const;
 
 export type JobKind = (typeof JOB_KINDS)[number];
@@ -204,6 +208,8 @@ export type PrinterHostStatus = {
 export type PrinterCheckoffUnit = {
   part_id: number;
   unit_index: number;
+  /** Sliced Object name that mapped to this Required unit. */
+  object_name?: string;
 };
 
 export type PrinterHostOutcome = "unknown" | "success" | "failed" | "cancelled";
@@ -279,6 +285,11 @@ export type PrinterCheckoffLink = {
   filename: string;
   remote_path?: string;
   upload_job_id?: string;
+  /**
+   * Immutable Plate revision this job was bound to. Later exports must not
+   * retarget an in-flight or historical Printer job.
+   */
+  plate_revision_id?: number;
   units: PrinterCheckoffUnit[];
   /** Parsed object names that did not map to Progress units (visible, not confirmable). */
   unlabeled_names?: string[];
@@ -327,15 +338,15 @@ export type PrinterSendQueueItem = {
   /** Absolute path under data/exports/printer-uploads/… */
   artifact_path: string;
   /**
-   * Preferred fleet printer. For `match: "compatible"`, bed size (and optional
-   * Progress filament) are taken from this machine; drain may reassign to
-   * another idle host with the same bed.
+   * Queued Printer. Drain and dispatch always send to this host. Same-bed
+   * twins may appear in suggestions, but a sliced file is never moved
+   * automatically.
    */
   printer_id: string;
   /**
    * `pinned` (default): wait for this printer only.
-   * `compatible`: pick any idle linked Moonraker/PrusaLink with the same bed;
-   * prefer loaded-filament overlap with tracked Progress units.
+   * `compatible`: retained for suggestion ranking against same-bed idle
+   * hosts. Dispatch still sends only to `printer_id`.
    */
   match?: PrinterSendQueueMatch;
   /** When true, wait for host Idle before dispatch (default). */
@@ -343,6 +354,8 @@ export type PrinterSendQueueItem = {
   start: boolean;
   profile_id?: number;
   checkoff_units?: PrinterCheckoffUnit[];
+  /** Immutable Plate revision this queued send prints. */
+  plate_revision_id?: number;
   state: PrinterSendQueueState;
   created_at: string;
   updated_at: string;
@@ -385,6 +398,17 @@ export type ApiV1Index = {
   health: string;
 };
 
+export type RuntimeReleaseIdentity = {
+  version: string;
+  runtime_version: string;
+  commit: string | null;
+  tag: string | null;
+  image_digest: string | null;
+  deployment_mode: DeployMode;
+  github_release_url: string | null;
+  build_date: string | null;
+};
+
 export type HealthResponse = {
   ok: boolean;
   version: string;
@@ -394,6 +418,7 @@ export type HealthResponse = {
   port?: number;
   api_version?: string;
   capabilities?: string[];
+  release?: RuntimeReleaseIdentity;
   db?: {
     connected: boolean;
     driver: string;
@@ -420,24 +445,98 @@ export type AppUpdateCheckResponse = {
   checked_at: string | null;
 };
 
+export type AcceptedProgressUnavailableReason =
+  | "compatibility_dirty"
+  | "uninitialized"
+  | "integrity"
+  | "concurrent_update";
+
+export type AcceptedProgressSummary =
+  | {
+      readonly kind: "ready";
+      readonly total_units: number;
+      readonly remaining_units: number;
+    }
+  | { readonly kind: "empty" }
+  | {
+      readonly kind: "unavailable";
+      readonly reason: AcceptedProgressUnavailableReason;
+    };
+
 export type ProfileSummary = {
-  id: number;
-  name: string;
-  order_number: string | null;
+  readonly id: number;
+  readonly name: string;
+  readonly order_number: string | null;
   /** Quiet operator note (e.g. contact customer before printing). */
-  special_request: string | null;
-  part_count: number;
-  /** Included print units still unmarked on Progress. */
-  remaining_units: number;
-  /** Included print units (quantity sum) for this plan. */
-  total_units: number;
-  /** True when plan config changed since the last successful recompute. */
-  build_stale: boolean;
+  readonly special_request: string | null;
+  readonly part_count: number;
+  readonly accepted_progress: AcceptedProgressSummary;
+  /** Compatibility flag for a definite stale Plan; use `freshness` for reasons. */
+  readonly build_stale: boolean;
+  /** Accepted Source/naming identity compared with the current Plan inputs. */
+  readonly freshness: PlanFreshness;
   /** ISO timestamp when archived as a template; null if active. */
-  archived_at: string | null;
+  readonly archived_at: string | null;
   /** ISO timestamp of last spine selection. */
-  last_used_at: string | null;
+  readonly last_used_at: string | null;
 };
+
+export type LegacyProfileSummaryV1 = Omit<ProfileSummary, "accepted_progress"> & {
+  readonly remaining_units: number;
+  readonly total_units: number;
+};
+
+export type PlanStaleReason =
+  | {
+      readonly kind: "source_revision_changed";
+      readonly source_id: number;
+      readonly source_name: string;
+      readonly accepted_revision_id: number;
+      readonly current_revision_id: number;
+    }
+  | {
+      readonly kind: "source_revision_unavailable";
+      readonly source_id: number;
+      readonly source_name: string;
+      readonly accepted_revision_id: number;
+    }
+  | {
+      readonly kind: "naming_rules_changed";
+      readonly source_id: number;
+      readonly source_name: string;
+      readonly accepted_digest: string;
+      readonly current_digest: string;
+    }
+  | { readonly kind: "plan_inputs_invalid" }
+  | { readonly kind: "plan_configuration_changed" };
+
+export type PlanUntrackedReason =
+  | { readonly kind: "no_accepted_inputs" }
+  | {
+      readonly kind: "source_revision_untracked";
+      readonly source_id: number;
+      readonly source_name: string;
+    };
+
+export type PlanFreshness =
+  | {
+      readonly status: "current";
+      readonly accepted_input_set_id: number;
+      readonly accepted_at: string;
+    }
+  | {
+      readonly status: "stale";
+      readonly accepted_input_set_id: number;
+      readonly accepted_at: string;
+      readonly reasons: readonly [PlanStaleReason, ...PlanStaleReason[]];
+      readonly untracked_sources: readonly PlanUntrackedReason[];
+    }
+  | {
+      readonly status: "untracked";
+      readonly accepted_input_set_id: number | null;
+      readonly accepted_at: string | null;
+      readonly reasons: readonly [PlanUntrackedReason, ...PlanUntrackedReason[]];
+    };
 
 export type SourceSummary = {
   id: number;
@@ -453,6 +552,7 @@ export type SourceSummary = {
   local_path: string | null;
   last_synced_at: string | null;
   last_commit_sha: string | null;
+  current_source_revision_id: number | null;
   docs_url: string | null;
   manifest_community_slug: string | null;
   metadata: Record<string, unknown> | null;
@@ -461,6 +561,35 @@ export type SourceSummary = {
   update_checked_at?: string | null;
   /** Count of synced markdown/PDF docs indexed for this source. */
   doc_count?: number;
+};
+
+export type SourceRevision = {
+  readonly id: number;
+  readonly source_id: number;
+  readonly upstream_revision_key: string;
+  readonly manifest_digest: string;
+  readonly snapshot_locator: string;
+  readonly synced_at: string;
+  readonly completeness: "complete";
+};
+
+export type PlanRevisionInput = {
+  readonly source_id: number;
+  readonly source_layer: string;
+  readonly layer_order: number;
+  readonly tracking_kind: "revision" | "untracked";
+  readonly source_revision_id: number | null;
+  readonly manifest_digest: string | null;
+  readonly effective_naming_digest: string;
+};
+
+export type PlanRevisionInputSet = {
+  readonly id: number;
+  readonly plan_id: number;
+  readonly recorded_at: string;
+  readonly published_at: string;
+  readonly format_version: 1 | 2;
+  readonly inputs: readonly PlanRevisionInput[];
 };
 
 export type PartRow = {
@@ -523,7 +652,6 @@ export type SearchProviderId =
   | "brave"
   | "exa"
   | "duckduckgo"
-  | "searxng"
   | "none";
 
 export type SearchSetupOption = {

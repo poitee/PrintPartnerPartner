@@ -35,6 +35,8 @@ export type CreatePrinterCheckoffLinkInput = {
   filename: string;
   remote_path?: string;
   upload_job_id?: string;
+  /** Immutable Plate revision this job prints. Omitted for legacy / plan-only links. */
+  plate_revision_id?: number;
   units: PrinterCheckoffUnit[];
   /** Object names that did not map to units — preview only, never confirmable. */
   unlabeled_names?: string[];
@@ -42,17 +44,23 @@ export type CreatePrinterCheckoffLinkInput = {
   started?: boolean;
 };
 
-function isUnit(x: unknown): x is PrinterCheckoffUnit {
-  if (!x || typeof x !== "object") return false;
+function optionalPositiveInteger(value: unknown): number | undefined {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) return undefined;
+  return n;
+}
+
+function normalizeUnit(x: unknown): PrinterCheckoffUnit | null {
+  if (!x || typeof x !== "object") return null;
   const row = x as Record<string, unknown>;
-  return (
-    typeof row.part_id === "number" &&
-    Number.isInteger(row.part_id) &&
-    row.part_id > 0 &&
-    typeof row.unit_index === "number" &&
-    Number.isInteger(row.unit_index) &&
-    row.unit_index >= 0
-  );
+  const partId = Number(row.part_id);
+  const unitIndex = Number(row.unit_index);
+  if (!Number.isInteger(partId) || partId <= 0) return null;
+  if (!Number.isInteger(unitIndex) || unitIndex < 0) return null;
+  const unit: PrinterCheckoffUnit = { part_id: partId, unit_index: unitIndex };
+  const objectName = typeof row.object_name === "string" ? row.object_name.trim() : "";
+  if (objectName) unit.object_name = objectName.slice(0, 200);
+  return unit;
 }
 
 function parseResolved(raw: unknown): PrintVerifyDecision[] | undefined {
@@ -97,7 +105,12 @@ function parseLink(raw: unknown): PrinterCheckoffLink | null {
     return null;
   }
   const state = normalizeState(rawState as PrinterCheckoffLinkState);
-  const units = Array.isArray(row.units) ? row.units.filter(isUnit) : [];
+  const units = Array.isArray(row.units)
+    ? row.units.flatMap((item) => {
+        const unit = normalizeUnit(item);
+        return unit ? [unit] : [];
+      })
+    : [];
   const unlabeled_names = Array.isArray(row.unlabeled_names)
     ? row.unlabeled_names
         .filter((n): n is string => typeof n === "string" && n.trim().length > 0)
@@ -143,6 +156,7 @@ function parseLink(raw: unknown): PrinterCheckoffLink | null {
       typeof row.upload_job_id === "string" && row.upload_job_id.trim()
         ? row.upload_job_id.trim()
         : undefined,
+    plate_revision_id: optionalPositiveInteger(row.plate_revision_id),
     units,
     unlabeled_names: unlabeled_names?.length ? unlabeled_names : undefined,
     resolved_units: parseResolved(row.resolved_units),
@@ -208,7 +222,10 @@ export function createPrinterCheckoffLink(
   repo: AppRepository,
   input: CreatePrinterCheckoffLinkInput,
 ): PrinterCheckoffLink | null {
-  const units = input.units.filter(isUnit);
+  const units = input.units.flatMap((item) => {
+    const unit = normalizeUnit(item);
+    return unit ? [unit] : [];
+  });
   const unlabeled_names = input.unlabeled_names
     ?.filter((n) => typeof n === "string" && n.trim())
     .map((n) => n.trim().slice(0, 200))
@@ -231,6 +248,7 @@ export function createPrinterCheckoffLink(
       filename,
       remote_path: input.remote_path?.trim() || undefined,
       upload_job_id: input.upload_job_id?.trim() || undefined,
+      plate_revision_id: optionalPositiveInteger(input.plate_revision_id),
       units,
       unlabeled_names,
       state: "watching",
@@ -240,6 +258,7 @@ export function createPrinterCheckoffLink(
       created_at: new Date().toISOString(),
     };
     if (!link.unlabeled_names?.length) delete link.unlabeled_names;
+    if (link.plate_revision_id == null) delete link.plate_revision_id;
     const all = loadPrinterCheckoffLinks(repo);
     all.push(link);
     savePrinterCheckoffLinks(repo, all);

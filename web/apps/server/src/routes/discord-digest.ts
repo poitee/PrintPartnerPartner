@@ -12,7 +12,11 @@ import type { FastifyInstance } from "fastify";
 import type { AppRepository } from "../db/repository.js";
 import type { IntegrationPort } from "../integrations/store.js";
 import { loadFleet } from "../services/printer-fleet.js";
-import { sendFarmDigest, type FarmDigestData } from "../services/discord-notify.js";
+import {
+  sendFarmDigest,
+  type FarmDigestData,
+  type FarmDigestPlanCollection,
+} from "../services/discord-notify.js";
 import { getLogger } from "../services/logger.js";
 
 type DigestDeps = {
@@ -74,11 +78,23 @@ export async function registerDiscordDigestRoute(
       }),
     );
 
-    // Collect active plan summaries
-    const activePlans = deps.repo
-      .listProfiles()
-      .filter((p) => !p.archived_at)
-      .map((p) => ({ plan_name: p.name, remaining_units: p.remaining_units }));
+    let activePlans: FarmDigestPlanCollection;
+    try {
+      activePlans = {
+        kind: "available",
+        plans: deps.repo
+          .listAcceptedProfileSummaries()
+          .filter(({ header }) => !header.archived_at)
+          .map(({ header, progress }) => ({ plan_name: header.name, progress })),
+      };
+    } catch {
+      activePlans = { kind: "unavailable" };
+      logger.log(
+        "error",
+        "[discord-digest] Plan progress collection unavailable",
+        { failure: "unexpected", operation: "discord_digest_plan_progress" },
+      );
+    }
 
     const digestData: FarmDigestData = {
       platesOvernight,

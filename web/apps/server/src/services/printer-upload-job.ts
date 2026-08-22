@@ -55,6 +55,8 @@ export type PrinterUploadJobInput = {
   /** Object names that did not map — Progress preview only. */
   unlabeled_names?: string[];
   upload_job_id?: string;
+  /** Immutable Plate revision this send prints. */
+  plate_revision_id?: number;
 };
 
 export type PrinterUploadJobEmit = (patch: {
@@ -163,6 +165,7 @@ async function runPrinterUploadJobInner(
       filename,
       remote_path: result.remote_path ?? filename,
       upload_job_id: input.upload_job_id,
+      plate_revision_id: input.plate_revision_id,
       units: checkoffUnits,
       unlabeled_names: unlabeledNames.length ? unlabeledNames : undefined,
       started: Boolean(result.started),

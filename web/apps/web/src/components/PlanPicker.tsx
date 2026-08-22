@@ -13,6 +13,7 @@ import {
   useDeleteProfileMutation,
   useDuplicateProfileMutation,
   useTouchProfileLastUsedMutation,
+  useUnarchiveProfileMutation,
   useUpdateProfileMutation,
 } from "../queries/profiles";
 import { Button } from "./ui/button";
@@ -58,6 +59,7 @@ export default function PlanPicker({
   const deleteMutation = useDeleteProfileMutation();
   const duplicateMutation = useDuplicateProfileMutation();
   const archiveMutation = useArchiveProfileMutation();
+  const unarchiveMutation = useUnarchiveProfileMutation();
   const touchMutation = useTouchProfileLastUsedMutation();
   const {
     registerOpenCreate,
@@ -65,6 +67,7 @@ export default function PlanPicker({
     registerOpenDuplicate,
     registerOpenDelete,
     registerOpenArchive,
+    registerOpenRestore,
   } = usePlanActions();
 
   const [open, setOpen] = useState(false);
@@ -93,7 +96,8 @@ export default function PlanPicker({
     updateMutation.isPending ||
     deleteMutation.isPending ||
     duplicateMutation.isPending ||
-    archiveMutation.isPending;
+    archiveMutation.isPending ||
+    unarchiveMutation.isPending;
 
   const groups = useMemo(
     () => partitionPlanPickerGroups(profiles, selectedProfileId, { search }),
@@ -155,6 +159,23 @@ export default function PlanPicker({
     return () => registerOpenArchive(null);
   }, [registerOpenArchive, selectedProfileId]);
 
+  useEffect(() => {
+    registerOpenRestore((planId) => {
+      const id = planId ?? selectedProfileId;
+      if (id == null) return;
+      void (async () => {
+        const plan = profiles.find((p) => p.id === id);
+        try {
+          await unarchiveMutation.mutateAsync(id);
+          toast.success(`Restored “${plan?.name ?? "Build"}”`);
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : String(e));
+        }
+      })();
+    });
+    return () => registerOpenRestore(null);
+  }, [registerOpenRestore, selectedProfileId, profiles, unarchiveMutation]);
+
   const closeActionDialog = () => {
     setActionTargetId(null);
   };
@@ -183,7 +204,7 @@ export default function PlanPicker({
       return;
     }
     activatePlan(targetId);
-    toast.success(`Created plan “${targetName}”`);
+    toast.success(`Created Build “${targetName}”`);
   };
 
   const onCreate = async () => {
@@ -217,7 +238,7 @@ export default function PlanPicker({
       await updateMutation.mutateAsync({ id: actionTargetId, name });
       setRenameOpen(false);
       closeActionDialog();
-      toast.success(`Renamed plan to “${name}”`);
+      toast.success(`Renamed Build to “${name}”`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -248,7 +269,7 @@ export default function PlanPicker({
           activatePlan(copy.id);
         }
       }
-      toast.success(`Duplicated plan “${name}”`);
+      toast.success(`Duplicated Build “${name}”`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -261,7 +282,7 @@ export default function PlanPicker({
       await deleteMutation.mutateAsync(actionTargetId);
       setDeleteOpen(false);
       closeActionDialog();
-      toast.success(`Deleted plan “${deletedName}”`);
+      toast.success(`Deleted Build “${deletedName}”`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     }
@@ -284,8 +305,8 @@ export default function PlanPicker({
     selected != null
       ? `${selected.name} (${selected.part_count} parts)`
       : profiles.length === 0
-        ? "Create your first plan"
-        : "Select plan";
+        ? "New Build"
+        : "Select Build";
 
   const renderPlanItem = (
     p: { id: number; name: string; archived_at: string | null },
@@ -325,7 +346,7 @@ export default function PlanPicker({
             className,
           )}
           onClick={() => setCreateOpen(true)}
-          aria-label="Create plan"
+          aria-label="New Build"
         >
           {compact ? (
             <Plus className="h-4 w-4" />
@@ -350,7 +371,7 @@ export default function PlanPicker({
               size={compact ? "icon" : "default"}
               role="combobox"
               aria-expanded={open}
-              aria-label="Select plan"
+              aria-label="Select Build"
               disabled={disabled || loading || busy}
               className={cn(
                 compact
@@ -394,12 +415,12 @@ export default function PlanPicker({
           >
             <Command shouldFilter={false}>
               <CommandInput
-                placeholder="Search plans…"
+                placeholder="Search builds…"
                 value={search}
                 onValueChange={setSearch}
               />
               <CommandList>
-                <CommandEmpty>No plans found.</CommandEmpty>
+                <CommandEmpty>No builds found.</CommandEmpty>
                 {groups.active.length > 0 ? (
                   <CommandGroup heading="Active">
                     {groups.active.map((p) =>
@@ -426,10 +447,10 @@ export default function PlanPicker({
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Create plan</DialogTitle>
+            <DialogTitle>New Build</DialogTitle>
           </DialogHeader>
           <div className="space-y-1">
-            <Label htmlFor="plan-create-name">Plan name</Label>
+            <Label htmlFor="plan-create-name">Build name</Label>
             <Input
               id="plan-create-name"
               value={newName}
@@ -460,7 +481,7 @@ export default function PlanPicker({
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Rename plan</DialogTitle>
+            <DialogTitle>Rename Build</DialogTitle>
           </DialogHeader>
           <div className="space-y-1">
             <Label htmlFor="plan-rename-name">Name</Label>
@@ -500,7 +521,7 @@ export default function PlanPicker({
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Duplicate plan</DialogTitle>
+            <DialogTitle>Duplicate Build</DialogTitle>
           </DialogHeader>
           <div className="space-y-1">
             <Label htmlFor="plan-dup-name">Name</Label>
@@ -553,7 +574,7 @@ export default function PlanPicker({
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete plan?</DialogTitle>
+            <DialogTitle>Delete Build?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             Delete “{actionTarget?.name}” and all its parts, layers, and print
@@ -589,11 +610,12 @@ export default function PlanPicker({
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Archive plan?</DialogTitle>
+            <DialogTitle>Archive Build?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Archive “{actionTarget?.name}”? It stays in the picker as a
-            template.
+            Archive “{actionTarget?.name}”? It leaves Active and stays listed
+            under Archived. Restore it to keep working on the same Plan,
+            Checkoff, and Production history.
           </p>
           <div className="flex justify-end gap-2">
             <Button
@@ -618,7 +640,7 @@ export default function PlanPicker({
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Switch to new plan?</DialogTitle>
+            <DialogTitle>Switch to this Build?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             {switchPrompt && selected
@@ -635,7 +657,7 @@ export default function PlanPicker({
                 setSwitchPrompt(null);
               }}
             >
-              Switch plan
+              Switch Build
             </Button>
           </div>
         </DialogContent>

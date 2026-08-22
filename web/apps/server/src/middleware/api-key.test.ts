@@ -18,7 +18,55 @@ async function makeApp(dir: string) {
   return { app, ports };
 }
 
-describe("/api/v1 API key authentication", () => {
+describe("versioned API key authentication", () => {
+  it("protects v2 Plan routes while exempting only the v2 index and OpenAPI alias", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pp-api-key-v2-"));
+    const { app, ports } = await makeApp(dir);
+
+    try {
+      const denied = await app.inject({
+        method: "GET",
+        url: "/api/v2/plans",
+        remoteAddress: "203.0.113.10",
+      });
+      expect(denied.statusCode).toBe(401);
+
+      const index = await app.inject({
+        method: "GET",
+        url: "/api/v2",
+        remoteAddress: "203.0.113.10",
+      });
+      expect(index.statusCode).toBe(200);
+      expect(index.json()).toEqual({
+        version: "2",
+        scope: "plans",
+        plans: "/api/v2/plans",
+        openapi: "/api/v2/openapi.json",
+      });
+
+      const openapi = await app.inject({
+        method: "GET",
+        url: "/api/v2/openapi.json",
+        remoteAddress: "203.0.113.10",
+      });
+      expect(openapi.statusCode).toBe(200);
+      expect(openapi.json().paths).toHaveProperty("/api/v2/plans");
+      expect(openapi.json().paths).not.toHaveProperty("/api/v2/sources");
+
+      const accepted = await app.inject({
+        method: "GET",
+        url: "/api/v2/plans",
+        remoteAddress: "203.0.113.10",
+        headers: { authorization: "Bearer bootstrap-api-key" },
+      });
+      expect(accepted.statusCode).toBe(200);
+    } finally {
+      await app.close();
+      ports.db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not exempt dotted API paths from authentication", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pp-api-key-dotted-"));
     const { app, ports } = await makeApp(dir);

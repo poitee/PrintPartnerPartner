@@ -7,8 +7,7 @@ import { registerImportRoutes } from "./imports.js";
 import { registerLegalRoutes } from "./legal.js";
 import { registerManifestRoutes } from "./manifest.js";
 import { registerPartRoutes } from "./parts.js";
-import { registerPlanRoutes } from "./plans.js";
-import { registerPrintPlanRoutes } from "./print-plan.js";
+import { registerPlanRoutes, type PlanSummaryContract } from "./plans.js";
 import { registerPrinterRoutes } from "./printers.js";
 import { registerSlicerInstanceRoutes } from "./slicer-instances.js";
 import { registerSlicerHandoffRoutes } from "./slicer-handoff.js";
@@ -51,6 +50,7 @@ export type CoreRouteOptions = {
   /** v1-only routes: integrations, webhooks, artifacts, job list */
   apiV1Extensions?: boolean;
   authStore?: AuthStore | null;
+  planSummaryContract?: PlanSummaryContract;
 };
 
 export async function registerCoreRoutes(
@@ -71,9 +71,14 @@ export async function registerCoreRoutes(
   await registerPlanRoutes(app, {
     repo: deps.repo,
     dataDir: deps.dataDir,
+    reposDir: deps.reposDir,
+    thumbsDir: deps.thumbsDir,
+  }, { summaryContract: options.planSummaryContract });
+  await registerPartRoutes(app, {
+    repo: deps.repo,
+    reposDir: deps.reposDir,
     thumbsDir: deps.thumbsDir,
   });
-  await registerPartRoutes(app, { repo: deps.repo, thumbsDir: deps.thumbsDir });
   await registerExportRoutes(app, { dataDir: deps.dataDir });
   await registerImportRoutes(app, { repo: deps.repo });
   await registerSettingsRoutes(app, { repo: deps.repo, dataDir: deps.dataDir, config: deps.config });
@@ -91,9 +96,10 @@ export async function registerCoreRoutes(
     repo: deps.repo,
     config: deps.config,
     exportsDir: join(deps.dataDir, "exports"),
+    dataDir: deps.dataDir,
+    reposDir: deps.reposDir,
   });
   await registerProfileLibraryRoutes(app, { repo: deps.repo });
-  await registerPrintPlanRoutes(app, { repo: deps.repo });
   await registerManifestRoutes(app, { repo: deps.repo });
 
   const authStore = options.authStore ?? deps.authStore;
@@ -101,7 +107,6 @@ export async function registerCoreRoutes(
     registerShareRoutes(app, { repo: deps.repo, authStore, config: deps.config });
   }
 
-  // SPA-facing printer host routes (flat, not behind /api/v1 API-key gate).
   const integrations = createIntegrationPort({
     repo: deps.repo,
     getAdapter: getIntegrationAdapter,

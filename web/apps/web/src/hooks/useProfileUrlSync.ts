@@ -1,16 +1,17 @@
 import { useEffect, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useProfileSelection } from "../context/ProfileContext";
 import { shouldBlockUrlProfileSync } from "./profileSelection";
 import {
   parseProfileParam,
   profileIdFromUrl,
-  searchParamsWithProfile,
+  searchAfterProfileStamp,
 } from "./profileUrlSync";
 
 /** Bidirectional sync between selected plan and ?profile= URL param. */
 export function useProfileUrlSync() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
   const {
     profiles,
     selectedProfileId,
@@ -19,10 +20,8 @@ export function useProfileUrlSync() {
     clearPendingSelection,
   } = useProfileSelection();
 
-  // Latest params, read inside the state -> URL effect without making it a dep
-  // (which would fight the URL -> state sync).
-  const searchParamsRef = useRef(searchParams);
-  searchParamsRef.current = searchParams;
+  const locationRef = useRef(location);
+  locationRef.current = location;
 
   const selectedRef = useRef(selectedProfileId);
   selectedRef.current = selectedProfileId;
@@ -32,7 +31,7 @@ export function useProfileUrlSync() {
 
   // URL -> state when the query or plan list changes (not when selection changes).
   useEffect(() => {
-    const urlId = parseProfileParam(searchParams.get("profile"));
+    const urlId = parseProfileParam(new URLSearchParams(location.search).get("profile"));
     if (
       shouldBlockUrlProfileSync(urlId, pendingRef.current, selectedRef.current)
     ) {
@@ -50,21 +49,28 @@ export function useProfileUrlSync() {
       setSelectedProfileId(nextId, { fromUrl: true });
     }
     // selectedProfileId intentionally omitted — including it fights state -> URL sync.
-  }, [searchParams, profiles, setSelectedProfileId, clearPendingSelection]);
+  }, [location.search, profiles, setSelectedProfileId, clearPendingSelection]);
 
-  // State -> URL. Only navigate when the param actually changes; calling
-  // setSearchParams on a no-op still replaces history and drops location.state
-  // (e.g. the kit-import payload passed to the Build page).
+  // State -> URL. Read the live location at effect time so a stale /builds
+  // render cannot replace New Build's navigation to Sources.
   useEffect(() => {
-    const next = searchParamsWithProfile(searchParamsRef.current, selectedProfileId);
-    if (next) {
-      setSearchParams(next, { replace: true });
+    const live = locationRef.current;
+    const search = searchAfterProfileStamp(
+      live.pathname,
+      live.search,
+      selectedProfileId,
+    );
+    if (search !== undefined) {
+      navigate({ pathname: live.pathname, search }, { replace: true });
     }
+    const params = new URLSearchParams(
+      live.search.startsWith("?") ? live.search.slice(1) : live.search,
+    );
     if (
       selectedProfileId != null &&
-      searchParamsRef.current.get("profile") === String(selectedProfileId)
+      params.get("profile") === String(selectedProfileId)
     ) {
       clearPendingSelection(selectedProfileId);
     }
-  }, [selectedProfileId, setSearchParams, clearPendingSelection]);
+  }, [selectedProfileId, location.pathname, navigate, clearPendingSelection]);
 }

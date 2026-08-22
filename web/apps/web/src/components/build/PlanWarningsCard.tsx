@@ -22,7 +22,7 @@ export default function PlanWarningsCard({ warnings, className }: Props) {
           aria-hidden
         />
         <span className="text-[12.5px] font-semibold text-amber-950 dark:text-amber-100">
-          Update build
+          Rebuild plan
         </span>
       </div>
       <ul className="space-y-1.5">

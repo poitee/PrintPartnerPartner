@@ -20,13 +20,6 @@ import {
 import { tenantExportDirectory } from "../lib/secure-path.js";
 import { registerExportRoutes } from "./exports.js";
 
-/**
- * GET /exports/* serves the files export jobs produce. Auto-slice writes a
- * plate thumbnail (gcode/thumbnails/plate_NN.png) that the UI renders with an
- * <img src>, so a PNG must come back inline with image/png — an
- * octet-stream attachment would download instead of render.
- */
-
 let cleanup: Array<() => void> = [];
 
 afterEach(() => {
@@ -134,30 +127,36 @@ describe("GET /exports/*", () => {
     });
     const tenantA = join(
       tenantExportDirectory(join(dir, "exports"), "tenant-a"),
-      "same",
+      "accepted-plates",
+      "profile-1",
+      "revision-2",
+      "plates",
     );
     const tenantB = join(
       tenantExportDirectory(join(dir, "exports"), "tenant-b"),
-      "same",
+      "accepted-plates",
+      "profile-1",
+      "revision-2",
+      "plates",
     );
     mkdirSync(tenantA, { recursive: true });
     mkdirSync(tenantB, { recursive: true });
-    writeFileSync(join(tenantA, "plate.gcode"), "TENANT-A\n");
-    writeFileSync(join(tenantB, "plate.gcode"), "TENANT-B\n");
+    writeFileSync(join(tenantA, "0001.3mf"), "TENANT-A\n");
+    writeFileSync(join(tenantB, "0001.3mf"), "TENANT-B\n");
 
     const a = await app.inject({
       method: "GET",
-      url: "/exports/same/plate.gcode",
+      url: "/exports/accepted-plates/profile-1/revision-2/plates/0001.3mf",
       headers: { "x-test-tenant": "tenant-a" },
     });
     const b = await app.inject({
       method: "GET",
-      url: "/exports/same/plate.gcode",
+      url: "/exports/accepted-plates/profile-1/revision-2/plates/0001.3mf",
       headers: { "x-test-tenant": "tenant-b" },
     });
     const crossTenant = await app.inject({
       method: "GET",
-      url: "/exports/tenant-tenant-a/same/plate.gcode",
+      url: "/exports/tenant-tenant-a/accepted-plates/profile-1/revision-2/plates/0001.3mf",
       headers: { "x-test-tenant": "tenant-b" },
     });
 
@@ -168,21 +167,37 @@ describe("GET /exports/*", () => {
     expect(crossTenant.statusCode).toBe(404);
   });
 
-  it("serves an auto-slice plate thumbnail inline as image/png", async () => {
+  it("serves a PNG export inline as image/png", async () => {
     const { app, dir } = await makeApp();
-    const thumbDir = join(dir, "exports", "tenant-default", "my_plan", "gcode", "thumbnails");
+    const thumbDir = join(dir, "exports", "tenant-default", "previews");
     mkdirSync(thumbDir, { recursive: true });
     writeFileSync(join(thumbDir, "plate_01.png"), PNG);
 
     const res = await app.inject({
       method: "GET",
-      url: "/exports/my_plan/gcode/thumbnails/plate_01.png",
+      url: "/exports/previews/plate_01.png",
     });
 
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toBe("image/png");
     expect(res.headers["content-disposition"]).toContain("inline");
     expect(res.rawPayload.subarray(0, 8)).toEqual(PNG.subarray(0, 8));
+  });
+
+  it("serves accepted Plate files with the 3MF media type", async () => {
+    const { app, dir } = await makeApp();
+    const exportDir = join(dir, "exports", "tenant-default", "accepted-plates");
+    mkdirSync(exportDir, { recursive: true });
+    writeFileSync(join(exportDir, "0001.3mf"), "3mf-bytes");
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/exports/accepted-plates/0001.3mf",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toBe("model/3mf");
+    expect(response.headers["content-disposition"]).toContain('attachment; filename="0001.3mf"');
   });
 
   it("still serves gcode as a downloadable attachment", async () => {

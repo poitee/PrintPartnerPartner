@@ -6,7 +6,16 @@ import { createSelfHostPorts } from "../adapters/self-host/index.js";
 import { loadConfig } from "../config.js";
 import { createIntegrationPort } from "../integrations/store.js";
 import { getIntegrationAdapter } from "../integrations/registry.js";
-import { resolveAssistantRuntime } from "./resolve-assistant.js";
+import {
+  parseSearchProviderOverride,
+  resolveAssistantRuntime,
+} from "./resolve-assistant.js";
+
+describe("parseSearchProviderOverride", () => {
+  it("maps the removed SearXNG setting to its former DuckDuckGo fallback", () => {
+    expect(parseSearchProviderOverride("searxng")).toBe("duckduckgo");
+  });
+});
 
 describe("resolveAssistantRuntime", () => {
   let dataDir: string;
@@ -71,6 +80,29 @@ describe("resolveAssistantRuntime", () => {
     expect(runtime.aiModel).toBe("llama3.2");
     expect(runtime.anthropicApiKey).toBeNull();
     expect(runtime.useOtherBuildsAsExamples).toBe(true);
+  });
+
+  it("normalizes a persisted SearXNG setting to the former DuckDuckGo fallback", () => {
+    const integrations = createIntegrationPort({
+      repo,
+      getAdapter: getIntegrationAdapter,
+    });
+    integrations.create({
+      type: "ai_assistant",
+      name: "Legacy search settings",
+      config: {
+        provider: "ollama",
+        enabled: true,
+        search_provider: "searxng",
+      },
+    });
+
+    const runtime = resolveAssistantRuntime(repo, {
+      ...loadConfig(),
+      searchProvider: "exa",
+    });
+
+    expect(runtime.searchProvider).toBe("duckduckgo");
   });
 
   it("honors use_other_builds_as_examples=false from settings", () => {

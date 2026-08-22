@@ -1,3 +1,4 @@
+import { acceptPlanForTest, editAcceptedPartsForTest } from "./test/accept-plan.js";
 import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -8,8 +9,69 @@ import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createSelfHostPorts } from "./adapters/self-host/index.js";
 import { buildStlTreePayload, progressSummary } from "@print-partner/domain";
-import { exportProfileStlPack, exportStlPackJobMessage, STL_EXPORT_MISSING_HINT } from "./services/export-stl-pack.js";
-import { buildPlanReview } from "./services/plan-review.js";
+import { exportStlPackJobMessage, STL_EXPORT_MISSING_HINT } from "./services/export-stl-pack.js";
+import { acceptedPlanBasis } from "./db/accepted-plan-progress.js";
+import { parseRequiredUnitToken } from "./services/required-units.js";
+
+async function waitForExportJob(
+  app: Awaited<ReturnType<typeof buildApp>>,
+  jobId: string,
+): Promise<{
+  status: string;
+  result?: { root_path?: string; file_total?: number; warnings?: string[] };
+}> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const jobRes = await app.inject({ method: "GET", url: `/jobs/${jobId}` });
+    const job = jobRes.json() as {
+      status: string;
+      result?: { root_path?: string; file_total?: number; warnings?: string[] };
+    };
+    if (job.status === "done" || job.status === "error" || job.status === "cancelled") {
+      return job;
+    }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`export job ${jobId} did not finish`);
+}
+
+function applyTrackedPlan(repo: AppRepository, sourceId: number, profileId: number): void {
+  const observed = repo.getProjectRow(sourceId);
+  if (!observed) throw new Error("Source is missing");
+  const revision = repo.recordSourceRevision({
+    sourceId,
+    upstreamRevisionKey: `phase3-${profileId}`,
+    manifestDigest: "d".repeat(64),
+    snapshotLocator: String(sourceId),
+    syncedAt: "2026-08-21T12:00:00.000Z",
+    completeness: "complete",
+  });
+  repo.activateSourceRevision({ sourceId, revisionId: revision.id, observed });
+  const draft = repo.recomputePlanDraft({
+    profileId,
+    actor: "test:user",
+    idempotencyKey: `phase3-draft-${profileId}`,
+  });
+  if (draft.kind !== "created") throw new Error("Plan draft was not created");
+  const reconciled = repo.savePlanDraftRequiredUnitReconciliation({
+    profileId,
+    draftId: draft.draft.id,
+    expectedSnapshotDigest: draft.draft.snapshotDigest,
+    decisions: [],
+    actorId: "test:user",
+    idempotencyKey: `phase3-reconcile-${profileId}`,
+  });
+  if (reconciled.kind !== "saved") throw new Error("Plan reconciliation failed");
+  const applied = repo.applyPlanChanges({
+    profileId,
+    draftId: draft.draft.id,
+    expectedSnapshotDigest: reconciled.draft.snapshotDigest,
+    expectedLifecycleVersion: 0,
+    expectedBase: { kind: "empty", planVersion: 0 },
+    actorId: "test:user",
+    idempotencyKey: `phase3-apply-${profileId}`,
+  });
+  if (applied.kind !== "applied") throw new Error("Plan was not applied");
+}
 
 describe("Phase 3 APIs", () => {
   it("builds STL tree from repo folder", () => {
@@ -19,42 +81,6 @@ describe("Phase 3 APIs", () => {
     const payload = buildStlTreePayload(dir, JSON.stringify(["parts/"]));
     expect(payload.total).toBe(1);
     expect(payload.selected).toBe(1);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("plan review includes print_units and include_excluded", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-rev-"));
-    const sqlite = new SqliteDatabase(dir);
-    sqlite.connect();
-    const repo = new AppRepository(getDb(sqlite), undefined, sqlite.reposDir);
-    const source = repo.createSource({ name: "Repo", url: "https://github.com/a/b", source_kind: "github" });
-    const repoPath = join(dir, "repos", String(source.id));
-    mkdirSync(join(repoPath, "x"), { recursive: true });
-    writeFileSync(join(repoPath, "x", "part.stl"), "x");
-    repo.updateSource(source.id, { local_path: repoPath });
-    repo.updateImportRules(source.id, ["x/"]);
-
-    const plan = repo.createProfile("Plan", source.id);
-    await repo.recomputeProfile(plan.id);
-
-    const review = buildPlanReview(repo, plan.id);
-    const parts = review.part_groups.flatMap((g) => g.parts);
-    expect(parts.length).toBeGreaterThan(0);
-    expect(parts[0].print_units).toEqual([false]);
-    expect(parts[0].printed_count).toBe(0);
-    expect(parts[0].missing).toBe(true);
-    expect(parts[0].filament_display).toBeDefined();
-
-    const partId = parts[0].id;
-    repo.patchPart(partId, { included: false });
-    const defaultReview = buildPlanReview(repo, plan.id);
-    expect(defaultReview.part_groups.flatMap((g) => g.parts)).toHaveLength(0);
-
-    const withExcluded = buildPlanReview(repo, plan.id, { includeExcluded: true });
-    const excludedParts = withExcluded.part_groups.flatMap((g) => g.parts);
-    expect(excludedParts.some((p) => !p.included)).toBe(true);
-
-    sqlite.close();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -71,17 +97,22 @@ describe("Phase 3 APIs", () => {
     repo.updateImportRules(source.id, ["x/"]);
 
     const plan = repo.createProfile("Plan", source.id);
-    await repo.recomputeProfile(plan.id);
+    await acceptPlanForTest(repo, plan.id);
 
-    const checkoff = repo.getCheckoff(plan.id);
-    expect(checkoff.parts.length).toBeGreaterThan(0);
-    const partId = checkoff.parts[0].id;
-    const patched = repo.patchPartProgress(partId, 0, true);
-    expect(patched.printed_count).toBe(1);
-    expect(patched.missing).toBe(false);
-
-    const again = repo.getCheckoff(plan.id);
-    expect(progressSummary(again.parts)).toContain("1/");
+    const priorPartId = repo.listParts(plan.id).parts[0]!.id;
+    editAcceptedPartsForTest(repo, plan.id, [{
+      projectionPartId: priorPartId,
+      quantityOverride: 1,
+    }]);
+    const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
+    if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+    const patched = repo.setAcceptedUnitCompletion({
+      expected: acceptedPlanBasis(accepted.snapshot),
+      token: parseRequiredUnitToken(accepted.snapshot.parts[0]!.units[0]!.token),
+      completed: true,
+    });
+    expect(patched).toMatchObject({ kind: "updated", body: { printed_count: 1, missing: false } });
+    expect(progressSummary([{ quantity_effective: 1, printed_count: 1 }])).toContain("1/");
 
     sqlite.close();
     rmSync(dir, { recursive: true, force: true });
@@ -100,31 +131,30 @@ describe("Phase 3 APIs", () => {
     repo.updateImportRules(source.id, ["x/"]);
 
     const plan = repo.createProfile("Plan", source.id);
-    await repo.recomputeProfile(plan.id);
+    await acceptPlanForTest(repo, plan.id);
 
-    const checkoff = repo.getCheckoff(plan.id);
-    const partId = checkoff.parts[0].id;
-
-    // New print_progress rows default to assembled=false, and it's only
-    // reachable once a unit is completed (mirrors the checkoff UI's own gating).
-    const enriched = repo.getEnrichedPartsForReview(plan.id, false);
-    expect(enriched[0].assembled_units).toEqual([false]);
-
-    repo.patchPartProgress(partId, 0, true);
-    const patched = repo.patchPartAssembled(partId, 0, true);
-    expect(patched.assembled_count).toBe(1);
-    expect(patched.assembled_units).toEqual([true]);
-
-    const afterAssembled = repo.getEnrichedPartsForReview(plan.id, false);
-    expect(afterAssembled[0].assembled_units).toEqual([true]);
-
-    // Toggling back off works too — the column is read/write, not append-only.
-    const unset = repo.patchPartAssembled(partId, 0, false);
-    expect(unset.assembled_units).toEqual([false]);
-
-    // Same round trip through the actual HTTP endpoint used by the frontend,
-    // to prove the route is wired end-to-end and doesn't break the existing
-    // /parts/:id/progress contract alongside it.
+    const priorPartId = repo.listParts(plan.id).parts[0]!.id;
+    const partId = editAcceptedPartsForTest(repo, plan.id, [{
+      projectionPartId: priorPartId,
+      quantityOverride: 1,
+    }]).get(priorPartId)!;
+    const accepted = repo.readAcceptedPlanOperationalSnapshot(plan.id);
+    if (accepted.kind !== "ready") throw new Error("accepted Plan is not ready");
+    const expected = acceptedPlanBasis(accepted.snapshot);
+    const token = parseRequiredUnitToken(accepted.snapshot.parts[0]!.units[0]!.token);
+    expect(repo.setAcceptedUnitCompletion({ expected, token, completed: false })).toMatchObject({
+      kind: "updated",
+      body: { assembled_units: [false] },
+    });
+    repo.setAcceptedUnitCompletion({ expected, token, completed: true });
+    expect(repo.setAcceptedUnitAssembly({ expected, token, assembled: true })).toMatchObject({
+      kind: "updated",
+      body: { assembled_count: 1, assembled_units: [true] },
+    });
+    expect(repo.setAcceptedUnitAssembly({ expected, token, assembled: false })).toMatchObject({
+      kind: "updated",
+      body: { assembled_units: [false] },
+    });
     const config = loadConfig();
     const ports = createSelfHostPorts(dir);
     await ports.db.connect();
@@ -215,7 +245,7 @@ describe("Phase 3 APIs", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["p/"]);
     const plan = repo.createProfile("ExportPlan", source.id);
-    repo.recomputeProfile(plan.id);
+    applyTrackedPlan(repo, source.id, plan.id);
 
     const app = await buildApp(config, ports);
     const res = await app.inject({
@@ -225,9 +255,7 @@ describe("Phase 3 APIs", () => {
     });
     expect(res.statusCode).toBe(200);
     const { job_id } = res.json() as { job_id: string };
-    await new Promise((r) => setTimeout(r, 300));
-    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
-    const job = jobRes.json() as { status: string; result?: { root_path?: string } };
+    const job = await waitForExportJob(app, job_id);
     expect(job.status).toBe("done");
     expect(job.result?.root_path).toBeTruthy();
 
@@ -250,11 +278,7 @@ describe("Phase 3 APIs", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["p/"]);
     const plan = repo.createProfile("RemainingFresh", source.id);
-    await repo.recomputeProfile(plan.id);
-
-    const review = buildPlanReview(repo, plan.id);
-    expect(review.has_blockers).toBe(false);
-    expect(review.totals.total_print_units).toBeGreaterThan(0);
+    applyTrackedPlan(repo, source.id, plan.id);
 
     const app = await buildApp(config, ports);
     const res = await app.inject({
@@ -264,12 +288,7 @@ describe("Phase 3 APIs", () => {
     });
     expect(res.statusCode).toBe(200);
     const { job_id } = res.json() as { job_id: string };
-    await new Promise((r) => setTimeout(r, 300));
-    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
-    const job = jobRes.json() as {
-      status: string;
-      result?: { file_total?: number; warnings?: string[] };
-    };
+    const job = await waitForExportJob(app, job_id);
     expect(job.status).toBe("done");
     expect(job.result?.file_total ?? 0).toBeGreaterThan(0);
     expect((job.result?.warnings ?? []).some((w) => /already marked printed/i.test(w))).toBe(false);
@@ -294,12 +313,8 @@ describe("Phase 3 APIs", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["p/"]);
     const plan = repo.createProfile("BlockerFresh", source.id);
-    await repo.recomputeProfile(plan.id);
+    applyTrackedPlan(repo, source.id, plan.id);
     rmSync(join(repoPath, "p", "gone.stl"));
-
-    const review = buildPlanReview(repo, plan.id);
-    expect(review.has_blockers).toBe(true);
-    expect(review.issues.some((i) => i.code === "missing_stl")).toBe(true);
 
     const app = await buildApp(config, ports);
     const res = await app.inject({
@@ -309,9 +324,7 @@ describe("Phase 3 APIs", () => {
     });
     expect(res.statusCode).toBe(200);
     const { job_id } = res.json() as { job_id: string };
-    await new Promise((r) => setTimeout(r, 300));
-    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
-    const job = jobRes.json() as { status: string; result?: { file_total?: number } };
+    const job = await waitForExportJob(app, job_id);
     expect(job.status).toBe("done");
     expect(job.result?.file_total ?? 0).toBeGreaterThan(0);
 
@@ -336,7 +349,7 @@ describe("Phase 3 APIs", () => {
     repo.updateSource(source.id, { local_path: repoPath });
     repo.updateImportRules(source.id, ["alpha/", "beta/"]);
     const plan = repo.createProfile("ExportFlat", source.id);
-    await repo.recomputeProfile(plan.id);
+    applyTrackedPlan(repo, source.id, plan.id);
 
     const app = await buildApp(config, ports);
     const res = await app.inject({
@@ -346,12 +359,7 @@ describe("Phase 3 APIs", () => {
     });
     expect(res.statusCode).toBe(200);
     const { job_id } = res.json() as { job_id: string };
-    await new Promise((r) => setTimeout(r, 300));
-    const jobRes = await app.inject({ method: "GET", url: `/jobs/${job_id}` });
-    const job = jobRes.json() as {
-      status: string;
-      result?: { root_path?: string };
-    };
+    const job = await waitForExportJob(app, job_id);
     expect(job.status).toBe("done");
     const rootPath = job.result?.root_path;
     expect(rootPath).toBeTruthy();
@@ -364,180 +372,6 @@ describe("Phase 3 APIs", () => {
 
     await app.close();
     await ports.db.close();
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("exportProfileStlPack copies files", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-"));
-    const stl = join(dir, "part.stl");
-    writeFileSync(stl, "solid");
-    const { rootPath, fileCounts } = exportProfileStlPack(
-      "Test",
-      [
-        {
-          matchKey: "part.stl",
-          relativePath: "part.stl",
-          filename: "part.stl",
-          sourceLayer: "base:R",
-          status: "base",
-          role: "primary",
-          quantityAuto: 1,
-          quantityOverride: null,
-          partSlug: "part",
-          included: true,
-          notes: "",
-          geometrySame: null,
-          absolutePath: stl,
-        },
-      ],
-      join(dir, "exports"),
-    );
-    expect(rootPath).toContain("stl");
-    expect(fileCounts.primary).toBe(1);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("exportProfileStlPack groups by color + directory by default", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-dir-"));
-    mkdirSync(join(dir, "alpha"), { recursive: true });
-    mkdirSync(join(dir, "beta"), { recursive: true });
-    const stlA = join(dir, "alpha", "part.stl");
-    const stlB = join(dir, "beta", "part.stl");
-    writeFileSync(stlA, "solidA");
-    writeFileSync(stlB, "solidB");
-    const part = (relativePath: string, absolutePath: string) => ({
-      matchKey: relativePath,
-      relativePath,
-      filename: "part.stl",
-      sourceLayer: "base:R",
-      status: "base",
-      role: "primary",
-      quantityAuto: 1,
-      quantityOverride: null,
-      partSlug: "part",
-      included: true,
-      notes: "",
-      geometrySame: null,
-      absolutePath,
-    });
-    const { rootPath, fileCounts } = exportProfileStlPack(
-      "Test",
-      [part("alpha/part.stl", stlA), part("beta/part.stl", stlB)],
-      join(dir, "exports"),
-    );
-    expect(fileCounts.primary).toBe(2);
-    expect(existsSync(join(rootPath, "primary", "alpha", "part_01.stl"))).toBe(true);
-    expect(existsSync(join(rootPath, "primary", "beta", "part_01.stl"))).toBe(true);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("exportProfileStlPack flattens by color and de-dupes collisions", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-flat-"));
-    mkdirSync(join(dir, "alpha"), { recursive: true });
-    mkdirSync(join(dir, "beta"), { recursive: true });
-    const stlA = join(dir, "alpha", "part.stl");
-    const stlB = join(dir, "beta", "part.stl");
-    writeFileSync(stlA, "solidA");
-    writeFileSync(stlB, "solidB");
-    const part = (relativePath: string, absolutePath: string) => ({
-      matchKey: relativePath,
-      relativePath,
-      filename: "part.stl",
-      sourceLayer: "base:R",
-      status: "base",
-      role: "primary",
-      quantityAuto: 1,
-      quantityOverride: null,
-      partSlug: "part",
-      included: true,
-      notes: "",
-      geometrySame: null,
-      absolutePath,
-    });
-    const { rootPath, fileCounts } = exportProfileStlPack(
-      "Test",
-      [part("alpha/part.stl", stlA), part("beta/part.stl", stlB)],
-      join(dir, "exports"),
-      { groupBy: "color" },
-    );
-    expect(fileCounts.primary).toBe(2);
-    const roleDir = join(rootPath, "primary");
-    const files = readdirSync(roleDir);
-    expect(files).toHaveLength(2);
-    expect(files).toContain("part_01.stl");
-    // Second same-named file is de-duped with a directory prefix.
-    expect(files.some((f) => f !== "part_01.stl" && f.endsWith("part_01.stl"))).toBe(true);
-    // No nested directory folders were created in flat mode.
-    expect(existsSync(join(roleDir, "alpha"))).toBe(false);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("exportProfileStlPack warns with sync hint when STL paths missing", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-missing-"));
-    const { warnings } = exportProfileStlPack(
-      "Test",
-      [
-        {
-          matchKey: "missing.stl",
-          relativePath: "parts/missing.stl",
-          filename: "missing.stl",
-          sourceLayer: "base:R",
-          status: "base",
-          role: "primary",
-          quantityAuto: 1,
-          quantityOverride: null,
-          partSlug: "missing",
-          included: true,
-          notes: "",
-          geometrySame: null,
-          absolutePath: null,
-        },
-      ],
-      join(dir, "exports"),
-    );
-    expect(warnings[0]).toContain("Missing STL: parts/missing.stl");
-    expect(warnings[0]).toContain(STL_EXPORT_MISSING_HINT);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("missing_only with no included parts does not claim everything is printed", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-empty-missing-"));
-    const { warnings, fileCounts } = exportProfileStlPack("Empty", [], join(dir, "exports"), {
-      missingOnly: true,
-      completedByMatchKey: {},
-    });
-    expect(Object.values(fileCounts).reduce((a, b) => a + b, 0)).toBe(0);
-    expect(warnings.some((w) => /already marked printed/i.test(w))).toBe(false);
-    expect(warnings[0]).toMatch(/no included parts/i);
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("missing_only with only missing STL paths does not claim everything is printed", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pp-pack-all-missing-"));
-    const { warnings } = exportProfileStlPack(
-      "Missing",
-      [
-        {
-          matchKey: "missing.stl",
-          relativePath: "parts/missing.stl",
-          filename: "missing.stl",
-          sourceLayer: "base:R",
-          status: "base",
-          role: "primary",
-          quantityAuto: 1,
-          quantityOverride: null,
-          partSlug: "missing",
-          included: true,
-          notes: "",
-          geometrySame: null,
-          absolutePath: null,
-        },
-      ],
-      join(dir, "exports"),
-      { missingOnly: true, completedByMatchKey: {} },
-    );
-    expect(warnings.some((w) => /already marked printed/i.test(w))).toBe(false);
-    expect(warnings.some((w) => /Missing STL/i.test(w))).toBe(true);
     rmSync(dir, { recursive: true, force: true });
   });
 

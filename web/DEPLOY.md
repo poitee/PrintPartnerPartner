@@ -16,15 +16,25 @@ Open [http://localhost:8080](http://localhost:8080). Data persists in the `print
 
 ### Published images
 
+<!-- release-version:start -->
 Release images are published to GitHub Container Registry:
 
 | Image | Tags | Platforms |
 |-------|------|-----------|
-| `ghcr.io/poitee/print-partner` | `latest`, `X.Y.Z` (one per release, e.g. `3.1.0`) | `linux/amd64`, `linux/arm64` |
+| `ghcr.io/poitee/print-partner` | `latest`, `X.Y.Z` (one per release, e.g. `3.2.0`) | `linux/amd64`, `linux/arm64` |
 
-Each image bakes the release version into `PP_VERSION` (e.g. `3.1.0-web`), which `GET /health` reports and the in-app update checker compares against GitHub releases. Compose defaults to the audited `3.1.0` image tag; set `PRINT_PARTNER_VERSION` to another release explicitly. The compose files keep a `build:` section as a fallback, so `docker compose up --build` always works without the registry.
+Each image bakes the release version, peeled Git commit, tag, and build date into
+its runtime identity. `GET /health` reports those values, and the in-app update
+checker compares the runtime version with GitHub Releases. Compose defaults to
+the prepared `3.2.0` image tag; set `PRINT_PARTNER_VERSION` to another release
+explicitly. The compose files keep a `build:` section as a fallback, so
+`docker compose up --build` always works without the registry.
 
-**Pull failures:** GHCR packages are private by default until visibility is set. The release workflow sets `ghcr.io/poitee/print-partner` to **public** after each tagged push. If `docker compose pull` returns `denied` or `unauthorized`, use `docker compose up --build` instead, or `docker login ghcr.io` with a token that has `read:packages`. See [docs/INSTALL.md](../docs/INSTALL.md#denied-or-unauthorized-when-pulling-the-image).
+**Pull failures:** Package visibility is managed once in GitHub Packages, not
+during a release. If `docker compose pull` returns `denied` or `unauthorized`,
+use `docker compose up --build` instead, or `docker login ghcr.io` with a token
+that has `read:packages`. See
+[docs/INSTALL.md](../docs/INSTALL.md#denied-or-unauthorized-when-pulling-the-image).
 
 The app service has a healthcheck that polls `GET /health` every 30s using Node's built-in `fetch` (the `node:22-bookworm-slim` runtime image ships no curl/wget). `docker ps` shows the container as `healthy` once the server responds.
 
@@ -38,13 +48,13 @@ The app service has a healthcheck that polls `GET /health` every 30s using Node'
 | `STATIC_DIR` | unset | When set, serve built SPA from this directory |
 | `DEPLOY_MODE` | `self-host` | `self-host` or `saas` |
 | `CORS_ORIGIN` / `ALLOWED_ORIGINS` | `true` | CORS allowed origin(s); comma-separated list for multiple |
-| `PP_VERSION` | `3.1.0-web` (baked into release images) | Health payload version |
+| `PP_VERSION` | `3.2.0-web` (baked into release images) | Health payload version |
+| `PP_COMMIT` / `PP_TAG` / `PP_BUILD_DATE` | baked into release images | Read-only release provenance reported by `GET /health`; source builds report a development identity |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload limit (512 MiB) |
 | `SOURCE_DOCS_MAX_BYTES` | `1073741824` | Per-source budget for synced markdown/PDF docs (~1 GiB). Operator escape hatch only. |
 | `PRINT_PARTNER_API_KEY` | unset | When set, requires Bearer or `X-Print-Partner-Api-Key` on `/api/v1/*`. **Required for `/api/v1/mcp` unless `HOST` is loopback** (Docker uses `0.0.0.0`) |
 | `OPENAPI_UI` | unset | Set to `1` to expose `/api/v1/docs` in production |
-| `REDIS_URL` | unset | Optional; when set in SaaS, enables BullMQ job queue (see SaaS) |
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped override — skip GitHub and compare against this version |
@@ -52,6 +62,7 @@ The app service has a healthcheck that polls `GET /health` every 30s using Node'
 | `ASSISTANT_ALLOW_URL_INGEST` | enabled | Set to `0` to disable MCP `ingest_guide_url` / `fetch_web_page` |
 | `ASSISTANT_GUIDE_INGEST_MAX_BYTES` | `524288` (512 KiB) | Max response body size for a single guide / page URL fetch |
 | `PRINT_PARTNER_MCP_PLAN_ID` | unset | Optional default `plan_id` for MCP tools that omit it |
+<!-- release-version:end -->
 
 **URL ingest safety (MCP tools):** `ingest_guide_url`, `fetch_web_page`, and `web_search` use the same SSRF guard as cover/image fetches (`safeOutboundFetch`): HTTP(S) only, DNS-resolved, private/loopback/metadata blocked. Guide and search text is untrusted evidence; mutations require confirm-to-apply. There is no autonomous crawler.
 
@@ -106,23 +117,37 @@ Disable checks entirely with `PRINT_PARTNER_UPDATE_CHECK=0`. Offline or failed l
 
 ### Releasing (maintainers)
 
-Tag a release and push it; CI does the rest:
+<!-- release-version:start -->
+Prepare every version-bearing file with the release command, review the dry
+run, and commit the result:
 
 ```bash
-git tag v3.1.0
-git push origin v3.1.0
+node scripts/release.mjs prepare 3.2.0 --dry-run
+node scripts/release.mjs prepare 3.2.0
+git add CHANGELOG.md Dockerfile README.md docs/OPERATIONS.md docker-compose.yml web/package.json web/package-lock.json web/DEPLOY.md
+git commit -m "chore(release): prepare v3.2.0"
+node scripts/release.mjs check
+git tag -a v3.2.0 -m "Release v3.2.0"
+git push origin main
+git push origin v3.2.0
 ```
 
 The `release.yml` workflow first requires the complete web quality suite,
 high-severity dependency audit, production Docker smoke test, and manifest
-schema/drift validation. It then builds the multi-arch image (`linux/amd64` +
-`linux/arm64`), pushes `ghcr.io/poitee/print-partner:latest` and `:3.1.0` with
-`PP_VERSION=3.1.0-web` baked in, sets the GHCR package visibility to **public**,
-and creates a GitHub Release with auto-generated notes. Before tagging, move the
-`[Unreleased]` CHANGELOG entries under the new version and bump
-`web/package.json`, the `PP_VERSION` defaults in
-`web/apps/server/src/config.ts` and `Dockerfile`, and the audited default image
-tag in `docker-compose.yml`.
+schema/drift validation. It peels the annotated tag to its commit, checks every
+version sink, and builds a multi-arch candidate image (`linux/amd64` and
+`linux/arm64`) with matching OCI metadata. CI then attaches a digest-pinned
+`release-identity.json` to the GitHub Release, creates or verifies the immutable
+`:3.2.0` alias, verifies the public identity, and moves `:latest` last as a
+convenience alias. A conflicting existing candidate, release asset, or version
+alias fails instead of being overwritten.
+<!-- release-version:end -->
+
+GHCR package visibility is a one-time package setting, not a release step. The
+historical `v3.1.0` tag points to disconnected history and its workflow pushed
+an image before failing to create a GitHub Release. Do not move, delete, or
+reuse that tag. `v3.2.0` is the first release prepared under the repaired
+identity contract.
 
 ### Local development
 
@@ -138,7 +163,9 @@ Versioned API for integrations: `http://127.0.0.1:18765/api/v1` — see [`../doc
 
 ## SaaS mode (`DEPLOY_MODE=saas`)
 
-SaaS mode can use **Postgres for app data** when `DATABASE_URL` is set (tenant-scoped rows). The current Postgres repository runs through a synchronous compatibility bridge and is **experimental, not production-ready**: it does not provide native transaction semantics for repository mutations. Production startup fails closed unless `POSTGRES_EXPERIMENTAL=1` explicitly acknowledges this limitation. SQLite remains the supported database. `GET /health` reports `db.support_status` as `supported` or `experimental`.
+SaaS, Postgres, and S3 are **experimental**. The supported self-hosted mode is SQLite, local disk, and the in-process job runner. There is no Redis or BullMQ queue; `REDIS_URL` is ignored if set.
+
+SaaS mode can use **Postgres for app data** when `DATABASE_URL` is set (tenant-scoped rows). The current Postgres repository runs through a synchronous compatibility bridge and is **experimental, not production-ready**: it does not provide native transaction semantics for repository mutations. Production startup fails closed unless `POSTGRES_EXPERIMENTAL=1` explicitly acknowledges this limitation. SQLite remains the supported database. `GET /health` reports `db.support_status` and a `deployment` capability object.
 
 The bridge also depends on Drizzle's private prepared-field metadata and
 `drizzle-orm/utils` result mapper. Dependency updates must pass
@@ -190,7 +217,6 @@ and authentication protect the shared interface.
 | `DISCORD_CLIENT_ID` / `SECRET` / `DISCORD_CALLBACK_URL` | OAuth | Discord OAuth app (`/auth/discord/callback`) |
 | `GOOGLE_CLIENT_ID` | Optional | Public Google OAuth **Web** client id for parts-manifest Drive open/save (SPA GIS + Drive API). Not a secret; exposed on `GET /health`. Enable Drive API and add your app origin to Authorized JavaScript origins. Dev SPA fallback: `VITE_GOOGLE_CLIENT_ID`. |
 | `SAAS_ALLOW_ANONYMOUS` | Optional | `1` to allow unauthenticated API (dev only) |
-| `REDIS_URL` | Optional | BullMQ-backed job queue for horizontal scaling |
 | `UPLOAD_MAX_BYTES` | Optional | Request body / upload size limit |
 
 ### Auth routes

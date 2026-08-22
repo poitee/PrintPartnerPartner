@@ -81,7 +81,8 @@ print-partner add-addon LDOVoronTrident Leviathan a4t_toolhead
 
     expect(actions.some((a) => a.type === "set_base")).toBe(true);
     expect(actions.filter((a) => a.type === "add_addon").length).toBeGreaterThanOrEqual(2);
-    expect(actions.some((a) => a.type === "apply_build_recipe")).toBe(true);
+    expect(actions.some((a) => a.type === "start_sync")).toBe(true);
+    expect(actions.some((a) => a.type === "start_recompute")).toBe(false);
     expect(cleanedContent).toMatch(/Apply cards/i);
     expect(cleanedContent).not.toMatch(/following command/i);
   });

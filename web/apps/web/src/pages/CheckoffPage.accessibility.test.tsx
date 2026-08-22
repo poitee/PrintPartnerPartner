@@ -13,8 +13,7 @@ const state = vi.hoisted(() => ({
       name: "Voron",
       archived_at: null,
       part_count: 1,
-      remaining_units: 1,
-      total_units: 1,
+      accepted_progress: { kind: "ready" as const, remaining_units: 1, total_units: 1 },
       build_stale: false,
       special_request: null,
     },
@@ -80,9 +79,7 @@ vi.mock("../context/PlanWorkspaceContext", () => ({
     } as unknown as PlanReview,
     loading: false,
     error: null,
-    reload: vi.fn(),
-    revision: 0,
-    loadedRevision: 0,
+    refresh: vi.fn(),
     toggleUnit: vi.fn(),
     toggleAssembled: vi.fn(),
     busyPartId: null,
@@ -144,7 +141,7 @@ vi.mock("../components/SpoolRemainingBadge", () => ({
 vi.mock("../components/pwa/PwaInstallBanner", () => ({
   default: () => null,
 }));
-vi.mock("../components/StaleBuildBanner", () => ({
+vi.mock("../components/PlanFreshnessNotice", () => ({
   default: () => null,
 }));
 vi.mock("../components/PlanSpecialRequestLine", () => ({
@@ -161,8 +158,7 @@ describe("CheckoffPage accessibility", () => {
         name: "Voron",
         archived_at: null,
         part_count: 1,
-        remaining_units: 1,
-        total_units: 1,
+        accepted_progress: { kind: "ready" as const, remaining_units: 1, total_units: 1 },
         build_stale: false,
         special_request: null,
       },
@@ -192,7 +188,7 @@ describe("CheckoffPage accessibility", () => {
     );
 
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Progress");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Checkoff");
     const printTitle = container.querySelector(".sheet-title");
     const repositoryTitle = container.querySelector(".sheet-repo-title");
     const folderTitle = container.querySelector(".sheet-folder-title");
@@ -200,6 +196,17 @@ describe("CheckoffPage accessibility", () => {
     expect(printTitle?.textContent).toBe("Voron");
     expect(repositoryTitle?.tagName).toBe("H3");
     expect(folderTitle?.tagName).toBe("H4");
+  });
+
+  it("opens Prepare missing parts with Missing Required units selected", () => {
+    render(
+      <MemoryRouter>
+        <CheckoffPage />
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByRole("link", { name: "Prepare missing parts" });
+    expect(link.getAttribute("href")).toBe("/export?profile=7&select=missing");
   });
 
   it("announces initial progress failures as alerts", () => {

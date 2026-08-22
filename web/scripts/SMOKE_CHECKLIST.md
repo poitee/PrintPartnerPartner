@@ -14,9 +14,9 @@ Automated workflow: `BASE=http://localhost:8080 ./web/scripts/workflow-smoke.sh`
 | Static | `GET /`, `GET /assets/*` | **200** — Vite bundle `index-*.js`, `index-*.css` |
 | Add source | `POST /sources` | **200** — GitHub `Klipper3d/klipper` → `id:2` |
 | Sync | `POST /jobs/sync` | **200** — job `status:done`, 4 STLs downloaded |
-| Create plan | `POST /plans` | **200** — `Smoke Test Plan` → `id:2` |
+| Create Build | `POST /plans` | **200** — `Smoke Test Plan` → `id:2` |
 | Base layer | `PUT /plans/{id}/layers/base` | **200** — layer linked to source |
-| Recompute | `POST /jobs/recompute` | **200** — `part_count:4` |
+| Recompute | `POST /plans/{id}/drafts/recompute` then `POST /plans/{id}/drafts/{draftId}/apply` | **200** — reconciliation `ready`, then applied `revision_digest` |
 | Parts | `GET /plans/{id}/parts` | **200** — 4 parts (calibrate_size, ringing_tower, …) |
 | Checkoff | `GET /plans/{id}/checkoff` | **200** — summary + print_units |
 | Progress | `PATCH /parts/{id}/progress` | **200** — `printed_count:1`, `missing:false` |
@@ -54,9 +54,9 @@ curl -s -X POST http://localhost:8080/plans -H 'Content-Type: application/json' 
 ## Manual UI checks (browser)
 
 - [ ] Add GitHub source, sync, STL tree
-- [ ] Create plan, base layer, recompute
-- [ ] Review tab, checkoff toggles
-- [ ] Export STL pack / checklist HTML / 3MF from UI
+- [ ] New Build, base layer, recompute
+- [ ] Plan quantities, Checkoff toggles
+- [ ] Production STL pack / checklist HTML / 3MF from UI
 - [ ] Kit import (admin or job)
 
 ## Sources
@@ -67,7 +67,7 @@ curl -s -X POST http://localhost:8080/plans -H 'Content-Type: application/json' 
 
 ## Build plan
 
-- [ ] Create plan with base layer, add addon layer, recompute (with apply manifest)
+- [ ] Create Build (`POST /plans`) with base layer, add addon layer, recompute (with apply manifest)
 - [ ] Apply stack preset from kit catalog (when sources synced)
 - [ ] Set role filaments
 - [ ] **Persist smoke:** save import rules → reload plan → rules unchanged; PATCH part included/qty survives recompute

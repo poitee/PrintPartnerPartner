@@ -11,12 +11,13 @@ import { isSyntheticAnonymousSession } from "../routes/auth-types.js";
 const EXEMPT_PREFIXES = [
   "/api/v1/openapi.json",
   "/api/v1/docs",
+  "/api/v2/openapi.json",
   "/openapi.json",
 ];
 
 function isExempt(url: string): boolean {
   const path = url.split("?")[0] ?? url;
-  if (path === "/health" || path === "/api/v1") return true;
+  if (path === "/health" || path === "/api/v1" || path === "/api/v2") return true;
   if (EXEMPT_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`))) {
     return true;
   }
@@ -98,8 +99,6 @@ function hasConfiguredBasicAuth(
   return constantTimeSecretEqual(header, expected);
 }
 
-/** Require API key on /api/v1/* when PRINT_PARTNER_API_KEY is configured (self-host).
- * Settings-created API keys are accepted through the repository-backed validator. */
 export function registerApiKeyAuth(
   app: FastifyInstance,
   config: ServerConfig,
@@ -112,7 +111,7 @@ export function registerApiKeyAuth(
 
   app.addHook("onRequest", async (request, reply) => {
     const path = request.url.split("?")[0] ?? request.url;
-    if (!path.startsWith("/api/v1")) return;
+    if (!path.startsWith("/api/v1") && !path.startsWith("/api/v2")) return;
     if (isExempt(path)) return;
 
     const provided = extractApiKey(request);

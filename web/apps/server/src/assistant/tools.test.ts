@@ -1,8 +1,10 @@
+import { acceptPlanForTest } from "../test/accept-plan.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
+import { InProcessJobRunner } from "../routes/jobs.js";
 import { invokeAssistantTool, applyAssistantAction } from "./tools.js";
 import { inferStackPresetId, summarizeOtherBuildsAsExamples } from "./example-builds.js";
 import { buildAssistantSystemPrompt } from "./assistant-context.js";
@@ -31,7 +33,12 @@ describe("assistant tools + example builds", () => {
     const plan = repo.createProfile("My 2.4", source.id);
 
     const plans = JSON.parse((await invokeAssistantTool("list_plans", {}, { repo })).content);
-    expect(plans.plans.some((p: { id: number }) => p.id === plan.id)).toBe(true);
+    expect(plans.plans).toContainEqual({
+      id: plan.id,
+      name: "My 2.4",
+      part_count: 0,
+      build_stale: false,
+    });
 
     const sources = JSON.parse((await invokeAssistantTool("list_sources", {}, { repo })).content);
     expect(sources.sources.some((s: { name: string }) => s.name === "Voron-2")).toBe(true);
@@ -54,6 +61,36 @@ describe("assistant tools + example builds", () => {
     expect(JSON.parse(content).status).toBe("proposed");
     // Layers unchanged until apply
     expect(repo.getProfileLayers(plan.id).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("refuses assistant rebuild actions before starting a job", async () => {
+    const plan = repo.createProfile("Review first");
+    let starts = 0;
+    const result = await applyAssistantAction(
+      {
+        id: "legacy-rebuild",
+        type: "start_recompute",
+        plan_id: plan.id,
+        label: "Rebuild",
+        summary: "Legacy assistant action",
+        params: {},
+      },
+      {
+        repo,
+        jobs: {
+          start: async () => {
+            starts += 1;
+            return "unexpected";
+          },
+        } as never,
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      detail: expect.stringMatching(/Plan page/),
+    });
+    expect(starts).toBe(0);
   });
 
   it("applyAssistantAction set_base mutates after confirm", async () => {
@@ -89,6 +126,39 @@ describe("assistant tools + example builds", () => {
     expect(baseLayer?.project_id).toBe(other.id);
   });
 
+  it("duplicate_plan returns header fields without reading a profile summary", async () => {
+    const plan = repo.createProfile("Template");
+    const result = await applyAssistantAction(
+      {
+        id: "duplicate-plan",
+        type: "duplicate_plan",
+        plan_id: plan.id,
+        label: "Duplicate plan",
+        summary: "Create a working copy",
+        params: { name: "Working copy", clear_checkoff: true },
+      },
+      {
+        repo,
+        jobs: new InProcessJobRunner({
+          getRepo: () => repo,
+          reposDir: dataDir,
+          exportsDir: dataDir,
+          dataDir,
+        }),
+      },
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      result: {
+        plan_id: expect.any(Number),
+        name: "Working copy",
+        part_count: 0,
+        clear_checkoff: true,
+      },
+    });
+  });
+
   it("summarizeOtherBuildsAsExamples excludes active plan and documents non-training", () => {
     const source = repo.createSource({
       name: "Voron-2",
@@ -97,10 +167,20 @@ describe("assistant tools + example builds", () => {
     });
     const a = repo.createProfile("Alpha", source.id);
     const b = repo.createProfile("Beta", source.id);
+    const listProfileHeaders = repo.listProfileHeaders.bind(repo);
+    let headerListReads = 0;
+    repo.listProfileHeaders = () => {
+      headerListReads += 1;
+      return listProfileHeaders();
+    };
+    repo.getProfileHeader = () => {
+      throw new Error("Example rendering must reuse the bulk header row");
+    };
     const text = summarizeOtherBuildsAsExamples({
       repo,
       excludePlanId: a.id,
     });
+    expect(headerListReads).toBe(1);
     expect(text).toContain("NOT model training");
     expect(text).toContain("Beta");
     expect(text).not.toContain(`#${a.id}:`);
@@ -238,7 +318,7 @@ describe("assistant tools + example builds", () => {
     });
     repo.updateImportRules(source.id, ["STLs/"]);
     const plan = repo.createProfile("Plan", source.id);
-    repo.recomputeProfile(plan.id);
+    acceptPlanForTest(repo, plan.id);
 
     const found = JSON.parse(
       (
@@ -255,11 +335,12 @@ describe("assistant tools + example builds", () => {
     expect(found.hint).toMatch(/ui_highlight_part/);
   });
 
-  it("system prompt pairs ui_* with show/open and mentions sync workflow", () => {
+  it("system prompt pairs ui_* with show/open and keeps rebuild review on Plan", () => {
     const prompt = buildAssistantSystemPrompt({ repo, toolsAvailable: true });
     expect(prompt).toContain("search_plan_parts");
     expect(prompt).toContain("start_sync");
-    expect(prompt).toContain("propose_sync_and_update");
+    expect(prompt).toContain("Direct the user to Plan");
+    expect(prompt).not.toContain("propose_sync_and_update");
     expect(prompt).toContain("ui_focus_kit_option");
     expect(prompt).toMatch(/pair.*ui_\*|Always pair/i);
   });
@@ -276,7 +357,7 @@ describe("assistant tools + example builds", () => {
     expect(result.proposedAction?.params.stl_filter).toBe("extruder");
   });
 
-  it("propose_sync_and_update proposes Sync → Update build recipe", async () => {
+  it("start_sync proposes Source sync without rebuilding the Plan", async () => {
     const source = repo.createSource({
       name: "Voron-Trident",
       url: "https://example.com/trident.git",
@@ -284,14 +365,12 @@ describe("assistant tools + example builds", () => {
     });
     const plan = repo.createProfile("Sync plan", source.id);
     const result = await invokeAssistantTool(
-      "propose_sync_and_update",
+      "start_sync",
       { plan_id: plan.id, source_name: "Voron-Trident" },
       { repo },
     );
-    expect(result.proposedAction?.type).toBe("apply_build_recipe");
-    expect(result.proposedAction?.label).toBe("Sync → Update build");
-    const steps = result.proposedAction?.params.steps as Array<{ type: string }>;
-    expect(steps.map((s) => s.type)).toEqual(["start_sync", "start_recompute"]);
+    expect(result.proposedAction?.type).toBe("start_sync");
+    expect(result.proposedAction?.label).toBe("Sync Voron-Trident");
   });
 
   it("check_stack_compatibility warns on dual probes", async () => {
@@ -395,7 +474,7 @@ describe("assistant tools + example builds", () => {
     expect(repo.listSources().some((s) => s.name === "New-Mod")).toBe(true);
   });
 
-  it("propose_add_source Apply chains a Sync → Update follow-up card when a plan is active", async () => {
+  it("propose_add_source Apply chains a Sync follow-up card when a plan is active", async () => {
     const plan = repo.createProfile("Chain plan");
     const { proposedAction } = await invokeAssistantTool(
       "propose_add_source",
@@ -415,10 +494,8 @@ describe("assistant tools + example builds", () => {
     expect(result.ok).toBe(true);
     const followUp = (result.result as { follow_up_action?: { type: string; params: Record<string, unknown> } })
       .follow_up_action;
-    expect(followUp?.type).toBe("apply_build_recipe");
-    expect(followUp?.params.workflow).toBe("sync_then_recompute");
-    const steps = followUp?.params.steps as Array<{ type: string }>;
-    expect(steps.map((s) => s.type)).toEqual(["start_sync", "start_recompute"]);
+    expect(followUp?.type).toBe("start_sync");
+    expect(followUp?.params.project_ids).toHaveLength(1);
   });
 
   it("propose_add_source Apply without a plan returns needs_sync but no follow-up card", async () => {

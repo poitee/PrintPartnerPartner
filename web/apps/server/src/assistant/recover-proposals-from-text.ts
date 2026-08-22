@@ -2,7 +2,7 @@ import type { AssistantProposedAction } from "@print-partner/contracts";
 import { invokeAssistantTool, type ToolContext } from "./tools.js";
 import { stripEmbeddedToolCallJson } from "./parse-text-tool-calls.js";
 import { sanitizeAssistantDisplayText } from "./sanitize-display-text.js";
-import { buildSyncThenUpdateAction } from "./sync-then-update.js";
+import { buildSyncAction } from "./sync-action.js";
 
 type RecipeLike = {
   base?: {
@@ -214,7 +214,7 @@ export async function recoverProposedActionsFromText(
     await proposeAddon(name);
   }
 
-  // After a tagged set_base (and any addons), offer Sync → Update as the next card.
+  // After a tagged set_base (and any addons), offer Sync as the next card.
   const setBase = actions.find((a) => a.type === "set_base");
   const tag =
     setBase && typeof setBase.params?.tag === "string" ? setBase.params.tag.trim() : "";
@@ -231,7 +231,7 @@ export async function recoverProposedActionsFromText(
       if (src) projectIds.push(src.id);
     }
     actions.push(
-      buildSyncThenUpdateAction({
+      buildSyncAction({
         planId,
         projectIds,
         sourceName:

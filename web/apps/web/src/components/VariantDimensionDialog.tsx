@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -29,6 +29,8 @@ export default function VariantDimensionDialog({ profileId, onDone }: Props) {
   const [pending, setPending] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +40,7 @@ export default function VariantDimensionDialog({ profileId, onDone }: Props) {
         if (cancelled) return;
         if (Object.keys(res.dimensions ?? {}).length === 0) {
           // No variant dimensions — skip silently
-          onDone();
+          onDoneRef.current();
           return;
         }
         setData(res);
@@ -47,13 +49,13 @@ export default function VariantDimensionDialog({ profileId, onDone }: Props) {
         setOpen(true);
       } catch {
         // Not fatal — just skip variant configuration
-        if (!cancelled) onDone();
+        if (!cancelled) onDoneRef.current();
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [profileId, onDone]);
+  }, [profileId]);
 
   const allPicked =
     data != null &&
@@ -66,7 +68,7 @@ export default function VariantDimensionDialog({ profileId, onDone }: Props) {
     try {
       await applyPlanVariantSelection(profileId, pending, data.source_id);
       setOpen(false);
-      onDone();
+      onDoneRef.current();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -76,7 +78,7 @@ export default function VariantDimensionDialog({ profileId, onDone }: Props) {
 
   const onSkip = () => {
     setOpen(false);
-    onDone();
+    onDoneRef.current();
   };
 
   if (!data) return null;

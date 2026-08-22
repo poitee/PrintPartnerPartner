@@ -2,6 +2,7 @@ import { type MouseEvent, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   BookOpen,
+  Factory,
   Layers,
   PanelLeftClose,
   PanelLeftOpen,
@@ -40,7 +41,8 @@ const UTILITY_ICONS: Record<
   SpineUtilityId,
   typeof Layers
 > = {
-  plans: Layers,
+  builds: Layers,
+  production: Factory,
   printers: Printer,
   settings: Settings,
   help: BookOpen,
@@ -81,7 +83,7 @@ function SidebarTooltip({
   );
 }
 
-/** Left spine rail: plan picker, desk-loop stages, stage-weight utility (Plans·Printers·Settings·Help). */
+/** Left spine rail: plan picker, Build destinations, global sections. */
 export default function SpineRail({
   collapsed,
   onToggleCollapsed,
@@ -131,7 +133,7 @@ export default function SpineRail({
                 <PlanPicker compact className="mx-auto" />
               </div>
             </SidebarTooltip>
-            <SidebarTooltip label="Create plan" collapsed>
+            <SidebarTooltip label="New Build" collapsed>
               <CreatePlanButton size="icon" showLabel={false} variant="ghost" className="mx-auto" />
             </SidebarTooltip>
           </div>

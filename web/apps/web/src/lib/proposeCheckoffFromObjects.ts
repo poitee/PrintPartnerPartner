@@ -206,10 +206,14 @@ export function proposeCheckoffFromObjects(
       unmatchedNames.push(name);
       continue;
     }
-    const exact = slots.find(
+    const exactMatches = slots.filter(
       (s) => !used.has(`${s.part.id}:${s.unit_index}`) && s.exportKey === key,
     );
-    if (exact && takeSlot(exact, name, "export_name")) continue;
+    if (exactMatches.length === 1 && takeSlot(exactMatches[0]!, name, "export_name")) continue;
+    if (exactMatches.length > 1) {
+      unmatchedNames.push(name);
+      continue;
+    }
     pendingStem.push(name);
   }
 
@@ -227,6 +231,11 @@ export function proposeCheckoffFromObjects(
     const available = slots.filter(
       (s) => s.stem === stem && !used.has(`${s.part.id}:${s.unit_index}`),
     );
+    const partIds = new Set(available.map((s) => s.part.id));
+    if (partIds.size > 1) {
+      unmatchedNames.push(...names);
+      continue;
+    }
     let i = 0;
     for (const name of names) {
       if (i < available.length && takeSlot(available[i]!, name, "stem")) {
@@ -237,10 +246,12 @@ export function proposeCheckoffFromObjects(
     }
   }
 
-  const units: PrinterCheckoffUnit[] = matches.map((m) => ({
-    part_id: m.part_id,
-    unit_index: m.unit_index,
-  }));
+  const units: PrinterCheckoffUnit[] = matches.map((m) => {
+    const name = m.objectName.trim().slice(0, 200);
+    return name
+      ? { part_id: m.part_id, unit_index: m.unit_index, object_name: name }
+      : { part_id: m.part_id, unit_index: m.unit_index };
+  });
 
   return { units, matches, unmatchedNames };
 }

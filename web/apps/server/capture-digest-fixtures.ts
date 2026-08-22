@@ -11,7 +11,10 @@
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { getDb, SqliteDatabase, type DrizzleDb } from "./src/db/client.js";
+import { backfillAcceptedPlanRevisions } from "./src/db/accepted-plan-revisions.js";
+import { backfillCurrentRequiredUnitSets } from "./src/db/required-units.js";
 import { AppRepository } from "./src/db/repository.js";
 import * as schema from "./src/db/schema.js";
 import { invokeAssistantTool } from "./src/assistant/tools.js";
@@ -64,6 +67,20 @@ function seedRemainingUnits(db: DrizzleDb, profileId: number, units: number): vo
       })
       .returning()
       .get();
+  }
+}
+
+function seedAcceptedState(sqlite: SqliteDatabase): void {
+  const database = new Database(sqlite.dbPath);
+  let token = 1;
+  try {
+    backfillAcceptedPlanRevisions(database, "2026-08-21T12:00:00.000Z");
+    backfillCurrentRequiredUnitSets(database, {
+      now: () => "2026-08-21T12:01:00.000Z",
+      tokenFactory: () => `ppu_${(token++).toString(16).padStart(32, "0")}`,
+    });
+  } finally {
+    database.close();
   }
 }
 
@@ -178,6 +195,7 @@ for (const scenario of scenarios) {
     if (scenario.plan) {
       const plan = repo.createProfile(scenario.plan.name);
       seedRemainingUnits(db, plan.id, scenario.plan.units);
+      seedAcceptedState(sqlite);
       profileId = plan.id;
     } else {
       profileId = repo.createProfile(`${scenario.name} scratch plan`).id;

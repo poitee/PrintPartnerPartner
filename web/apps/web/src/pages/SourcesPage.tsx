@@ -2,13 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ChevronDown, FolderGit2, MoreHorizontal, Search } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
-  createSource,
-  deleteSource,
-  fetchSourceCategories,
-  fetchSources,
-  saveSourceCategories,
-  bulkAssignSourceCategory,
   importReposTxt,
   importSourceArchive,
   importSourceFiles,
@@ -18,7 +13,6 @@ import {
   startCheckSourceUpdates,
   startImportScan,
   startSync,
-  updateSource,
   waitForJobDone,
   type SourceSummary,
   type StlSearchHit,
@@ -109,6 +103,18 @@ import {
 import { toastJobResult } from "../lib/jobToasts";
 import { cn } from "../lib/utils";
 import { resolveEngineState } from "../lib/workflowState";
+import {
+  invalidateSourceDependents,
+  useBulkAssignSourceCategoryMutation,
+  useCreateSourceMutation,
+  useDeleteSourceMutation,
+  useSourcesQuery,
+  useUpdateSourceMutation,
+} from "../queries/sources";
+import {
+  useSaveSourceCategoriesMutation,
+  useSourceCategoriesQuery,
+} from "../queries/sourceCategories";
 
 type SourceDetailTab = "docs" | "rules" | "naming";
 type SourcesLocationState = { stlSearch?: boolean };
@@ -164,20 +170,17 @@ export default function SourcesPage() {
   const { formatDate } = useDateFormat();
   const { health, error: healthError, loading: healthLoading } = useEngineHealth();
   const { busy, runJob } = useJobRunner("sync");
-  const { busy: updateBusy, runJob: runUpdateJob } = useJobRunner("source-updates");
+  const { busy: updateBusy, runJob: runUpdateJob } =
+    useJobRunner("check-source-updates");
   const { activeJobs } = useJobContext();
   const { review } = usePlanWorkspace();
   const { profiles, selectedProfileId } = useProfileSelection();
   const persistedUi = useMemo(() => loadPersistedSourcesUi(), []);
-  const [sources, setSources] = useState<SourceSummary[]>([]);
-  const [sourcesLoaded, setSourcesLoaded] = useState(false);
-  const [categories, setCategories] = useState<string[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [categoryError, setCategoryError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [form, setForm] = useState<WizardForm>(emptyForm([]));
-  const [detailSource, setDetailSource] = useState<SourceSummary | null>(null);
+  const [detailSourceId, setDetailSourceId] = useState<number | null>(null);
   const [detailTab, setDetailTab] = useState<SourceDetailTab>("docs");
   const [highlightPath, setHighlightPath] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SourceSummary | null>(null);
@@ -208,6 +211,38 @@ export default function SourcesPage() {
     error: healthError,
   });
   const engineReady = engineState === "ready";
+  const queryClient = useQueryClient();
+  const {
+    data: sources = [],
+    isLoading: sourcesLoading,
+    isFetched: sourcesLoaded,
+    error: sourcesQueryError,
+    refetch: refetchSources,
+  } = useSourcesQuery(engineReady);
+  const categoriesQuery = useSourceCategoriesQuery(engineReady);
+  const categories = categoriesQuery.data ?? [];
+  const saveCategoriesMutation = useSaveSourceCategoriesMutation();
+  const createSourceMutation = useCreateSourceMutation();
+  const updateSourceMutation = useUpdateSourceMutation();
+  const deleteSourceMutation = useDeleteSourceMutation();
+  const bulkCategoryMutation = useBulkAssignSourceCategoryMutation();
+  const detailSource =
+    detailSourceId == null
+      ? null
+      : sources.find((source) => source.id === detailSourceId) ?? null;
+  const sourceQueryError =
+    sourcesQueryError instanceof Error
+      ? sourcesQueryError.message
+      : sourcesQueryError
+        ? String(sourcesQueryError)
+        : null;
+  const pageLoadError = loadError ?? sourceQueryError;
+  const categoryError =
+    categoriesQuery.error instanceof Error
+      ? `Could not load source categories: ${categoriesQuery.error.message}`
+      : categoriesQuery.error
+        ? `Could not load source categories: ${String(categoriesQuery.error)}`
+        : null;
 
   useEffect(() => {
     const state = location.state as SourcesLocationState | null;
@@ -252,36 +287,16 @@ export default function SourcesPage() {
   const refresh = useCallback(async () => {
     if (!engineReady) return;
     setLoadError(null);
-    setCategoryError(null);
-    const sourcesRequest = fetchSources()
-      .then(setSources)
-      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setSourcesLoaded(true));
-    const categoriesRequest = fetchSourceCategories()
-      .then(setCategories)
-      .catch((e) =>
-        setCategoryError(
-          `Could not load source categories: ${e instanceof Error ? e.message : String(e)}`,
-        ),
-      );
-    await Promise.allSettled([sourcesRequest, categoriesRequest]);
-  }, [engineReady]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    await Promise.allSettled([refetchSources(), categoriesQuery.refetch()]);
+  }, [categoriesQuery, engineReady, refetchSources]);
 
   const onCategoriesReorder = useCallback(async (next: string[]) => {
-    const previous = categories;
-    setCategories(next);
     try {
-      const saved = await saveSourceCategories(next);
-      setCategories(saved);
+      await saveCategoriesMutation.mutateAsync(next);
     } catch (e) {
-      setCategories(previous);
       toast.error(e instanceof Error ? e.message : "Could not reorder categories");
     }
-  }, [categories]);
+  }, [saveCategoriesMutation]);
 
   const filtered = useMemo(
     () =>
@@ -333,9 +348,7 @@ export default function SourcesPage() {
     if (ids.length === 0) return;
     setBulkAssigning(true);
     try {
-      const result = await bulkAssignSourceCategory(ids, category);
-      const updatedById = new Map(result.updated.map((s) => [s.id, s]));
-      setSources((prev) => prev.map((s) => updatedById.get(s.id) ?? s));
+      const result = await bulkCategoryMutation.mutateAsync({ sourceIds: ids, category });
       const label = category?.trim() ? category.trim() : "Uncategorised";
       if (result.failed > 0) {
         toast.error(
@@ -354,8 +367,7 @@ export default function SourcesPage() {
 
   const hasSyncedSources = sources.some((s) => Boolean(s.local_path));
 
-  // Skeletons until the first fetch resolves; bail out if the engine is offline.
-  const sourcesLoading = !sourcesLoaded;
+  const showSourceSkeletons = sourcesLoading && !sourcesLoaded;
 
   const selectedPlan = profiles.find((p) => p.id === selectedProfileId) ?? null;
   const attachedIds = useMemo(() => attachedSourceIds(review), [review]);
@@ -400,7 +412,7 @@ export default function SourcesPage() {
     tab: SourceDetailTab = "docs",
     path: string | null = null,
   ) => {
-    setDetailSource(source);
+    setDetailSourceId(source.id);
     setDetailTab(tab);
     setHighlightPath(path);
   };
@@ -491,9 +503,10 @@ export default function SourcesPage() {
     const next = category?.trim() || null;
     if (previous === next) return;
     try {
-      const updated = await updateSource(source.id, { category: next });
-      setSources((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-      setDetailSource((cur) => (cur?.id === updated.id ? updated : cur));
+      const updated = await updateSourceMutation.mutateAsync({
+        id: source.id,
+        body: { category: next },
+      });
       toast.success(
         next
           ? `Moved “${updated.name}” to ${next}`
@@ -509,7 +522,7 @@ export default function SourcesPage() {
     kind: SourceKind,
     pendingFiles: File[],
     pendingZip: File | null,
-  ) => {
+  ): Promise<boolean> => {
     if (kind === "local") {
       if (pendingFiles.length === 0) {
         throw new Error("Select STL files or a folder to upload.");
@@ -519,12 +532,12 @@ export default function SourcesPage() {
         `Uploaded ${result.imported_files ?? pendingFiles.length} file(s)` +
           (result.stl_count != null ? ` (${result.stl_count} STL)` : ""),
       );
-      return;
+      return true;
     }
 
     const needsZip =
       kind === "archive" || kind === "printables" || kind === "makerworld";
-    if (!needsZip) return;
+    if (!needsZip) return false;
 
     const zip = pendingZip ?? (await pickZipArchive());
     if (!zip) {
@@ -539,6 +552,7 @@ export default function SourcesPage() {
       `Uploaded archive` +
         (result.stl_count != null ? ` (${result.stl_count} STL files)` : ""),
     );
+    return true;
   };
 
   const saveSource = async () => {
@@ -559,40 +573,44 @@ export default function SourcesPage() {
         ) {
           throw new Error("Enter the model page URL from Printables or MakerWorld.");
         }
-        const created = await createSource({
+        const created = await createSourceMutation.mutateAsync({
           name: form.name.trim(),
           url: form.url.trim(),
           ...refFields,
           source_kind: form.source_kind,
           category,
         });
-        await uploadPendingContent(
+        const uploaded = await uploadPendingContent(
           created.id,
           form.source_kind,
           form.pendingFiles,
           form.pendingZip,
         );
         setWizardOpen(false);
-        await refresh();
+        if (uploaded) await invalidateSourceDependents(queryClient);
         if (created.source_kind === "github") syncSources([created.id]);
       } else {
-        await updateSource(editId, {
-          name: form.name.trim(),
-          url: form.url.trim(),
-          ...refFields,
-          source_kind: form.source_kind,
-          category,
+        await updateSourceMutation.mutateAsync({
+          id: editId,
+          body: {
+            name: form.name.trim(),
+            url: form.url.trim(),
+            ...refFields,
+            source_kind: form.source_kind,
+            category,
+          },
         });
-        if (form.pendingFiles.length > 0 || form.pendingZip) {
-          await uploadPendingContent(
+        const uploaded =
+          form.pendingFiles.length > 0 || form.pendingZip
+            ? await uploadPendingContent(
             editId,
             form.source_kind,
             form.pendingFiles,
             form.pendingZip,
-          );
-        }
+              )
+            : false;
         setWizardOpen(false);
-        await refresh();
+        if (uploaded) await invalidateSourceDependents(queryClient);
       }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -604,10 +622,9 @@ export default function SourcesPage() {
     setDeleting(true);
     setLoadError(null);
     try {
-      await deleteSource(deleteTarget.id);
-      if (detailSource?.id === deleteTarget.id) setDetailSource(null);
+      await deleteSourceMutation.mutateAsync(deleteTarget.id);
+      if (detailSourceId === deleteTarget.id) setDetailSourceId(null);
       setDeleteTarget(null);
-      await refresh();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -661,10 +678,13 @@ export default function SourcesPage() {
         .map((r) => ({ source_id: r.source_id as number, name: r.name }));
       setReposImportOpen(false);
       setReposImportText("");
-      await refresh();
+      await Promise.all([
+        categoriesQuery.refetch(),
+        invalidateSourceDependents(queryClient),
+      ]);
       if (reposImportSyncAfter && newSources.length > 0) {
         await syncSourceIdsSequential(newSources);
-        await refresh();
+        await invalidateSourceDependents(queryClient);
       }
     } catch (e) {
       setReposImportNote(e instanceof Error ? e.message : String(e));
@@ -1058,9 +1078,9 @@ export default function SourcesPage() {
               hideCategoryPills
             />
 
-            {(loadError || categoryError || reposImportNote || reposImportSyncNote) && (
+            {(pageLoadError || categoryError || reposImportNote || reposImportSyncNote) && (
               <div className="space-y-1 text-sm">
-                {loadError && <p className="text-destructive">{loadError}</p>}
+                {pageLoadError && <p className="text-destructive">{pageLoadError}</p>}
                 {categoryError && <p className="text-destructive">{categoryError}</p>}
                 {reposImportNote && <p className="text-muted-foreground">{reposImportNote}</p>}
                 {reposImportSyncNote && (
@@ -1069,7 +1089,7 @@ export default function SourcesPage() {
               </div>
             )}
 
-            {sourcesLoading ? (
+            {showSourceSkeletons ? (
               viewMode === "grid" ? (
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {Array.from({ length: 6 }, (_, i) => (
@@ -1103,11 +1123,11 @@ export default function SourcesPage() {
                   ))}
                 </div>
               )
-            ) : loadError && sources.length === 0 ? (
+            ) : pageLoadError && sources.length === 0 ? (
               <Card className="border-destructive/40 bg-destructive/5 shadow-none">
                 <CardContent className="space-y-3 pt-6">
                   <p className="text-sm text-destructive">
-                    Could not load Library: {loadError}
+                    Could not load Library: {pageLoadError}
                   </p>
                   <Button size="sm" variant="secondary" onClick={() => void refresh()}>
                     Retry
@@ -1465,9 +1485,6 @@ export default function SourcesPage() {
         open={categoriesSheetOpen}
         onOpenChange={setCategoriesSheetOpen}
         engineReady={engineReady}
-        onCategoriesChanged={(cats) => {
-          setCategories(cats);
-        }}
       />
 
       <SourceDetailSheet
@@ -1475,7 +1492,7 @@ export default function SourcesPage() {
         open={detailSource != null}
         onOpenChange={(open) => {
           if (!open) {
-            setDetailSource(null);
+            setDetailSourceId(null);
             setHighlightPath(null);
           }
         }}

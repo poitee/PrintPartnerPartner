@@ -27,6 +27,7 @@ function part(overrides: Partial<ReviewPart> & { id: number }): ReviewPart {
 
 const emptyReview: PlanReview = {
   profile_id: 1,
+  accepted_basis: null,
   plan_name: "T",
   layers: [],
   totals: {

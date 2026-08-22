@@ -1,13 +1,8 @@
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { RefreshCw, Plus, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import {
-  addProfileAddonLayer,
-  deleteProfileLayer,
-  fetchPlanLayers,
-  replaceProfileLayer,
-  setProfileBaseLayer,
   startSync,
   type ProfileLayer,
   type SourceSummary,
@@ -15,6 +10,13 @@ import {
 import { sourcesRoute } from "../../lib/routes";
 import { useSourcesQuery } from "../../queries/sources";
 import { useJobRunner } from "../../hooks/useJobRunner";
+import {
+  useAddPlanAddonLayerMutation,
+  useDeletePlanLayerMutation,
+  usePlanLayersQuery,
+  useReplacePlanLayerMutation,
+  useSetPlanBaseLayerMutation,
+} from "../../queries/planLayers";
 import { Button } from "../ui/button";
 import {
   Select,
@@ -36,22 +38,26 @@ import { formatSyncTime } from "../../api/engine";
 
 type Props = {
   profileId: number;
-  layers: ProfileLayer[];
-  onLayersChange: (layers: ProfileLayer[]) => void;
   disabled?: boolean;
 };
 
-/** Inline source attach and sync from the Build page. */
 export default function BuildSourcesPanel({
   profileId,
-  layers,
-  onLayersChange,
   disabled,
 }: Props) {
-  const { data: sources = [], refetch } = useSourcesQuery();
+  const { data: sources = [] } = useSourcesQuery();
+  const { data: layers = [] } = usePlanLayersQuery(profileId);
   const syncJob = useJobRunner("sync");
   const [addonSourceId, setAddonSourceId] = useState("");
-  const [busy, setBusy] = useState(false);
+  const setBaseMutation = useSetPlanBaseLayerMutation(profileId);
+  const addAddonMutation = useAddPlanAddonLayerMutation(profileId);
+  const replaceLayerMutation = useReplacePlanLayerMutation(profileId);
+  const deleteLayerMutation = useDeletePlanLayerMutation(profileId);
+  const busy =
+    setBaseMutation.isPending ||
+    addAddonMutation.isPending ||
+    replaceLayerMutation.isPending ||
+    deleteLayerMutation.isPending;
 
   const attachedIds = useMemo(
     () => new Set(layers.map((l) => l.project_id).filter((id): id is number => id != null)),
@@ -60,11 +66,6 @@ export default function BuildSourcesPanel({
 
   const availableAddons = sources.filter((s) => !attachedIds.has(s.id));
 
-  const reloadLayers = useCallback(async () => {
-    const next = await fetchPlanLayers(profileId);
-    onLayersChange(next);
-  }, [profileId, onLayersChange]);
-
   const syncSource = (sourceId: number) => {
     void syncJob.runJob(
       () => startSync([sourceId]),
@@ -72,7 +73,6 @@ export default function BuildSourcesPanel({
         if (snap.status === "error") toast.error(snap.message || "Sync failed");
         else {
           toast.success("Source synced");
-          void refetch();
         }
       },
       { sourceIds: [sourceId] },
@@ -80,57 +80,39 @@ export default function BuildSourcesPanel({
   };
 
   const attachBase = async (sourceId: number) => {
-    setBusy(true);
     try {
-      await setProfileBaseLayer(profileId, sourceId);
-      await reloadLayers();
+      await setBaseMutation.mutateAsync(sourceId);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
     }
   };
 
   const attachAddon = async () => {
     const id = Number(addonSourceId);
     if (!Number.isFinite(id) || id <= 0) return;
-    setBusy(true);
     try {
-      await addProfileAddonLayer(profileId, id);
+      await addAddonMutation.mutateAsync(id);
       setAddonSourceId("");
-      await reloadLayers();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
     }
   };
 
   const replaceLayerSource = async (layer: ProfileLayer, sourceId: number) => {
-    setBusy(true);
     try {
-      if (layer.layer_type === "base") {
-        await setProfileBaseLayer(profileId, sourceId);
-      } else {
-        await replaceProfileLayer(profileId, layer.id, sourceId);
-      }
-      await reloadLayers();
+      await (layer.layer_type === "base"
+        ? setBaseMutation.mutateAsync(sourceId)
+        : replaceLayerMutation.mutateAsync({ layerId: layer.id, sourceId }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
     }
   };
 
   const removeLayer = async (layerId: number) => {
-    setBusy(true);
     try {
-      await deleteProfileLayer(profileId, layerId);
-      await reloadLayers();
+      await deleteLayerMutation.mutateAsync(layerId);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
     }
   };
 

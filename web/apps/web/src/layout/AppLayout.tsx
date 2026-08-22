@@ -1,6 +1,6 @@
 import { type MouseEvent, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { BookOpen, Layers, MoreHorizontal, Printer, Settings } from "lucide-react";
+import { BookOpen, Factory, Layers, MoreHorizontal, Printer, Settings } from "lucide-react";
 import CommandPalette from "../components/CommandPalette";
 import ErrorBoundary from "../components/ErrorBoundary";
 import JobTray from "../components/JobTray";
@@ -28,11 +28,13 @@ import { openSponsor } from "../lib/supportLinks";
 import { useProfileUrlSync } from "../hooks/useProfileUrlSync";
 import { useAppUpdateCheck } from "../hooks/useAppUpdateCheck";
 import { useWorkflowStages } from "../hooks/useWorkflowStages";
+import { pageDensityFromPath } from "../lib/pageDensity";
 import {
   isBuildPath,
+  isExportPath,
   isPartsPath,
-  isPlanPath,
   isProgressPath,
+  isSourcesPath,
 } from "../lib/routes";
 import {
   spineUtilityNavItems,
@@ -49,7 +51,8 @@ import { readSidebarCollapsed, writeSidebarCollapsed } from "../lib/persistedSid
 import { TooltipProvider } from "../components/ui/tooltip";
 
 const UTILITY_ICONS: Record<SpineUtilityId, typeof Layers> = {
-  plans: Layers,
+  builds: Layers,
+  production: Factory,
   printers: Printer,
   settings: Settings,
   help: BookOpen,
@@ -108,8 +111,8 @@ export default function AppLayout() {
 
   const onPipelineNavigate = (to: string, e: MouseEvent<HTMLAnchorElement>) => {
     const destPath = to.split("?")[0] ?? to;
-    const leavingPlan = isPlanPath(location.pathname) && !isPlanPath(destPath);
-    if (!leavingPlan) return;
+    const leavingSources = isSourcesPath(location.pathname) && !isSourcesPath(destPath);
+    if (!leavingSources) return;
     e.preventDefault();
     void Promise.all([flushImportRules(), flushKitManifest()]).then(() => {
       navigate(to);
@@ -125,7 +128,8 @@ export default function AppLayout() {
     activePlanName &&
     (isBuildPath(location.pathname) ||
       isPartsPath(location.pathname) ||
-      isProgressPath(location.pathname));
+      isProgressPath(location.pathname) ||
+      isExportPath(location.pathname));
 
   const secondaryMobile = spineUtilityNavItems(selectedProfileId).map((item) => ({
     ...item,
@@ -205,8 +209,9 @@ export default function AppLayout() {
             <main
               id="main-content"
               tabIndex={-1}
+              data-density={pageDensityFromPath(location.pathname)}
               className={cn(
-                "flex-1 overflow-x-hidden overflow-y-auto p-3 pb-28 sm:p-5 sm:pb-24 lg:pb-20 print:overflow-visible print:p-0",
+                "flex-1 overflow-x-hidden overflow-y-auto p-[var(--density-page-pad)] pb-28 sm:pb-24 lg:pb-20 print:overflow-visible print:p-0",
               )}
             >
               <ErrorBoundary key={location.pathname}>

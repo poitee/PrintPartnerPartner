@@ -1,4 +1,4 @@
-import type { AppRepository } from "../db/repository.js";
+import type { AppRepository, ProfileHeader } from "../db/repository.js";
 import { loadKitCatalog } from "../services/kit-catalog.js";
 import { loadKitManifest } from "../services/kit-manifest-store.js";
 import { loadRoleFilamentDefaults } from "../services/role-filament-store.js";
@@ -54,11 +54,10 @@ export function inferStackPresetId(
 
 function summarizeOnePlan(
   repo: AppRepository,
-  planId: number,
+  profile: ProfileHeader,
   catalog: Record<string, unknown>,
 ): string | null {
-  const profile = repo.getProfile(planId);
-  if (!profile) return null;
+  const planId = profile.id;
   const layers = repo.getProfileLayers(planId);
   const kit = loadKitManifest(repo, planId);
   const base = layers.find((l) => l.layer_type === "base");
@@ -110,7 +109,7 @@ export function summarizeOtherBuildsAsExamples(options: ExampleBuildsOptions): s
   const knownTokens = collectCatalogFeedbackTokens(catalog);
   const feedback = aggregateFeedbackScores(options.repo, knownTokens);
   const profiles = options.repo
-    .listProfiles()
+    .listProfileHeaders()
     .filter((p) => p.id !== options.excludePlanId)
     .sort((a, b) => {
       const scoreDiff =
@@ -126,7 +125,7 @@ export function summarizeOtherBuildsAsExamples(options: ExampleBuildsOptions): s
     "These are summaries of plans this user can already access. Use them as concrete setup examples when advising; never invent STLs from them; never dump full part lists.",
   ];
   for (const p of profiles) {
-    const block = summarizeOnePlan(options.repo, p.id, catalog);
+    const block = summarizeOnePlan(options.repo, p, catalog);
     if (block) blocks.push(block);
   }
   return truncate(blocks.join("\n\n"), MAX_EXAMPLE_CHARS);

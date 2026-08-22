@@ -1,12 +1,13 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { JobSnapshot } from "../api/engine";
 import { queryKeys } from "./keys";
-import { invalidatePlanReview } from "./planReview";
 import { invalidateProfiles } from "./profiles";
 import { invalidateSources } from "./sources";
+import {
+  invalidateAcceptedPlateExportJobs,
+} from "./acceptedPlates";
 
 const SYNC_KINDS = new Set(["sync", "sync-all", "check-source-updates", "import-scan"]);
-const RECOMPUTE_KINDS = new Set(["recompute", "apply-manifest"]);
 const SOURCE_MUTATION_KINDS = new Set([
   "import-repos-txt",
   "import-kit-bundle",
@@ -20,27 +21,16 @@ export function invalidateAfterJob(
   snapshot: JobSnapshot,
   profileId?: number | null,
 ) {
+  if (kind === "export-accepted-plate-3mf" && profileId != null) {
+    void invalidateAcceptedPlateExportJobs(qc, profileId);
+  }
+
   if (snapshot.status !== "done") return;
 
   if (SOURCE_MUTATION_KINDS.has(kind)) {
     void invalidateSources(qc);
     void invalidateProfiles(qc);
-  }
-
-  if (RECOMPUTE_KINDS.has(kind) && profileId != null) {
-    void invalidatePlanReview(qc, profileId);
-    void invalidateProfiles(qc);
-    void qc.invalidateQueries({ queryKey: queryKeys.planLayers(profileId) });
-    void qc.invalidateQueries({ queryKey: queryKeys.roleFilaments(profileId) });
-    // Parts changed → the server re-packs, so plate contents and their
-    // height-band labels are stale.
-    void qc.invalidateQueries({ queryKey: queryKeys.plateWorkspace(profileId) });
-  }
-
-  // A pack preview re-packs on the server with the requested strategy; refresh
-  // the plate cards so their height bands match what was just packed.
-  if (kind === "pack-preview" && profileId != null) {
-    void qc.invalidateQueries({ queryKey: queryKeys.plateWorkspace(profileId) });
+    void qc.invalidateQueries({ queryKey: queryKeys.planReviews });
   }
 
   if (kind === "stl-export" || kind === "export-kit-bundle" || kind === "export-checklist-html") {

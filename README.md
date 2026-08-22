@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/sponsors/poitee"><img src="https://img.shields.io/badge/GitHub_Sponsors-Sponsor-ea4aaa?style=for-the-badge&logo=github-sponsors&logoColor=white" alt="Sponsor on GitHub Sponsors"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey?style=for-the-badge" alt="CC BY-NC 4.0"></a>
 </p>
 
 <p align="center">
@@ -28,14 +29,14 @@
 </p>
 
 <p align="center">
-  <code>Library</code> → <code>Plan</code> → <code>Parts</code> → <code>Progress</code> → <code>Export</code>
+  <code>Library</code> → <code>Builds</code> → <code>Sources</code> → <code>Plan</code> → <code>Checkoff</code> → <code>Production</code>
 </p>
 
 <p align="center">
   <sub>
-    Manage plans from the header <strong>Create plan</strong> control or the sidebar <strong>Plans</strong> page.
-    Print checkoff lives on <strong>Progress</strong> (legacy <code>/checkoff</code> redirects there).
-    Utility nav: Plans · Printers · Settings · Help.
+    <strong>New Build</strong> asks only for a name, then opens Sources.
+    Opening an existing Build opens Plan.
+    Utility nav: Builds · Production · Printers · Settings.
   </sub>
 </p>
 
@@ -55,12 +56,13 @@
 | Step | What you are doing |
 |------|--------------------|
 | **Library** | Add GitHub repos, local folders, or zips; assign categories; search STLs across every synced repo; see **update available** badges; sync and set import rules. |
-| **Plan** | Attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), recompute when stale, kit/manifest options, inline repo **Docs**. |
-| **Parts** | Confirm validation by role and filament, browse included parts with 3D previews, edit quantities. |
-| **Progress** | Track **print checkoff** (per-unit progress, assembled toggles, filters, printable checklist). |
-| **Export** | Plate workspace, height-band packing, slicer links, profile library, STL/3MF packs, printer bind / send, Spoolman deduct when configured. |
+| **Builds** | Name a Build, search, filter, archive, and restore. **New Build** asks only for a name, then opens Sources. |
+| **Sources** | Attach base/add-on sources, pick STL files, set **role filament colors** (previews update live), kit/manifest options, inline repo **Docs**. |
+| **Plan** | Review quantities and warnings, save a draft, and **Apply** so Checkoff and Production use the accepted list. |
+| **Checkoff** | Track **print checkoff** (per-unit progress, assembled toggles, filters, printable checklist). |
+| **Production** | Assign Required units to Printers, arrange accepted Plates, download revision-bound 3MFs, open a local slicer, send G-code, and deduct Spoolman when configured. |
 
-**Plans** (not a pipeline step): create, rename, duplicate, archive, and delete plans from **Create plan** or the **Plans** page. The active plan is shared across Plan, Parts, Progress, and Export.
+**Builds** (home, not a pipeline step after Library): create, rename, duplicate, archive, and restore from **New Build** or the **Builds** page. The active Build is shared across Sources, Plan, Checkoff, and Production.
 
 **MCP attach:** Print Partner is the kit brain. Connect Cursor / Grok / Claude to HTTP MCP (`/api/v1/mcp` + `PRINT_PARTNER_API_KEY`). Mutations stay confirm-to-apply. Guide: [`docs/assistant-mcp.md`](docs/assistant-mcp.md). There is **no in-app Ask / Kit Advisor sheet** and **no Settings → AI**.
 
@@ -68,11 +70,11 @@
 
 Optional integrations:
 
-- **[Spoolman](docs/integrations/SPOOLMAN.md)** — pick filaments from inventory on Plan; read-only remaining weights in Parts; optional deduct on send.
-- **Live printers** — **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload with verify-first Progress; **Bambu** LAN MQTT is status-only (send deferred). See **[Printer setup](docs/integrations/PRINTER_SETUP.md)**.
-- **Slicer sidecar** — optional Orca/Prusa/Bambu CLI companion for auto-slice (`slicer-sidecar/`, `pp-compose.yml`).
+- **[Spoolman](docs/integrations/SPOOLMAN.md)** — pick filaments from inventory on Sources; read-only remaining weights in Plan; optional deduct on send.
+- **Live printers** — **Klipper/Moonraker** and **PrusaLink** support test, status, and G-code upload with verify-first Checkoff; **Bambu** LAN MQTT is status-only (send deferred). See **[Printer setup](docs/integrations/PRINTER_SETUP.md)**.
+- **Local slicers** — optional Orca/Prusa/Bambu GUI containers with profile watch volumes (`pp-compose.yml`). Print Partner hands off accepted 3MFs; profile and slicing choices stay in the slicer.
 - **Discord digest / Home Assistant** — optional overnight farm digest and HA hooks when configured.
-- **Backups, metrics, rate limits, API keys** — see [`OPERATIONS.md`](OPERATIONS.md).
+- **Backups, metrics, rate limits, API keys** — see [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ---
 
@@ -104,39 +106,55 @@ Screenshots switch with your GitHub **light / dark** theme (or see both on the [
 
 Source library: categories, sync status, **update available** badges, global STL search, per-source import rules.
 
-### Plans
+### Builds
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/builds.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/builds.png">
-  <img src="docs/screenshots/light/builds.png" alt="Plans — plan manager with create, rename, duplicate, and archive.">
+  <img src="docs/screenshots/light/builds.png" alt="Builds — list-first home with create, rename, duplicate, archive, and restore.">
 </picture>
 
-Sidebar **Plans** page plus **Create plan** in the header spine.
+Sidebar **Builds** page plus **New Build** in the header spine.
 
-### Plan
+### Sources
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/build.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/build.png">
-  <img src="docs/screenshots/light/build.png" alt="Plan — role filament colors, STL pickers with live preview, and recompute.">
+  <img src="docs/screenshots/light/build.png" alt="Sources — attach sources, pick STLs, and set role colors for a Build.">
 </picture>
 
-Role colors, attach sources, pick STLs (live 3D preview), recompute when stale, kit options, **Docs**.
+Attach sources, pick STLs (live 3D preview), role colors, kit options, **Docs**.
 
-### Parts
+### Plan
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/review.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/review.png">
-  <img src="docs/screenshots/light/review.png" alt="Parts — validation, parts with 3D previews, quantity edits.">
+  <img src="docs/screenshots/light/review.png" alt="Plan — quantities, warnings, and Apply.">
 </picture>
 
-Validation by role and filament, parts list with **3D previews**, quantity edits.
+Quantities, warnings, saved draft, and explicit **Apply**.
 
-### Progress & Export
+### Checkoff
 
-Print checkoff lives on **Progress**. Plate packing, slicer links, profile library, and send live on **Export**. Re-run `docs/scripts/capture-screenshots.mjs` to refresh PNGs for those stages.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/progress.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/progress.png">
+  <img src="docs/screenshots/light/progress.png" alt="Checkoff — per-unit print verification for remaining parts.">
+</picture>
+
+Track remaining units, bag/sort, and print the checklist.
+
+### Production
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark/export.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/light/export.png">
+  <img src="docs/screenshots/light/export.png" alt="Production — Prepare Plates, named-object 3MF, and slicer handoff.">
+</picture>
+
+Assign Required units to Printers, arrange accepted Plates, download revision-bound 3MFs, and send G-code.
 
 ---
 
@@ -152,8 +170,9 @@ docker compose pull && docker compose up -d
 
 Open [http://localhost:8080](http://localhost:8080). Data persists in the `print-partner-data` volume, mounted at `/data` inside the container (SQLite database, synced repos, exports, and thumbnails).
 
+<!-- release-version:start -->
 Images are published to **`ghcr.io/poitee/print-partner`** (`latest` plus a tag
-per release, e.g. `3.1.0`). Compose defaults to the audited `3.1.0` tag; set
+per release, e.g. `3.2.0`). Compose defaults to the prepared `3.2.0` tag; set
 `PRINT_PARTNER_VERSION` to another release explicitly. To build from source
 instead:
 
@@ -169,10 +188,10 @@ docker compose up --build
 2. Clone this repo and `cd` into it.
 3. Run `docker compose pull && docker compose up -d` (or `docker compose up --build` to build from source).
 4. Open [http://localhost:8080](http://localhost:8080) (or `http://<lan-ip>:8080`).
-5. Add a source on **Library**, create a plan with **Create plan** or **Plans**, then walk **Plan → Parts → Progress → Export**.
+5. Add a source on **Library**, create a Build with **New Build**, then walk **Sources → Plan → Checkoff → Production**.
 6. For MCP attach on Docker (`HOST=0.0.0.0`): set `PRINT_PARTNER_API_KEY`, prefer HTTPS via a reverse proxy, then connect via [`docs/assistant-mcp.md`](docs/assistant-mcp.md).
 
-Optional slicer GUI + sidecar stack (profiles + auto-slice): `docker compose -f docker-compose.yml -f pp-compose.yml up -d` — see comments in `pp-compose.yml`.
+Optional local slicer GUI stack with profile watch volumes: `docker compose -f docker-compose.yml -f pp-compose.yml up -d`. See comments in `pp-compose.yml`.
 
 ### Environment variables (self-host)
 
@@ -194,15 +213,16 @@ Defaults match `web/apps/server/src/config.ts`; the Docker image overrides `HOST
 | `CORS_ORIGIN` / `ALLOWED_ORIGINS` | `true` | Allowed CORS origin(s); comma-separated list for multiple (`ALLOWED_ORIGINS` takes precedence) |
 | `BASIC_AUTH_USER` / `BASIC_AUTH_PASS` | unset | Optional HTTP Basic protection |
 | `UPLOAD_MAX_BYTES` | `536870912` | Multipart upload / request body limit (512 MiB) |
-| `PP_VERSION` | `3.1.0-web` (baked into release images) | Version reported by `GET /health` |
+| `PP_VERSION` | `3.2.0-web` (baked into release images) | Version reported by `GET /health` |
 | `PRINT_PARTNER_UPDATE_CHECK` | enabled | Set to `0` to disable in-app update checks |
 | `GITHUB_REPO` | `poitee/PrintPartnerPartner` | GitHub repo for release lookup |
 | `PRINT_PARTNER_LATEST_VERSION` | unset | Air-gapped: compare against this version instead of GitHub |
-| `PRINT_PARTNER_API_KEY` | unset | Gates `/api/v1/*` when set; **required** for `/api/v1/mcp` unless `HOST` is loopback |
+| `PRINT_PARTNER_API_KEY` | unset | Gates `/api/v1/*` and `/api/v2/*` when set; **required** for `/api/v1/mcp` unless `HOST` is loopback |
+<!-- release-version:end -->
 
 The app optionally checks GitHub for newer releases and shows a subtle banner plus **Settings → About & updates**. Self-host Docker upgrade: `docker compose pull && docker compose up -d`.
 
-See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables, MCP attach, and desktop-data migration. Day-two ops (backups, API keys, metrics, rate limits): [`OPERATIONS.md`](OPERATIONS.md).
+See [`web/DEPLOY.md`](web/DEPLOY.md) for the full reference, including SaaS variables, MCP attach, and desktop-data migration. Day-two ops (backups, API keys, metrics, rate limits): [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ---
 
@@ -273,7 +293,7 @@ The application lives in the `web/` TypeScript monorepo; the `Dockerfile` and Co
     └── packages/              # contracts, domain
 ```
 
-The server uses a **ports/adapters** design: a `self-host` adapter (SQLite + local disk) and a `saas` adapter (Postgres + S3) implement the same ports. STL rendering happens client-side with Three.js, and long-running work (sync, recompute, exports, auto-slice) runs in a background job runner that streams progress over a WebSocket. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for details.
+The server uses a **ports/adapters** design: a `self-host` adapter (SQLite + local disk) and a `saas` adapter (Postgres + S3) implement the same ports. STL rendering happens client-side with Three.js, and long-running work such as sync, recompute, and accepted Plate export runs in a background job runner that streams progress over a WebSocket. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for details.
 
 ---
 
@@ -303,7 +323,7 @@ Credits (people only): **Chad Lynch** ([@poitee](https://github.com/poitee)), **
 - [`docs/KIT_ADVISOR.md`](docs/KIT_ADVISOR.md) — kit brain + MCP (no in-app AI)
 - [`web/DEPLOY.md`](web/DEPLOY.md) — Docker Compose, env vars, SaaS, MCP attach
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system design
-- [`docs/API.md`](docs/API.md) — HTTP API overview (`/api/v1`, MCP)
-- [`OPERATIONS.md`](OPERATIONS.md) — backups, API keys, metrics, day-two ops
+- [`docs/API.md`](docs/API.md) — HTTP API overview (`/api/v1`, `/api/v2`, MCP)
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — backups, API keys, metrics, day-two ops
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
 - [`LICENSE`](LICENSE) — full license text

@@ -91,7 +91,7 @@ export async function registerAssistantRoutes(
     const q = request.query as { plan_id?: string };
     const raw = q.plan_id != null ? Number(q.plan_id) : NaN;
     const planId = Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : null;
-    if (planId != null && !deps.repo.getProfile(planId)) {
+    if (planId != null && !deps.repo.getOwnedProfileIdentity(planId)) {
       return sendProblem(reply, 404, "Not Found", "Plan not found");
     }
     const digest = buildPreferencesDigest(deps.repo, planId);
@@ -133,7 +133,7 @@ export async function registerAssistantRoutes(
     }
 
     if (planId != null) {
-      if (!deps.repo.getProfile(planId)) {
+      if (!deps.repo.getOwnedProfileIdentity(planId)) {
         return sendProblem(reply, 404, "Not Found", "Plan not found");
       }
       const deleted = deps.repo.deletePlanDecisionsForPlan(planId);
@@ -191,13 +191,44 @@ export async function registerAssistantRoutes(
       if (typeof action.plan_id !== "number" || !Number.isFinite(action.plan_id)) {
         return sendProblem(reply, 400, "Bad Request", "action.plan_id is required");
       }
-      const result = await applyAssistantAction(action, {
-        repo: deps.repo,
-        jobs: deps.jobs,
-        tenantId: request.tenantId,
-      });
+      let result: Awaited<ReturnType<typeof applyAssistantAction>>;
+      try {
+        result = await applyAssistantAction(action, {
+          repo: deps.repo,
+          jobs: deps.jobs,
+          tenantId: request.tenantId,
+        });
+      } catch {
+        request.log.error(
+          { failure: "unexpected", actionType: action.type, planId: action.plan_id },
+          "Assistant action apply failed",
+        );
+        return sendProblem(reply, 500, "Internal Server Error", "Internal Server Error");
+      }
       if (!result.ok) {
-        return sendProblem(reply, 400, "Bad Request", result.detail ?? "Action failed");
+        const status = result.status === 500 || result.status === 503 ? result.status : 400;
+        if (status === 500) {
+          request.log.error(
+            {
+              failure: result.detail === "Accepted Plan data is inconsistent"
+                ? "integrity"
+                : "unexpected",
+              actionType: action.type,
+              planId: action.plan_id,
+            },
+            "Assistant action apply failed",
+          );
+        }
+        return sendProblem(
+          reply,
+          status,
+          status === 503
+            ? "Service Unavailable"
+            : status === 500
+              ? "Internal Server Error"
+              : "Bad Request",
+          result.detail ?? "Action failed",
+        );
       }
       removePendingProposedAction(deps.repo, action.id);
       const followUp =

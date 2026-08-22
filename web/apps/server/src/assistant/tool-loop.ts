@@ -7,7 +7,7 @@ import {
 } from "./parse-text-tool-calls.js";
 import { recoverProposedActionsFromText } from "./recover-proposals-from-text.js";
 import { suggestSoftStackActions } from "./stack-suggest.js";
-import { buildSyncThenUpdateAction } from "./sync-then-update.js";
+import { buildSyncAction } from "./sync-action.js";
 import { isDismissedFingerprint } from "./preferences-digest.js";
 import { loadKitCatalog } from "../services/kit-catalog.js";
 import { type BuildDecision, applyUserConstraintsToDecisions } from "./build-decisions.js";
@@ -33,23 +33,16 @@ function appendSoftStackSuggestions(
 }
 
 /**
- * If the turn proposed set_base with a tag/branch but no sync workflow yet,
- * append a Sync → Update build card so the user isn't left narrating sync.
+ * If the turn proposed set_base with a tag/branch but no sync action yet,
+ * append a Sync card so the user isn't left narrating sync.
  */
-export function appendSyncThenUpdateIfNeeded(
+export function appendSyncIfNeeded(
   toolCtx: ToolContext,
   proposedActions: AssistantProposedAction[],
 ): void {
   const planId = toolCtx.activePlanId;
   if (planId == null) return;
-  if (
-    proposedActions.some(
-      (a) =>
-        a.type === "start_sync" ||
-        (a.type === "apply_build_recipe" &&
-          a.params?.workflow === "sync_then_recompute"),
-    )
-  ) {
+  if (proposedActions.some((action) => action.type === "start_sync")) {
     return;
   }
   const setBase = proposedActions.find((a) => a.type === "set_base");
@@ -58,7 +51,7 @@ export function appendSyncThenUpdateIfNeeded(
   const tag = typeof setBase?.params?.tag === "string" ? setBase.params.tag.trim() : "";
   const branch =
     typeof setBase?.params?.branch === "string" ? setBase.params.branch.trim() : "";
-  // Stack presets (e.g. ldo_trident_r2) often imply a release tag — always offer Sync → Update.
+  // Stack presets (e.g. ldo_trident_r2) often imply a release tag — always offer Sync.
   if (!stackPreset && !tag && !branch) return;
 
   const names = new Set<string>();
@@ -98,7 +91,7 @@ export function appendSyncThenUpdateIfNeeded(
         ? [...names][0]!
         : null;
   proposedActions.push(
-    buildSyncThenUpdateAction({
+    buildSyncAction({
       planId,
       projectIds,
       sourceName,
@@ -162,7 +155,7 @@ export function userAskedToSwitchBase(userText: string): boolean {
 function planBaseSourceName(toolCtx: ToolContext): string | null {
   const planId = toolCtx.activePlanId;
   if (planId == null) return null;
-  if (!toolCtx.repo.getProfile(planId)) return null;
+  if (!toolCtx.repo.getOwnedProfileIdentity(planId)) return null;
   const layers = toolCtx.repo.getProfileLayers(planId);
   const base = layers.find((l) => l.layer_type === "base");
   return base?.project_name ?? null;
@@ -228,7 +221,9 @@ export function appendAliasDrivenHints(
   const liveNames = new Set(liveSources.map((s) => s.name));
   const catalogBases = catalogBaseSourceNameSet();
   const layers =
-    toolCtx.repo.getProfile(planId) != null ? toolCtx.repo.getProfileLayers(planId) : [];
+    toolCtx.repo.getOwnedProfileIdentity(planId) != null
+      ? toolCtx.repo.getProfileLayers(planId)
+      : [];
   const attached = new Set(
     layers.map((l) => l.project_name).filter((n): n is string => Boolean(n)),
   );
@@ -633,7 +628,7 @@ function finalizeProposedActions(
   appendAliasDrivenHints(toolCtx, proposedActions, userText);
   appendBuildDecisionHints(toolCtx, proposedActions, userText, lastDecisions);
   appendSoftStackSuggestions(toolCtx, proposedActions);
-  appendSyncThenUpdateIfNeeded(toolCtx, proposedActions);
+  appendSyncIfNeeded(toolCtx, proposedActions);
   // Hard-filter dismissed fingerprints so recovered/soft cards never reach Apply UI.
   const kept = proposedActions.filter((a) => {
     if (!a.plan_id || a.plan_id <= 0) return true;

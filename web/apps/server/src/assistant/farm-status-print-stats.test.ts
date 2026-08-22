@@ -4,18 +4,20 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
-import { invokeAssistantTool } from "./tools.js";
+import { ASSISTANT_TOOL_SPECS, invokeAssistantTool } from "./tools.js";
 import { loadFleet, saveFleet } from "../services/printer-fleet.js";
 import { createIntegrationPort, type IntegrationPort } from "../integrations/store.js";
 import { spoolmanAdapter } from "../integrations/adapters/spoolman.js";
 import type { PrinterHostStatus } from "@print-partner/contracts";
 import type { PrinterMachine } from "@print-partner/domain";
+import { getLogger } from "../services/logger.js";
 
 /** A fleet machine with one empty filament slot, bound to `integrationId`. */
 function machine(id: string, name: string, integrationId: string | null): PrinterMachine {
   return {
     id,
     name,
+    model: name,
     bed_width_mm: 250,
     bed_depth_mm: 250,
     bed_height_mm: 250,
@@ -59,11 +61,19 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
+  it("describes the accepted Progress collection to the model", () => {
+    const spec = ASSISTANT_TOOL_SPECS.find(({ name }) => name === "get_print_stats");
+    expect(spec?.description).toBe(
+      "Recent print activity and accepted Plan progress. Returns plates sent in the last N hours, completed and failed counts, completion rate, filament consumed, and a per-printer breakdown. active_plans is either an available collection or unavailable when collection loading fails. Each available Plan has plan_id, plan_name, part_count, and accepted_progress. accepted_progress is ready with total_units and remaining_units, empty when nothing has been applied, or unavailable with reason compatibility_dirty, uninitialized, integrity, or concurrent_update. Per-Plan unavailable states remain inside an available collection. Pass hours to control the lookback window.",
+    );
+  });
+
   it("get_farm_status reports printer state + active job for each fleet machine", async () => {
     saveFleet(repo, [
       {
         id: "trident-r2",
         name: "Trident R2 LDO",
+        model: "Trident R2 LDO",
         bed_width_mm: 250,
         bed_depth_mm: 250,
         bed_height_mm: 250,
@@ -75,6 +85,7 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
       {
         id: "prusa-xl",
         name: "Prusa XL",
+        model: "Prusa XL",
         bed_width_mm: 360,
         bed_depth_mm: 360,
         bed_height_mm: 360,
@@ -86,6 +97,7 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
       {
         id: "coreone1",
         name: "CoreOne1",
+        model: "CoreOne1",
         bed_width_mm: 250,
         bed_depth_mm: 220,
         bed_height_mm: 270,
@@ -170,8 +182,10 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
     expect(data.plates_completed).toBe(3);
     expect(data.plates_failed).toBe(1);
     expect(data.filament_consumed_g).toBe(42 + 38 + 55 + 10); // excludes the null and the out-of-window row
-    expect(Array.isArray(data.active_plans)).toBe(true);
-    expect(data.active_plans.some((p: { plan_id: number }) => p.plan_id === plan.id)).toBe(true);
+    expect(data.active_plans.kind).toBe("available");
+    expect(
+      data.active_plans.plans.some((p: { plan_id: number }) => p.plan_id === plan.id),
+    ).toBe(true);
 
     // custom window: widen to 48h to pick up the previously-excluded row
     const wide = JSON.parse(
@@ -188,6 +202,122 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
     expect(data.plates_completed).toBe(0);
     expect(data.plates_failed).toBe(0);
     expect(data.filament_consumed_g).toBe(0);
+  });
+
+  it("get_print_stats returns an available mixed accepted Progress collection", async () => {
+    const ready = repo.createProfile("A Ready");
+    const empty = repo.createProfile("B Empty");
+    const dirty = repo.createProfile("C Dirty");
+    const uninitialized = repo.createProfile("D Uninitialized");
+    const integrity = repo.createProfile("E Integrity");
+    const concurrent = repo.createProfile("F Concurrent");
+    const archived = repo.createProfile("G Archived");
+    const readyHeader = repo.getProfileHeader(ready.id);
+    const emptyHeader = repo.getProfileHeader(empty.id);
+    const dirtyHeader = repo.getProfileHeader(dirty.id);
+    const uninitializedHeader = repo.getProfileHeader(uninitialized.id);
+    const integrityHeader = repo.getProfileHeader(integrity.id);
+    const concurrentHeader = repo.getProfileHeader(concurrent.id);
+    const archivedHeader = repo.getProfileHeader(archived.id);
+    if (
+      !readyHeader ||
+      !emptyHeader ||
+      !dirtyHeader ||
+      !uninitializedHeader ||
+      !integrityHeader ||
+      !concurrentHeader ||
+      !archivedHeader
+    ) {
+      throw new Error("test Profile header is missing");
+    }
+    repo.listAcceptedProfileSummaries = () => [
+      { header: readyHeader, progress: { kind: "ready", totalUnits: 4, remainingUnits: 2 } },
+      { header: emptyHeader, progress: { kind: "empty" } },
+      {
+        header: dirtyHeader,
+        progress: { kind: "unavailable", reason: "compatibility_dirty" },
+      },
+      {
+        header: uninitializedHeader,
+        progress: { kind: "unavailable", reason: "uninitialized" },
+      },
+      { header: integrityHeader, progress: { kind: "integrity_failure", code: "progress" } },
+      { header: concurrentHeader, progress: { kind: "concurrent_update" } },
+      {
+        header: { ...archivedHeader, archived_at: "2026-08-21T12:00:00.000Z" },
+        progress: { kind: "ready", totalUnits: 9, remainingUnits: 9 },
+      },
+    ];
+
+    const data = JSON.parse((await invokeAssistantTool("get_print_stats", {}, { repo })).content);
+    expect(data.active_plans).toEqual({
+      kind: "available",
+      plans: [
+        {
+          plan_id: ready.id,
+          plan_name: "A Ready",
+          part_count: 0,
+          accepted_progress: { kind: "ready", total_units: 4, remaining_units: 2 },
+        },
+        {
+          plan_id: empty.id,
+          plan_name: "B Empty",
+          part_count: 0,
+          accepted_progress: { kind: "empty" },
+        },
+        {
+          plan_id: dirty.id,
+          plan_name: "C Dirty",
+          part_count: 0,
+          accepted_progress: { kind: "unavailable", reason: "compatibility_dirty" },
+        },
+        {
+          plan_id: uninitialized.id,
+          plan_name: "D Uninitialized",
+          part_count: 0,
+          accepted_progress: { kind: "unavailable", reason: "uninitialized" },
+        },
+        {
+          plan_id: integrity.id,
+          plan_name: "E Integrity",
+          part_count: 0,
+          accepted_progress: { kind: "unavailable", reason: "integrity" },
+        },
+        {
+          plan_id: concurrent.id,
+          plan_name: "F Concurrent",
+          part_count: 0,
+          accepted_progress: { kind: "unavailable", reason: "concurrent_update" },
+        },
+      ],
+    });
+  });
+
+  it("get_print_stats preserves non-Plan stats and redacts collection failures", async () => {
+    repo.listAcceptedProfileSummaries = () => {
+      throw new Error("secret SQL /private/path token_123");
+    };
+    const log = vi.spyOn(getLogger(), "log").mockImplementation(() => undefined);
+
+    const data = JSON.parse((await invokeAssistantTool("get_print_stats", {}, { repo })).content);
+    expect(data).toEqual(
+      expect.objectContaining({
+        plates_sent: 0,
+        plates_completed: 0,
+        plates_failed: 0,
+        filament_consumed_g: 0,
+        by_printer: [],
+        active_plans: { kind: "unavailable" },
+      }),
+    );
+    expect(data.error).toBeUndefined();
+    expect(JSON.stringify(data)).not.toContain("secret SQL");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("secret SQL");
+    expect(log).toHaveBeenCalledWith(
+      "error",
+      "[assistant] Plan progress collection unavailable",
+      { failure: "unexpected", operation: "get_print_stats" },
+    );
   });
 
   it("get_farm_status does not error when fleet is empty", async () => {
@@ -558,4 +688,3 @@ describe("print_jobs schema supports get_farm_status / get_print_stats", () => {
     });
   });
 });
-

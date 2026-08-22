@@ -15,8 +15,17 @@ RUN npm run build && \
     npm ci --omit=dev
 
 FROM node:22-bookworm-slim AS runtime
-# Baked in by the release workflow (vX.Y.Z tag -> X.Y.Z-web); reported by GET /health.
-ARG PP_VERSION=3.1.0-web
+# Release builds override these with the validated, peeled tag identity.
+ARG PP_APP_VERSION=3.2.0
+ARG PP_COMMIT=
+ARG PP_TAG=
+ARG PP_BUILD_DATE=unknown
+
+LABEL org.opencontainers.image.source="https://github.com/poitee/PrintPartnerPartner" \
+      org.opencontainers.image.version="${PP_APP_VERSION}" \
+      org.opencontainers.image.revision="${PP_COMMIT}" \
+      org.opencontainers.image.ref.name="${PP_TAG}" \
+      org.opencontainers.image.created="${PP_BUILD_DATE}"
 
 # dumb-init: proper PID 1 signal handling. gosu: drop root after entrypoint chown.
 RUN apt-get update && apt-get install -y --no-install-recommends dumb-init gosu && \
@@ -38,7 +47,10 @@ RUN if ! id ppuser >/dev/null 2>&1; then \
 
 WORKDIR /app/web
 ENV NODE_ENV=production
-ENV PP_VERSION=${PP_VERSION}
+ENV PP_VERSION=${PP_APP_VERSION}-web
+ENV PP_COMMIT=${PP_COMMIT}
+ENV PP_TAG=${PP_TAG}
+ENV PP_BUILD_DATE=${PP_BUILD_DATE}
 ENV HOST=0.0.0.0
 ENV PORT=8080
 ENV PRINT_PARTNER_DATA_DIR=/data
