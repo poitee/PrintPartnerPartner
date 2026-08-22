@@ -189,7 +189,7 @@ describe("PlanWorkspaceProvider saved draft lifecycle", () => {
       await hook.result.current.applyActivePlanDraft();
     });
 
-    expect(applyPlanDraft).toHaveBeenCalledWith(savedWorkspace);
+    expect(applyPlanDraft).toHaveBeenCalledWith(savedWorkspace, undefined);
     expect(client.getQueryState(queryKeys.planReview(7, false))?.isInvalidated).toBe(true);
     expect(client.getQueryState(queryKeys.profiles)?.isInvalidated).toBe(true);
     expect(client.getQueryState(queryKeys.checkoff(7))?.isInvalidated).toBe(true);
@@ -214,6 +214,19 @@ describe("PlanWorkspaceProvider saved draft lifecycle", () => {
 
     expect(hook.result.current.draftWorkspace?.draft).toMatchObject({ draft_id: 9, state: "open" });
     expect(client.getQueryData(queryKeys.planDraft(7, 9))).not.toBeNull();
+  });
+
+  it("forwards remapCheckoffLinks when Apply is asked to preserve production links", async () => {
+    const client = new QueryClient();
+    const hook = renderHook(usePlanWorkspace, { wrapper: wrapper(client) });
+    await waitFor(() => expect(hook.result.current.draftWorkspace?.draft.draft_id).toBe(9));
+
+    await act(async () => {
+      await hook.result.current.applyActivePlanDraft({ remapCheckoffLinks: true });
+    });
+
+    expect(applyPlanDraft).toHaveBeenCalledWith(savedWorkspace, { remapCheckoffLinks: true });
+    await waitFor(() => expect(hook.result.current.draftWorkspace).toBeNull());
   });
 
   it("abandons the exact stale identity before rebasing and stores the successor", async () => {
