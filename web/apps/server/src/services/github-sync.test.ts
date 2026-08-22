@@ -95,7 +95,46 @@ describe("atomic GitHub Source sync", () => {
     for (const [url, init] of fetchMock.mock.calls) {
       expect(String(url)).toContain(`/${COMMIT_A}/`);
       expect(init?.signal).toBeInstanceOf(AbortSignal);
+      // Regression: raw.githubusercontent.com serves gzip by default. Node's fetch
+      // decompresses transparently but leaves Content-Length at the *compressed*
+      // size, which then mismatches the decompressed byte count we measure and
+      // makes every sync fail with a false "length mismatch" error. Requesting
+      // identity encoding keeps the header and body in agreement.
+      expect((init?.headers as Record<string, string> | undefined)?.["Accept-Encoding"]).toBe(
+        "identity",
+      );
     }
+  });
+
+  it("requests identity encoding so a compressed Content-Length cannot mismatch the decoded body", async () => {
+    const root = reposRoot();
+    setTree(COMMIT_A, [{ path: "README.md", type: "blob", mode: "100644", size: 8 }]);
+    const decoded = "# Notes\n";
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      // Simulate a gzip-compressing origin: Content-Length reflects the smaller
+      // compressed size, but the body delivered to fetch() is already decoded
+      // (as undici would do), so it is longer than the header claims.
+      expect((init?.headers as Record<string, string> | undefined)?.["Accept-Encoding"]).toBe(
+        "identity",
+      );
+      return new Response(decoded, {
+        status: 200,
+        headers: { "content-length": String(Buffer.byteLength(decoded)) },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await syncGithubSource({
+      url: "https://github.com/example/printer",
+      branch: "main",
+      reposDir: root,
+      sourceId: 11,
+    });
+
+    expect(result.docsDownloaded).toBe(1);
+    expect(
+      readFileSync(join(result.snapshot.absolutePath, "README.md"), "utf8"),
+    ).toBe(decoded);
   });
 
   it("rejects truncated trees and excessive STL sets before creating a candidate", async () => {

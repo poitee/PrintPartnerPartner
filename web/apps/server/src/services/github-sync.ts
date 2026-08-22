@@ -132,7 +132,12 @@ async function openRawFile(
 ): Promise<SnapshotFileResponse> {
   const segments = path.split("/").map(encodeURIComponent).join("/");
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/${commitSha}/${segments}`;
-  const headers: Record<string, string> = {};
+  // raw.githubusercontent.com serves gzip-encoded bodies by default. Node's fetch
+  // (undici) transparently decompresses the stream but leaves Content-Length as the
+  // *compressed* size, so comparing decompressed byte counts against it always fails
+  // with a false "length mismatch". Requesting identity encoding keeps the header and
+  // the actual body size in agreement.
+  const headers: Record<string, string> = { "Accept-Encoding": "identity" };
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) {
