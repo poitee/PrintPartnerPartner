@@ -121,9 +121,14 @@ export default function SourceCategoryManager({ engineReady }: Props) {
   );
 
   useEffect(() => {
-    if (sameCategories(draft, categories)) draftDirtyRef.current = false;
-    if (!draftDirtyRef.current) setDraft(categories);
-  }, [categories, draft]);
+    if (draftDirtyRef.current) return;
+    setDraft(categories);
+  }, [categories]);
+
+  const replaceDraft = (next: string[]) => {
+    draftDirtyRef.current = !sameCategories(next, categories);
+    setDraft(next);
+  };
 
   const queryError =
     categoriesQuery.error instanceof Error
@@ -143,15 +148,13 @@ export default function SourceCategoryManager({ engineReady }: Props) {
       setLoadError("That category already exists.");
       return;
     }
-    draftDirtyRef.current = true;
-    setDraft((prev) => [...prev, name]);
+    replaceDraft([...draft, name]);
     setNewName("");
     setLoadError(null);
   };
 
   const onRename = (index: number, value: string) => {
-    draftDirtyRef.current = true;
-    setDraft((prev) => prev.map((c, i) => (i === index ? value : c)));
+    replaceDraft(draft.map((c, i) => (i === index ? value : c)));
   };
 
   const onRemove = (index: number) => {
@@ -159,8 +162,7 @@ export default function SourceCategoryManager({ engineReady }: Props) {
       setLoadError("Keep at least one category.");
       return;
     }
-    draftDirtyRef.current = true;
-    setDraft((prev) => prev.filter((_, i) => i !== index));
+    replaceDraft(draft.filter((_, i) => i !== index));
     setLoadError(null);
   };
 
@@ -170,8 +172,7 @@ export default function SourceCategoryManager({ engineReady }: Props) {
     const oldIndex = Number(String(active.id).replace(/^cat-/, ""));
     const newIndex = Number(String(over.id).replace(/^cat-/, ""));
     if (!Number.isFinite(oldIndex) || !Number.isFinite(newIndex)) return;
-    draftDirtyRef.current = true;
-    setDraft((prev) => moveItem(prev, oldIndex, newIndex));
+    replaceDraft(moveItem(draft, oldIndex, newIndex));
     setSaveNote(null);
   };
 
