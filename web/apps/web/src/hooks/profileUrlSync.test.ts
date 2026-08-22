@@ -57,9 +57,10 @@ describe("searchParamsWithProfile", () => {
     expect(next?.get("foo")).toBe("bar");
   });
 
-  it("does not stamp profile onto global Production", () => {
+  it("does not stamp profile onto global Production or Builds", () => {
     expect(shouldStampProfileOnPath("/production")).toBe(false);
-    expect(shouldStampProfileOnPath("/builds")).toBe(true);
+    expect(shouldStampProfileOnPath("/builds")).toBe(false);
+    expect(shouldStampProfileOnPath("/plans")).toBe(false);
     expect(shouldStampProfileOnPath("/plan")).toBe(true);
     expect(shouldStampProfileOnPath("/sources")).toBe(true);
   });
@@ -68,6 +69,7 @@ describe("searchParamsWithProfile", () => {
     expect(searchAfterProfileStamp("/sources", "", 7)).toBe("?profile=7");
     expect(searchAfterProfileStamp("/sources", "?profile=7", 7)).toBeUndefined();
     expect(searchAfterProfileStamp("/production", "", 7)).toBeUndefined();
+    expect(searchAfterProfileStamp("/builds", "", 7)).toBeUndefined();
   });
 
   it("does not loop when user picks a new plan before url catches up", () => {

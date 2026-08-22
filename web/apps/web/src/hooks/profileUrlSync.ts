@@ -56,9 +56,10 @@ export function searchParamsWithProfile(
 }
 
 /**
- * Global Production must stay `/production` with no profile. URL sync would
- * otherwise stamp `?profile=` and the compatibility shim would bounce to Build Production.
+ * Global Production stays `/production` with no profile so URL sync cannot
+ * bounce it to Build Production. Global Builds stays `/builds` for the same
+ * reason: stamping `?profile=` there rewinds New Build's navigate to Sources.
  */
 export function shouldStampProfileOnPath(pathname: string): boolean {
-  return pathname !== "/production";
+  return pathname !== "/production" && pathname !== "/builds" && pathname !== "/plans";
 }
