@@ -84,6 +84,28 @@ describe("proposeCheckoffFromObjects", () => {
     expect(result.unmatchedNames).toEqual([]);
   });
 
+  it("does not silently map a duplicate basename from two Sources", () => {
+    const parts = [
+      part({
+        id: 1,
+        filename: "kit-a/bracket.stl",
+        quantity_effective: 1,
+        print_units: [false],
+      }),
+      part({
+        id: 2,
+        filename: "kit-b/bracket.stl",
+        quantity_effective: 1,
+        print_units: [false],
+      }),
+    ];
+    const result = proposeCheckoffFromObjects(["bracket_01", "bracket.stl"], parts);
+    expect(result.units).toEqual([]);
+    expect(result.unmatchedNames).toEqual(["bracket_01", "bracket.stl"]);
+    const rows = buildObjectPreviewRows(result, parts);
+    expect(rows.every((row) => row.kind === "unlabeled")).toBe(true);
+  });
+
   it("does not propose past already-printed units", () => {
     const parts = [
       part({
