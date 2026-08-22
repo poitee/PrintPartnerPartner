@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { createSelfHostPorts } from "../adapters/self-host/index.js";
 import { buildApp } from "../app.js";
@@ -160,6 +161,53 @@ describe("Plan summary HTTP contracts", () => {
           layers: [],
         });
       }
+    } finally {
+      await app.close();
+      ports.db.close();
+    }
+  });
+
+  it("restores an archived Build in place on unarchive and PATCH archived false", async () => {
+    const { app, ports } = await fixture();
+    try {
+      const template = ports.repository.createProfile("Finished kit");
+      const archiveAt = (archivedAt: string | null) => {
+        const raw = new Database(ports.db.sqlite.dbPath);
+        raw.prepare("UPDATE build_profiles SET archived_at = ? WHERE id = ?").run(
+          archivedAt,
+          template.id,
+        );
+        raw.close();
+      };
+      archiveAt("2026-08-22T00:00:00.000Z");
+
+      const flat = await app.inject({
+        method: "POST",
+        url: `/plans/${template.id}/unarchive`,
+      });
+      const v2 = await app.inject({
+        method: "POST",
+        url: `/api/v2/plans/${template.id}/unarchive`,
+      });
+      expect(flat.statusCode).toBe(200);
+      expect(v2.json()).toEqual(flat.json());
+      expect(flat.json()).toMatchObject({
+        id: template.id,
+        name: "Finished kit",
+        archived_at: null,
+        accepted_progress: { kind: "empty" },
+      });
+      expect(ports.repository.getProfileHeader(template.id)?.archived_at).toBeNull();
+
+      archiveAt("2026-08-22T00:01:00.000Z");
+      const patch = await app.inject({
+        method: "PATCH",
+        url: `/plans/${template.id}`,
+        payload: { archived: false },
+      });
+      expect(patch.statusCode).toBe(200);
+      expect(patch.json()).toMatchObject({ id: template.id, archived_at: null });
+      expect(ports.repository.listProfileHeaders()).toHaveLength(1);
     } finally {
       await app.close();
       ports.db.close();

@@ -79,3 +79,38 @@ export function canArchiveAcceptedPlan(plan: {
     progress.remaining_units === 0
   );
 }
+
+export type BuildProductionCounts = {
+  printing: number;
+  awaitingVerify: number;
+};
+
+/** Active Printer jobs (`watching`) and work awaiting verification, keyed by Build. */
+export function countBuildProductionByProfile(
+  links: ReadonlyArray<{ readonly profile_id: number; readonly state: string }>,
+): Map<number, BuildProductionCounts> {
+  const counts = new Map<number, BuildProductionCounts>();
+  for (const link of links) {
+    if (link.state !== "watching" && link.state !== "awaiting_verify") continue;
+    const current = counts.get(link.profile_id) ?? { printing: 0, awaitingVerify: 0 };
+    if (link.state === "watching") current.printing += 1;
+    else current.awaitingVerify += 1;
+    counts.set(link.profile_id, current);
+  }
+  return counts;
+}
+
+export function buildProductionCountsFor(
+  profileId: number,
+  counts: Map<number, BuildProductionCounts>,
+): BuildProductionCounts {
+  return counts.get(profileId) ?? { printing: 0, awaitingVerify: 0 };
+}
+
+export function buildPrintingLabel(count: number): string {
+  return count === 1 ? "1 printing" : `${count} printing`;
+}
+
+export function buildAwaitingVerifyLabel(count: number): string {
+  return count === 1 ? "1 to verify" : `${count} to verify`;
+}

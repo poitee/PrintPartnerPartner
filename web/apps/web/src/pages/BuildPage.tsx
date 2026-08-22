@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import {
   Archive,
+  ArchiveRestore,
   Copy,
   Hammer,
   Layers,
@@ -116,6 +117,7 @@ function BuildPageContent() {
     openDuplicatePlan,
     openDeletePlan,
     openArchivePlan,
+    openRestorePlan,
   } = usePlanActions();
   const {
     review,
@@ -544,7 +546,15 @@ function BuildPageContent() {
                   <Pencil className="mr-2 h-4 w-4" />
                   Rename
                 </DropdownMenuItem>
-                {archiveAllowed ? (
+                {selectedProfile?.archived_at ? (
+                  <DropdownMenuItem
+                    onClick={() => openRestorePlan()}
+                    disabled={selectedProfileId == null}
+                  >
+                    <ArchiveRestore className="mr-2 h-4 w-4" />
+                    Restore
+                  </DropdownMenuItem>
+                ) : archiveAllowed ? (
                   <DropdownMenuItem
                     onClick={() => openArchivePlan()}
                     disabled={selectedProfileId == null}

@@ -220,11 +220,6 @@ export async function registerPlanRoutes(
       touch_last_used?: boolean;
     };
     const archiveAttempted = body.archived === true;
-    if (body.archived === false) {
-      return reply.status(400).send({
-        detail: "Cannot unarchive; duplicate the archived template instead",
-      });
-    }
     if (archiveAttempted && !deps.repo.canMutateAcceptedPlan()) {
       return reply.status(503).send({ detail: "Accepted Plan update is unavailable" });
     }
@@ -281,6 +276,9 @@ export async function registerPlanRoutes(
           return reply.status(500).send({ detail: "Internal Server Error" });
         }
         header = { ...header, archived_at: archived.archivedAt };
+      }
+      if (body.archived === false) {
+        header = deps.repo.unarchiveProfile(id);
       }
       if (body.touch_last_used === true) {
         header = deps.repo.touchProfileLastUsed(id);
@@ -405,6 +403,45 @@ export async function registerPlanRoutes(
         return reply.status(500).send({ detail: "Accepted Plan data is inconsistent" });
       }
       request.log.error({ failure: "unexpected", profileId: id }, "Plan archive failed");
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+  });
+
+  app.post("/plans/:id/unarchive", async (request, reply) => {
+    const id = Number((request.params as { id: string }).id);
+    let accepted: AcceptedProfileSummary;
+    try {
+      const read = deps.repo.readAcceptedProfileSummary(id);
+      if (read.kind === "missing") {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      accepted = read.summary;
+    } catch {
+      request.log.error(
+        { failure: "unexpected", operation: "unarchive_plan", profileId: id },
+        "Plan summary read failed",
+      );
+      return reply.status(500).send({ detail: "Internal Server Error" });
+    }
+    const preflight = presentProfile(accepted, contract);
+    if (preflight.kind === "unavailable") {
+      return sendLegacyFailure(request, reply, "unarchive_plan", preflight.failure, id);
+    }
+    try {
+      const header = deps.repo.unarchiveProfile(id);
+      const presented = presentProfile(
+        { header, progress: accepted.progress },
+        contract,
+      );
+      if (presented.kind === "unavailable") {
+        throw new Error("Captured legacy Plan projection changed after write");
+      }
+      return presented.profile;
+    } catch (error) {
+      if (error instanceof Error && error.message === "Profile not found") {
+        return reply.status(404).send({ detail: "Profile not found" });
+      }
+      request.log.error({ failure: "unexpected", profileId: id }, "Plan unarchive failed");
       return reply.status(500).send({ detail: "Internal Server Error" });
     }
   });

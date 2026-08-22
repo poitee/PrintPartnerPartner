@@ -15,11 +15,13 @@ type PlanActionsContextValue = {
   openDuplicatePlan: PlanIdHandler;
   openDeletePlan: PlanIdHandler;
   openArchivePlan: PlanIdHandler;
+  openRestorePlan: PlanIdHandler;
   registerOpenCreate: (fn: (() => void) | null) => void;
   registerOpenRename: (fn: PlanIdHandler | null) => void;
   registerOpenDuplicate: (fn: PlanIdHandler | null) => void;
   registerOpenDelete: (fn: PlanIdHandler | null) => void;
   registerOpenArchive: (fn: PlanIdHandler | null) => void;
+  registerOpenRestore: (fn: PlanIdHandler | null) => void;
 };
 
 const PlanActionsContext = createContext<PlanActionsContextValue | null>(null);
@@ -30,6 +32,7 @@ export function PlanActionsProvider({ children }: { children: ReactNode }) {
   const openDuplicateRef = useRef<PlanIdHandler | null>(null);
   const openDeleteRef = useRef<PlanIdHandler | null>(null);
   const openArchiveRef = useRef<PlanIdHandler | null>(null);
+  const openRestoreRef = useRef<PlanIdHandler | null>(null);
 
   const registerOpenCreate = useCallback((fn: (() => void) | null) => {
     openCreateRef.current = fn;
@@ -49,6 +52,10 @@ export function PlanActionsProvider({ children }: { children: ReactNode }) {
 
   const registerOpenArchive = useCallback((fn: PlanIdHandler | null) => {
     openArchiveRef.current = fn;
+  }, []);
+
+  const registerOpenRestore = useCallback((fn: PlanIdHandler | null) => {
+    openRestoreRef.current = fn;
   }, []);
 
   const openCreatePlan = useCallback(() => {
@@ -71,6 +78,10 @@ export function PlanActionsProvider({ children }: { children: ReactNode }) {
     openArchiveRef.current?.(typeof planId === "number" ? planId : undefined);
   }, []);
 
+  const openRestorePlan = useCallback((planId?: number) => {
+    openRestoreRef.current?.(typeof planId === "number" ? planId : undefined);
+  }, []);
+
   const value = useMemo(
     () => ({
       openCreatePlan,
@@ -78,11 +89,13 @@ export function PlanActionsProvider({ children }: { children: ReactNode }) {
       openDuplicatePlan,
       openDeletePlan,
       openArchivePlan,
+      openRestorePlan,
       registerOpenCreate,
       registerOpenRename,
       registerOpenDuplicate,
       registerOpenDelete,
       registerOpenArchive,
+      registerOpenRestore,
     }),
     [
       openCreatePlan,
@@ -90,11 +103,13 @@ export function PlanActionsProvider({ children }: { children: ReactNode }) {
       openDuplicatePlan,
       openDeletePlan,
       openArchivePlan,
+      openRestorePlan,
       registerOpenCreate,
       registerOpenRename,
       registerOpenDuplicate,
       registerOpenDelete,
       registerOpenArchive,
+      registerOpenRestore,
     ],
   );
 

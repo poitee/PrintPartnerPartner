@@ -13,6 +13,7 @@ import {
   useDeleteProfileMutation,
   useDuplicateProfileMutation,
   useTouchProfileLastUsedMutation,
+  useUnarchiveProfileMutation,
   useUpdateProfileMutation,
 } from "../queries/profiles";
 import { Button } from "./ui/button";
@@ -58,6 +59,7 @@ export default function PlanPicker({
   const deleteMutation = useDeleteProfileMutation();
   const duplicateMutation = useDuplicateProfileMutation();
   const archiveMutation = useArchiveProfileMutation();
+  const unarchiveMutation = useUnarchiveProfileMutation();
   const touchMutation = useTouchProfileLastUsedMutation();
   const {
     registerOpenCreate,
@@ -65,6 +67,7 @@ export default function PlanPicker({
     registerOpenDuplicate,
     registerOpenDelete,
     registerOpenArchive,
+    registerOpenRestore,
   } = usePlanActions();
 
   const [open, setOpen] = useState(false);
@@ -93,7 +96,8 @@ export default function PlanPicker({
     updateMutation.isPending ||
     deleteMutation.isPending ||
     duplicateMutation.isPending ||
-    archiveMutation.isPending;
+    archiveMutation.isPending ||
+    unarchiveMutation.isPending;
 
   const groups = useMemo(
     () => partitionPlanPickerGroups(profiles, selectedProfileId, { search }),
@@ -154,6 +158,23 @@ export default function PlanPicker({
     });
     return () => registerOpenArchive(null);
   }, [registerOpenArchive, selectedProfileId]);
+
+  useEffect(() => {
+    registerOpenRestore((planId) => {
+      const id = planId ?? selectedProfileId;
+      if (id == null) return;
+      void (async () => {
+        const plan = profiles.find((p) => p.id === id);
+        try {
+          await unarchiveMutation.mutateAsync(id);
+          toast.success(`Restored “${plan?.name ?? "Build"}”`);
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : String(e));
+        }
+      })();
+    });
+    return () => registerOpenRestore(null);
+  }, [registerOpenRestore, selectedProfileId, profiles, unarchiveMutation]);
 
   const closeActionDialog = () => {
     setActionTargetId(null);
@@ -592,8 +613,9 @@ export default function PlanPicker({
             <DialogTitle>Archive Build?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Archive “{actionTarget?.name}”? It stays in the picker as a
-            template.
+            Archive “{actionTarget?.name}”? It leaves Active and stays listed
+            under Archived. Restore it to keep working on the same Plan,
+            Checkoff, and Production history.
           </p>
           <div className="flex justify-end gap-2">
             <Button

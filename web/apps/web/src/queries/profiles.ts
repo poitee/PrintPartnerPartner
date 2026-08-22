@@ -6,6 +6,7 @@ import {
   duplicateProfile,
   fetchProfiles,
   touchProfileLastUsed,
+  unarchiveProfile,
   updateProfile,
   type ProfileSummary,
 } from "../api/engine";
@@ -75,6 +76,19 @@ export function useArchiveProfileMutation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => archiveProfile(id),
+    onSuccess: async (updated) => {
+      qc.setQueryData<ProfileSummary[]>(queryKeys.profiles, (prev) =>
+        upsertProfile(prev, updated),
+      );
+      await qc.invalidateQueries({ queryKey: queryKeys.profiles });
+    },
+  });
+}
+
+export function useUnarchiveProfileMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => unarchiveProfile(id),
     onSuccess: async (updated) => {
       qc.setQueryData<ProfileSummary[]>(queryKeys.profiles, (prev) =>
         upsertProfile(prev, updated),

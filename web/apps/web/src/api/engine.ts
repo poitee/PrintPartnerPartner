@@ -783,6 +783,13 @@ export async function archiveProfile(profileId: number): Promise<ProfileSummary>
   });
 }
 
+export async function unarchiveProfile(profileId: number): Promise<ProfileSummary> {
+  return engineFetch(`/plans/${profileId}/unarchive`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export async function touchProfileLastUsed(profileId: number): Promise<ProfileSummary> {
   return engineFetch(`/plans/${profileId}/touch`, {
     method: "POST",

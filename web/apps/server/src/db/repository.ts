@@ -6804,9 +6804,25 @@ export class AppRepository {
     return profile;
   }
 
-  /** Unarchive is intentionally unsupported — duplicate an archived template instead. */
-  unarchiveProfile(_id: number): never {
-    throw new Error("Cannot unarchive; duplicate the archived template instead");
+  /** Restore an archived Build in place. Plan, Checkoff, and Production history stay. */
+  unarchiveProfile(id: number): ProfileHeader {
+    const existing = this.getOwnedProfileIdentity(id);
+    if (!existing) throw new Error("Profile not found");
+    if (existing.archivedAt == null) {
+      const header = this.getProfileHeader(id);
+      if (!header) throw new Error("Profile not found");
+      return header;
+    }
+    this.db
+      .update(this.schema.buildProfiles)
+      .set({ archivedAt: null })
+      .where(
+        and(eq(this.schema.buildProfiles.tenantId, this.tenantId), eq(this.schema.buildProfiles.id, id)),
+      )
+      .run();
+    const profile = this.getProfileHeader(id);
+    if (!profile) throw new Error("Profile not found");
+    return profile;
   }
 
   touchProfileLastUsed(id: number): ProfileHeader {

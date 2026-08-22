@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import PlansPage from "./PlansPage";
@@ -10,7 +11,7 @@ const state = vi.hoisted(() => ({
     {
       id: 7,
       name: "Voron",
-      archived_at: null,
+      archived_at: null as string | null,
       part_count: 24,
       accepted_progress: { kind: "ready" as const, remaining_units: 6, total_units: 30 },
       build_stale: true,
@@ -22,8 +23,15 @@ const state = vi.hoisted(() => ({
   mobile: true,
 }));
 
+const api = vi.hoisted(() => ({
+  fetchPrinterCheckoffLinks: vi.fn(),
+}));
+
 vi.mock("../hooks/useEngineHealth", () => ({
   useEngineHealth: () => ({ health: { ok: true }, error: null, loading: false }),
+}));
+vi.mock("../api/engine", () => ({
+  fetchPrinterCheckoffLinks: (...args: unknown[]) => api.fetchPrinterCheckoffLinks(...args),
 }));
 vi.mock("../context/ProfileContext", () => ({
   useProfileSelection: () => ({
@@ -42,6 +50,7 @@ vi.mock("../context/PlanActionsContext", () => ({
     openDuplicatePlan: vi.fn(),
     openDeletePlan: vi.fn(),
     openArchivePlan: vi.fn(),
+    openRestorePlan: vi.fn(),
   }),
 }));
 vi.mock("../queries/profiles", () => ({
@@ -69,6 +78,8 @@ describe("PlansPage", () => {
     state.loading = false;
     state.error = null;
     state.mobile = true;
+    api.fetchPrinterCheckoffLinks.mockReset();
+    api.fetchPrinterCheckoffLinks.mockResolvedValue({ links: [] });
   });
 
   it("renders one accessible Builds tree with complete controls on small screens", () => {
@@ -209,5 +220,64 @@ describe("PlansPage", () => {
     expect(screen.getByRole("alert").textContent).toContain(
       "Could not load builds: database unavailable",
     );
+  });
+
+  it("offers Restore on an archived Build instead of Archive", async () => {
+    const user = userEvent.setup();
+    state.mobile = false;
+    state.profiles = [
+      {
+        id: 7,
+        name: "Voron",
+        archived_at: "2026-08-21T12:00:00.000Z",
+        part_count: 24,
+        accepted_progress: { kind: "ready" as const, remaining_units: 0, total_units: 30 },
+        build_stale: false,
+        last_used_at: null,
+      },
+    ];
+
+    render(
+      <MemoryRouter>
+        <PlansPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Archived" }));
+    await user.click(screen.getByRole("button", { name: "Actions for Voron" }));
+
+    expect((await screen.findByRole("menuitem", { name: "Restore" })).textContent).toContain(
+      "Restore",
+    );
+    expect(screen.queryByRole("menuitem", { name: "Archive" })).toBeNull();
+  });
+
+  it("shows printing and awaiting-verify counts on a Build row", async () => {
+    state.mobile = false;
+    api.fetchPrinterCheckoffLinks.mockImplementation(async (options?: { state?: string }) => {
+      if (options?.state === "watching") {
+        return {
+          links: [
+            { id: "p1", state: "watching", profile_id: 7 },
+            { id: "p2", state: "watching", profile_id: 7 },
+          ],
+        };
+      }
+      if (options?.state === "awaiting_verify") {
+        return { links: [{ id: "v1", state: "awaiting_verify", profile_id: 7 }] };
+      }
+      return { links: [] };
+    });
+
+    render(
+      <MemoryRouter>
+        <PlansPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("2 printing").textContent).toBe("2 printing");
+    });
+    expect(screen.getByText("1 to verify").textContent).toBe("1 to verify");
   });
 });

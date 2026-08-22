@@ -178,6 +178,25 @@ describe("accepted Plan Progress commands", () => {
     raw.close();
   });
 
+  it("restores the same archived Build so Progress can change again", async () => {
+    const { repo, profileId, snapshot } = await fixture(1);
+    const expected = acceptedPlanBasis(snapshot);
+    const token = parseRequiredUnitToken(snapshot.parts[0]!.units[0]!.token);
+    expect(repo.setAcceptedUnitCompletion({ expected, token, completed: true }).kind).toBe(
+      "updated",
+    );
+    expect(repo.archiveAcceptedPlan({ expected }).kind).toBe("archived");
+
+    const restored = repo.unarchiveProfile(profileId);
+    expect(restored.id).toBe(profileId);
+    expect(restored.archived_at).toBeNull();
+    expect(repo.listProfileHeaders()).toHaveLength(1);
+    expect(repo.setAcceptedUnitCompletion({ expected, token, completed: false })).toMatchObject({
+      kind: "updated",
+      body: { print_units: [false] },
+    });
+  });
+
   it("imports printed counts atomically against one accepted basis", async () => {
     const { root, repo, profileId, partId, snapshot } = await fixture(3);
     const expected = acceptedPlanBasis(snapshot);

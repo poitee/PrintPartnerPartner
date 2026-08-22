@@ -6,9 +6,9 @@ Print Partner helps you manage **layered STL kits** — a base repo plus add-on 
 ## Managing Builds
 
 - **Builds** — the home list. Search, filter, and open a Build into Plan.
-- **Build picker** — switch the active Build from the sidebar. Archived Builds stay listed as templates; selecting one does not unarchive.
+- **Build picker** — switch the active Build from the sidebar. Archived Builds stay listed; selecting one does not restore it.
 - **New Build** — under the picker in the sidebar, or the primary action on Builds.
-- **Build overflow** — Rename, Duplicate, Delete; Archive only when print remaining is 0.
+- **Build overflow** — Rename, Duplicate, Delete; Archive only when print remaining is 0; Restore returns the same archived Build to Active.
 
 The active Build is shared across Sources, Plan, Checkoff, and Production.
 

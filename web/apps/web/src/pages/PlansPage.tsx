@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Archive,
+  ArchiveRestore,
   Copy,
   Layers,
   MoreHorizontal,
@@ -22,15 +23,21 @@ import {
 } from "../components/ui/dropdown-menu";
 import { Input } from "../components/ui/input";
 import { SegmentedControl } from "../components/ui/segmented-control";
+import { fetchPrinterCheckoffLinks } from "../api/engine";
 import { usePlanActions } from "../context/PlanActionsContext";
 import { useProfileSelection } from "../context/ProfileContext";
 import { useEngineHealth } from "../hooks/useEngineHealth";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
+  buildAwaitingVerifyLabel,
+  buildPrintingLabel,
+  buildProductionCountsFor,
   canArchiveAcceptedPlan,
+  countBuildProductionByProfile,
   filterPlansList,
   planProgressLabel,
   planStatusLabel,
+  type BuildProductionCounts,
   type PlansListFilter,
   type PlansListSort,
 } from "../lib/plansList";
@@ -61,6 +68,7 @@ export default function PlansPage() {
     openDuplicatePlan,
     openDeletePlan,
     openArchivePlan,
+    openRestorePlan,
   } = usePlanActions();
   const touchMutation = useTouchProfileLastUsedMutation();
   const useCompactPlanList = useMediaQuery("(max-width: 639px)");
@@ -68,6 +76,9 @@ export default function PlansPage() {
   const [filter, setFilter] = useState<PlansListFilter>("active");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<PlansListSort>("name");
+  const [productionCounts, setProductionCounts] = useState<Map<number, BuildProductionCounts>>(
+    () => new Map(),
+  );
   const engineState = resolveEngineState({
     health,
     loading: healthLoading,
@@ -93,6 +104,27 @@ export default function PlansPage() {
     () => filterPlansList(profiles, filter, query, sort),
     [profiles, filter, query, sort],
   );
+
+  useEffect(() => {
+    if (engineState !== "ready") return;
+    let cancelled = false;
+    void Promise.all([
+      fetchPrinterCheckoffLinks({ state: "watching" }),
+      fetchPrinterCheckoffLinks({ state: "awaiting_verify" }),
+    ])
+      .then(([watching, awaiting]) => {
+        if (cancelled) return;
+        setProductionCounts(
+          countBuildProductionByProfile([...watching.links, ...awaiting.links]),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setProductionCounts(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [engineState, profiles]);
 
   const openBuild = (id: number) => {
     setSelectedProfileId(id);
@@ -125,7 +157,12 @@ export default function PlansPage() {
             <Copy className="mr-2 h-4 w-4" />
             Duplicate
           </DropdownMenuItem>
-          {archiveAllowed ? (
+          {plan.archived_at ? (
+            <DropdownMenuItem onClick={() => openRestorePlan(plan.id)}>
+              <ArchiveRestore className="mr-2 h-4 w-4" />
+              Restore
+            </DropdownMenuItem>
+          ) : archiveAllowed ? (
             <DropdownMenuItem onClick={() => openArchivePlan(plan.id)}>
               <Archive className="mr-2 h-4 w-4" />
               Archive
@@ -294,6 +331,17 @@ export default function PlansPage() {
                             <span>{planStatusLabel(plan)}</span>
                             <span>{planProgressLabel(plan.accepted_progress)}</span>
                             <span>{plan.part_count} parts</span>
+                            <span>
+                              {buildPrintingLabel(
+                                buildProductionCountsFor(plan.id, productionCounts).printing,
+                              )}
+                            </span>
+                            <span>
+                              {buildAwaitingVerifyLabel(
+                                buildProductionCountsFor(plan.id, productionCounts)
+                                  .awaitingVerify,
+                              )}
+                            </span>
                             {plan.build_stale ? (
                               <span className="text-warning">stale</span>
                             ) : null}
@@ -308,7 +356,7 @@ export default function PlansPage() {
               ) : (
               <div className="overflow-x-auto">
               <table
-                className="w-full min-w-[36rem] border-collapse text-sm"
+                className="w-full min-w-[44rem] border-collapse text-sm"
                 aria-label="Builds"
               >
                 <thead>
@@ -316,6 +364,8 @@ export default function PlansPage() {
                     <th className="py-2 pr-3 font-medium">Name</th>
                     <th className="py-2 pr-3 font-medium">Status</th>
                     <th className="py-2 pr-3 font-medium">Remaining</th>
+                    <th className="py-2 pr-3 font-medium">Printing</th>
+                    <th className="py-2 pr-3 font-medium">Verify</th>
                     <th className="py-2 pr-3 font-medium">Parts</th>
                     <th className="py-2 pr-3 font-medium">Stale</th>
                     <th className="py-2 pr-3 font-medium">Checkoff</th>
@@ -355,6 +405,16 @@ export default function PlansPage() {
                         </td>
                         <td className="py-2.5 pr-3 font-mono tabular-nums text-muted-foreground">
                           {planProgressLabel(plan.accepted_progress)}
+                        </td>
+                        <td className="py-2.5 pr-3 font-mono tabular-nums text-muted-foreground">
+                          {buildPrintingLabel(
+                            buildProductionCountsFor(plan.id, productionCounts).printing,
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-3 font-mono tabular-nums text-muted-foreground">
+                          {buildAwaitingVerifyLabel(
+                            buildProductionCountsFor(plan.id, productionCounts).awaitingVerify,
+                          )}
                         </td>
                         <td className="py-2.5 pr-3 font-mono tabular-nums text-muted-foreground">
                           {plan.part_count}

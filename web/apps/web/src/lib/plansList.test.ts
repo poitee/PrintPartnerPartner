@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canArchiveAcceptedPlan,
+  countBuildProductionByProfile,
   filterPlansList,
   planProgressLabel,
   planStatusLabel,
@@ -125,5 +126,21 @@ describe("accepted Progress display", () => {
         accepted_progress: { kind: "ready", total_units: 5, remaining_units: 0 },
       }),
     ).toBe(false);
+  });
+});
+
+describe("countBuildProductionByProfile", () => {
+  it("counts printing and awaiting-verify jobs per Build and ignores the rest", () => {
+    const counts = countBuildProductionByProfile([
+      { profile_id: 7, state: "watching" },
+      { profile_id: 7, state: "watching" },
+      { profile_id: 7, state: "awaiting_verify" },
+      { profile_id: 8, state: "awaiting_verify" },
+      { profile_id: 7, state: "host_failed" },
+      { profile_id: 7, state: "verified" },
+    ]);
+    expect(counts.get(7)).toEqual({ printing: 2, awaitingVerify: 1 });
+    expect(counts.get(8)).toEqual({ printing: 0, awaitingVerify: 1 });
+    expect(counts.get(9)).toBeUndefined();
   });
 });

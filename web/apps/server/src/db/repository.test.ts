@@ -72,6 +72,24 @@ describe("AppRepository", () => {
     });
   });
 
+  it("restores an archived Build in place without duplicating it", () => {
+    withRepo((repo, db) => {
+      const plan = repo.createProfile("Finished kit");
+      insertIncludedPart(db, plan.id);
+      db.update(schema.buildProfiles)
+        .set({ archivedAt: "2026-08-21T17:00:00.000Z" })
+        .where(eq(schema.buildProfiles.id, plan.id))
+        .run();
+
+      const restored = repo.unarchiveProfile(plan.id);
+      expect(restored.id).toBe(plan.id);
+      expect(restored.name).toBe("Finished kit");
+      expect(restored.archived_at).toBeNull();
+      expect(repo.listProfileHeaders()).toHaveLength(1);
+      expect(repo.unarchiveProfile(plan.id).archived_at).toBeNull();
+    });
+  });
+
   it("persists special_request on the plan and copies it on duplicate", () => {
     withRepo((repo) => {
       const plan = repo.createProfile("Desk job");
